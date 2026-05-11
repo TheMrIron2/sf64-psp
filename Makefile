@@ -10,8 +10,15 @@ find-command = $(shell which $(1) 2>/dev/null)
 
 #### Defaults ####
 
+# If TARGET_PSP is 1, attempt to build with the PSPSDK toolchain instead of
+# the N64 reconstruction toolchain.
+TARGET_PSP ?= 0
 # If COMPARE is 1, check the output md5sum after building
+ifeq ($(TARGET_PSP),1)
+COMPARE ?= 0
+else
 COMPARE ?= 1
+endif
 # If NON_MATCHING is 1, define the NON_MATCHING C flag when building
 NON_MATCHING ?= 0
 # if WERROR is 1, pass -Werror to CC_CHECK, so warnings would be treated as errors
@@ -19,14 +26,22 @@ WERROR ?= 0
 # Keep .mdebug section in build
 KEEP_MDEBUG ?= 0
 # Check code syntax with host compiler
+ifeq ($(TARGET_PSP),1)
+RUN_CC_CHECK ?= 0
+else
 RUN_CC_CHECK ?= 1
+endif
 CC_CHECK_COMP ?= gcc
 # Dump build object files
 OBJDUMP_BUILD ?= 0
 # Number of threads to compress with
 N_THREADS ?= $(shell nproc)
 # If COMPILER is GCC, compile with GCC instead of IDO.
+ifeq ($(TARGET_PSP),1)
+COMPILER := gcc
+else
 COMPILER ?= ido
+endif
 # Whether to colorize build messages
 COLOR ?= 1
 # Whether to hide commands or not
@@ -35,15 +50,27 @@ VERBOSE ?= 0
 PRINT ?= printf
 
 # Set prefix to mips binutils binaries (mips-linux-gnu-ld => 'mips-linux-gnu-') - Change at your own risk!
-# Auto-detect prefix for MIPS toolchain
-ifneq      ($(call find-command,mips-linux-gnu-ld),)
-  MIPS_BINUTILS_PREFIX := mips-linux-gnu-
-else ifneq ($(call find-command,mips64-linux-gnu-ld),)
-  MIPS_BINUTILS_PREFIX := mips64-linux-gnu-
-else ifneq ($(call find-command,mips64-elf-ld),)
-  MIPS_BINUTILS_PREFIX := mips64-elf-
+ifeq ($(TARGET_PSP),1)
+  PSP_CONFIG ?= psp-config
+  PSP_FIXUP_IMPORTS ?= psp-fixup-imports
+  PSP_PRXGEN ?= psp-prxgen
+  MKSFOEX ?= mksfoex
+  PACK_PBP ?= pack-pbp
+  PSP_STRIP ?= psp-strip
+  PSPSDK ?= $(shell $(PSP_CONFIG) --pspsdk-path 2>/dev/null)
+  PSPDEV ?= $(shell $(PSP_CONFIG) --psp-prefix 2>/dev/null | sed 's,/psp$$,,')
+  MIPS_BINUTILS_PREFIX := psp-
 else
-  $(error Unable to detect a suitable MIPS toolchain installed)
+  # Auto-detect prefix for MIPS toolchain
+  ifneq      ($(call find-command,mips-linux-gnu-ld),)
+    MIPS_BINUTILS_PREFIX := mips-linux-gnu-
+  else ifneq ($(call find-command,mips64-linux-gnu-ld),)
+    MIPS_BINUTILS_PREFIX := mips64-linux-gnu-
+  else ifneq ($(call find-command,mips64-elf-ld),)
+    MIPS_BINUTILS_PREFIX := mips64-elf-
+  else
+    $(error Unable to detect a suitable MIPS toolchain installed)
+  endif
 endif
 
 VERSION ?= us
@@ -55,7 +82,26 @@ TARGET               := starfox64
 
 ### Output ###
 
+ifeq ($(TARGET_PSP),1)
+BUILD_DIR := build/psp
+PSP_TITLE ?= Star Fox 64 PSP
+PROFILE_PSP ?= 0
+PSP_EBOOT_DIR ?= src/psp/EBOOT
+PSP_EBOOT_ICON ?= $(PSP_EBOOT_DIR)/ICON0.png
+PSP_EBOOT_ICON1 ?= NULL
+PSP_EBOOT_PIC0 ?= $(PSP_EBOOT_DIR)/PIC0.png
+PSP_EBOOT_PIC1 ?= NULL
+PSP_EBOOT_SND0 ?= NULL
+PSP_EBOOT_PSAR ?= NULL
+PSP_LIBS ?= -lpspdebug -lpspdisplay -lpspge -lpspctrl -lpspnet -lpspnet_apctl
+PSP_EBOOT := $(BUILD_DIR)/EBOOT.PBP
+PSP_SFO   := $(BUILD_DIR)/PARAM.SFO
+PSP_ELF   := $(BUILD_DIR)/$(TARGET).psp.elf
+PSP_PRX   := $(BUILD_DIR)/$(TARGET).psp.prx
+PSP_MAP   := $(BUILD_DIR)/$(TARGET).psp.map
+else
 BUILD_DIR := build
+endif
 TOOLS	  := tools
 PYTHON	  := python3
 ROM       := $(BUILD_DIR)/$(TARGET).$(VERSION).$(REV).uncompressed.z64
@@ -69,7 +115,9 @@ LD_SCRIPT := linker_scripts/$(VERSION)/$(REV)/$(TARGET).ld
 # If gcc is used, define the NON_MATCHING flag respectively so the files that
 # are safe to be used can avoid using GLOBAL_ASM which doesn't work with gcc.
 ifeq ($(COMPILER),gcc)
+ifneq ($(TARGET_PSP),1)
   $(warning WARNING: GCC support is experimental. Use at your own risk.)
+endif
   CFLAGS += -DCOMPILER_GCC
   NON_MATCHING := 1
 endif
@@ -77,6 +125,7 @@ endif
 # Detect compiler and set variables appropriately.
 ifeq ($(COMPILER),gcc)
   CC       := $(MIPS_BINUTILS_PREFIX)gcc
+  CXX      := $(MIPS_BINUTILS_PREFIX)g++
 else
 ifeq ($(COMPILER),ido)
   CC       := $(TOOLS)/ido_recomp/$(DETECTED_OS)/7.1/cc
@@ -93,8 +142,16 @@ else
 endif
 
 ifeq ($(COMPILER),gcc)
-  CFLAGS += -G 0 -ffast-math -fno-unsafe-math-optimizations -march=vr4300 -mfix4300 -mabi=32 -mno-abicalls -mdivide-breaks -fno-zero-initialized-in-bss -fno-toplevel-reorder -ffreestanding -fno-common -fno-merge-constants -mno-explicit-relocs -mno-split-addresses $(CHECK_WARNINGS) -funsigned-char
-  MIPS_VERSION := -mips3
+  ifeq ($(TARGET_PSP),1)
+    CFLAGS += -std=gnu89 -G0 -DPSP -D__PSP__ -D_PSP_FW_VERSION=500 -O3 -ffast-math -fno-unsafe-math-optimizations -fno-common -fno-merge-constants -falign-functions=64 -flimit-function-alignment -fno-rounding-math -ffp-contract=off $(CHECK_WARNINGS) -funsigned-char
+    ifeq ($(PROFILE_PSP),1)
+      CFLAGS += -pg
+    endif
+    MIPS_VERSION :=
+  else
+    CFLAGS += -G 0 -ffast-math -fno-unsafe-math-optimizations -march=vr4300 -mfix4300 -mabi=32 -mno-abicalls -mdivide-breaks -fno-zero-initialized-in-bss -fno-toplevel-reorder -ffreestanding -fno-common -fno-merge-constants -mno-explicit-relocs -mno-split-addresses $(CHECK_WARNINGS) -funsigned-char
+    MIPS_VERSION := -mips3
+  endif
 else
   # we support Microsoft extensions such as anonymous structs, which the compiler does support but warns for their usage. Surpress the warnings with -woff.
   CFLAGS += -G 0 -non_shared -fullwarn -verbose -Xcpluscomm $(IINC) -nostdinc -Wab,-r4300_mul -woff 649,838,712,516
@@ -150,12 +207,20 @@ endif
 
 MAKE = make
 CPPFLAGS += -fno-dollars-in-identifiers -P
+ifeq ($(TARGET_PSP),1)
+LDFLAGS  :=
+else
 LDFLAGS  := --no-check-sections --accept-unknown-input-arch --emit-relocs
+endif
 
 UNAME_S := $(shell uname -s)
 UNAME_M := $(shell uname -m)
 ifeq ($(OS),Windows_NT)
+ifeq ($(TARGET_PSP),1)
+    DETECTED_OS := windows
+else
 $(error Native Windows is currently unsupported for building this repository, use WSL instead c:)
+endif
 else ifeq ($(UNAME_S),Linux)
     DETECTED_OS := linux
     #Detect aarch64 devices (Like Raspberry Pi OS 64-bit)
@@ -213,7 +278,10 @@ CAT             := cat
 TORCH           := $(TOOLS)/Torch/cmake-build-release/torch
 
 # Prefer clang as C preprocessor if installed on the system
-ifneq (,$(call find-command,clang))
+ifeq ($(TARGET_PSP),1)
+  CPP      := cpp
+  CPPFLAGS := -P -Wno-trigraphs -Wmissing-prototypes -Wstrict-prototypes -D_LANGUAGE_ASSEMBLY
+else ifneq (,$(call find-command,clang))
   CPP      := clang
   CPPFLAGS := -E -P -x c -Wno-trigraphs -Wmissing-prototypes -Wstrict-prototypes -D_LANGUAGE_ASSEMBLY
 else
@@ -233,6 +301,9 @@ MIO0			:= $(TOOLS)/mio0
 
 IINC := -Iinclude -Ibin/$(VERSION).$(REV) -I.
 IINC += -Ilib/ultralib/include -Ilib/ultralib/include/PR -Ilib/ultralib/include/ido
+ifeq ($(TARGET_PSP),1)
+  IINC += -I$(PSPDEV)/psp/include -I$(PSPSDK)/include
+endif
 
 ifeq ($(KEEP_MDEBUG),0)
   RM_MDEBUG = $(OBJCOPY) --remove-section .mdebug $@
@@ -263,13 +334,28 @@ else
     CC_CHECK          := @:
 endif
 
+ifeq ($(TARGET_PSP),1)
+ASFLAGS         := -G0
+else
 ASFLAGS         := -march=vr4300 -32 -G0
+endif
 COMMON_DEFINES  := -D_MIPS_SZLONG=32
 GBI_DEFINES     := -DF3DEX_GBI
 RELEASE_DEFINES := -DNDEBUG
+ifeq ($(TARGET_PSP),1)
+AS_DEFINES      := -DMIPSEL -D_LANGUAGE_ASSEMBLY -D_ULTRA64 -DTARGET_PSP=1 -D_PSP=1
+C_DEFINES       := -DLANGUAGE_C -D_LANGUAGE_C -DBUILD_VERSION=VERSION_H -DTARGET_PSP=1 -D_PSP=1 ${RELEASE_DEFINES}
+OBJCOPY_ELF_FORMAT := elf32-little
+else
 AS_DEFINES      := -DMIPSEB -D_LANGUAGE_ASSEMBLY -D_ULTRA64
 C_DEFINES       := -DLANGUAGE_C -D_LANGUAGE_C -DBUILD_VERSION=VERSION_H ${RELEASE_DEFINES}
+OBJCOPY_ELF_FORMAT := elf32-big
+endif
+ifeq ($(TARGET_PSP),1)
+ENDIAN          := -EL
+else
 ENDIAN          := -EB
+endif
 
 ICONV_FLAGS     := --from-code=UTF-8 --to-code=EUC-JP
 
@@ -295,6 +381,9 @@ endif
 $(shell mkdir -p asm bin linker_scripts/$(VERSION)/$(REV)/auto)
 
 SRC_DIRS      := $(shell find src -type d)
+ifeq ($(TARGET_PSP),0)
+SRC_DIRS      := $(filter-out src/psp%,$(SRC_DIRS))
+endif
 # Temporary, until we decide how we're gonna handle other versions
 ifeq ($(VERSION), jp)
 SRC_DIRS      := $(shell find srcjp -type d)
@@ -308,8 +397,20 @@ BIN_DIRS      := $(shell find bin -type d)
 
 C_FILES       := $(foreach dir,$(SRC_DIRS),$(wildcard $(dir)/*.c))
 C_FILES       := $(filter-out %.inc.c,$(C_FILES))
+PSP_BOOTSTRAP_C_FILES := $(wildcard src/psp/*.c)
+ifeq ($(TARGET_PSP),1)
+ifneq ($(PSP_FULL),1)
+C_FILES       := $(PSP_BOOTSTRAP_C_FILES)
+endif
+endif
 S_FILES       := $(foreach dir,$(ASM_DIRS) $(SRC_DIRS),$(wildcard $(dir)/*.s))
 BIN_FILES     := $(foreach dir,$(BIN_DIRS),$(wildcard $(dir)/*.bin))
+ifeq ($(TARGET_PSP),1)
+ifneq ($(PSP_FULL),1)
+S_FILES       :=
+BIN_FILES     :=
+endif
+endif
 O_FILES       := $(foreach f,$(C_FILES:.c=.o),$(BUILD_DIR)/$f) \
                  $(foreach f,$(S_FILES:.s=.o),$(BUILD_DIR)/$f) \
                  $(foreach f,$(BIN_FILES:.bin=.o),$(BUILD_DIR)/$f)
@@ -406,7 +507,14 @@ build/src/libultra/libc/xprintf.o:   OPTFLAGS := -Os
 build/src/libultra/libc/xldtob.o:    OPTFLAGS := -Os
 endif
 
+ifeq ($(TARGET_PSP),1)
+all: psp
+else
 all: uncompressed
+endif
+
+psp: $(PSP_EBOOT)
+	@$(PRINT) "$(BLUE)$(PSP_EBOOT)$(NO_COL): $(GREEN)OK$(NO_COL)\n"
 
 toolchain:
 	@$(MAKE) -s -C $(TOOLS)
@@ -475,7 +583,11 @@ clean:
 	rm -f torch.hash.yml
 	@git clean -fdx asm/$(VERSION)/$(REV)
 	@git clean -fdx bin/$(VERSION)/$(REV)
+ifeq ($(TARGET_PSP),1)
+	@git clean -fdx build/psp
+else
 	@git clean -fdx build/
+endif
 	@git clean -fdx src/assets/
 	@git clean -fdx include/assets/
 	@git clean -fdx linker_scripts/$(VERSION)/$(REV)/*.ld
@@ -505,6 +617,30 @@ disasm:
 
 #### Various Recipes ####
 
+ifeq ($(TARGET_PSP),1)
+$(PSP_EBOOT): $(PSP_ELF) $(PSP_SFO)
+	$(call print,Packaging PSP EBOOT:,$<,$@)
+ifeq ($(PROFILE_PSP),1)
+	$(V)$(PSP_STRIP) $(PSP_ELF) -o $(BUILD_DIR)/$(TARGET).psp.strip.elf
+	$(V)$(PACK_PBP) $@ $(PSP_SFO) $(PSP_EBOOT_ICON) $(PSP_EBOOT_ICON1) NULL $(PSP_EBOOT_PIC0) $(PSP_EBOOT_SND0) $(BUILD_DIR)/$(TARGET).psp.strip.elf $(PSP_EBOOT_PSAR)
+	$(V)rm -f $(BUILD_DIR)/$(TARGET).psp.strip.elf
+else
+	$(V)$(PSP_PRXGEN) $(PSP_ELF) $(PSP_PRX)
+	$(V)$(PACK_PBP) $@ $(PSP_SFO) $(PSP_EBOOT_ICON) $(PSP_EBOOT_ICON1) NULL $(PSP_EBOOT_PIC0) $(PSP_EBOOT_SND0) $(PSP_PRX) $(PSP_EBOOT_PSAR)
+endif
+
+$(PSP_SFO):
+	$(call print,Generating PSP SFO:,$(PSP_TITLE),$@)
+	$(V)$(MKSFOEX) -d MEMSIZE=1 '$(PSP_TITLE)' $@
+
+$(PSP_ELF): $(O_FILES)
+	$(call print,Linking PSP ELF:,$<,$@)
+	$(V)$(CC) $(O_FILES) -L$(PSPDEV)/psp/lib -L$(PSPSDK)/lib -Wl,-Map,$(PSP_MAP) -Wl,-zmax-page-size=128 \
+		$(if $(filter 1,$(PROFILE_PSP)),-pg,-specs=$(PSPSDK)/lib/prxspecs -Wl,-q,-T$(PSPSDK)/lib/linkfile.prx $(PSPSDK)/lib/prxexports.o) \
+		$(PSP_LIBS) -o $@
+	$(V)$(PSP_FIXUP_IMPORTS) $@
+endif
+
 # Final ROM
 $(ROMC): $(BASEROM_UNCOMPRESSED)
 	$(call print,Compressing ROM...,$<,$@)
@@ -530,7 +666,7 @@ $(BUILD_DIR)/%.ld: %.ld
 # Binary
 $(BUILD_DIR)/%.o: %.bin
 	$(call print,Binary:,$<,$@)
-	$(V)$(OBJCOPY) -I binary -O elf32-big $< $@
+	$(V)$(OBJCOPY) -I binary -O $(OBJCOPY_ELF_FORMAT) $< $@
 
 # Assembly
 $(BUILD_DIR)/%.o: %.s
@@ -560,4 +696,4 @@ build/src/libultra/libc/ll.o: src/libultra/libc/ll.c
 # Print target for debugging
 print-% : ; $(info $* is a $(flavor $*) variable set to [$($*)]) @true
 
-.PHONY: all uncompressed compressed clean init extract expected format checkformat decompress compress assets context disasm toolchain
+.PHONY: all psp uncompressed compressed clean init extract expected format checkformat decompress compress assets context disasm toolchain
