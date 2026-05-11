@@ -93,7 +93,7 @@ PSP_EBOOT_PIC0 ?= $(PSP_EBOOT_DIR)/PIC0.png
 PSP_EBOOT_PIC1 ?= NULL
 PSP_EBOOT_SND0 ?= NULL
 PSP_EBOOT_PSAR ?= NULL
-PSP_LIBS ?= -lpspdebug -lpspdisplay -lpspge -lpspctrl -lpspnet -lpspnet_apctl
+PSP_LIBS ?= -lm -lpspdebug -lpspdisplay -lpspge -lpspctrl -lpspnet -lpspnet_apctl
 PSP_EBOOT := $(BUILD_DIR)/EBOOT.PBP
 PSP_SFO   := $(BUILD_DIR)/PARAM.SFO
 PSP_ELF   := $(BUILD_DIR)/$(TARGET).psp.elf
@@ -143,7 +143,7 @@ endif
 
 ifeq ($(COMPILER),gcc)
   ifeq ($(TARGET_PSP),1)
-    CFLAGS += -std=gnu89 -G0 -DPSP -D__PSP__ -D_PSP_FW_VERSION=500 -O3 -ffast-math -fno-unsafe-math-optimizations -fno-common -fno-merge-constants -falign-functions=64 -flimit-function-alignment -fno-rounding-math -ffp-contract=off $(CHECK_WARNINGS) -funsigned-char
+    CFLAGS += -std=gnu89 -G0 -DPSP -D__PSP__ -D_PSP_FW_VERSION=500 -O3 -ffast-math -fno-unsafe-math-optimizations -fno-builtin -fno-common -fno-merge-constants -fno-strict-aliasing -falign-functions=64 -flimit-function-alignment -fno-rounding-math -ffp-contract=off $(CHECK_WARNINGS) -funsigned-char
     ifeq ($(PROFILE_PSP),1)
       CFLAGS += -pg
     endif
@@ -397,19 +397,26 @@ BIN_DIRS      := $(shell find bin -type d)
 
 C_FILES       := $(foreach dir,$(SRC_DIRS),$(wildcard $(dir)/*.c))
 C_FILES       := $(filter-out %.inc.c,$(C_FILES))
-PSP_BOOTSTRAP_C_FILES := $(wildcard src/psp/*.c)
+PSP_BOOTSTRAP_C_FILES := src/psp/main.c
+PSP_PLATFORM_C_FILES := src/psp/main.c \
+                        src/psp/ultra_reimpl.c
+PSP_GAME_C_FILES := src/sys/sys_math.c \
+                    src/sys/sys_memory.c \
+                    src/libc_math64.c \
+                    src/libultra/gu/sinf.c \
+                    src/libultra/gu/cosf.c
 ifeq ($(TARGET_PSP),1)
 ifneq ($(PSP_FULL),1)
 C_FILES       := $(PSP_BOOTSTRAP_C_FILES)
+else
+C_FILES       := $(PSP_PLATFORM_C_FILES) $(PSP_GAME_C_FILES)
 endif
 endif
 S_FILES       := $(foreach dir,$(ASM_DIRS) $(SRC_DIRS),$(wildcard $(dir)/*.s))
 BIN_FILES     := $(foreach dir,$(BIN_DIRS),$(wildcard $(dir)/*.bin))
 ifeq ($(TARGET_PSP),1)
-ifneq ($(PSP_FULL),1)
 S_FILES       :=
 BIN_FILES     :=
-endif
 endif
 O_FILES       := $(foreach f,$(C_FILES:.c=.o),$(BUILD_DIR)/$f) \
                  $(foreach f,$(S_FILES:.s=.o),$(BUILD_DIR)/$f) \
