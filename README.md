@@ -1,3 +1,9 @@
+# Star Fox 64 PSP
+
+A work-in-progress port of Star Fox 64 to PSP, based on the SF64 decomp project.
+
+The original README continues below.
+
 ### Progress:
 
 <p align="left">
