@@ -286,8 +286,11 @@ void Game_Draw(s32 playerNum) {
         case DRAW_NONE:
             break;
         case DRAW_TITLE:
+            PSP_TRACE("draw title: starfield");
             Background_DrawStarfield();
+            PSP_TRACE("draw title: title draw");
             OvlMenu_CallFunction(OVLCALL_TITLE_DRAW, NULL);
+            PSP_TRACE("draw title: done");
             break;
         case DRAW_OPTION:
             Background_DrawStarfield();

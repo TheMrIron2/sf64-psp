@@ -334,21 +334,45 @@ void Title_Draw(void) {
             Title_Ranking_Draw();
             break;
 
-        case TITLE_SCREEN:
-            Title_Matrix_Push();
-            Title_Screen_Draw();
+    case TITLE_SCREEN:
+        PSP_TRACE("title draw: screen begin");
 
-            Matrix_Pop(&gGfxMatrix);
+        PSP_TRACE("title draw: matrix push 1");
+        Title_Matrix_Push();
 
-            Title_StarfoxLogo_Draw();
-            Title_CopyrightSymbol_Draw();
-            Title_Copyright_Draw();
-            Title_PressStart_Draw();
-            Title_Matrix_Push();
-            Title_64Logo_Draw();
+        PSP_TRACE("title draw: screen draw");
+        Title_Screen_Draw();
 
-            Matrix_Pop(&gGfxMatrix);
-            break;
+        PSP_TRACE("title draw: matrix pop 1");
+        Matrix_Pop(&gGfxMatrix);
+
+        PSP_TRACE("title draw: starfox logo");
+        Title_StarfoxLogo_Draw();
+
+        PSP_TRACE("title draw: copyright symbol");
+        Title_CopyrightSymbol_Draw();
+
+        PSP_TRACE("title draw: copyright");
+        Title_Copyright_Draw();
+
+        PSP_TRACE("title draw: press start");
+        Title_PressStart_Draw();
+
+    #ifndef TARGET_PSP // bringup stub
+        PSP_TRACE("title draw: matrix push 2");
+        Title_Matrix_Push();
+
+        PSP_TRACE("title draw: 64 logo");
+        Title_64Logo_Draw();
+
+        PSP_TRACE("title draw: matrix pop 2");
+        Matrix_Pop(&gGfxMatrix);
+    #else
+        PSP_TRACE("title draw: PSP skip 64 logo");
+    #endif
+
+        PSP_TRACE("title draw: screen done");
+        break;
 
         case TITLE_GREAT_FOX_TRAVELING:
             if (D_menu_801B8348) {
@@ -969,8 +993,11 @@ void Title_Screen_Update(void) {
 }
 
 void Title_Screen_Draw(void) {
+    // bringup stub
     s32 i;
     static TitleTeam D_menu_801ADA84[4] = { TEAM_FOX, TEAM_FALCO, TEAM_SLIPPY, TEAM_PEPPY };
+
+    PSP_TRACE("title screen draw: begin");
 
     gLight1R = D_menu_801B82F8;
     gLight1G = D_menu_801B82FC;
@@ -979,6 +1006,7 @@ void Title_Screen_Draw(void) {
     gAmbientG = D_menu_801B8308;
     gAmbientB = D_menu_801B830C;
 
+#ifndef TARGET_PSP
     if ((D_menu_801B86A4 < 2) && (D_menu_801B9040 != 0)) {
         D_menu_801B86D8 = RAD_TO_DEG(Math_Atan2F(-D_menu_801B9060, sqrtf(SQ(-D_menu_801B905C) + SQ(-D_menu_801B9064))));
         D_menu_801B86DC = RAD_TO_DEG(Math_Atan2F(D_menu_801B905C, D_menu_801B9064));
@@ -993,6 +1021,10 @@ void Title_Screen_Draw(void) {
         Title_Team_Draw(D_menu_801ADA84[i]);
         sTitleTeam[D_menu_801ADA84[i]].frameCount += sTitleTeam[D_menu_801ADA84[i]].unk_5C;
     }
+#else
+    (void) i;
+    PSP_TRACE("title screen draw: PSP skip title team models");
+#endif
 
     gLight1R = D_menu_801B8310;
     gLight1G = D_menu_801B8314;
@@ -1002,9 +1034,14 @@ void Title_Screen_Draw(void) {
     gAmbientG = D_menu_801B8320;
     gAmbientB = D_menu_801B8324;
 
+#ifndef TARGET_PSP
     Title_SetLightRot(D_menu_801B86D0, D_menu_801B86D4, 100.0f, &D_menu_801B82E0, &D_menu_801B82E4, &D_menu_801B82E8);
-
     Title_Arwing_Draw(0);
+#else
+    PSP_TRACE("title screen draw: PSP skip title arwing model");
+#endif
+
+    PSP_TRACE("title screen draw: done");
 }
 
 void Title_CsGreatFox_Setup(void) {
@@ -3569,6 +3606,21 @@ void Title_SetCamUp2(f32 arg0, f32 arg1, f32 arg2, f32* arg3, f32* arg4, f32* ar
 }
 
 void Title_SetLightRot(f32 xRot, f32 yRot, f32 zSrc, f32* dirX, f32* dirY, f32* dirZ) {
+#ifdef TARGET_PSP // stub for bringup
+    (void) xRot;
+    (void) yRot;
+
+    if (dirX != NULL) {
+        *dirX = 0.0f;
+    }
+    if (dirY != NULL) {
+        *dirY = 0.0f;
+    }
+    if (dirZ != NULL) {
+        *dirZ = zSrc;
+    }
+    return;
+#else
     f32 xRotTarget;
     f32 yRotTarget;
     Vec3f dest;
@@ -3590,6 +3642,7 @@ void Title_SetLightRot(f32 xRot, f32 yRot, f32 zSrc, f32* dirX, f32* dirY, f32* 
     *dirX = dest.x;
     *dirY = dest.y;
     *dirZ = dest.z;
+#endif
 }
 
 void Title_GetCamRot(f32* xRot, f32* yRot) {

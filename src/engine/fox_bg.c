@@ -24,6 +24,11 @@
 #include "prevent_bss_reordering2.h"
 // #include "prevent_bss_reordering3.h"
 
+#ifdef TARGET_PSP // debug
+    void PspPlatform_LogLine(const char* line);
+    #define PSP_STARFIELD_CAP 16
+#endif
+
 f32 gWarpZoneBgAlpha;
 u8 gDrawAquasSurfaceWater;
 f32 D_bg_8015F968; // heat shimmer effect for SO and TI?
@@ -98,7 +103,22 @@ f32 sGroundPositions360z[4] = {
     -6000.0f,
 };
 
+#ifdef TARGET_PSP
+    void PspPlatform_LogLine(const char* line);
+    #define PSP_STARFIELD_CAP 256
+#endif
+
 void Background_DrawStarfield(void) {
+
+    #ifdef TARGET_PSP
+        /*
+            PSP bring-up: original N64 path emits hundreds of 1x1 RDP fill rects
+            PSP null renderer can't do this right now
+            skip until a PSP native batched star renderer exists
+        */
+        return;
+    #endif
+
     f32 by;
     f32 bx;
     s16 vy;
