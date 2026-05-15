@@ -18,6 +18,7 @@
 #include "macros.h"
 #include "src/psp/platform.h"
 
+#include <pspdebug.h>
 #include <pspkernel.h>
 #include <psprtc.h>
 
@@ -93,6 +94,20 @@ static void psp_memcpy(void* dst, const void* src, u32 size) {
 
 static u32 ticks_to_usecs(OSTime ticks) {
     return (u32) ((ticks * 1000000ULL) / PSP_N64_TICKS_PER_SECOND);
+}
+
+static s32 psp_thread_priority_from_os(OSPri pri) {
+    const s32 pspLowest = 0x70;
+    const s32 pspHighest = 0x10;
+
+    if (pri <= OS_PRIORITY_IDLE) {
+        return pspLowest;
+    }
+    if (pri >= OS_PRIORITY_MAX) {
+        return pspHighest;
+    }
+
+    return pspLowest - ((pri * (pspLowest - pspHighest)) / OS_PRIORITY_MAX);
 }
 
 void osCreateMesgQueue(OSMesgQueue* mq, OSMesg* msgBuf, s32 count) {
@@ -174,9 +189,18 @@ s32 osRecvMesg(OSMesgQueue* mq, OSMesg* msg, s32 flag) {
 }
 
 static int psp_timer_thread(SceSize args, void* argp) {
-    PspTimer* timer = (PspTimer*) argp;
+    PspTimer* timer;
 
-    (void) args;
+    if ((args != sizeof(timer)) || (argp == NULL)) {
+        pspDebugScreenPrintf("[psp] bad timer args %u %p\n", (unsigned) args, argp);
+        return -1;
+    }
+
+    timer = *(PspTimer**) argp;
+    if (timer == NULL) {
+        pspDebugScreenPrintf("[psp] null timer arg\n");
+        return -1;
+    }
 
     while (timer->active) {
         sceKernelDelayThread(ticks_to_usecs(timer->countdown));
@@ -257,12 +281,23 @@ u32 osGetCount(void) {
 }
 
 static int psp_thread_entry(SceSize args, void* argp) {
-    PspThread* thread = (PspThread*) argp;
+    PspThread* thread;
 
-    (void) args;
+    if ((args != sizeof(thread)) || (argp == NULL)) {
+        pspDebugScreenPrintf("[psp] bad thread args %u %p\n", (unsigned) args, argp);
+        return -1;
+    }
 
+    thread = *(PspThread**) argp;
+    if ((thread == NULL) || (thread->entry == NULL)) {
+        pspDebugScreenPrintf("[psp] null thread arg/entry\n");
+        return -1;
+    }
+
+    pspDebugScreenPrintf("[psp] thread %ld enter\n", thread->owner != NULL ? thread->owner->id : -1L);
     thread->entry(thread->arg);
     thread->active = 0;
+    pspDebugScreenPrintf("[psp] thread %ld exit\n", thread->owner != NULL ? thread->owner->id : -1L);
 
     return 0;
 }
@@ -293,11 +328,17 @@ void osStartThread(OSThread* thread) {
     for (i = 0; i < ARRAY_COUNT(sThreads); i++) {
         if (sThreads[i].owner == thread) {
             sThreads[i].active = 1;
-            sThreads[i].threadId = sceKernelCreateThread("n64_thread", psp_thread_entry, 0x18, 0x4000, 0, NULL);
+            sThreads[i].threadId = sceKernelCreateThread("n64_thread", psp_thread_entry,
+                                                         psp_thread_priority_from_os(thread->priority), 0x4000, 0,
+                                                         NULL);
             if (sThreads[i].threadId >= 0) {
                 PspThread* threadArg = &sThreads[i];
+                pspDebugScreenPrintf("[psp] start thread %ld\n", thread->id);
                 thread->state = OS_STATE_RUNNING;
                 sceKernelStartThread(sThreads[i].threadId, sizeof(threadArg), &threadArg);
+            } else {
+                pspDebugScreenPrintf("[psp] create thread %ld failed %08x\n", thread->id,
+                                     (unsigned) sThreads[i].threadId);
             }
             return;
         }
@@ -332,9 +373,20 @@ OSId osGetThreadId(OSThread* thread) {
 
 void osSetThreadPri(OSThread* thread, OSPri pri) {
     if (thread == NULL) {
+        sceKernelChangeThreadPriority(0, psp_thread_priority_from_os(pri));
         return;
     }
     thread->priority = pri;
+    {
+        s32 i;
+
+        for (i = 0; i < ARRAY_COUNT(sThreads); i++) {
+            if ((sThreads[i].owner == thread) && (sThreads[i].threadId >= 0)) {
+                sceKernelChangeThreadPriority(sThreads[i].threadId, psp_thread_priority_from_os(pri));
+                break;
+            }
+        }
+    }
 }
 
 OSPri osGetThreadPri(OSThread* thread) {

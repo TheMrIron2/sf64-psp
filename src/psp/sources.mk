@@ -107,13 +107,6 @@ PSP_GAME_C_FILES := \
     src/libultra/vimodes/vimodempallan1.c \
     src/libultra/vimodes/vimodentsclan1.c \
     src/libultra/vimodes/vimodepallan1.c \
-    src/mods/fpscounter.c \
-    src/mods/isviewer.c \
-    src/mods/levelselect.c \
-    src/mods/object_ram.c \
-    src/mods/object_ram_info.c \
-    src/mods/sfxjukebox.c \
-    src/mods/spawner.c \
     src/overlays/ovl_ending/fox_end1.c \
     src/overlays/ovl_ending/fox_end2.c \
     src/overlays/ovl_i1/fox_co.c \

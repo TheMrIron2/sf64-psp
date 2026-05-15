@@ -33,3 +33,4 @@ torch.hash.yml
 *.code-workspace
 docs/psp-port-strategy.md
 src/psp/PORT_STRATEGY.md
+AGENTS.md

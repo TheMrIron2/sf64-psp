@@ -62,8 +62,11 @@ int main(int argc, char* argv[]) {
     pspDebugScreenPrintf("Booting native game loop...\n\n");
     pspDebugScreenPrintf("Select+Start exits\n");
 
+    pspDebugScreenPrintf("[psp] platform init\n");
     PspPlatform_Init();
+    pspDebugScreenPrintf("[psp] bootproc enter\n");
     bootproc();
+    pspDebugScreenPrintf("[psp] bootproc returned\n");
 
     while (1) {
         sceDisplayWaitVblankStart();
