@@ -438,6 +438,10 @@ void Main_ThreadEntry(void* arg0) {
     OSMesg osMesg;
     u8 mesg;
 
+#ifdef TARGET_PSP
+    Main_InitMesgQueues();
+#endif
+
     osCreateThread(&gAudioThread, THREAD_ID_AUDIO, Audio_ThreadEntry, arg0,
                    gAudioThreadStack + sizeof(gAudioThreadStack), 80);
     osStartThread(&gAudioThread);
@@ -451,7 +455,9 @@ void Main_ThreadEntry(void* arg0) {
                    gSerialThreadStack + sizeof(gSerialThreadStack), 20);
     osStartThread(&gSerialThread);
 
+#ifndef TARGET_PSP
     Main_InitMesgQueues();
+#endif
 
     while (true) {
         MQ_WAIT_FOR_MESG(&gMainThreadMesgQueue, &osMesg);

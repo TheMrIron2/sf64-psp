@@ -3,6 +3,12 @@
 #include <pspdisplay.h>
 #include <pspctrl.h>
 
+#ifdef PSP_FULL
+#include "src/psp/platform.h"
+
+void bootproc(void);
+#endif
+
 PSP_MODULE_INFO("Star Fox 64 PSP", PSP_MODULE_USER, 1, 0);
 PSP_MAIN_THREAD_ATTR(PSP_THREAD_ATTR_USER);
 PSP_HEAP_SIZE_KB(-1024);
@@ -39,7 +45,9 @@ void setup_callbacks(void) {
 }
 
 int main(int argc, char* argv[]) {
+#ifndef PSP_FULL
     SceCtrlData pad;
+#endif
 
     (void) argc;
     (void) argv;
@@ -49,6 +57,18 @@ int main(int argc, char* argv[]) {
     sceCtrlSetSamplingCycle(0);
     sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
 
+#ifdef PSP_FULL
+    pspDebugScreenPrintf("Star Fox 64 PSP\n");
+    pspDebugScreenPrintf("Booting native game loop...\n\n");
+    pspDebugScreenPrintf("Select+Start exits\n");
+
+    PspPlatform_Init();
+    bootproc();
+
+    while (1) {
+        sceDisplayWaitVblankStart();
+    }
+#else
     pspDebugScreenPrintf("Star Fox 64 PSP\n");
     pspDebugScreenPrintf("PSP build pipeline OK\n\n");
     pspDebugScreenPrintf("Press X to exit\n");
@@ -62,5 +82,6 @@ int main(int argc, char* argv[]) {
     }
 
     sceKernelExitGame();
+#endif
     return 0;
 }
