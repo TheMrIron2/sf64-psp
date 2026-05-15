@@ -19,11 +19,13 @@
 #include "src/psp/platform.h"
 
 #include <pspdebug.h>
+#include <pspintrman.h>
 #include <pspkernel.h>
 #include <psprtc.h>
 
 #define PSP_N64_TICKS_PER_SECOND 46875000ULL
 #define PSP_TIMER_POOL_SIZE 32
+#define PSP_N64_THREAD_STACK_SIZE 0x10000
 
 u64 osClockRate = PSP_N64_TICKS_PER_SECOND;
 
@@ -96,6 +98,14 @@ static u32 ticks_to_usecs(OSTime ticks) {
     return (u32) ((ticks * 1000000ULL) / PSP_N64_TICKS_PER_SECOND);
 }
 
+static u32 psp_mq_lock(void) {
+    return sceKernelCpuSuspendIntr();
+}
+
+static void psp_mq_unlock(u32 state) {
+    sceKernelCpuResumeIntr(state);
+}
+
 static s32 psp_thread_priority_from_os(OSPri pri) {
     const s32 pspLowest = 0x70;
     const s32 pspHighest = 0x10;
@@ -121,46 +131,60 @@ void osCreateMesgQueue(OSMesgQueue* mq, OSMesg* msgBuf, s32 count) {
 
 s32 osSendMesg(OSMesgQueue* mq, OSMesg msg, s32 flag) {
     s32 index;
+    u32 intrState;
 
-    if (mq->validCount >= mq->msgCount) {
+    if (mq == NULL) {
+        return -1;
+    }
+
+    while (true) {
+        intrState = psp_mq_lock();
+        if (mq->validCount < mq->msgCount) {
+            index = (mq->first + mq->validCount) % mq->msgCount;
+            mq->msg[index] = msg;
+            mq->validCount++;
+            psp_mq_unlock(intrState);
+            return 0;
+        }
+        psp_mq_unlock(intrState);
+
         if (flag != OS_MESG_BLOCK) {
             return -1;
         }
-        while (mq->validCount >= mq->msgCount) {
-            sceKernelDelayThread(1000);
-        }
+        sceKernelDelayThread(1000);
     }
-
-    index = (mq->first + mq->validCount) % mq->msgCount;
-    mq->msg[index] = msg;
-    mq->validCount++;
-
-    return 0;
 }
 
 s32 osJamMesg(OSMesgQueue* mq, OSMesg msg, s32 flag) {
     s32 i;
+    u32 intrState;
 
-    if (mq->validCount >= mq->msgCount) {
+    if (mq == NULL) {
+        return -1;
+    }
+
+    while (true) {
+        intrState = psp_mq_lock();
+        if (mq->validCount < mq->msgCount) {
+            mq->first--;
+            if (mq->first < 0) {
+                mq->first = mq->msgCount - 1;
+            }
+            for (i = mq->validCount; i > 0; i--) {
+                mq->msg[(mq->first + i) % mq->msgCount] = mq->msg[(mq->first + i - 1) % mq->msgCount];
+            }
+            mq->msg[mq->first] = msg;
+            mq->validCount++;
+            psp_mq_unlock(intrState);
+            return 0;
+        }
+        psp_mq_unlock(intrState);
+
         if (flag != OS_MESG_BLOCK) {
             return -1;
         }
-        while (mq->validCount >= mq->msgCount) {
-            sceKernelDelayThread(1000);
-        }
+        sceKernelDelayThread(1000);
     }
-
-    mq->first--;
-    if (mq->first < 0) {
-        mq->first = mq->msgCount - 1;
-    }
-    for (i = mq->validCount; i > 0; i--) {
-        mq->msg[(mq->first + i) % mq->msgCount] = mq->msg[(mq->first + i - 1) % mq->msgCount];
-    }
-    mq->msg[mq->first] = msg;
-    mq->validCount++;
-
-    return 0;
 }
 
 s32 osSendMesgNoBlock(OSMesgQueue* mq, OSMesg msg) {
@@ -171,21 +195,31 @@ s32 osSendMesgNoBlock(OSMesgQueue* mq, OSMesg msg) {
 }
 
 s32 osRecvMesg(OSMesgQueue* mq, OSMesg* msg, s32 flag) {
-    while (mq->validCount == 0) {
+    u32 intrState;
+
+    if (mq == NULL) {
+        return -1;
+    }
+
+    while (true) {
+        intrState = psp_mq_lock();
+        if (mq->validCount != 0) {
+            if (msg != NULL) {
+                *msg = mq->msg[mq->first];
+            }
+
+            mq->first = (mq->first + 1) % mq->msgCount;
+            mq->validCount--;
+            psp_mq_unlock(intrState);
+            return 0;
+        }
+        psp_mq_unlock(intrState);
+
         if (flag != OS_MESG_BLOCK) {
             return -1;
         }
         sceKernelDelayThread(1000);
     }
-
-    if (msg != NULL) {
-        *msg = mq->msg[mq->first];
-    }
-
-    mq->first = (mq->first + 1) % mq->msgCount;
-    mq->validCount--;
-
-    return 0;
 }
 
 static int psp_timer_thread(SceSize args, void* argp) {
@@ -329,8 +363,8 @@ void osStartThread(OSThread* thread) {
         if (sThreads[i].owner == thread) {
             sThreads[i].active = 1;
             sThreads[i].threadId = sceKernelCreateThread("n64_thread", psp_thread_entry,
-                                                         psp_thread_priority_from_os(thread->priority), 0x4000, 0,
-                                                         NULL);
+                                                         psp_thread_priority_from_os(thread->priority),
+                                                         PSP_N64_THREAD_STACK_SIZE, 0, NULL);
             if (sThreads[i].threadId >= 0) {
                 PspThread* threadArg = &sThreads[i];
                 pspDebugScreenPrintf("[psp] start thread %ld\n", thread->id);

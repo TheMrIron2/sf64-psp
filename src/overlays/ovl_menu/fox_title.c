@@ -11,6 +11,34 @@
 #include "assets/ast_title.h"
 #include "assets/ast_text.h"
 
+#ifdef TARGET_PSP
+void PspPlatform_LogLine(const char* line);
+#define PSP_TRACE(msg) PspPlatform_LogLine("[psp] " msg)
+
+static f32 PspTitle_WrapRadians(f32 angle) {
+    while (angle > M_PI) {
+        angle -= M_PI * 2.0f;
+    }
+    while (angle < -M_PI) {
+        angle += M_PI * 2.0f;
+    }
+    return angle;
+}
+
+static f32 PspTitle_SinApprox(f32 angle) {
+    f32 x = PspTitle_WrapRadians(angle);
+    f32 x2 = x * x;
+
+    return x * (1.0f + (x2 * (-1.0f / 6.0f)) + (x2 * x2 * (1.0f / 120.0f)));
+}
+
+static f32 PspTitle_CosApprox(f32 angle) {
+    return PspTitle_SinApprox(angle + (M_PI * 0.5f));
+}
+#else
+#define PSP_TRACE(msg) ((void) 0)
+#endif
+
 f32 D_menu_801B7BB0;
 f32 D_menu_801B7BB4;
 f32 D_menu_801B7BB8;
@@ -157,13 +185,16 @@ u16* sGralPepperMsg[5] = {
 };
 
 void Title_Setup(void) {
+    PSP_TRACE("title setup: begin");
     gVIsPerFrame = 2;
     gGameFrameCount = 0;
     gTitleState = TITLE_UPDATE_ENTRY;
     gLastGameState = GSTATE_NONE;
     D_game_800D2870 = false;
 
+    PSP_TRACE("title setup: check controllers");
     gMainController = Title_CheckControllers();
+    PSP_TRACE("title setup: controllers done");
 
     gFillScreenRed = 0;
     gFillScreenGreen = 0;
@@ -188,28 +219,47 @@ void Title_Setup(void) {
     sTitleTextPrimColTarget = 255.0f;
     sTitleTextPrimCol = 255.0f;
 
+    PSP_TRACE("title setup: memory free");
     Memory_FreeAll();
 
+    PSP_TRACE("title setup: starfield");
     Play_GenerateStarfield();
     gStarfieldX = SCREEN_WIDTH;
     gStarfieldY = SCREEN_HEIGHT;
 
+    PSP_TRACE("title setup: rank hits");
     Title_GetRankTotalHits();
+    PSP_TRACE("title setup: rank hits done");
+
+#ifdef TARGET_PSP
+    /*
+     * Early PSP bring-up keeps the scheduler on the simpler interactive title
+     * path. The opening cinematic currently reaches hardware-only crashes in
+     * the Great Fox travel update before we have a renderer to validate it.
+     */
+    PSP_TRACE("title setup: psp force title screen");
+    gGoToTitle = true;
+#endif
 
     if ((gMainController == -1) || gGoToTitle) {
+        PSP_TRACE("title setup: title screen branch");
         AUDIO_SET_SPEC(SFX_LAYOUT_DEFAULT, AUDIOSPEC_TITLE);
         sCutsceneState = TITLE_SCREEN;
         gGoToTitle = false;
     } else {
+        PSP_TRACE("title setup: opening branch");
         AUDIO_SET_SPEC(SFX_LAYOUT_DEFAULT, AUDIOSPEC_OPENING);
         sCutsceneState = TITLE_GREAT_FOX_TRAVELING;
     }
     gControllerLock = 30;
+    PSP_TRACE("title setup: complete");
 }
 
 void Title_Main(void) {
+    PSP_TRACE("title main: begin");
     switch (gTitleState) {
         case TITLE_IDLE:
+            PSP_TRACE("title main: idle");
             if (gNextGameStateTimer == 0) {
                 gDrawMode = DRAW_NONE;
                 gTitleState = TITLE_SETUP;
@@ -217,19 +267,23 @@ void Title_Main(void) {
             break;
 
         case TITLE_SETUP:
+            PSP_TRACE("title main: setup");
             gDrawMode = DRAW_NONE;
             Title_Setup();
             break;
 
         case TITLE_UPDATE_ENTRY:
+            PSP_TRACE("title main: update entry");
             gDrawMode = DRAW_TITLE;
             Title_UpdateEntry();
             break;
     }
     gGameFrameCount++;
+    PSP_TRACE("title main: done");
 }
 
 void Title_UpdateEntry(void) {
+    PSP_TRACE("title update entry: begin");
     if (sTimer1 > 0) {
         sTimer1--;
     }
@@ -239,29 +293,39 @@ void Title_UpdateEntry(void) {
 
     switch (sCutsceneState) {
         case TITLE_RANKING:
+            PSP_TRACE("title update entry: ranking");
             Title_Ranking_Update();
             break;
         case TITLE_SCREEN:
+            PSP_TRACE("title update entry: screen");
             Title_Screen_Update();
+            PSP_TRACE("title update entry: screen input");
             Title_Screen_Input();
             break;
         case TITLE_GREAT_FOX_TRAVELING:
+            PSP_TRACE("title update entry: great fox traveling");
             Title_CsGreatFoxTraveling_Update();
             break;
         case TITLE_CS_TEAM_RUNNING:
+            PSP_TRACE("title update entry: team running");
             Title_CsTeamRunning_Update();
             break;
         case TITLE_GREAT_FOX_CLOSE_UP:
+            PSP_TRACE("title update entry: great fox close");
             Title_CsGreatFoxCloseUp_Update();
             break;
         case TITLE_TAKE_OFF:
+            PSP_TRACE("title update entry: take off");
             Title_CsTakeOff_Update();
             break;
         case TITLE_TAKE_OFF_SPACE:
+            PSP_TRACE("title update entry: take off space");
             Title_CsTakeOffSpace_Update();
             break;
     }
+    PSP_TRACE("title update entry: next state");
     Title_NextState_Check();
+    PSP_TRACE("title update entry: done");
 }
 
 void Title_Draw(void) {
@@ -504,6 +568,8 @@ void Title_Screen_Setup(void) {
     bool allExpertMedals = true;
     s32 i;
 
+    PSP_TRACE("title screen setup: begin");
+    PSP_TRACE("title screen setup: medals");
     for (i = 0; i < ARRAY_COUNT(gSaveFile.save.data.planet); i++) {
         if ((i != SAVE_SLOT_VENOM_1) && ((gSaveFile.save.data.planet[i].expertMedal & 1) == 0)) {
             allExpertMedals = false;
@@ -511,6 +577,7 @@ void Title_Screen_Setup(void) {
         }
     }
 
+    PSP_TRACE("title screen setup: globals");
     D_menu_801B82BC = 900;
 
     gRadioState = 0;
@@ -563,6 +630,7 @@ void Title_Screen_Setup(void) {
 
     D_menu_801B84D4 = 0.5f;
 
+    PSP_TRACE("title screen setup: arwing");
     sTitleArwing[TEAM_FOX].pos.x = -80.0f;
     sTitleArwing[TEAM_FOX].pos.y = 220.0f;
     sTitleArwing[TEAM_FOX].pos.z = -360.0f;
@@ -579,6 +647,7 @@ void Title_Screen_Setup(void) {
     sTitleArwing[TEAM_FOX].unk_40 = 0;
     sTitleArwing[TEAM_FOX].drawShadow = 0;
 
+    PSP_TRACE("title screen setup: fox");
     if (allExpertMedals) {
         sTitleTeam[TEAM_FOX].pos.x = -299.0f;
         sTitleTeam[TEAM_FOX].pos.y = -32.0f;
@@ -612,6 +681,7 @@ void Title_Screen_Setup(void) {
     sTitleTeam[TEAM_FOX].frameCount = 0;
     sTitleTeam[TEAM_FOX].unk_5C = 0;
 
+    PSP_TRACE("title screen setup: falco");
     if (allExpertMedals) {
         sTitleTeam[TEAM_FALCO].pos.x = -42.0f;
         sTitleTeam[TEAM_FALCO].pos.y = -7.0f;
@@ -645,6 +715,7 @@ void Title_Screen_Setup(void) {
     sTitleTeam[TEAM_FALCO].frameCount = 0;
     sTitleTeam[TEAM_FALCO].unk_5C = 0;
 
+    PSP_TRACE("title screen setup: peppy");
     if (allExpertMedals) {
         sTitleTeam[TEAM_PEPPY].pos.x = 90.0f;
         sTitleTeam[TEAM_PEPPY].pos.y = 1.00f;
@@ -678,6 +749,7 @@ void Title_Screen_Setup(void) {
     sTitleTeam[TEAM_PEPPY].frameCount = 0;
     sTitleTeam[TEAM_PEPPY].unk_5C = 0;
 
+    PSP_TRACE("title screen setup: slippy");
     if (allExpertMedals) {
         sTitleTeam[TEAM_SLIPPY].pos.x = 58.0f;
         sTitleTeam[TEAM_SLIPPY].pos.y = -5.0f;
@@ -711,6 +783,7 @@ void Title_Screen_Setup(void) {
     sTitleTeam[TEAM_SLIPPY].frameCount = 254;
     sTitleTeam[TEAM_SLIPPY].unk_5C = 0;
 
+    PSP_TRACE("title screen setup: anim frames");
     for (i = 0; i < ARRAY_COUNT(sTeamAnim); i++) {
         Animation_GetFrameData(sTeamAnim[i].title,
                                sTitleTeam[i].frameCount % Animation_GetFrameCount(sTeamAnim[i].title),
@@ -720,7 +793,9 @@ void Title_Screen_Setup(void) {
     D_menu_801B86A4 = 0;
     D_menu_801B82B0 = 100;
 
+    PSP_TRACE("title screen setup: bgm");
     AUDIO_PLAY_BGM(NA_BGM_TITLE);
+    PSP_TRACE("title screen setup: done");
 }
 
 void Title_Screen_Update(void) {
@@ -729,8 +804,10 @@ void Title_Screen_Update(void) {
     static f32 D_menu_801ADA64[4] = { 10.0f, 20.0f, 20.0f, 20.0f };
     static f32 D_menu_801ADA74[4] = { 2.0f, 5.0f, 4.0f, 4.0f };
 
+    PSP_TRACE("title screen update: begin");
     switch (sSceneState) {
         case 0:
+            PSP_TRACE("title screen update: case 0");
             Title_Screen_Setup();
             D_menu_801B82CC = 0.04f;
             D_menu_801B82D0 = 0.1f;
@@ -739,6 +816,7 @@ void Title_Screen_Update(void) {
             break;
 
         case 1:
+            PSP_TRACE("title screen update: case 1");
             Math_SmoothStepToF(&D_menu_801B86C8, -10.0f, D_menu_801B82CC, 100.0f, 0.0001f);
             Math_SmoothStepToF(&D_menu_801B86CC, 57.0f, D_menu_801B82CC, 100.0f, 0.0001f);
             Math_SmoothStepToF(&D_menu_801B8304, 13.0f, D_menu_801B82CC, 100.0f, 0.0001f);
@@ -752,12 +830,14 @@ void Title_Screen_Update(void) {
             break;
 
         case 2:
+            PSP_TRACE("title screen update: case 2");
             if (D_menu_801B82B0 == 0) {
                 sSceneState++;
             }
             break;
 
         case 3:
+            PSP_TRACE("title screen update: case 3");
             sTimer1 = (s32) (RAND_FLOAT(5.0f) + 1.0f) * 10;
             temp_fv1 = D_menu_801B8340;
             sTitleTeam[D_menu_801B8340].unk_5C = 0;
@@ -779,6 +859,7 @@ void Title_Screen_Update(void) {
             break;
 
         case 4:
+            PSP_TRACE("title screen update: case 4");
             if (sTimer1 == 0) {
                 sTitleTeam[D_menu_801B8340].unk_54 = false;
                 Math_SmoothStepToF(&sTitleTeam[D_menu_801B8340].unk_18, 0.0f, D_menu_801B82CC, 100.0f, 0.001f);
@@ -791,6 +872,7 @@ void Title_Screen_Update(void) {
             break;
     }
 
+    PSP_TRACE("title screen update: team motion");
     if (sTitleTeam[D_menu_801B8340].unk_54) {
         if ((sTitleTeam[D_menu_801B8340].unk_18 + sTitleTeam[D_menu_801B8340].unk_1C) < 0.0f) {
             sTitleTeam[D_menu_801B8340].unk_1C = D_menu_801ADA74[D_menu_801B8340];
@@ -804,6 +886,7 @@ void Title_Screen_Update(void) {
         sTitleTeam[D_menu_801B8340].unk_18 += sTitleTeam[D_menu_801B8340].unk_1C;
     }
 
+    PSP_TRACE("title screen update: falco idle");
     if (D_menu_801B82B0 == 0) {
         if ((gGameFrameCount & 0x80) != 0) {
             if (sTitleTeam[TEAM_FALCO].unk_20 + sTitleTeam[TEAM_FALCO].unk_24 < -20.0f) {
@@ -818,6 +901,7 @@ void Title_Screen_Update(void) {
         }
     }
 
+    PSP_TRACE("title screen update: camera recenter");
     if ((D_menu_801B86A4 >= 3) && (D_menu_801B9040 != 0)) {
         Math_SmoothStepToF(&D_menu_801B86C8, -10.0f, D_menu_801B82D0, 100.0f, 0.0001f);
         Math_SmoothStepToF(&D_menu_801B86CC, 57.0f, D_menu_801B82D0, 100.0f, 0.0001f);
@@ -848,12 +932,17 @@ void Title_Screen_Update(void) {
         }
     }
 
+    PSP_TRACE("title screen update: camera");
+    PSP_TRACE("title screen update: arwing rot");
     sTitleArwing->xRot += 0.6f;
 
+    PSP_TRACE("title screen update: cam up");
     Title_SetCamUp3(1, &gCsCamEyeX, &gCsCamEyeY, &gCsCamEyeZ, &gCsCamAtX, &gCsCamAtY, &gCsCamAtZ, D_menu_801B86A8,
                     D_menu_801B86AC, D_menu_801B86B0);
+    PSP_TRACE("title screen update: starfield pos");
     Camera_SetStarfieldPos(gCsCamEyeX, gCsCamEyeY, gCsCamEyeZ, gCsCamAtX, gCsCamAtY, gCsCamAtZ);
 
+    PSP_TRACE("title screen update: timers");
     gStarfieldScrollX -= 0.5f;
 
     if (D_menu_801B82B0 > 0) {
@@ -876,6 +965,7 @@ void Title_Screen_Update(void) {
     gDrawMode = DRAW_NONE;
 
     sCutsceneState = TITLE_RANKING;
+    PSP_TRACE("title screen update: done");
 }
 
 void Title_Screen_Draw(void) {
@@ -3334,6 +3424,51 @@ void Title_ScreenFade_Update(void) {
 
 void Title_SetCamUp3(bool arg0, f32* arg1, f32* arg2, f32* arg3, f32* arg4, f32* arg5, f32* arg6, f32 arg7, f32 arg8,
                      f32 arg9) {
+#ifdef TARGET_PSP
+    f32* outX;
+    f32* outY;
+    f32* outZ;
+    f32 baseX;
+    f32 baseY;
+    f32 baseZ;
+    f32 sinX;
+    f32 cosX;
+    f32 sinY;
+    f32 cosY;
+
+    PSP_TRACE("title cam up3: begin");
+    if (arg0) {
+        baseX = *arg4;
+        baseY = *arg5;
+        baseZ = *arg6;
+        outX = arg1;
+        outY = arg2;
+        outZ = arg3;
+    } else {
+        baseX = *arg1;
+        baseY = *arg2;
+        baseZ = *arg3;
+        arg9 = -arg9;
+        outX = arg4;
+        outY = arg5;
+        outZ = arg6;
+    }
+
+    sinX = PspTitle_SinApprox(M_DTOR * arg7);
+    cosX = PspTitle_CosApprox(M_DTOR * arg7);
+    sinY = PspTitle_SinApprox(M_DTOR * arg8);
+    cosY = PspTitle_CosApprox(M_DTOR * arg8);
+
+    *outX = baseX + (arg9 * sinY * cosX);
+    *outY = baseY - (arg9 * sinX);
+    *outZ = baseZ + (arg9 * cosY * cosX);
+
+    sTitleCamUpX = sinY * sinX;
+    sTitleCamUpY = cosX;
+    sTitleCamUpZ = cosY * sinX;
+    PSP_TRACE("title cam up3: done");
+    return;
+#else
     Vec3f sp54;
     Vec3f sp48;
     f32* sp44;
@@ -3384,6 +3519,7 @@ void Title_SetCamUp3(bool arg0, f32* arg1, f32* arg2, f32* arg3, f32* arg4, f32*
     sTitleCamUpX = sp54.x;
     sTitleCamUpY = sp54.y;
     sTitleCamUpZ = sp54.z;
+#endif
 }
 
 void Title_SetCamUp2(f32 arg0, f32 arg1, f32 arg2, f32* arg3, f32* arg4, f32* arg5, f32 arg6, f32* arg7, f32* arg8,

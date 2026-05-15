@@ -2,6 +2,16 @@
 #include "sf64audio_external.h"
 #include "mods.h"
 
+#ifdef TARGET_PSP
+void PspPlatform_LogLine(const char* line);
+void PspPlatform_LogFrame(const char* phase, u32 frame);
+#define PSP_TRACE(msg) PspPlatform_LogLine("[psp] " msg)
+#define PSP_TRACE_FRAME(phase, frame) PspPlatform_LogFrame((phase), (frame))
+#else
+#define PSP_TRACE(msg) ((void) 0)
+#define PSP_TRACE_FRAME(phase, frame) ((void) 0)
+#endif
+
 s32 sGammaMode = 1;
 
 SPTask* gCurrentTask;
@@ -108,8 +118,10 @@ void Main_Initialize(void) {
 void Audio_ThreadEntry(void* arg0) {
     SPTask* task;
 
+    PSP_TRACE("audio init");
     AudioLoad_Init();
     Audio_InitSounds();
+    PSP_TRACE("audio ready");
 
     task = AudioThread_CreateTask();
     if (task != NULL) {
@@ -208,7 +220,9 @@ void Main_SetVIMode(void) {
 void SerialInterface_ThreadEntry(void* arg0) {
     OSMesg sp34;
 
+    PSP_TRACE("serial init");
     Controller_Init();
+    PSP_TRACE("serial ready");
     while (true) {
         MQ_WAIT_FOR_MESG(&gSerialThreadMesgQueue, &sp34);
 
@@ -232,6 +246,7 @@ void SerialInterface_ThreadEntry(void* arg0) {
 void Timer_ThreadEntry(void* arg0) {
     void* sp24;
 
+    PSP_TRACE("timer ready");
     while (true) {
         MQ_WAIT_FOR_MESG(&gTimerTaskMesgQueue, &sp24);
         Timer_CompleteTask(sp24);
@@ -243,34 +258,61 @@ void Graphics_ThreadEntry(void* arg0) {
     u8 visPerFrame;
     u8 validVIsPerFrame;
 
+    PSP_TRACE("gfx game init");
     Game_Initialize();
+    PSP_TRACE("gfx game init done");
     osSendMesg(&gSerialThreadMesgQueue, (OSMesg) SI_READ_CONTROLLER, OS_MESG_NOBLOCK);
+    PSP_TRACE("gfx init task 0");
     Graphics_InitializeTask(gSysFrameCount);
     {
         gSPSegment(gUnkDisp1++, 0, 0);
         gSPDisplayList(gMasterDisp++, gGfxPool->unkDL1);
+        PSP_TRACE("gfx first update");
         Game_Update();
+        PSP_TRACE("gfx first update done");
         gSPEndDisplayList(gUnkDisp1++);
         gSPEndDisplayList(gUnkDisp2++);
         gSPDisplayList(gMasterDisp++, gGfxPool->unkDL2);
         gDPFullSync(gMasterDisp++);
         gSPEndDisplayList(gMasterDisp++);
     }
+    PSP_TRACE("gfx first task");
     Graphics_SetTask();
+    PSP_TRACE("gfx loop");
     while (true) {
         gSysFrameCount++;
+        if ((gSysFrameCount <= 4) || ((gSysFrameCount % 30) == 0)) {
+            PSP_TRACE_FRAME("loop begin", gSysFrameCount);
+        }
         Graphics_InitializeTask(gSysFrameCount);
         MQ_WAIT_FOR_MESG(&gControllerMesgQueue, NULL);
+        if ((gSysFrameCount <= 4) || ((gSysFrameCount % 30) == 0)) {
+            PSP_TRACE_FRAME("controller ready", gSysFrameCount);
+        }
+#ifndef TARGET_PSP
         osSendMesg(&gSerialThreadMesgQueue, (OSMesg) SI_RUMBLE, OS_MESG_NOBLOCK);
+#endif
         Controller_UpdateInput();
+        if ((gSysFrameCount <= 4) || ((gSysFrameCount % 30) == 0)) {
+            PSP_TRACE_FRAME("controller update done", gSysFrameCount);
+        }
         osSendMesg(&gSerialThreadMesgQueue, (OSMesg) SI_READ_CONTROLLER, OS_MESG_NOBLOCK);
+        if ((gSysFrameCount <= 4) || ((gSysFrameCount % 30) == 0)) {
+            PSP_TRACE_FRAME("controller read queued", gSysFrameCount);
+        }
         if (gControllerPress[3].button & U_JPAD) {
             Main_SetVIMode();
         }
         {
             gSPSegment(gUnkDisp1++, 0, 0);
             gSPDisplayList(gMasterDisp++, gGfxPool->unkDL1);
+            if ((gSysFrameCount <= 4) || ((gSysFrameCount % 30) == 0)) {
+                PSP_TRACE_FRAME("game update begin", gSysFrameCount);
+            }
             Game_Update();
+            if ((gSysFrameCount <= 4) || ((gSysFrameCount % 30) == 0)) {
+                PSP_TRACE_FRAME("game update done", gSysFrameCount);
+            }
             if (gStartNMI == 1) {
                 Graphics_NMIWipe();
             }
@@ -281,8 +323,14 @@ void Graphics_ThreadEntry(void* arg0) {
             gSPEndDisplayList(gMasterDisp++);
         }
         MQ_WAIT_FOR_MESG(&gGfxTaskMesgQueue, NULL);
+        if ((gSysFrameCount <= 4) || ((gSysFrameCount % 30) == 0)) {
+            PSP_TRACE_FRAME("gfx task ack", gSysFrameCount);
+        }
 
         Graphics_SetTask();
+        if ((gSysFrameCount <= 4) || ((gSysFrameCount % 30) == 0)) {
+            PSP_TRACE_FRAME("gfx task queued", gSysFrameCount);
+        }
 
         if (!gFillScreen) {
             osViSwapBuffer(&gFrameBuffers[(gSysFrameCount - 1) % 3]);
@@ -294,6 +342,9 @@ void Graphics_ThreadEntry(void* arg0) {
         validVIsPerFrame = MAX(visPerFrame, gGfxVImesgQueue.validCount + 1);
         for (i = 0; i < validVIsPerFrame; i += 1) { // Can't be ++
             MQ_WAIT_FOR_MESG(&gGfxVImesgQueue, NULL);
+        }
+        if ((gSysFrameCount <= 4) || ((gSysFrameCount % 30) == 0)) {
+            PSP_TRACE_FRAME("vi wait done", gSysFrameCount);
         }
 
         Audio_Update();
@@ -325,6 +376,11 @@ void Main_HandleRDP(void) {
     SPTask** task = sGfxTasks;
     u8 i;
 
+    if (*task == NULL) {
+        PSP_TRACE("rdp with no gfx task");
+        return;
+    }
+
     if ((*task)->mesgQueue != NULL) {
         osSendMesg((*task)->mesgQueue, (*task)->msg, OS_MESG_NOBLOCK);
     }
@@ -338,6 +394,11 @@ void Main_HandleRDP(void) {
 
 void Main_HandleRSP(void) {
     SPTask* task = gCurrentTask;
+
+    if (task == NULL) {
+        PSP_TRACE("rsp with no current task");
+        return;
+    }
 
     gCurrentTask = NULL;
     if (task->state == SPTASK_STATE_INTERRUPTED) {

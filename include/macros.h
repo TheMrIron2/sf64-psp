@@ -23,8 +23,17 @@
 #define RAND_INT_SEEDED(max) ((s32)(Rand_ZeroOneSeeded()*(max)))
 #define RAND_FLOAT_CENTERED_SEEDED(width) ((Rand_ZeroOneSeeded()-0.5f)*(width))
 
+#ifdef TARGET_PSP
+#define PSP_IS_NATIVE_PTR(ptr) (((uintptr_t)(ptr) >= 0x08000000U) && ((uintptr_t)(ptr) < 0x0A000000U))
+#define SEGMENTED_TO_VIRTUAL(segment)                                                                                    \
+    ((void*) (PSP_IS_NATIVE_PTR(segment)                                                                                 \
+                  ? (uintptr_t) (segment)                                                                                \
+                  : (gSegments[(((uintptr_t) (segment)) >> 24) & 0xF] + (((uintptr_t) (segment)) & 0xFFFFFF))))
+#define SEGMENTED_TO_VIRTUAL_JP(segment) SEGMENTED_TO_VIRTUAL(segment)
+#else
 #define SEGMENTED_TO_VIRTUAL(segment) ((void*)OS_PHYSICAL_TO_K0(gSegments[((uintptr_t)(segment)<<4)>>0x1C]+(((uintptr_t)(segment))&0xFFFFFF)))
 #define SEGMENTED_TO_VIRTUAL_JP(segment) ((void*)OS_PHYSICAL_TO_K0(gSegments[((uintptr_t)(segment)&(0xF<<0x18))>>0x18]+(((uintptr_t)(segment))&0xFFFFFF)))
+#endif
 
 #define ARRAY_COUNT(arr) (s32)(sizeof(arr) / sizeof(arr[0]))
 #define ARRAY_COUNTU(arr) (u32)(sizeof(arr) / sizeof(arr[0]))

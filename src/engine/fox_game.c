@@ -4,6 +4,13 @@
 #include "assets/ast_logo.h"
 #include "mods.h"
 
+#ifdef TARGET_PSP
+void PspPlatform_LogLine(const char* line);
+#define PSP_TRACE(msg) PspPlatform_LogLine("[psp] " msg)
+#else
+#define PSP_TRACE(msg) ((void) 0)
+#endif
+
 f32 gNextVsViewScale;
 f32 gVsViewScale;
 s32 gPlayerInactive[4];
@@ -51,12 +58,17 @@ s32 sLevelSceneIds[] = {
 };
 
 void Game_Initialize(void) {
+    PSP_TRACE("game init: Memory_FreeAll");
     Memory_FreeAll();
+    PSP_TRACE("game init: Rand_Init");
     Rand_Init();
+    PSP_TRACE("game init: Rand_SetSeed");
     Rand_SetSeed(1, 29000, 9876);
+    PSP_TRACE("game init: state setup");
     gGameState = GSTATE_BOOT;
 #ifdef MODS_BOOT_STATE
     gNextGameState = GSTATE_INIT;
+    PSP_TRACE("game init: Save_Read");
     if (Save_Read() != 0) {
 #ifdef AVOID_UB
         gSaveFile.save = gDefaultSave;
@@ -67,6 +79,7 @@ void Game_Initialize(void) {
         Save_Write();
     }
 #endif
+    PSP_TRACE("game init: globals");
     gNextGameStateTimer = 0;
     gBgColor = 0;
     gBlurAlpha = 255;
@@ -76,8 +89,11 @@ void Game_Initialize(void) {
     gNextVsViewScale = gVsViewScale = 0.0f;
     gSceneId = SCENE_LOGO;
     gSceneSetup = 0;
+    PSP_TRACE("game init: Load_InitDmaAndMsg");
     Load_InitDmaAndMsg();
+    PSP_TRACE("game init: Load_InitDmaAndMsg done");
     gGameStandby = true;
+    PSP_TRACE("game init: complete");
 }
 
 void Game_SetGameState(void) {
@@ -343,49 +359,68 @@ void Game_Update(void) {
     u8 partialFill;
     u8 soundMode;
 
+    PSP_TRACE("game update: set state");
     Game_SetGameState();
 
     if (gGameStandby) {
+        PSP_TRACE("game update: standby dl");
         Game_InitStandbyDL(&gUnkDisp1);
         gGameStandby = false;
+        PSP_TRACE("game update: standby done");
         return;
     }
 
+    PSP_TRACE("game update: master dl");
     Game_InitMasterDL(&gUnkDisp1);
+    PSP_TRACE("game update: set scene");
     Game_SetScene();
 
+    PSP_TRACE("game update: change scene");
     if (Game_ChangeScene() != true) {
+        PSP_TRACE("game update: perspective");
         Lib_InitPerspective(&gUnkDisp1);
+        PSP_TRACE("game update: viewport");
         Game_InitViewport(&gUnkDisp1, gCamCount, 0);
 
         if (gNextGameStateTimer != 0) {
             gNextGameStateTimer--;
         }
 
+        PSP_TRACE("game update: state switch");
         switch (gGameState) {
             case GSTATE_BOOT:
+                PSP_TRACE("game update: boot");
                 gNextGameStateTimer = 2;
                 gGameState++;
                 break;
 
             case GSTATE_BOOT_WAIT:
+                PSP_TRACE("game update: boot wait");
                 if (gNextGameStateTimer == 0) {
                     gGameState++;
                 }
                 break;
 
             case GSTATE_SHOW_LOGO:
+                PSP_TRACE("game update: show logo begin");
                 RCP_SetupDL(&gMasterDisp, SETUPDL_76);
+                PSP_TRACE("game update: show logo setup");
                 gDPSetPrimColor(gMasterDisp++, 0x00, 0x00, 255, 255, 255, 255);
                 Lib_TextureRect_IA8(&gMasterDisp, &aNintendoLogoTex[128 * 16 * 0], 128, 16, 100.0f, 86.0f, 1.0f, 1.0f);
+                PSP_TRACE("game update: show logo 1");
                 Lib_TextureRect_IA8(&gMasterDisp, &aNintendoLogoTex[128 * 16 * 1], 128, 16, 100.0f, 102.0f, 1.0f, 1.0f);
+                PSP_TRACE("game update: show logo 2");
                 Lib_TextureRect_IA8(&gMasterDisp, &aNintendoLogoTex[128 * 16 * 2], 128, 16, 100.0f, 118.0f, 1.0f, 1.0f);
+                PSP_TRACE("game update: show logo 3");
                 Lib_TextureRect_IA8(&gMasterDisp, &aNintendoLogoTex[128 * 16 * 3], 128, 16, 100.0f, 134.0f, 1.0f, 1.0f);
+                PSP_TRACE("game update: show logo 4");
                 Lib_TextureRect_IA8(&gMasterDisp, &aNintendoLogoTex[128 * 16 * 4], 128, 10, 100.0f, 150.0f, 1.0f, 1.0f);
+                PSP_TRACE("game update: show logo done");
                 gGameState++;
                 break;
 
             case GSTATE_CHECK_SAVE:
+                PSP_TRACE("game update: check save");
                 if (Save_Read() != 0) {
 #ifdef AVOID_UB
                     gSaveFile.save = gDefaultSave;
@@ -399,6 +434,7 @@ void Game_Update(void) {
                 Timer_CreateTask(MSEC_TO_CYCLES(1000), Timer_Increment, (s32*) &gGameState, 1);
                 /* fallthrough */
             case GSTATE_LOGO_WAIT:
+                PSP_TRACE("game update: logo wait");
                 RCP_SetupDL(&gMasterDisp, SETUPDL_76);
                 gDPSetPrimColor(gMasterDisp++, 0x00, 0x00, 255, 255, 255, 255);
                 Lib_TextureRect_IA8(&gMasterDisp, &aNintendoLogoTex[128 * 16 * 0], 128, 16, 100.0f, 86.0f, 1.0f, 1.0f);
@@ -409,12 +445,14 @@ void Game_Update(void) {
                 break;
 
             case GSTATE_START:
+                PSP_TRACE("game update: start");
                 gGameState = GSTATE_INIT;
                 gSceneId = SCENE_TITLE;
                 gSceneSetup = 0;
                 break;
 
             case GSTATE_INIT:
+                PSP_TRACE("game update: init");
                 gGameState = GSTATE_TITLE;
                 gTitleState = 1;
                 gClearPlayerInfo = true;
@@ -493,32 +531,42 @@ void Game_Update(void) {
                 break;
 
             case GSTATE_TITLE:
+                PSP_TRACE("game update: title");
                 OvlMenu_CallFunction(OVLCALL_TITLE_UPDATE, NULL);
                 break;
             case GSTATE_MENU:
+                PSP_TRACE("game update: menu");
                 OvlMenu_CallFunction(OVLCALL_OPTION_UPDATE, NULL);
                 break;
             case GSTATE_MAP:
+                PSP_TRACE("game update: map");
                 Map_Main();
                 break;
             case GSTATE_VS_INIT:
+                PSP_TRACE("game update: vs init");
                 Versus_StartMatch();
                 break;
             case GSTATE_PLAY:
+                PSP_TRACE("game update: play");
                 Play_Main();
                 break;
             case GSTATE_GAME_OVER:
+                PSP_TRACE("game update: game over");
                 OvlMenu_CallFunction(OVLCALL_GAME_OVER_UPDATE, NULL);
                 break;
             case GSTATE_ENDING:
+                PSP_TRACE("game update: ending");
                 gDrawMode = DRAW_ENDING;
                 Ending_Main();
                 break;
             default:
+                PSP_TRACE("game update: default");
                 break;
         }
 
+        PSP_TRACE("game update: draw");
         Game_Draw(0);
+        PSP_TRACE("game update: draw done");
 
         if (gCamCount == 2) {
             Game_InitViewport(&gMasterDisp, gCamCount, 1);
@@ -609,6 +657,7 @@ void Game_Update(void) {
                                    gFillScreenGreen, gFillScreenBlue, gFillScreenAlpha);
         }
         Audio_dummy_80016A50();
+        PSP_TRACE("game update: tail done");
 #if MODS_RAM_MOD == 1
         RamMod_Update();
 #endif

@@ -23,6 +23,7 @@
 
 typedef int SceUID;
 typedef unsigned int SceSize;
+typedef unsigned int SceMode;
 
 typedef struct SceCtrlData {
     u32 TimeStamp;
@@ -40,11 +41,20 @@ SceUID sceKernelCreateThread(const char* name, int (*entry)(SceSize, void*), int
                              int attr, void* option);
 int sceKernelStartThread(SceUID thid, SceSize arglen, void* argp);
 void sceKernelExitGame(void);
+SceUID sceIoOpen(const char* file, int flags, SceMode mode);
+int sceIoWrite(SceUID fd, const void* data, SceSize size);
+int sceIoClose(SceUID fd);
+int sceIoRemove(const char* file);
 void pspDebugScreenSetXY(int x, int y);
 void pspDebugScreenPrintf(const char* fmt, ...);
 float sqrtf(float x);
 
 #define PSP_VI_PER_FRAME 2
+#define PSP_LOG_PATH "ms0:/sf64_psp.log"
+#define PSP_O_WRONLY 0x0002
+#define PSP_O_APPEND 0x0100
+#define PSP_O_CREAT 0x0200
+#define PSP_O_TRUNC 0x0400
 
 typedef struct {
     OSMesgQueue* mq;
@@ -71,13 +81,30 @@ long long int rspbootTextStart[1], rspbootTextEnd[1];
 long long int gspF3DEX_fifoTextStart[1], gspF3DEX_fifoTextEnd[1];
 long long int gspF3DEX_fifoDataStart[1], gspF3DEX_fifoDataEnd[1];
 
+#define PSP_EMPTY_RANGE_IMPL(start, end) \
+    __asm__(".section .rodata\n" \
+            ".balign 4\n" \
+            ".globl " #start "\n" \
+            #start ":\n" \
+            ".globl " #end "\n" \
+            #end ":\n" \
+            ".previous\n")
+#define PSP_EMPTY_RANGE(start, end) PSP_EMPTY_RANGE_IMPL(start, end)
+#define PSP_EMPTY_SYMBOL_IMPL(symbol) \
+    __asm__(".section .rodata\n" \
+            ".balign 4\n" \
+            ".globl " #symbol "\n" \
+            #symbol ":\n" \
+            ".previous\n")
+#define PSP_EMPTY_SYMBOL(symbol) PSP_EMPTY_SYMBOL_IMPL(symbol)
 #define PSP_EMPTY_SEGMENT(name) \
-    u8 name##_ROM_START[1], name##_ROM_END[1]; \
-    u8 name##_VRAM[1], name##_VRAM_END[1]; \
-    u8 name##_TEXT_START[1], name##_TEXT_END[1]; \
-    u8 name##_DATA_START[1], name##_DATA_END[1], name##_DATA_SIZE[1]; \
-    u8 name##_RODATA_START[1], name##_RODATA_END[1]; \
-    u8 name##_BSS_START[1], name##_BSS_END[1]
+    PSP_EMPTY_RANGE(name##_ROM_START, name##_ROM_END); \
+    PSP_EMPTY_RANGE(name##_VRAM, name##_VRAM_END); \
+    PSP_EMPTY_RANGE(name##_TEXT_START, name##_TEXT_END); \
+    PSP_EMPTY_RANGE(name##_DATA_START, name##_DATA_END); \
+    PSP_EMPTY_SYMBOL(name##_DATA_SIZE); \
+    PSP_EMPTY_RANGE(name##_RODATA_START, name##_RODATA_END); \
+    PSP_EMPTY_RANGE(name##_BSS_START, name##_BSS_END)
 
 PSP_EMPTY_SEGMENT(makerom);
 PSP_EMPTY_SEGMENT(main);
@@ -156,6 +183,74 @@ PSP_EMPTY_SEGMENT(ovl_menu);
 PSP_EMPTY_SEGMENT(ovl_ending);
 PSP_EMPTY_SEGMENT(ovl_unused);
 
+static u32 psp_strlen(const char* text) {
+    u32 len = 0;
+
+    while ((text != NULL) && (text[len] != '\0')) {
+        len++;
+    }
+    return len;
+}
+
+static char* psp_append_text(char* out, const char* text) {
+    while ((text != NULL) && (*text != '\0')) {
+        *out++ = *text++;
+    }
+    return out;
+}
+
+static char* psp_append_u32(char* out, u32 value) {
+    char digits[10];
+    s32 count = 0;
+
+    if (value == 0) {
+        *out++ = '0';
+        return out;
+    }
+
+    while (value != 0) {
+        digits[count++] = (char) ('0' + (value % 10));
+        value /= 10;
+    }
+    while (count > 0) {
+        *out++ = digits[--count];
+    }
+    return out;
+}
+
+void PspPlatform_LogLine(const char* line) {
+    SceUID fd;
+    static int sLogReady;
+
+    if (line == NULL) {
+        return;
+    }
+
+    pspDebugScreenPrintf("%s\n", line);
+
+    fd = sceIoOpen(PSP_LOG_PATH, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_APPEND, 0777);
+    if (fd >= 0) {
+        if (!sLogReady) {
+            sLogReady = 1;
+        }
+        sceIoWrite(fd, line, psp_strlen(line));
+        sceIoWrite(fd, "\n", 1);
+        sceIoClose(fd);
+    }
+}
+
+void PspPlatform_LogFrame(const char* phase, u32 frame) {
+    char line[96];
+    char* out = line;
+
+    out = psp_append_text(out, "[psp] frame ");
+    out = psp_append_u32(out, frame);
+    out = psp_append_text(out, ": ");
+    out = psp_append_text(out, phase);
+    *out = '\0';
+    PspPlatform_LogLine(line);
+}
+
 static int psp_vi_thread(SceSize args, void* argp) {
     (void) args;
     (void) argp;
@@ -212,6 +307,8 @@ static void psp_map_buttons(SceCtrlData* in, OSContPad* out) {
 
 void PspPlatform_Init(void) {
     sExitRequested = 0;
+    sceIoRemove(PSP_LOG_PATH);
+    PspPlatform_LogLine("[psp] log start");
     sceCtrlSetSamplingCycle(0);
     sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
 
@@ -271,6 +368,9 @@ void PspPlatform_PollInput(OSContPad* pads) {
 void PspPlatform_RunGfxTask(SPTask* task) {
     sGfxTaskCount++;
     (void) task;
+    if ((sGfxTaskCount <= 4) || ((sGfxTaskCount % 30) == 0)) {
+        PspPlatform_LogFrame("gfx task complete", sGfxTaskCount);
+    }
     if (sEvents[OS_EVENT_SP].mq != NULL) {
         osSendMesg(sEvents[OS_EVENT_SP].mq, sEvents[OS_EVENT_SP].msg, OS_MESG_NOBLOCK);
     }
@@ -289,6 +389,7 @@ void PspPlatform_RunAudioTask(SPTask* task) {
 
 void PspPlatform_DebugFrame(void) {
     static u32 sLastFrame;
+    static u32 sLastLoggedFrame;
 
     if (gSysFrameCount != sLastFrame) {
         sLastFrame = gSysFrameCount;
@@ -298,6 +399,11 @@ void PspPlatform_DebugFrame(void) {
                              (unsigned long) sViCount,
                              (unsigned long) sGfxTaskCount,
                              (unsigned long) sAudioTaskCount);
+
+        if ((gSysFrameCount <= 4) || ((gSysFrameCount - sLastLoggedFrame) >= 30)) {
+            sLastLoggedFrame = gSysFrameCount;
+            PspPlatform_LogFrame("heartbeat", gSysFrameCount);
+        }
     }
 }
 

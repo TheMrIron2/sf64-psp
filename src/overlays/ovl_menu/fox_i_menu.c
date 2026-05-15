@@ -1,5 +1,12 @@
 #include "global.h"
 
+#ifdef TARGET_PSP
+void PspPlatform_LogLine(const char* line);
+#define PSP_TRACE(msg) PspPlatform_LogLine("[psp] " msg)
+#else
+#define PSP_TRACE(msg) ((void) 0)
+#endif
+
 void Title_Main(void);
 void Title_Draw(void);
 void Option_Main(void);
@@ -15,11 +22,15 @@ s32 D_menu_801AD9F0 = 0;
 void OvlMenu_CallFunction(u32 mode, void* ptr) {
     switch (mode) {
         case OVLCALL_TITLE_UPDATE:
+            PSP_TRACE("ovl menu: title update");
             Title_Main();
+            PSP_TRACE("ovl menu: title update done");
             break;
 
         case OVLCALL_TITLE_DRAW:
+            PSP_TRACE("ovl menu: title draw");
             Title_Draw();
+            PSP_TRACE("ovl menu: title draw done");
             break;
 
         case OVLCALL_MAP_UPDATE:
