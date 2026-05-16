@@ -146,6 +146,7 @@ PSP_GAME_C_FILES := \
     src/psp/platform.c \
     src/psp/ultra_reimpl.c \
     src/psp/renderer.c \
+    src/psp/renderer_texture.c \
     src/sys/sys_fault.c \
     src/sys/sys_joybus.c \
     src/sys/sys_lib.c \
