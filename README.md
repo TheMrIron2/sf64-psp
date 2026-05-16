@@ -1,27 +1,19 @@
 # Star Fox 64 PSP
 
-A work-in-progress port of Star Fox 64 to PSP, based on the SF64 decomp project.
+A work-in-progress port of **Star Fox 64** to PSP, based on the SF64 decomp project.
 
-The original README continues below.
+This port has a few key goals:
 
-### Progress:
+- **Reference quality** codebase
+- **GPU acceleration** with pspgu
+- **Media Engine** audio
+- Experimental implementation of **Virtual Mobile Engine** (VME)
 
-<p align="left">
-    <a href="" alt="SF64_Total_NonMatchingFunctions">
-        <img src="https://img.shields.io/badge/Functions%20decompiled:%202951%2F2951-100%25-Yellow" /></a>
-</p>
-<p align="left">
-    <a href="" alt="SF64_Total_MatchingFunctions">
-        <img src="https://img.shields.io/badge/Matching%20Functions:%202948%2F2951-99.90%25-yellow" /></a>
-</p>
+Contributions are welcome! This is an educational project that welcomes other contributors and aims to be a high quality port that can serve other PSP developers well in the long term.
 
-Functions left to match:
+If you'd like to contribute, aim for the most native code possible, and don't be afraid to collaborate or ask for help! We'd love to work together to make this port a benchmark for the PSP scene.
 
-[AudioSynth_HartleyTransform](https://decomp.me/scratch/7N88x)
-
-[Aquas_AqBacoon_Update](https://decomp.me/scratch/cyJAV)
-
-[Titania_80193DF0](https://decomp.me/scratch/aOI9e)
+The original README continues below. Follow the build instructions and compile with `make psp`.
 
 [![Discord Invitation](https://discordapp.com/api/guilds/1190102597521133700/widget.png?style=banner2 'Starfox 64')](https://discord.gg/tuwdmuTTqc)
 
