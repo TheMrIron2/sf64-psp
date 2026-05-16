@@ -2,6 +2,7 @@
 #include "libultra/ultra64.h"
 #include "sf64thread.h"
 #include "macros.h"
+#include "assets/ast_title.h"
 #include "src/psp/platform.h"
 #include "src/psp/renderer.h"
 #include "src/psp/renderer_texture.h"
@@ -14,7 +15,7 @@
 #define PSP_RENDERER_DL_MAX_DEPTH 8
 #define PSP_RENDERER_DL_MAX_COMMANDS 8192
 #define PSP_RENDERER_UNSUPPORTED_BUCKETS 256
-#define PSP_RENDERER_RANGES 4
+#define PSP_RENDERER_RANGES 8
 #define PSP_SCREEN_WIDTH 480
 #define PSP_SCREEN_HEIGHT 272
 #define PSP_FRAMEBUFFER_WIDTH 512
@@ -290,10 +291,27 @@ static void psp_renderer_add_range(const Gfx* start, const Gfx* end) {
     sRenderer.rangeCount++;
 }
 
+static const Gfx* psp_renderer_find_static_dl_end(const Gfx* start, u32 maxCommands) {
+    u32 i;
+
+    if (start == NULL) {
+        return NULL;
+    }
+
+    for (i = 0; i < maxCommands; i++) {
+        if (psp_gfx_opcode(&start[i]) == PSP_GBI_OPCODE(G_ENDDL)) {
+            return &start[i + 1];
+        }
+    }
+
+    return NULL;
+}
+
 static void psp_renderer_setup_task_ranges(SPTask* task) {
     GfxPool* pool = (GfxPool*) task;
     const Gfx* masterStart;
     const Gfx* masterEnd;
+    const Gfx* title64End;
 
     sRenderer.rangeCount = 0;
     if (task == NULL) {
@@ -306,6 +324,12 @@ static void psp_renderer_setup_task_ranges(SPTask* task) {
     psp_renderer_add_range(masterStart, masterEnd);
     psp_renderer_add_range(pool->unkDL1, pool->unkDL1 + ARRAY_COUNT(pool->unkDL1));
     psp_renderer_add_range(pool->unkDL2, pool->unkDL2 + ARRAY_COUNT(pool->unkDL2));
+
+    title64End = psp_renderer_find_static_dl_end(aTitle64LogoDL, 256);
+    if (title64End != NULL) {
+        psp_renderer_add_range(aTitle64LogoDL, title64End);
+        PspPlatform_LogLine("[psp] renderer: registered aTitle64LogoDL");
+    }
 }
 
 static const Gfx* psp_renderer_range_end_for(const Gfx* ptr) {
@@ -575,6 +599,8 @@ static void psp_renderer_draw_textured_rect(s32 ulx, s32 uly, s32 lrx, s32 lry, 
         sourceStride,
         sourceS,
         sourceT,
+        sRenderer.rdp.palette,
+        sRenderer.rdp.paletteCount,
         &texture
     )) {
         sRenderer.census.validationFailures++;
@@ -774,8 +800,10 @@ static void psp_renderer_handle_texrect(const Gfx* gfx, int flipped) {
         height = (u32) rectHeight;
     }
 
-    if ((sRenderer.rdp.textureFmt == G_IM_FMT_RGBA) || (sRenderer.rdp.textureFmt == G_IM_FMT_IA)) {
-        psp_renderer_draw_textured_rect(ulx, uly, lrx, lry, width, height, sourceS, sourceT);
+    if ((sRenderer.rdp.textureFmt == G_IM_FMT_RGBA) ||
+        (sRenderer.rdp.textureFmt == G_IM_FMT_IA) ||
+        (sRenderer.rdp.textureFmt == G_IM_FMT_CI)) {
+            psp_renderer_draw_textured_rect(ulx, uly, lrx, lry, width, height, sourceS, sourceT);
     } else {
         psp_renderer_draw_solid_rect(ulx, uly, lrx, lry, sRenderer.rdp.primColor, 0);
         sRenderer.census.placeholderRectCount++;
@@ -845,6 +873,14 @@ static void psp_renderer_execute_dl(const Gfx* start) {
 
                 sRenderer.census.dlCount++;
                 if (targetEnd == NULL) {
+                    char line[128];
+                    char* out = line;
+
+                    out = psp_renderer_append_text(out, "[psp] renderer: reject dl ");
+                    psp_renderer_log_pair(&out, "target ", (u32) target);
+                    *out = '\0';
+                    PspPlatform_LogLine(line);
+
                     sRenderer.census.rangeRejects++;
                     pc++;
                     break;

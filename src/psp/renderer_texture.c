@@ -23,6 +23,8 @@ typedef struct {
     u32 sourceStride;
     u32 sourceS;
     u32 sourceT;
+    u32 paletteHash;
+    u32 paletteCount;
     u32 valid;
     u32 age;
     u32 pixels[PSP_RENDERER_TEX_MAX_PIXELS] __attribute__((aligned(64)));
@@ -32,6 +34,22 @@ typedef struct {
 
 static PspTextureCacheEntry sTextureCache[PSP_RENDERER_TEX_CACHE_SLOTS];
 static u32 sTextureAge;
+
+static u32 psp_texture_hash_palette(const u32* palette, u32 paletteCount) {
+    u32 i;
+    u32 hash = 2166136261u;
+
+    if (palette == NULL) {
+        return 0;
+    }
+
+    for (i = 0; i < paletteCount; i++) {
+        hash ^= palette[i];
+        hash *= 16777619u;
+    }
+
+    return hash;
+}
 
 static u32 psp_texture_rgba32(u8 r, u8 g, u8 b, u8 a) {
     return ((u32) a << 24) | ((u32) b << 16) | ((u32) g << 8) | (u32) r;
@@ -72,17 +90,24 @@ static u16 psp_texture_read_rgba16(const u8* src, u32 sourceTexel) {
 }
 
 static PspTextureCacheEntry* psp_texture_find_slot(const void* source, u32 fmt, u32 siz, u32 width, u32 height,
-                                                   u32 sourceStride, u32 sourceS, u32 sourceT, int* cacheHit) {
+                                                   u32 sourceStride, u32 sourceS, u32 sourceT, u32 paletteHash,
+                                                   u32 paletteCount, int* cacheHit) {
     PspTextureCacheEntry* oldest = &sTextureCache[0];
     u32 i;
 
     *cacheHit = 0;
 
     for (i = 0; i < PSP_RENDERER_TEX_CACHE_SLOTS; i++) {
-        if ((sTextureCache[i].source == source) && (sTextureCache[i].fmt == fmt) && (sTextureCache[i].siz == siz) &&
-            (sTextureCache[i].width == width) && (sTextureCache[i].height == height) &&
-            (sTextureCache[i].sourceStride == sourceStride) && (sTextureCache[i].sourceS == sourceS) &&
-            (sTextureCache[i].sourceT == sourceT)) {
+        if ((sTextureCache[i].source == source) &&
+            (sTextureCache[i].fmt == fmt) &&
+            (sTextureCache[i].siz == siz) &&
+            (sTextureCache[i].width == width) &&
+            (sTextureCache[i].height == height) &&
+            (sTextureCache[i].sourceStride == sourceStride) &&
+            (sTextureCache[i].sourceS == sourceS) &&
+            (sTextureCache[i].sourceT == sourceT) &&
+            (sTextureCache[i].paletteHash == paletteHash) &&
+            (sTextureCache[i].paletteCount == paletteCount)) {
             sTextureCache[i].age = ++sTextureAge;
             *cacheHit = sTextureCache[i].valid != 0;
             return &sTextureCache[i];
@@ -101,13 +126,15 @@ static PspTextureCacheEntry* psp_texture_find_slot(const void* source, u32 fmt, 
     oldest->sourceStride = sourceStride;
     oldest->sourceS = sourceS;
     oldest->sourceT = sourceT;
+    oldest->paletteHash = paletteHash;
+    oldest->paletteCount = paletteCount;
     oldest->valid = 0;
     oldest->age = ++sTextureAge;
     return oldest;
 }
 
 static int psp_texture_convert(PspTextureCacheEntry* entry, u32 width, u32 height, u32 sourceStride, u32 sourceS,
-                               u32 sourceT) {
+                               u32 sourceT, const u32* palette, u32 paletteCount) {
     u32 x;
     u32 y;
     u32 texWidth = psp_texture_next_pow2(width);
@@ -151,11 +178,31 @@ static int psp_texture_convert(PspTextureCacheEntry* entry, u32 width, u32 heigh
 
         for (y = 0; y < height; y++) {
             for (x = 0; x < width; x++) {
-                u8 packed = src[((y + sourceT) * sourceStride) + (x + sourceS)];
+                u32 sourceTexel = ((y + sourceT) * sourceStride) + (x + sourceS);
+                u8 packed = src[sourceTexel];
                 u8 intensity = (u8) (((packed >> 4) & 0xF) * 17);
                 u8 alpha = (u8) ((packed & 0xF) * 17);
 
                 entry->pixels[(y * texWidth) + x] = psp_texture_rgba32(intensity, intensity, intensity, alpha);
+            }
+        }
+    } else if ((entry->fmt == G_IM_FMT_CI) && (entry->siz == G_IM_SIZ_8b)) {
+        const u8* src = (const u8*) entry->source;
+
+        if ((palette == NULL) || (paletteCount == 0)) {
+            return 0;
+        }
+
+        for (y = 0; y < height; y++) {
+            for (x = 0; x < width; x++) {
+                u32 sourceTexel = ((y + sourceT) * sourceStride) + (x + sourceS);
+                u8 index = src[sourceTexel];
+
+                if (index < paletteCount) {
+                    entry->pixels[(y * texWidth) + x] = palette[index];
+                } else {
+                    entry->pixels[(y * texWidth) + x] = 0;
+                }
             }
         }
     } else {
@@ -172,9 +219,10 @@ void PspRendererTexture_Reset(void) {
 }
 
 int PspRendererTexture_Get(const void* source, u32 fmt, u32 siz, u32 width, u32 height, u32 sourceStride, u32 sourceS,
-                           u32 sourceT, PspRendererTexture* out) {
+                           u32 sourceT, const u32* palette, u32 paletteCount, PspRendererTexture* out) {
     PspTextureCacheEntry* entry;
     int cacheHit;
+    u32 paletteHash;
 
     if (out == NULL) {
         return 0;
@@ -187,8 +235,12 @@ int PspRendererTexture_Get(const void* source, u32 fmt, u32 siz, u32 width, u32 
     out->textureHeight = psp_texture_next_pow2(height);
     out->cacheHit = 0;
 
-    entry = psp_texture_find_slot(source, fmt, siz, width, height, sourceStride, sourceS, sourceT, &cacheHit);
-    if (!cacheHit && !psp_texture_convert(entry, width, height, sourceStride, sourceS, sourceT)) {
+    paletteHash = psp_texture_hash_palette(palette, paletteCount);
+
+    entry = psp_texture_find_slot(source, fmt, siz, width, height, sourceStride, sourceS, sourceT, paletteHash,
+                                  paletteCount, &cacheHit);
+
+    if (!cacheHit && !psp_texture_convert(entry, width, height, sourceStride, sourceS, sourceT, palette, paletteCount)) {
         return 0;
     }
 

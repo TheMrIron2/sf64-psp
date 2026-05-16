@@ -13,7 +13,19 @@ typedef struct {
 } PspRendererTexture;
 
 void PspRendererTexture_Reset(void);
-int PspRendererTexture_Get(const void* source, u32 fmt, u32 siz, u32 width, u32 height, u32 sourceStride, u32 sourceS,
-                           u32 sourceT, PspRendererTexture* out);
+
+int PspRendererTexture_Get(
+    const void* source,
+    u32 fmt,
+    u32 siz,
+    u32 width,
+    u32 height,
+    u32 sourceStride,
+    u32 sourceS,
+    u32 sourceT,
+    const u32* palette,
+    u32 paletteCount,
+    PspRendererTexture* out
+);
 
 #endif
