@@ -22,6 +22,18 @@ COLOR ?= 1
 VERBOSE ?= 0
 N_THREADS ?= $(shell nproc 2>/dev/null || echo 1)
 PYTHON ?= python3
+TOOLS ?= tools
+
+BASEROM := baserom.$(VERSION).$(REV).z64
+BASEROM_UNCOMPRESSED := baserom.$(VERSION).$(REV).uncompressed.z64
+
+COMPTOOL := $(TOOLS)/comptool.py
+COMPTOOL_DIR := baserom
+MIO0 := $(TOOLS)/mio0
+SPLAT ?= $(PYTHON) $(TOOLS)/splat/split.py
+SPLAT_YAML ?= $(TARGET).$(VERSION).$(REV).yaml
+TORCH := $(TOOLS)/Torch/cmake-build-release/torch
+CAT := cat
 
 PSP_CONFIG ?= psp-config
 PSP_FIXUP_IMPORTS ?= psp-fixup-imports
@@ -115,6 +127,53 @@ DEP_FILES := $(O_FILES:.o=.d)
 ASSET_C_FILES := $(filter src/assets/%,$(PSP_GAME_C_FILES))
 ASSET_PREFLIGHT_STAMP := $(BUILD_DIR)/asset-preflight.stamp
 
+check-python-deps:
+	@$(PYTHON) - <<'PY'
+try:
+    import yaml
+except ImportError:
+    raise SystemExit("Missing Python deps. Run: make python-deps  or  make venv")
+PY
+
+tools-init:
+	git submodule update --init --recursive
+	$(MAKE) -s -C $(TOOLS)
+	$(RM) -f torch.hash.yml
+
+init:
+	$(MAKE) check-python-deps
+	$(MAKE) tools-init
+	$(MAKE) clean-generated
+	$(MAKE) decompress
+	$(MAKE) extract -j $(N_THREADS)
+	$(MAKE) assets -j $(N_THREADS)
+	$(MAKE) psp
+
+decompress: $(BASEROM) $(MIO0)
+	@echo "Decompressing ROM..."
+	$(V)$(PYTHON) $(COMPTOOL) $(DECOMPRESS_OPT) -dse $(COMPTOOL_DIR) -m $(MIO0) $(BASEROM) $(BASEROM_UNCOMPRESSED)
+
+extract: $(BASEROM_UNCOMPRESSED)
+	$(RM) -r asm/$(VERSION)/$(REV) bin/$(VERSION)/$(REV)
+	@mkdir -p asm bin
+	@echo "Unifying yamls..."
+	$(V)$(CAT) yamls/$(VERSION)/$(REV)/header.yaml yamls/$(VERSION)/$(REV)/main.yaml yamls/$(VERSION)/$(REV)/assets.yaml yamls/$(VERSION)/$(REV)/overlays.yaml > $(SPLAT_YAML)
+	@echo "Extracting..."
+	$(V)$(SPLAT) $(SPLAT_YAML)
+
+assets: $(BASEROM_UNCOMPRESSED)
+	@echo "Extracting assets from ROM..."
+	$(V)$(TORCH) code $(BASEROM_UNCOMPRESSED)
+	$(V)$(TORCH) header $(BASEROM_UNCOMPRESSED)
+	$(V)$(TORCH) modding export $(BASEROM_UNCOMPRESSED)
+
+clean-generated:
+	$(RM) -f torch.hash.yml $(SPLAT_YAML)
+	$(RM) -r asm/$(VERSION)/$(REV)
+	$(RM) -r bin/$(VERSION)/$(REV)
+	$(RM) -r src/assets
+	$(RM) -r include/assets
+
 all: psp
 
 psp: $(PSP_EBOOT)
@@ -136,6 +195,9 @@ $(ASSET_PREFLIGHT_STAMP): tools/psp_validate_assets.py $(ASSET_C_FILES) include/
 	$(V)$(PYTHON) tools/psp_validate_assets.py
 	$(V)touch $@
 endif
+
+$(MIO0):
+	$(MAKE) -s -C $(TOOLS)
 
 $(PSP_EBOOT): $(PSP_ELF) $(PSP_SFO)
 	$(call print,Packaging PSP EBOOT:,$<,$@)
@@ -175,4 +237,4 @@ print-%:
 
 -include $(DEP_FILES)
 
-.PHONY: all psp bootstrap preflight clean
+.PHONY: tools-init toolchain torch init decompress extract assets clean-generated

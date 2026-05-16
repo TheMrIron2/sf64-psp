@@ -38,7 +38,15 @@ mio0:
 	$(CC) -Wall -Wextra -Wno-format-overflow -O2 -ffunction-sections -fdata-sections -DMIO0_STANDALONE -s -Wl,${MIO0_FLAGS} -o mio0 mio0-decompressor/libmio0.c
 
 torch:
+	@if [ ! -f Torch/CMakeLists.txt ]; then \
+		echo "Torch submodule is missing. Run: git submodule update --init --recursive"; \
+		exit 1; \
+	fi
 	@echo "Building torch..."
-	$(MAKE) -C Torch type=release -j$(N_THREADS)
+	cmake -S Torch -B Torch/cmake-build-release \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+		-Wno-dev
+	cmake --build Torch/cmake-build-release -j$(N_THREADS)
 
 .PHONY: all clean distclean default torch
