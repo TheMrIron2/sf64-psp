@@ -15,7 +15,7 @@
 #define PSP_RENDERER_UNSUPPORTED_BUCKETS 256
 #define PSP_RENDERER_RANGES 4
 #define PSP_RENDERER_TEX_CACHE_SLOTS 16
-#define PSP_RENDERER_TEX_MAX_WIDTH 128
+#define PSP_RENDERER_TEX_MAX_WIDTH 256
 #define PSP_RENDERER_TEX_MAX_HEIGHT 128
 #define PSP_RENDERER_TEX_MAX_PIXELS (PSP_RENDERER_TEX_MAX_WIDTH * PSP_RENDERER_TEX_MAX_HEIGHT)
 
@@ -28,7 +28,8 @@
 #define PSP_RENDERER_TEXRECT_SKIP 0
 #define PSP_RENDERER_TEXRECT_SOLID 1
 #define PSP_RENDERER_TEXRECT_TEXTURED 2
-#define PSP_RENDERER_TEXRECT_MODE PSP_RENDERER_TEXRECT_SOLID
+#define PSP_RENDERER_TEXRECT_MODE PSP_RENDERER_TEXRECT_TEXTURED
+#define PSP_RGBA16_SOURCE_VARIANT 2
 
 #define PSP_COORD_X(x) ((f32) (x) * 1.5f)
 #define PSP_COORD_Y(y) ((f32) (y) + 16.0f)
@@ -66,6 +67,10 @@ typedef struct {
     u32 siz;
     u32 width;
     u32 height;
+    u32 sourceStride;
+    u32 sourceS;
+    u32 sourceT;
+    u32 valid;
     u32 age;
     u32 pixels[PSP_RENDERER_TEX_MAX_PIXELS] __attribute__((aligned(64)));
 } PspTextureCacheEntry;
@@ -121,6 +126,11 @@ typedef struct {
     u32 taskIndex;
 } PspRendererState;
 
+typedef enum {
+    PSP_TEX_SOURCE_RAW_BYTES,
+    PSP_TEX_SOURCE_U64_WORDSWAPPED,
+} PspTextureSourceLayout;
+
 static unsigned int sGuList[262144] __attribute__((aligned(64)));
 static PspTextureCacheEntry sTextureCache[PSP_RENDERER_TEX_CACHE_SLOTS];
 static PspRendererState sRenderer;
@@ -135,6 +145,51 @@ static u32 psp_rgba32(u8 r, u8 g, u8 b, u8 a) {
     return ((u32) a << 24) | ((u32) b << 16) | ((u32) g << 8) | (u32) r;
 }
 
+static u32 psp_renderer_abs_s16(s16 value) {
+    return (value < 0) ? (u32) -value : (u32) value;
+}
+
+static u32 psp_renderer_texrect_sample_span(s32 screenSpan, s16 stepFixed) {
+    u32 absStep;
+    u32 span;
+
+    if (screenSpan < 0) {
+        screenSpan = -screenSpan;
+    }
+
+    absStep = psp_renderer_abs_s16(stepFixed);
+
+    /*
+     * N64 texture-rectangle dsdx/dtdy are commonly 10-bit fractional scale.
+     * 0x0400 means one texel per screen pixel.
+     */
+    if (absStep == 0) {
+        return (u32) screenSpan;
+    }
+
+    span = (((u32) screenSpan * absStep) + 0x3FF) >> 10;
+    if (span == 0) {
+        span = 1;
+    }
+
+    return span;
+}
+
+#define PSP_TEXTURE_SOURCE_LAYOUT PSP_TEX_SOURCE_U64_WORDSWAPPED
+
+static u8 psp_renderer_read_texture_u8(const u8* src, u32 offset, PspTextureSourceLayout layout) {
+    if (layout == PSP_TEX_SOURCE_U64_WORDSWAPPED) {
+        offset ^= 7U;
+    }
+
+    return src[offset];
+}
+
+static u16 psp_renderer_read_texture_be16(const u8* src, u32 offset, PspTextureSourceLayout layout) {
+    return ((u16) psp_renderer_read_texture_u8(src, offset, layout) << 8) |
+           (u16) psp_renderer_read_texture_u8(src, offset + 1, layout);
+}
+
 static u32 psp_rgba16_to_8888(u16 color) {
     u8 r = (u8) (((color >> 11) & 0x1F) * 255 / 31);
     u8 g = (u8) (((color >> 6) & 0x1F) * 255 / 31);
@@ -142,6 +197,43 @@ static u32 psp_rgba16_to_8888(u16 color) {
     u8 a = (color & 1) ? 255 : 0;
 
     return psp_rgba32(r, g, b, a);
+}
+
+static u16 psp_renderer_read_rgba16_variant(const u8* src, u32 sourceTexel) {
+    u32 sourceByte = sourceTexel * 2U;
+
+#if PSP_RGBA16_SOURCE_VARIANT == 0
+    /*
+     * Current working-colour path:
+     * byte xor within 64-bit word, then BE16 reconstruction.
+     */
+    return psp_renderer_read_texture_be16(src, sourceByte, PSP_TEXTURE_SOURCE_LAYOUT);
+
+#elif PSP_RGBA16_SOURCE_VARIANT == 1
+    /*
+     * Raw big-endian texel order.
+     */
+    return ((u16) src[sourceByte + 0] << 8) | (u16) src[sourceByte + 1];
+
+#elif PSP_RGBA16_SOURCE_VARIANT == 2
+    /*
+     * Raw little-endian texel order.
+     */
+    return ((u16) src[sourceByte + 1] << 8) | (u16) src[sourceByte + 0];
+
+#else
+    /*
+     * Reverse 16-bit texel lanes inside each 64-bit word,
+     * but read each selected texel as big-endian.
+     */
+    {
+        u32 wordBase = (sourceTexel & ~3U) * 2U;
+        u32 wordTexel = sourceTexel & 3U;
+        u32 byteOffset = wordBase + ((3U - wordTexel) * 2U);
+
+        return ((u16) src[byteOffset + 0] << 8) | (u16) src[byteOffset + 1];
+    }
+#endif
 }
 
 static char* psp_renderer_append_text(char* out, const char* text) {
@@ -225,9 +317,25 @@ static void psp_renderer_reset_census(void) {
     }
 }
 
-static void psp_renderer_log_texrect(s32 ulx, s32 uly, s32 lrx, s32 lry, u32 width, u32 height) {
-    char line[192];
+static void psp_renderer_log_texrect(
+    s32 ulx,
+    s32 uly,
+    s32 lrx,
+    s32 lry,
+    u32 width,
+    u32 height,
+    u32 sourceS,
+    u32 sourceT,
+    s16 dsdxFixed,
+    s16 dtdyFixed
+) {
+    static u32 sPrevTexrectImage = 0;
+    char line[256];
     char* out = line;
+    u32 image = (u32) sRenderer.rdp.textureImage;
+    u32 imageDelta = (sPrevTexrectImage != 0) ? (image - sPrevTexrectImage) : 0;
+
+    sPrevTexrectImage = image;
 
     if ((sTexRectLogBudget == 0) && ((sRenderer.taskIndex > 4) && ((sRenderer.taskIndex % 30) != 0))) {
         return;
@@ -244,10 +352,20 @@ static void psp_renderer_log_texrect(s32 ulx, s32 uly, s32 lrx, s32 lry, u32 wid
     out = psp_renderer_append_text(out, "[psp] texrect:");
     psp_renderer_log_pair(&out, " fmt ", sRenderer.rdp.textureFmt);
     psp_renderer_log_pair(&out, " siz ", sRenderer.rdp.textureSiz);
+    psp_renderer_log_pair(&out, " img ", (u32) sRenderer.rdp.textureImage);
+    psp_renderer_log_pair(&out, " dimg ", imageDelta);
     psp_renderer_log_pair(&out, " tw ", sRenderer.rdp.tileWidth);
     psp_renderer_log_pair(&out, " th ", sRenderer.rdp.tileHeight);
     psp_renderer_log_pair(&out, " w ", width);
     psp_renderer_log_pair(&out, " h ", height);
+    psp_renderer_log_pair(&out, " ss ", sourceS);
+    psp_renderer_log_pair(&out, " st ", sourceT);
+
+    out = psp_renderer_append_text(out, " dsdx ");
+    out = psp_renderer_append_s32(out, (s32) dsdxFixed);
+    out = psp_renderer_append_text(out, " dtdy ");
+    out = psp_renderer_append_s32(out, (s32) dtdyFixed);
+
     out = psp_renderer_append_text(out, " xy ");
     out = psp_renderer_append_s32(out, ulx);
     out = psp_renderer_append_text(out, ",");
@@ -256,6 +374,7 @@ static void psp_renderer_log_texrect(s32 ulx, s32 uly, s32 lrx, s32 lry, u32 wid
     out = psp_renderer_append_s32(out, lrx);
     out = psp_renderer_append_text(out, ",");
     out = psp_renderer_append_s32(out, lry);
+
     *out = '\0';
     PspPlatform_LogLine(line);
 }
@@ -516,25 +635,6 @@ static void psp_renderer_draw_texrect_solid(s32 ulx, s32 uly, s32 lrx, s32 lry, 
     psp_renderer_draw_solid_rect(ulx, uly, lrx, lry, color, 0);
 }
 
-static int psp_renderer_validate_texrect_bounds(s32 ulx, s32 uly, s32 lrx, s32 lry) {
-    s32 width;
-    s32 height;
-
-    if ((ulx < 0) || (uly < 0) || (lrx <= ulx) || (lry <= uly) || (lrx > N64_SCREEN_WIDTH) ||
-        (lry > N64_SCREEN_HEIGHT)) {
-        sRenderer.census.validationFailures++;
-        return 0;
-    }
-
-    width = lrx - ulx;
-    height = lry - uly;
-    if ((width > N64_SCREEN_WIDTH) || (height > N64_SCREEN_HEIGHT)) {
-        sRenderer.census.validationFailures++;
-        return 0;
-    }
-    return 1;
-}
-
 static u32 psp_renderer_next_pow2(u32 value) {
     u32 result = 1;
 
@@ -544,17 +644,33 @@ static u32 psp_renderer_next_pow2(u32 value) {
     return result;
 }
 
-static PspTextureCacheEntry* psp_renderer_find_texture_slot(const void* source, u32 fmt, u32 siz, u32 width, u32 height) {
+static PspTextureCacheEntry* psp_renderer_find_texture_slot(
+    const void* source,
+    u32 fmt,
+    u32 siz,
+    u32 width,
+    u32 height,
+    u32 sourceStride,
+    u32 sourceS,
+    u32 sourceT
+) {
     PspTextureCacheEntry* oldest = &sTextureCache[0];
     u32 i;
 
     for (i = 0; i < ARRAY_COUNT(sTextureCache); i++) {
-        if ((sTextureCache[i].source == source) && (sTextureCache[i].fmt == fmt) && (sTextureCache[i].siz == siz) &&
-            (sTextureCache[i].width == width) && (sTextureCache[i].height == height)) {
+        if ((sTextureCache[i].source == source) &&
+            (sTextureCache[i].fmt == fmt) &&
+            (sTextureCache[i].siz == siz) &&
+            (sTextureCache[i].width == width) &&
+            (sTextureCache[i].height == height) &&
+            (sTextureCache[i].sourceStride == sourceStride) &&
+            (sTextureCache[i].sourceS == sourceS) &&
+            (sTextureCache[i].sourceT == sourceT)) {
             sTextureCache[i].age = ++sRenderer.textureAge;
             sRenderer.census.texCacheHits++;
             return &sTextureCache[i];
         }
+
         if ((sTextureCache[i].source == NULL) || (sTextureCache[i].age < oldest->age)) {
             oldest = &sTextureCache[i];
         }
@@ -565,18 +681,38 @@ static PspTextureCacheEntry* psp_renderer_find_texture_slot(const void* source, 
     oldest->siz = siz;
     oldest->width = width;
     oldest->height = height;
+    oldest->sourceStride = sourceStride;
+    oldest->sourceS = sourceS;
+    oldest->sourceT = sourceT;
+    oldest->valid = 0;
     oldest->age = ++sRenderer.textureAge;
+
     sRenderer.census.texCacheMisses++;
     return oldest;
 }
 
-static int psp_renderer_convert_texture(PspTextureCacheEntry* entry, u32 width, u32 height) {
+static int psp_renderer_convert_texture(
+    PspTextureCacheEntry* entry,
+    u32 width,
+    u32 height,
+    u32 sourceStride,
+    u32 sourceS,
+    u32 sourceT
+) {
     u32 x;
     u32 y;
     u32 texWidth = psp_renderer_next_pow2(width);
     u32 texHeight = psp_renderer_next_pow2(height);
 
-    if ((entry == NULL) || (entry->source == NULL) || (texWidth > PSP_RENDERER_TEX_MAX_WIDTH) ||
+    if (sourceStride == 0) {
+        sourceStride = width;
+    }
+    if (sourceStride < width) {
+        sourceStride = width;
+    }
+
+    if ((entry == NULL) || (entry->source == NULL) ||
+        (texWidth > PSP_RENDERER_TEX_MAX_WIDTH) ||
         (texHeight > PSP_RENDERER_TEX_MAX_HEIGHT)) {
         sRenderer.census.validationFailures++;
         return 0;
@@ -589,11 +725,19 @@ static int psp_renderer_convert_texture(PspTextureCacheEntry* entry, u32 width, 
     }
 
     if ((entry->fmt == G_IM_FMT_RGBA) && (entry->siz == G_IM_SIZ_16b)) {
-        const u16* src = (const u16*) entry->source;
+        const u8* src = (const u8*) entry->source;
 
         for (y = 0; y < height; y++) {
             for (x = 0; x < width; x++) {
-                entry->pixels[(y * texWidth) + x] = psp_rgba16_to_8888(src[(y * width) + x]);
+                u32 sourceTexel = ((y + sourceT) * sourceStride) + (x + sourceS);
+                u16 packed = psp_renderer_read_rgba16_variant(src, sourceTexel);
+
+                u8 r = (u8) (((packed >> 11) & 0x1F) * 255 / 31);
+                u8 g = (u8) (((packed >> 6) & 0x1F) * 255 / 31);
+                u8 b = (u8) (((packed >> 1) & 0x1F) * 255 / 31);
+                u8 a = (packed & 1) ? 255 : 0;
+
+                entry->pixels[(y * texWidth) + x] = psp_rgba32(r, g, b, a);
             }
         }
     } else if ((entry->fmt == G_IM_FMT_IA) && (entry->siz == G_IM_SIZ_8b)) {
@@ -601,22 +745,27 @@ static int psp_renderer_convert_texture(PspTextureCacheEntry* entry, u32 width, 
 
         for (y = 0; y < height; y++) {
             for (x = 0; x < width; x++) {
-                u8 packed = src[(y * width) + x];
+                u8 packed = src[((y + sourceT) * sourceStride) + (x + sourceS)];
                 u8 intensity = (u8) (((packed >> 4) & 0xF) * 17);
                 u8 alpha = (u8) ((packed & 0xF) * 17);
 
                 entry->pixels[(y * texWidth) + x] = psp_rgba32(intensity, intensity, intensity, alpha);
             }
         }
-        
     } else if ((entry->fmt == G_IM_FMT_IA) && (entry->siz == G_IM_SIZ_16b)) {
-        const u16* src = (const u16*) entry->source;
+        const u8* src = (const u8*) entry->source;
 
+        /*
+         * SF64 PSP bring-up:
+         * Some logo/title assets appear as fmt IA / siz 16b in GBI state,
+         * but SETTIMG pointers advance as 1 byte per texel. Treat this path
+         * as IA8-style until LOADBLOCK/tile-line semantics are modelled properly.
+         */
         for (y = 0; y < height; y++) {
             for (x = 0; x < width; x++) {
-                u16 packed = src[(y * width) + x];
-                u8 intensity = (u8) ((packed >> 8) & 0xFF);
-                u8 alpha = (u8) (packed & 0xFF);
+                u8 packed = src[((y + sourceT) * sourceStride) + (x + sourceS)];
+                u8 intensity = (u8) (((packed >> 4) & 0xF) * 17);
+                u8 alpha = (u8) ((packed & 0xF) * 17);
 
                 entry->pixels[(y * texWidth) + x] = psp_rgba32(intensity, intensity, intensity, alpha);
             }
@@ -626,14 +775,16 @@ static int psp_renderer_convert_texture(PspTextureCacheEntry* entry, u32 width, 
     }
 
     sceKernelDcacheWritebackRange(entry->pixels, texWidth * texHeight * sizeof(u32));
+    entry->valid = 1;
     return 1;
 }
 
-static void psp_renderer_draw_textured_rect(s32 ulx, s32 uly, s32 lrx, s32 lry, u32 width, u32 height) {
+static void psp_renderer_draw_textured_rect(s32 ulx, s32 uly, s32 lrx, s32 lry, u32 width, u32 height, u32 sourceS, u32 sourceT) {
     PspTextureCacheEntry* entry;
     PspVertex2DTexture* vertices;
     u32 texWidth;
     u32 texHeight;
+    u32 sourceStride;
 
     if (!psp_renderer_sanitize_rect(&ulx, &uly, &lrx, &lry, 0)) {
         return;
@@ -645,9 +796,27 @@ static void psp_renderer_draw_textured_rect(s32 ulx, s32 uly, s32 lrx, s32 lry, 
 
     texWidth = psp_renderer_next_pow2(width);
     texHeight = psp_renderer_next_pow2(height);
-    entry = psp_renderer_find_texture_slot(sRenderer.rdp.textureImage, sRenderer.rdp.textureFmt, sRenderer.rdp.textureSiz, width,
-                                           height);
-    if (!psp_renderer_convert_texture(entry, width, height)) {
+
+    sourceStride = sRenderer.rdp.textureWidth;
+    if (sourceStride == 0) {
+        sourceStride = width;
+    }
+    if (sourceStride < width) {
+        sourceStride = width;
+    }
+
+    entry = psp_renderer_find_texture_slot(
+        sRenderer.rdp.textureImage,
+        sRenderer.rdp.textureFmt,
+        sRenderer.rdp.textureSiz,
+        width,
+        height,
+        sourceStride,
+        sourceS,
+        sourceT
+    );
+
+    if (!psp_renderer_convert_texture(entry, width, height, sourceStride, sourceS, sourceT)) {
         psp_renderer_draw_solid_rect(ulx, uly, lrx, lry, sRenderer.rdp.primColor, 0);
         sRenderer.census.placeholderRectCount++;
         return;
@@ -658,45 +827,55 @@ static void psp_renderer_draw_textured_rect(s32 ulx, s32 uly, s32 lrx, s32 lry, 
         sRenderer.census.validationFailures++;
         return;
     }
+    u32 vertexColor = psp_rgba32(255, 255, 255, 255);
 
-    vertices[0].u = 0.0f;
-    vertices[0].v = 0.0f;
-    vertices[0].color = sRenderer.rdp.primColor;
-    vertices[0].x = PSP_COORD_X(ulx);
-    vertices[0].y = PSP_COORD_Y(uly);
-    vertices[0].z = 0.0f;
+    vertices[0].u = 0;
+    vertices[0].v = 0;
+    vertices[0].color = vertexColor;
+    vertices[0].x = (s16) PSP_COORD_X(ulx);
+    vertices[0].y = (s16) PSP_COORD_Y(uly);
+    vertices[0].z = 0;
 
-    vertices[1].u = (f32) width;
-    vertices[1].v = 0.0f;
-    vertices[1].color = sRenderer.rdp.primColor;
-    vertices[1].x = PSP_COORD_X(lrx);
-    vertices[1].y = PSP_COORD_Y(uly);
-    vertices[1].z = 0.0f;
+    vertices[1].u = (s16) width;
+    vertices[1].v = 0;
+    vertices[1].color = vertexColor;
+    vertices[1].x = (s16) PSP_COORD_X(lrx);
+    vertices[1].y = (s16) PSP_COORD_Y(uly);
+    vertices[1].z = 0;
 
-    vertices[2].u = 0.0f;
-    vertices[2].v = (f32) height;
-    vertices[2].color = sRenderer.rdp.primColor;
-    vertices[2].x = PSP_COORD_X(ulx);
-    vertices[2].y = PSP_COORD_Y(lry);
-    vertices[2].z = 0.0f;
+    vertices[2].u = 0;
+    vertices[2].v = (s16) height;
+    vertices[2].color = vertexColor;
+    vertices[2].x = (s16) PSP_COORD_X(ulx);
+    vertices[2].y = (s16) PSP_COORD_Y(lry);
+    vertices[2].z = 0;
 
-    vertices[3].u = (f32) width;
-    vertices[3].v = (f32) height;
-    vertices[3].color = sRenderer.rdp.primColor;
-    vertices[3].x = PSP_COORD_X(lrx);
-    vertices[3].y = PSP_COORD_Y(lry);
-    vertices[3].z = 0.0f;
+    vertices[3].u = (s16) width;
+    vertices[3].v = (s16) height;
+    vertices[3].color = vertexColor;
+    vertices[3].x = (s16) PSP_COORD_X(lrx);
+    vertices[3].y = (s16) PSP_COORD_Y(lry);
+    vertices[3].z = 0;
 
     sceGuEnable(GU_TEXTURE_2D);
     sceGuTexMode(GU_PSM_8888, 0, 0, GU_FALSE);
     sceGuTexImage(0, texWidth, texHeight, texWidth, entry->pixels);
-    sceGuTexFunc(GU_TFX_MODULATE, GU_TCC_RGBA);
+    sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGBA);
     sceGuTexFilter(GU_NEAREST, GU_NEAREST);
     sceGuTexWrap(GU_CLAMP, GU_CLAMP);
-    sceGuTexScale(1.0f, 1.0f);
+    sceGuTexScale(1.0f / (f32) texWidth, 1.0f / (f32) texHeight);
     sceGuTexOffset(0.0f, 0.0f);
-    sceGuDrawArray(GU_TRIANGLE_STRIP, GU_TEXTURE_16BIT | GU_COLOR_8888 | GU_VERTEX_16BIT | GU_TRANSFORM_2D, 4, 0,
-                   vertices);
+
+    sceKernelDcacheWritebackRange(vertices, 4 * sizeof(PspVertex2DTexture));
+
+    sceGuDrawArray(
+        GU_TRIANGLE_STRIP,
+        GU_TEXTURE_16BIT | GU_COLOR_8888 | GU_VERTEX_16BIT | GU_TRANSFORM_2D,
+        4,
+        0,
+        vertices
+    );
+
     sRenderer.census.texturedRectCount++;
 }
 
@@ -800,6 +979,14 @@ static void psp_renderer_handle_texrect(const Gfx* gfx, int flipped) {
     s32 lry = (s32) (w0 & 0xFFF) >> G_TEXTURE_IMAGE_FRAC;
     s32 ulx = (s32) ((w1 >> 12) & 0xFFF) >> G_TEXTURE_IMAGE_FRAC;
     s32 uly = (s32) (w1 & 0xFFF) >> G_TEXTURE_IMAGE_FRAC;
+    s16 texSFixed = (s16) ((gfx[1].words.w1 >> 16) & 0xFFFF);
+    s16 texTFixed = (s16) (gfx[1].words.w1 & 0xFFFF);
+    s16 dsdxFixed = (s16) ((gfx[2].words.w1 >> 16) & 0xFFFF);
+    s16 dtdyFixed = (s16) (gfx[2].words.w1 & 0xFFFF);
+    s32 rectWidth;
+    s32 rectHeight;
+    u32 sourceS;
+    u32 sourceT;
     u32 width;
     u32 height;
 
@@ -809,30 +996,59 @@ static void psp_renderer_handle_texrect(const Gfx* gfx, int flipped) {
         sRenderer.census.texRectCount++;
     }
 
+    sourceS = (u32) (texSFixed >> 5);
+    sourceT = (u32) (texTFixed >> 5);
+
+    rectWidth = (lrx >= ulx) ? (lrx - ulx) : (ulx - lrx);
+    rectHeight = (lry >= uly) ? (lry - uly) : (uly - lry);
+
     width = sRenderer.rdp.tileWidth;
     height = sRenderer.rdp.tileHeight;
+
     if ((width == 0) || (height == 0)) {
-        width = (u32) ((lrx >= ulx) ? (lrx - ulx) : (ulx - lrx));
-        height = (u32) ((lry >= uly) ? (lry - uly) : (uly - lry));
+        width = (u32) rectWidth;
+        height = (u32) rectHeight;
     }
 
-#if PSP_RENDERER_TEXRECT_MODE == PSP_RENDERER_TEXRECT_SKIP
-    (void) width;
-    (void) height;
-    sRenderer.census.texRectDrawSkipped++;
-    return;
-#endif
+    #if PSP_RENDERER_TEXRECT_MODE == PSP_RENDERER_TEXRECT_SKIP
+        (void) width;
+        (void) height;
+        sRenderer.census.texRectDrawSkipped++;
+        return;
+    #endif
 
-#if PSP_RENDERER_TEXRECT_MODE == PSP_RENDERER_TEXRECT_SOLID
-    psp_renderer_log_texrect(ulx, uly, lrx, lry, width, height);
-    psp_renderer_draw_texrect_solid(ulx, uly, lrx, lry, sRenderer.rdp.primColor);
-    sRenderer.census.placeholderRectCount++;
-    return;
-#endif
+    #if PSP_RENDERER_TEXRECT_MODE == PSP_RENDERER_TEXRECT_SOLID
+        psp_renderer_log_texrect(
+            ulx,
+            uly,
+            lrx,
+            lry,
+            width,
+            height,
+            sourceS,
+            sourceT,
+            dsdxFixed,
+            dtdyFixed
+        );
+        psp_renderer_draw_texrect_solid(ulx, uly, lrx, lry, sRenderer.rdp.primColor);
+        sRenderer.census.placeholderRectCount++;
+        return;
+    #endif
 
-    psp_renderer_log_texrect(ulx, uly, lrx, lry, width, height);
+    psp_renderer_log_texrect(
+        ulx,
+        uly,
+        lrx,
+        lry,
+        width,
+        height,
+        sourceS,
+        sourceT,
+        dsdxFixed,
+        dtdyFixed
+    );
     if ((sRenderer.rdp.textureFmt == G_IM_FMT_RGBA) || (sRenderer.rdp.textureFmt == G_IM_FMT_IA)) {
-        psp_renderer_draw_textured_rect(ulx, uly, lrx, lry, width, height);
+        psp_renderer_draw_textured_rect(ulx, uly, lrx, lry, width, height, sourceS, sourceT);
     } else {
         psp_renderer_draw_solid_rect(ulx, uly, lrx, lry, sRenderer.rdp.primColor, 0);
         sRenderer.census.placeholderRectCount++;
