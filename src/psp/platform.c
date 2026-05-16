@@ -6,6 +6,7 @@
 #include "PR/ucode.h"
 #include "sf64dma.h"
 #include "src/psp/platform.h"
+#include "src/psp/renderer.h"
 
 #define PSP_CTRL_SELECT 0x000001
 #define PSP_CTRL_START 0x000008
@@ -226,7 +227,7 @@ void PspPlatform_LogLine(const char* line) {
         return;
     }
 
-    pspDebugScreenPrintf("%s\n", line);
+    //pspDebugScreenPrintf("%s\n", line);
 
     fd = sceIoOpen(PSP_LOG_PATH, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_APPEND, 0777);
     if (fd >= 0) {
@@ -311,6 +312,7 @@ void PspPlatform_Init(void) {
     PspPlatform_LogLine("[psp] log start");
     sceCtrlSetSamplingCycle(0);
     sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
+    PspRenderer_Init();
 
     if (sViThreadId < 0) {
         sViThreadId = sceKernelCreateThread("sf64_vi", psp_vi_thread, 0x12, 0x1000, 0, NULL);
@@ -367,7 +369,9 @@ void PspPlatform_PollInput(OSContPad* pads) {
 
 void PspPlatform_RunGfxTask(SPTask* task) {
     sGfxTaskCount++;
-    (void) task;
+
+    PspRenderer_RenderGfxTask(task, sGfxTaskCount);
+
     if ((sGfxTaskCount <= 4) || ((sGfxTaskCount % 30) == 0)) {
         PspPlatform_LogFrame("gfx task complete", sGfxTaskCount);
     }

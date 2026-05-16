@@ -52,7 +52,7 @@ PSP_ELF := $(BUILD_DIR)/$(TARGET).psp.elf
 PSP_PRX := $(BUILD_DIR)/$(TARGET).psp.prx
 PSP_MAP := $(BUILD_DIR)/$(TARGET).psp.map
 
-PSP_LIBS ?= -lm -lpspdebug -lpspdisplay -lpspge -lpspctrl -lpspnet -lpspnet_apctl
+PSP_LIBS ?= -lm -lpspdebug -lpspdisplay -lpspgu -lpspge -lpspctrl -lpspnet -lpspnet_apctl
 
 ifeq ($(COLOR),1)
 NO_COL := \033[0m
