@@ -21,6 +21,7 @@
 #define N64_SCREEN_WIDTH 320
 #define N64_SCREEN_HEIGHT 240
 #define PSP_SCREEN_GUARD 128
+#define PSP_RENDERER_MAX_STARS 512
 
 #define PSP_COORD_X(x) ((f32) (x) * 1.5f)
 #define PSP_COORD_Y(y) ((f32) (y) + 16.0f)
@@ -101,9 +102,19 @@ typedef struct {
     u32 taskIndex;
 } PspRendererState;
 
+typedef struct {
+    s16 x;
+    s16 y;
+    u32 color;
+} PspStarPoint;
+
 static unsigned int sGuList[262144] __attribute__((aligned(64)));
 static PspRendererState sRenderer;
 static int sRendererReady;
+
+static PspStarPoint sStarfieldStars[PSP_RENDERER_MAX_STARS];
+static u32 sStarfieldCount;
+static int sStarfieldReady;
 
 static u8 psp_gfx_opcode(const Gfx* gfx) {
     return (u8) (gfx->words.w0 >> 24);
@@ -120,6 +131,17 @@ static u32 psp_rgba16_to_8888(u16 color) {
     u8 a = (color & 1) ? 255 : 0;
 
     return psp_rgba32(r, g, b, a);
+}
+
+static u32 psp_renderer_fill_color_to_8888(u32 fillColor) {
+    /*
+     * N64 fill color is commonly a repeated 16-bit RGBA5551 value:
+     * 0xRRRRRRRR-style packed as two 16-bit pixels.
+     * Use the upper half, matching psp_renderer_handle_setfillcolor().
+     */
+    u16 color16 = (u16) ((fillColor >> 16) & 0xFFFF);
+
+    return psp_rgba16_to_8888(color16);
 }
 
 static char* psp_renderer_append_text(char* out, const char* text) {
@@ -444,6 +466,83 @@ static void psp_renderer_draw_solid_rect(s32 ulx, s32 uly, s32 lrx, s32 lry, u32
         0,
         v
     );
+}
+
+static void psp_renderer_draw_starfield_batch(void) {
+    PspVertex2DColor* vertices;
+    u32 i;
+    u32 out = 0;
+
+    if (!sStarfieldReady || (sStarfieldCount == 0)) {
+        return;
+    }
+
+    vertices = (PspVertex2DColor*) sceGuGetMemory(sStarfieldCount * 6 * sizeof(PspVertex2DColor));
+    if (vertices == NULL) {
+        sRenderer.census.validationFailures++;
+        sStarfieldReady = 0;
+        return;
+    }
+
+    for (i = 0; i < sStarfieldCount; i++) {
+        PspStarPoint* star = &sStarfieldStars[i];
+        s16 x0 = (s16) PSP_COORD_X(star->x);
+        s16 y0 = (s16) PSP_COORD_Y(star->y);
+        s16 x1 = (s16) PSP_COORD_X(star->x + 1);
+        s16 y1 = (s16) PSP_COORD_Y(star->y + 1);
+        u32 color = star->color;
+
+        vertices[out].color = color;
+        vertices[out].x = x0;
+        vertices[out].y = y0;
+        vertices[out].z = 0;
+        out++;
+
+        vertices[out].color = color;
+        vertices[out].x = x1;
+        vertices[out].y = y0;
+        vertices[out].z = 0;
+        out++;
+
+        vertices[out].color = color;
+        vertices[out].x = x0;
+        vertices[out].y = y1;
+        vertices[out].z = 0;
+        out++;
+
+        vertices[out].color = color;
+        vertices[out].x = x1;
+        vertices[out].y = y0;
+        vertices[out].z = 0;
+        out++;
+
+        vertices[out].color = color;
+        vertices[out].x = x1;
+        vertices[out].y = y1;
+        vertices[out].z = 0;
+        out++;
+
+        vertices[out].color = color;
+        vertices[out].x = x0;
+        vertices[out].y = y1;
+        vertices[out].z = 0;
+        out++;
+    }
+
+    sceKernelDcacheWritebackRange(vertices, out * sizeof(PspVertex2DColor));
+
+    sceGuDisable(GU_TEXTURE_2D);
+    sceGuDrawArray(
+        GU_TRIANGLES,
+        GU_COLOR_8888 | GU_VERTEX_16BIT | GU_TRANSFORM_2D,
+        out,
+        0,
+        vertices
+    );
+
+    // consume once so a frame that does not submit stars does not keep drawing stale stars
+
+    sStarfieldReady = 0;
 }
 
 static void psp_renderer_draw_textured_rect(s32 ulx, s32 uly, s32 lrx, s32 lry, u32 width, u32 height, u32 sourceS, u32 sourceT) {
@@ -842,6 +941,28 @@ static void psp_renderer_execute_dl(const Gfx* start) {
     PspPlatform_LogLine("[psp] renderer: command limit");
 }
 
+void PspRenderer_BeginStarfield(void) {
+    sStarfieldCount = 0;
+    sStarfieldReady = 0;
+}
+
+void PspRenderer_AddStar(s16 x, s16 y, u32 color) {
+    PspStarPoint* star;
+
+    if (sStarfieldCount >= ARRAY_COUNT(sStarfieldStars)) {
+        return;
+    }
+
+    star = &sStarfieldStars[sStarfieldCount++];
+    star->x = x;
+    star->y = y;
+    star->color = color;
+}
+
+void PspRenderer_EndStarfield(void) {
+    sStarfieldReady = 1;
+}
+
 void PspRenderer_Init(void) {
     if (sRendererReady) {
         return;
@@ -878,6 +999,7 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
     sRenderer.taskIndex = taskIndex;
 
     psp_renderer_begin_frame();
+    psp_renderer_draw_starfield_batch();
     psp_renderer_execute_dl(dl);
     psp_renderer_end_frame();
 
