@@ -232,9 +232,26 @@ static void psp_renderer_mtx_copy(f32 out[4][4], f32 in[4][4]) {
 }
 
 static void psp_renderer_transform_vec3(f32 mtx[4][4], f32 inX, f32 inY, f32 inZ, f32* x, f32* y, f32* z, f32* w) {
-    *x = (mtx[0][0] * inX) + (mtx[1][0] * inY) + (mtx[2][0] * inZ) + mtx[3][0];
-    *y = (mtx[0][1] * inX) + (mtx[1][1] * inY) + (mtx[2][1] * inZ) + mtx[3][1];
-    *z = (mtx[0][2] * inX) + (mtx[1][2] * inY) + (mtx[2][2] * inZ) + mtx[3][2];
+    /*
+     * N64/PSP matrix convention bring-up:
+     *
+     * The pure row-major transform improved orientation, but left the 64 logo
+     * centered and huge. That strongly indicates the rotation basis was closer,
+     * but translation/depth were being read from the wrong side of the matrix.
+     *
+     * Use row-major basis rows, but take translation from row 3. This should
+     * restore modelview translation/depth while preserving the improved
+     * orientation.
+     */
+    *x = (mtx[0][0] * inX) + (mtx[0][1] * inY) + (mtx[0][2] * inZ) + mtx[3][0];
+    *y = (mtx[1][0] * inX) + (mtx[1][1] * inY) + (mtx[1][2] * inZ) + mtx[3][1];
+    *z = (mtx[2][0] * inX) + (mtx[2][1] * inY) + (mtx[2][2] * inZ) + mtx[3][2];
+
+    /*
+     * Keep W in the original column-style form for now. Projection W is the
+     * most sensitive part of size/depth; this keeps perspective divide tied to
+     * the conventional N64 fixed matrix layout while testing translation.
+     */
     *w = (mtx[0][3] * inX) + (mtx[1][3] * inY) + (mtx[2][3] * inZ) + mtx[3][3];
 }
 

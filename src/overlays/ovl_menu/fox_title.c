@@ -2992,36 +2992,20 @@ void Title_StarfoxLogo_Draw(void) {
 static void Title_Matrix_RotateX90_Apply(Matrix* mtx) {
     Matrix src = *mtx;
 
-    /*
-     * Apply the same transform as Matrix_RotateX(..., +90deg, MTXF_APPLY),
-     * but avoid the generic Matrix_RotateX path that currently crashes on PSP.
-     *
-     * Matrix fields are column-major:
-     *   xx yx zx wx
-     *   xy yy zy wy
-     *   xz yz zz wz
-     *   xw yw zw ww
-     *
-     * Applying +90 degrees around X on the right maps:
-     *   new column X = old column X
-     *   new column Y = old column Z
-     *   new column Z = -old column Y
-     *   new column W = old column W
-     */
     mtx->xx = src.xx;
     mtx->yx = src.yx;
     mtx->zx = src.zx;
     mtx->wx = src.wx;
 
-    mtx->xy = src.xz;
-    mtx->yy = src.yz;
-    mtx->zy = src.zz;
-    mtx->wy = src.wz;
+    mtx->xy = -src.xz;
+    mtx->yy = -src.yz;
+    mtx->zy = -src.zz;
+    mtx->wy = -src.wz;
 
-    mtx->xz = -src.xy;
-    mtx->yz = -src.yy;
-    mtx->zz = -src.zy;
-    mtx->wz = -src.wy;
+    mtx->xz = src.xy;
+    mtx->yz = src.yy;
+    mtx->zz = src.zy;
+    mtx->wz = src.wy;
 
     mtx->xw = src.xw;
     mtx->yw = src.yw;
