@@ -128,12 +128,7 @@ ASSET_C_FILES := $(filter src/assets/%,$(PSP_GAME_C_FILES))
 ASSET_PREFLIGHT_STAMP := $(BUILD_DIR)/asset-preflight.stamp
 
 check-python-deps:
-	@$(PYTHON) - <<'PY'
-try:
-    import yaml
-except ImportError:
-    raise SystemExit("Missing Python deps. Run: make python-deps  or  make venv")
-PY
+	@$(PYTHON) -c "import yaml" || (echo "Missing Python deps. Run: make python-deps  or  make venv" && false)
 
 tools-init:
 	git submodule update --init --recursive
