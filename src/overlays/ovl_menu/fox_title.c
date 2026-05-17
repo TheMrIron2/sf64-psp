@@ -15,6 +15,32 @@
 void PspPlatform_LogLine(const char* line);
 #define PSP_TRACE(msg) PspPlatform_LogLine("[psp] " msg)
 
+static char* PspTitle_AppendText(char* out, const char* text) {
+    while ((text != NULL) && (*text != '\0')) {
+        *out++ = *text++;
+    }
+    return out;
+}
+
+static char* PspTitle_AppendU32(char* out, u32 value) {
+    char digits[10];
+    s32 count = 0;
+
+    if (value == 0) {
+        *out++ = '0';
+        return out;
+    }
+
+    while (value != 0) {
+        digits[count++] = (char) ('0' + (value % 10));
+        value /= 10;
+    }
+    while (count > 0) {
+        *out++ = digits[--count];
+    }
+    return out;
+}
+
 static f32 PspTitle_WrapRadians(f32 angle) {
     while (angle > M_PI) {
         angle -= M_PI * 2.0f;
@@ -358,18 +384,15 @@ void Title_Draw(void) {
         PSP_TRACE("title draw: press start");
         Title_PressStart_Draw();
 
-    #ifndef TARGET_PSP // bringup stub
         PSP_TRACE("title draw: matrix push 2");
         Title_Matrix_Push();
 
-        PSP_TRACE("title draw: 64 logo");
+        PSP_TRACE("title draw: 64 logo begin");
         Title_64Logo_Draw();
+        PSP_TRACE("title draw: 64 logo done");
 
         PSP_TRACE("title draw: matrix pop 2");
         Matrix_Pop(&gGfxMatrix);
-    #else
-        PSP_TRACE("title draw: PSP skip 64 logo");
-    #endif
 
         PSP_TRACE("title draw: screen done");
         break;
@@ -2965,15 +2988,90 @@ void Title_StarfoxLogo_Draw(void) {
     }
 }
 
+#ifdef TARGET_PSP
+static void Title_Matrix_RotateX90_Apply(Matrix* mtx) {
+    Matrix src = *mtx;
+
+    /*
+     * Apply the same transform as Matrix_RotateX(..., +90deg, MTXF_APPLY),
+     * but avoid the generic Matrix_RotateX path that currently crashes on PSP.
+     *
+     * Matrix fields are column-major:
+     *   xx yx zx wx
+     *   xy yy zy wy
+     *   xz yz zz wz
+     *   xw yw zw ww
+     *
+     * Applying +90 degrees around X on the right maps:
+     *   new column X = old column X
+     *   new column Y = old column Z
+     *   new column Z = -old column Y
+     *   new column W = old column W
+     */
+    mtx->xx = src.xx;
+    mtx->yx = src.yx;
+    mtx->zx = src.zx;
+    mtx->wx = src.wx;
+
+    mtx->xy = src.xz;
+    mtx->yy = src.yz;
+    mtx->zy = src.zz;
+    mtx->wy = src.wz;
+
+    mtx->xz = -src.xy;
+    mtx->yz = -src.yy;
+    mtx->zz = -src.zy;
+    mtx->wz = -src.wy;
+
+    mtx->xw = src.xw;
+    mtx->yw = src.yw;
+    mtx->zw = src.zw;
+    mtx->ww = src.ww;
+}
+#endif
+
 void Title_64Logo_Draw(void) {
+    PSP_TRACE("64 logo: setupdl");
     RCP_SetupDL(&gMasterDisp, SETUPDL_53);
+
+    PSP_TRACE("64 logo: matrix push");
     Matrix_Push(&gGfxMatrix);
+
+    PSP_TRACE("64 logo: translate");
     Matrix_Translate(gGfxMatrix, D_menu_801B905C, D_menu_801B9060, D_menu_801B9064, MTXF_APPLY);
+
+    PSP_TRACE("64 logo: scale");
     Matrix_Scale(gGfxMatrix, D_menu_801B9068, D_menu_801B906C, 1.0f, MTXF_APPLY);
+
+#ifdef TARGET_PSP
+    PSP_TRACE("64 logo: rotate x 90 safe");
+    Title_Matrix_RotateX90_Apply(gGfxMatrix);
+#else
+    PSP_TRACE("64 logo: rotate x");
     Matrix_RotateX(gGfxMatrix, M_DTOR * 90, MTXF_APPLY);
+#endif
+
+    PSP_TRACE("64 logo: set gfx mtx");
     Matrix_SetGfxMtx(&gMasterDisp);
+
+    PSP_TRACE("64 logo: display list");
+    #ifdef TARGET_PSP
+    {
+        char line[96];
+        char* out = line;
+
+        out = PspTitle_AppendText(out, "[psp] 64 logo: dl addr ");
+        out = PspTitle_AppendU32(out, (u32) aTitle64LogoDL);
+        *out = '\0';
+        PspPlatform_LogLine(line);
+    }
+    #endif
     gSPDisplayList(gMasterDisp++, aTitle64LogoDL);
+
+    PSP_TRACE("64 logo: matrix pop");
     Matrix_Pop(&gGfxMatrix);
+
+    PSP_TRACE("64 logo: done");
 }
 
 void Title_CopyrightSymbol_Draw(void) {

@@ -11,11 +11,13 @@
 #include <pspgu.h>
 #include <pspkernel.h>
 #include <psputils.h>
+#include <stdint.h>
 
 #define PSP_RENDERER_DL_MAX_DEPTH 8
 #define PSP_RENDERER_DL_MAX_COMMANDS 8192
 #define PSP_RENDERER_UNSUPPORTED_BUCKETS 256
-#define PSP_RENDERER_RANGES 8
+#define PSP_RENDERER_RANGES 32
+#define PSP_RENDERER_STATIC_DL_SCAN_COMMANDS 512
 #define PSP_SCREEN_WIDTH 480
 #define PSP_SCREEN_HEIGHT 272
 #define PSP_FRAMEBUFFER_WIDTH 512
@@ -43,6 +45,15 @@ typedef struct {
     s16 y;
     s16 z;
 } PspVertex2DTexture;
+
+typedef struct {
+    s16 x;
+    s16 y;
+    s16 z;
+    s16 s;
+    s16 t;
+    u32 color;
+} PspRspVertex;
 
 typedef struct {
     const Gfx* start;
@@ -95,12 +106,42 @@ typedef struct {
     u32 texRectDrawSkipped;
 } PspRendererCensus;
 
+typedef struct {
+    u32 entered;
+    u32 vtxLoads;
+    u32 triangles;
+    u32 drawn;
+    u32 textureFailures;
+    u32 transformFailures;
+    u32 cullFailures;
+    u32 hasModelview;
+    u32 hasProjection;
+    u32 fmt;
+    u32 siz;
+    u32 width;
+    u32 height;
+    u32 paletteCount;
+    s32 minX;
+    s32 minY;
+    s32 maxX;
+    s32 maxY;
+    int hasBounds;
+} PspTitle64Stats;
+
 typedef struct {    
     PspRdpState rdp;
+    PspRspVertex vertices[64];
+    f32 modelview[4][4];
+    f32 projection[4][4];
+    int hasModelview;
+    int hasProjection;
     PspRendererCensus census;
+    PspTitle64Stats title64;
     PspDlRange ranges[PSP_RENDERER_RANGES];
     u32 rangeCount;
     u32 taskIndex;
+    int title64Active;
+    u32 dlTraceCount;
 } PspRendererState;
 
 typedef struct {
@@ -134,15 +175,100 @@ static u32 psp_rgba16_to_8888(u16 color) {
     return psp_rgba32(r, g, b, a);
 }
 
-static u32 psp_renderer_fill_color_to_8888(u32 fillColor) {
-    /*
-     * N64 fill color is commonly a repeated 16-bit RGBA5551 value:
-     * 0xRRRRRRRR-style packed as two 16-bit pixels.
-     * Use the upper half, matching psp_renderer_handle_setfillcolor().
-     */
-    u16 color16 = (u16) ((fillColor >> 16) & 0xFFFF);
+static void psp_renderer_identity_mtx(f32 mtx[4][4]) {
+    u32 row;
+    u32 col;
 
-    return psp_rgba16_to_8888(color16);
+    for (row = 0; row < 4; row++) {
+        for (col = 0; col < 4; col++) {
+            mtx[row][col] = (row == col) ? 1.0f : 0.0f;
+        }
+    }
+}
+
+static void psp_renderer_mtx_l2f(f32 out[4][4], const Mtx* src) {
+    u32 row;
+    u32 col;
+
+    for (row = 0; row < 4; row++) {
+        for (col = 0; col < 4; col++) {
+            s32 fixed = ((s32) ((u32) src->u.i[row][col] << 16)) | src->u.f[row][col];
+            out[row][col] = fixed / 65536.0f;
+        }
+    }
+}
+
+static void psp_renderer_mtx_mul(f32 out[4][4], f32 a[4][4], f32 b[4][4]) {
+    f32 result[4][4];
+    u32 row;
+    u32 col;
+    u32 k;
+
+    for (row = 0; row < 4; row++) {
+        for (col = 0; col < 4; col++) {
+            result[row][col] = 0.0f;
+            for (k = 0; k < 4; k++) {
+                result[row][col] += a[row][k] * b[k][col];
+            }
+        }
+    }
+
+    for (row = 0; row < 4; row++) {
+        for (col = 0; col < 4; col++) {
+            out[row][col] = result[row][col];
+        }
+    }
+}
+
+static void psp_renderer_mtx_copy(f32 out[4][4], f32 in[4][4]) {
+    u32 row;
+    u32 col;
+
+    for (row = 0; row < 4; row++) {
+        for (col = 0; col < 4; col++) {
+            out[row][col] = in[row][col];
+        }
+    }
+}
+
+static void psp_renderer_transform_vec3(f32 mtx[4][4], f32 inX, f32 inY, f32 inZ, f32* x, f32* y, f32* z, f32* w) {
+    *x = (mtx[0][0] * inX) + (mtx[1][0] * inY) + (mtx[2][0] * inZ) + mtx[3][0];
+    *y = (mtx[0][1] * inX) + (mtx[1][1] * inY) + (mtx[2][1] * inZ) + mtx[3][1];
+    *z = (mtx[0][2] * inX) + (mtx[1][2] * inY) + (mtx[2][2] * inZ) + mtx[3][2];
+    *w = (mtx[0][3] * inX) + (mtx[1][3] * inY) + (mtx[2][3] * inZ) + mtx[3][3];
+}
+
+static int psp_renderer_transform_vertex(const PspRspVertex* src, f32* x, f32* y, f32* z) {
+    f32 vx = src->x;
+    f32 vy = src->y;
+    f32 vz = src->z;
+    f32 vw = 1.0f;
+
+    if (sRenderer.hasModelview) {
+        psp_renderer_transform_vec3(sRenderer.modelview, vx, vy, vz, &vx, &vy, &vz, &vw);
+    }
+
+    if (sRenderer.hasProjection) {
+        f32 clipX;
+        f32 clipY;
+        f32 clipZ;
+        f32 clipW;
+
+        psp_renderer_transform_vec3(sRenderer.projection, vx, vy, vz, &clipX, &clipY, &clipZ, &clipW);
+        if ((clipW > -0.001f) && (clipW < 0.001f)) {
+            return 0;
+        }
+
+        *x = ((clipX / clipW) + 1.0f) * (N64_SCREEN_WIDTH * 0.5f);
+        *y = (1.0f - (clipY / clipW)) * (N64_SCREEN_HEIGHT * 0.5f);
+        *z = clipZ / clipW;
+        return 1;
+    }
+
+    *x = vx;
+    *y = vy;
+    *z = vz;
+    return 1;
 }
 
 static char* psp_renderer_append_text(char* out, const char* text) {
@@ -150,6 +276,247 @@ static char* psp_renderer_append_text(char* out, const char* text) {
         *out++ = *text++;
     }
     return out;
+}
+
+static void psp_renderer_draw_rsp_triangle(u8 i0, u8 i1, u8 i2) {
+    PspRendererTexture texture;
+    PspVertex2DTexture* v;
+    PspRspVertex* a;
+    PspRspVertex* b;
+    PspRspVertex* c;
+    PspRspVertex* in[3];
+    u32 textureWidth;
+    u32 textureHeight;
+    u32 sourceStride;
+    u32 i;
+
+    if (sRenderer.title64Active) {
+        sRenderer.title64.triangles++;
+        sRenderer.title64.hasModelview = sRenderer.hasModelview != 0;
+        sRenderer.title64.hasProjection = sRenderer.hasProjection != 0;
+        sRenderer.title64.fmt = sRenderer.rdp.textureFmt;
+        sRenderer.title64.siz = sRenderer.rdp.textureSiz;
+        sRenderer.title64.paletteCount = sRenderer.rdp.paletteCount;
+    }
+
+    if ((i0 >= ARRAY_COUNT(sRenderer.vertices)) ||
+        (i1 >= ARRAY_COUNT(sRenderer.vertices)) ||
+        (i2 >= ARRAY_COUNT(sRenderer.vertices))) {
+        sRenderer.census.validationFailures++;
+        return;
+    }
+
+    a = &sRenderer.vertices[i0];
+    b = &sRenderer.vertices[i1];
+    c = &sRenderer.vertices[i2];
+    in[0] = a;
+    in[1] = b;
+    in[2] = c;
+
+    textureWidth = sRenderer.rdp.tileWidth;
+    textureHeight = sRenderer.rdp.tileHeight;
+    if (textureWidth == 0) {
+        textureWidth = sRenderer.rdp.textureWidth;
+    }
+    if (textureHeight == 0) {
+        textureHeight = 1;
+    }
+    if (sRenderer.title64Active) {
+        sRenderer.title64.width = textureWidth;
+        sRenderer.title64.height = textureHeight;
+    }
+    sourceStride = sRenderer.rdp.textureWidth;
+    if (sourceStride == 0) {
+        sourceStride = textureWidth;
+    }
+    if (sourceStride < textureWidth) {
+        sourceStride = textureWidth;
+    }
+
+    if ((sRenderer.rdp.textureImage == NULL) ||
+        !PspRendererTexture_Get(
+            sRenderer.rdp.textureImage,
+            sRenderer.rdp.textureFmt,
+            sRenderer.rdp.textureSiz,
+            textureWidth,
+            textureHeight,
+            sourceStride,
+            0,
+            0,
+            sRenderer.rdp.palette,
+            sRenderer.rdp.paletteCount,
+            &texture
+        )) {
+        sRenderer.census.validationFailures++;
+        if (sRenderer.title64Active) {
+            sRenderer.title64.textureFailures++;
+        }
+        return;
+    }
+    if (texture.cacheHit) {
+        sRenderer.census.texCacheHits++;
+    } else {
+        sRenderer.census.texCacheMisses++;
+    }
+
+    v = (PspVertex2DTexture*) sceGuGetMemory(3 * sizeof(PspVertex2DTexture));
+    if (v == NULL) {
+        sRenderer.census.validationFailures++;
+        return;
+    }
+
+    for (i = 0; i < 3; i++) {
+        f32 x;
+        f32 y;
+        f32 z;
+
+        if (!psp_renderer_transform_vertex(in[i], &x, &y, &z)) {
+            sRenderer.census.texRectDrawSkipped++;
+            if (sRenderer.title64Active) {
+                sRenderer.title64.transformFailures++;
+            }
+            return;
+        }
+        if ((x < -512.0f) || (x > 832.0f) || (y < -512.0f) || (y > 752.0f)) {
+            sRenderer.census.texRectDrawSkipped++;
+            if (sRenderer.title64Active) {
+                sRenderer.title64.cullFailures++;
+            }
+            return;
+        }
+        if (sRenderer.title64Active) {
+            s32 sx = (s32) x;
+            s32 sy = (s32) y;
+
+            if (!sRenderer.title64.hasBounds) {
+                sRenderer.title64.minX = sx;
+                sRenderer.title64.maxX = sx;
+                sRenderer.title64.minY = sy;
+                sRenderer.title64.maxY = sy;
+                sRenderer.title64.hasBounds = 1;
+            } else {
+                if (sx < sRenderer.title64.minX) {
+                    sRenderer.title64.minX = sx;
+                }
+                if (sx > sRenderer.title64.maxX) {
+                    sRenderer.title64.maxX = sx;
+                }
+                if (sy < sRenderer.title64.minY) {
+                    sRenderer.title64.minY = sy;
+                }
+                if (sy > sRenderer.title64.maxY) {
+                    sRenderer.title64.maxY = sy;
+                }
+            }
+        }
+
+        v[i].u = in[i]->s >> 5;
+        v[i].v = in[i]->t >> 5;
+        v[i].color = psp_rgba32(255, 255, 255, 255);
+        v[i].x = (s16) PSP_COORD_X(x);
+        v[i].y = (s16) PSP_COORD_Y(y);
+        v[i].z = (s16) z;
+    }
+
+    sceGuEnable(GU_TEXTURE_2D);
+    sceGuTexMode(GU_PSM_8888, 0, 0, GU_FALSE);
+    sceGuTexImage(0, texture.textureWidth, texture.textureHeight, texture.textureWidth, texture.pixels);
+    sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGBA);
+    sceGuTexFilter(GU_NEAREST, GU_NEAREST);
+    sceGuTexWrap(GU_CLAMP, GU_CLAMP);
+    sceGuTexScale(1.0f / (f32) texture.textureWidth, 1.0f / (f32) texture.textureHeight);
+    sceGuTexOffset(0.0f, 0.0f);
+
+    sceKernelDcacheWritebackRange(v, 3 * sizeof(PspVertex2DTexture));
+
+    sceGuDrawArray(
+        GU_TRIANGLES,
+        GU_TEXTURE_16BIT | GU_COLOR_8888 | GU_VERTEX_16BIT | GU_TRANSFORM_2D,
+        3,
+        0,
+        v
+    );
+
+    sRenderer.census.texturedRectCount++;
+    if (sRenderer.title64Active) {
+        sRenderer.title64.drawn++;
+    }
+}
+
+static u8 psp_renderer_decode_tri_index(u32 packed) {
+#if defined(F3DEX_GBI) || defined(F3DLP_GBI)
+    return (u8) (packed / 2);
+#else
+    return (u8) (packed / 10);
+#endif
+}
+
+static void psp_renderer_handle_tri1(const Gfx* gfx) {
+    u32 w1 = gfx->words.w1;
+    u8 a = psp_renderer_decode_tri_index((w1 >> 16) & 0xFF);
+    u8 b = psp_renderer_decode_tri_index((w1 >> 8) & 0xFF);
+    u8 c = psp_renderer_decode_tri_index(w1 & 0xFF);
+
+    psp_renderer_draw_rsp_triangle(a, b, c);
+}
+
+static void psp_renderer_handle_vtx(const Gfx* gfx) {
+    const Vtx* src = (const Vtx*) gfx->words.w1;
+    u32 w0 = gfx->words.w0;
+    u32 count = (w0 >> 10) & 0x3F;
+#if defined(F3DEX_GBI) || defined(F3DLP_GBI)
+    s32 v0 = (w0 >> 17) & 0x7F;
+#else
+    s32 v0 = ((w0 >> 17) & 0x7F) - count;
+#endif
+    u32 i;
+
+    if (sRenderer.title64Active) {
+        sRenderer.title64.vtxLoads++;
+    }
+
+    if (src == NULL) {
+        sRenderer.census.validationFailures++;
+        return;
+    }
+
+    if (v0 < 0) {
+        sRenderer.census.validationFailures++;
+        return;
+    }
+
+    if (((u32) v0 + count) > ARRAY_COUNT(sRenderer.vertices)) {
+        sRenderer.census.validationFailures++;
+        return;
+    }
+
+    for (i = 0; i < count; i++) {
+        const Vtx* in = &src[i];
+        PspRspVertex* out = &sRenderer.vertices[v0 + i];
+
+        out->x = in->v.ob[0];
+        out->y = in->v.ob[1];
+        out->z = in->v.ob[2];
+        out->s = in->v.tc[0];
+        out->t = in->v.tc[1];
+        out->color = psp_rgba32(in->v.cn[0], in->v.cn[1], in->v.cn[2], in->v.cn[3]);
+    }
+}
+
+static void psp_renderer_handle_tri2(const Gfx* gfx) {
+    u32 w0 = gfx->words.w0;
+    u32 w1 = gfx->words.w1;
+
+    u8 a0 = psp_renderer_decode_tri_index((w0 >> 16) & 0xFF);
+    u8 b0 = psp_renderer_decode_tri_index((w0 >> 8) & 0xFF);
+    u8 c0 = psp_renderer_decode_tri_index(w0 & 0xFF);
+
+    u8 a1 = psp_renderer_decode_tri_index((w1 >> 16) & 0xFF);
+    u8 b1 = psp_renderer_decode_tri_index((w1 >> 8) & 0xFF);
+    u8 c1 = psp_renderer_decode_tri_index(w1 & 0xFF);
+
+    psp_renderer_draw_rsp_triangle(a0, b0, c0);
+    psp_renderer_draw_rsp_triangle(a1, b1, c1);
 }
 
 static char* psp_renderer_append_u32(char* out, u32 value) {
@@ -171,9 +538,22 @@ static char* psp_renderer_append_u32(char* out, u32 value) {
     return out;
 }
 
+static char* psp_renderer_append_s32(char* out, s32 value) {
+    if (value < 0) {
+        *out++ = '-';
+        value = -value;
+    }
+    return psp_renderer_append_u32(out, (u32) value);
+}
+
 static void psp_renderer_log_pair(char** out, const char* label, u32 value) {
     *out = psp_renderer_append_text(*out, label);
     *out = psp_renderer_append_u32(*out, value);
+}
+
+static void psp_renderer_log_pair_s32(char** out, const char* label, s32 value) {
+    *out = psp_renderer_append_text(*out, label);
+    *out = psp_renderer_append_s32(*out, value);
 }
 
 static s32 psp_renderer_clamp_s32(s32 value, s32 min, s32 max) {
@@ -211,6 +591,27 @@ static void psp_renderer_reset_census(void) {
     sRenderer.census.texCacheHits = 0;
     sRenderer.census.texCacheMisses = 0;
     sRenderer.census.texRectDrawSkipped = 0;
+    sRenderer.title64.entered = 0;
+    sRenderer.title64.vtxLoads = 0;
+    sRenderer.title64.triangles = 0;
+    sRenderer.title64.drawn = 0;
+    sRenderer.title64.textureFailures = 0;
+    sRenderer.title64.transformFailures = 0;
+    sRenderer.title64.cullFailures = 0;
+    sRenderer.title64.hasModelview = 0;
+    sRenderer.title64.hasProjection = 0;
+    sRenderer.title64.fmt = 0;
+    sRenderer.title64.siz = 0;
+    sRenderer.title64.width = 0;
+    sRenderer.title64.height = 0;
+    sRenderer.title64.paletteCount = 0;
+    sRenderer.title64.minX = 0;
+    sRenderer.title64.minY = 0;
+    sRenderer.title64.maxX = 0;
+    sRenderer.title64.maxY = 0;
+    sRenderer.title64.hasBounds = 0;
+    sRenderer.title64Active = 0;
+    sRenderer.dlTraceCount = 0;
 
     for (i = 0; i < ARRAY_COUNT(sRenderer.census.unsupported); i++) {
         sRenderer.census.unsupported[i] = 0;
@@ -219,8 +620,17 @@ static void psp_renderer_reset_census(void) {
 
 static void psp_renderer_note_unsupported(u8 opcode) {
     if (sRenderer.census.unsupported[opcode] == 0) {
+        char line[96];
+        char* out = line;
+
+        out = psp_renderer_append_text(out, "[psp] renderer unsupported opcode ");
+        out = psp_renderer_append_u32(out, opcode);
+        *out = '\0';
+        PspPlatform_LogLine(line);
+
         sRenderer.census.unsupportedCount++;
     }
+
     sRenderer.census.unsupported[opcode]++;
 }
 
@@ -238,9 +648,54 @@ static u8 psp_renderer_top_unsupported(void) {
     return bestOpcode;
 }
 
+static void psp_renderer_log_title64(void) {
+    char line[256];
+    char* out = line;
+
+    if (sRenderer.title64.entered == 0) {
+        return;
+    }
+
+    out = psp_renderer_append_text(out, "[psp] renderer title64:");
+    psp_renderer_log_pair(&out, " enter ", sRenderer.title64.entered);
+    psp_renderer_log_pair(&out, " vtx ", sRenderer.title64.vtxLoads);
+    psp_renderer_log_pair(&out, " tri ", sRenderer.title64.triangles);
+    psp_renderer_log_pair(&out, " drawn ", sRenderer.title64.drawn);
+    psp_renderer_log_pair(&out, " texfail ", sRenderer.title64.textureFailures);
+    psp_renderer_log_pair(&out, " xformfail ", sRenderer.title64.transformFailures);
+    psp_renderer_log_pair(&out, " cull ", sRenderer.title64.cullFailures);
+    *out = '\0';
+    PspPlatform_LogLine(line);
+
+    out = line;
+    out = psp_renderer_append_text(out, "[psp] renderer title64 state:");
+    psp_renderer_log_pair(&out, " mv ", sRenderer.title64.hasModelview);
+    psp_renderer_log_pair(&out, " pr ", sRenderer.title64.hasProjection);
+    psp_renderer_log_pair(&out, " fmt ", sRenderer.title64.fmt);
+    psp_renderer_log_pair(&out, " siz ", sRenderer.title64.siz);
+    psp_renderer_log_pair(&out, " w ", sRenderer.title64.width);
+    psp_renderer_log_pair(&out, " h ", sRenderer.title64.height);
+    psp_renderer_log_pair(&out, " pal ", sRenderer.title64.paletteCount);
+    *out = '\0';
+    PspPlatform_LogLine(line);
+
+    if (sRenderer.title64.hasBounds) {
+        out = line;
+        out = psp_renderer_append_text(out, "[psp] renderer title64 bounds:");
+        psp_renderer_log_pair_s32(&out, " x0 ", sRenderer.title64.minX);
+        psp_renderer_log_pair_s32(&out, " y0 ", sRenderer.title64.minY);
+        psp_renderer_log_pair_s32(&out, " x1 ", sRenderer.title64.maxX);
+        psp_renderer_log_pair_s32(&out, " y1 ", sRenderer.title64.maxY);
+        *out = '\0';
+        PspPlatform_LogLine(line);
+    }
+}
+
 static void psp_renderer_log_census(u32 taskIndex) {
     char line[256];
     char* out = line;
+
+    psp_renderer_log_title64();
 
     if ((taskIndex > 4) && ((taskIndex % 30) != 0)) {
         return;
@@ -267,6 +722,7 @@ static void psp_renderer_log_census(u32 taskIndex) {
         *out = '\0';
         PspPlatform_LogLine(line);
     }
+
 }
 
 static void psp_renderer_reset_rdp_state(void) {
@@ -280,6 +736,10 @@ static void psp_renderer_reset_rdp_state(void) {
     sRenderer.rdp.tileWidth = 0;
     sRenderer.rdp.tileHeight = 0;
     sRenderer.rdp.paletteCount = 0;
+    psp_renderer_identity_mtx(sRenderer.modelview);
+    psp_renderer_identity_mtx(sRenderer.projection);
+    sRenderer.hasModelview = 0;
+    sRenderer.hasProjection = 0;
 }
 
 static void psp_renderer_add_range(const Gfx* start, const Gfx* end) {
@@ -307,6 +767,20 @@ static const Gfx* psp_renderer_find_static_dl_end(const Gfx* start, u32 maxComma
     return NULL;
 }
 
+static const Gfx* psp_renderer_try_register_static_dl(const Gfx* start) {
+    const Gfx* end;
+
+    if ((start == NULL) || (((uintptr_t) start & 7U) != 0) || !PSP_IS_NATIVE_PTR(start)) {
+        return NULL;
+    }
+
+    end = psp_renderer_find_static_dl_end(start, PSP_RENDERER_STATIC_DL_SCAN_COMMANDS);
+    if (end != NULL) {
+        psp_renderer_add_range(start, end);
+    }
+    return end;
+}
+
 static void psp_renderer_setup_task_ranges(SPTask* task) {
     GfxPool* pool = (GfxPool*) task;
     const Gfx* masterStart;
@@ -332,6 +806,25 @@ static void psp_renderer_setup_task_ranges(SPTask* task) {
     }
 }
 
+static void psp_renderer_trace_task_range(SPTask* task, u32 taskIndex) {
+    char line[160];
+    char* out;
+
+    if ((taskIndex > 4) && ((taskIndex % 30) != 0)) {
+        return;
+    }
+
+    out = line;
+    out = psp_renderer_append_text(out, "[psp] renderer task range:");
+    psp_renderer_log_pair(&out, " task ", taskIndex);
+    psp_renderer_log_pair(&out, " bytes ", task->task.t.data_size);
+    psp_renderer_log_pair(&out, " cmds ", task->task.t.data_size / sizeof(Gfx));
+    psp_renderer_log_pair(&out, " start ", (u32) task->task.t.data_ptr);
+    psp_renderer_log_pair(&out, " title64 ", (u32) aTitle64LogoDL);
+    *out = '\0';
+    PspPlatform_LogLine(line);
+}
+
 static const Gfx* psp_renderer_range_end_for(const Gfx* ptr) {
     u32 i;
 
@@ -343,6 +836,12 @@ static const Gfx* psp_renderer_range_end_for(const Gfx* ptr) {
     return NULL;
 }
 
+static int psp_renderer_is_title64_pc(const Gfx* ptr) {
+    const Gfx* title64End = psp_renderer_range_end_for(aTitle64LogoDL);
+
+    return (title64End != NULL) && (ptr >= aTitle64LogoDL) && (ptr < title64End);
+}
+
 static int psp_renderer_ptr_has_commands(const Gfx* ptr, u32 count) {
     const Gfx* end = psp_renderer_range_end_for(ptr);
 
@@ -350,6 +849,37 @@ static int psp_renderer_ptr_has_commands(const Gfx* ptr, u32 count) {
         return 0;
     }
     return (ptr + count) <= end;
+}
+
+static void psp_renderer_handle_mtx(const Gfx* gfx) {
+    const Mtx* mtx = (const Mtx*) gfx->words.w1;
+    u32 flags = (gfx->words.w0 >> 16) & 0xFF;
+    f32 loaded[4][4];
+    f32 (*target)[4];
+    int* hasTarget;
+
+    if ((mtx == NULL) || !PSP_IS_NATIVE_PTR(mtx)) {
+        sRenderer.census.validationFailures++;
+        return;
+    }
+
+    if ((flags & G_MTX_PROJECTION) != 0) {
+        target = sRenderer.projection;
+        hasTarget = &sRenderer.hasProjection;
+    } else {
+        target = sRenderer.modelview;
+        hasTarget = &sRenderer.hasModelview;
+    }
+
+    psp_renderer_mtx_l2f(loaded, mtx);
+    if ((flags & G_MTX_LOAD) != 0) {
+        psp_renderer_mtx_copy(target, loaded);
+    } else if (*hasTarget) {
+        psp_renderer_mtx_mul(target, target, loaded);
+    } else {
+        psp_renderer_mtx_copy(target, loaded);
+    }
+    *hasTarget = 1;
 }
 
 static void psp_renderer_begin_frame(void) {
@@ -707,6 +1237,19 @@ static void psp_renderer_handle_settimg(const Gfx* gfx) {
     sRenderer.census.setTimgCount++;
 }
 
+static void psp_renderer_handle_settile(const Gfx* gfx) {
+    u32 w0 = gfx->words.w0;
+    u32 w1 = gfx->words.w1;
+    u32 tile = (w1 >> 24) & 0x7;
+
+    if (tile == G_TX_RENDERTILE) {
+        sRenderer.rdp.textureFmt = (w0 >> 21) & 0x7;
+        sRenderer.rdp.textureSiz = (w0 >> 19) & 0x3;
+    }
+
+    sRenderer.census.setTileCount++;
+}
+
 static void psp_renderer_handle_settilesize(const Gfx* gfx) {
     u32 w0 = gfx->words.w0;
     u32 w1 = gfx->words.w1;
@@ -835,6 +1378,7 @@ static void psp_renderer_execute_dl(const Gfx* start) {
         }
 
         opcode = psp_gfx_opcode(pc);
+        sRenderer.title64Active = psp_renderer_is_title64_pc(pc);
         sRenderer.census.commandCount++;
 
         switch (opcode) {
@@ -844,6 +1388,8 @@ static void psp_renderer_execute_dl(const Gfx* start) {
             case G_RDPTILESYNC:
             case G_RDPFULLSYNC:
             case G_SETCOMBINE:
+            case G_SETCIMG:
+            case G_SETZIMG:
             case G_RDPSETOTHERMODE:
             case PSP_GBI_OPCODE(G_SETOTHERMODE_H):
             case PSP_GBI_OPCODE(G_SETOTHERMODE_L):
@@ -872,6 +1418,26 @@ static void psp_renderer_execute_dl(const Gfx* start) {
                 u32 param = (pc->words.w0 >> 16) & 0xFF;
 
                 sRenderer.census.dlCount++;
+                if (((sRenderer.taskIndex <= 4) || ((sRenderer.taskIndex % 30) == 0) ||
+                     (target == aTitle64LogoDL)) && (sRenderer.dlTraceCount < 12)) {
+                    char line[160];
+                    char* out = line;
+
+                    out = psp_renderer_append_text(out, "[psp] renderer dl:");
+                    psp_renderer_log_pair(&out, " task ", sRenderer.taskIndex);
+                    psp_renderer_log_pair(&out, " target ", (u32) target);
+                    psp_renderer_log_pair(&out, " title64 ", target == aTitle64LogoDL);
+                    psp_renderer_log_pair(&out, " param ", param);
+                    *out = '\0';
+                    PspPlatform_LogLine(line);
+                    sRenderer.dlTraceCount++;
+                }
+                if (target == aTitle64LogoDL) {
+                    sRenderer.title64.entered++;
+                }
+                if (targetEnd == NULL) {
+                    targetEnd = psp_renderer_try_register_static_dl(target);
+                }
                 if (targetEnd == NULL) {
                     char line[128];
                     char* out = line;
@@ -929,7 +1495,7 @@ static void psp_renderer_execute_dl(const Gfx* start) {
                 break;
 
             case G_SETTILE:
-                sRenderer.census.setTileCount++;
+                psp_renderer_handle_settile(pc);
                 pc++;
                 break;
 
@@ -964,6 +1530,31 @@ static void psp_renderer_execute_dl(const Gfx* start) {
                 } else {
                     pc++;
                 }
+                break;
+
+            case PSP_GBI_OPCODE(G_MTX):
+                psp_renderer_handle_mtx(pc);
+                pc++;
+                break;
+
+            case PSP_GBI_OPCODE(G_MOVEMEM):
+            case PSP_GBI_OPCODE(G_MOVEWORD):
+                pc++;
+                break;
+
+            case PSP_GBI_OPCODE(G_VTX):
+                psp_renderer_handle_vtx(pc);
+                pc++;
+                break;
+
+            case PSP_GBI_OPCODE(G_TRI1):
+                psp_renderer_handle_tri1(pc);
+                pc++;
+                break;
+
+            case PSP_GBI_OPCODE(G_TRI2):
+                psp_renderer_handle_tri2(pc);
+                pc++;
                 break;
 
             default:
@@ -1033,6 +1624,7 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
     psp_renderer_setup_task_ranges(task);
     sRenderer.census.taskBytes = task->task.t.data_size;
     sRenderer.taskIndex = taskIndex;
+    psp_renderer_trace_task_range(task, taskIndex);
 
     psp_renderer_begin_frame();
     psp_renderer_draw_starfield_batch();
