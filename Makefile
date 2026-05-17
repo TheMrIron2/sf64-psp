@@ -92,14 +92,20 @@ IINC := -Iinclude -Ibin/$(VERSION).$(REV) -I.
 IINC += -Ilib/ultralib/include -Ilib/ultralib/include/PR -Ilib/ultralib/include/ido
 IINC += -I$(PSPDEV)/psp/include -I$(PSPSDK)/include
 
-CHECK_WARNINGS := -Wall -Wextra -Wimplicit-fallthrough -Wno-unknown-pragmas -Wno-missing-braces
-CHECK_WARNINGS += -Wno-sign-compare -Wno-uninitialized
+PSP_WARNINGS := -Wall -Wextra -Wimplicit-fallthrough -Wno-unknown-pragmas -Wno-missing-braces
+PSP_WARNINGS += -Wno-sign-compare -Wno-uninitialized
+
+QUIET_DECOMP ?= 1
+
+define source_warning_flags
+$(if $(filter src/psp/%,$<),$(PSP_WARNINGS),$(if $(filter 1,$(QUIET_DECOMP)),-w,$(PSP_WARNINGS)))
+endef
 
 CFLAGS := -std=gnu89 -G0 -DPSP -D__PSP__ -D_PSP_FW_VERSION=500
 CFLAGS += -O3 -Os -ffast-math -fno-unsafe-math-optimizations -fno-builtin -fno-common
 CFLAGS += -fno-merge-constants -fno-strict-aliasing -falign-functions=64 -flimit-function-alignment
 CFLAGS += -fno-rounding-math -ffp-contract=off -funsigned-char -MMD -MP
-CFLAGS += $(CHECK_WARNINGS) $(VERSION_DEFINES) $(COMMON_DEFINES) $(RELEASE_DEFINES)
+CFLAGS += $(VERSION_DEFINES) $(COMMON_DEFINES) $(RELEASE_DEFINES)
 CFLAGS += $(GBI_DEFINES) $(PORT_DEFINES) $(IINC)
 ifeq ($(PSP_FULL),1)
 CFLAGS += -DPSP_FULL=1
@@ -113,6 +119,8 @@ LDFLAGS += -pg
 else
 LDFLAGS += -specs=$(PSPSDK)/lib/prxspecs -Wl,-q,-T$(PSPSDK)/lib/linkfile.prx $(PSPSDK)/lib/prxexports.o
 endif
+
+
 
 include src/psp/sources.mk
 
@@ -221,7 +229,7 @@ endif
 $(BUILD_DIR)/%.o: %.c Makefile src/psp/sources.mk
 	@mkdir -p $(dir $@)
 	$(call print,Compiling:,$<,$@)
-	$(V)$(CC) -c $(CFLAGS) -I$(dir $*) -o $@ $<
+	$(V)$(CC) -c $(CFLAGS) $(source_warning_flags) -I$(dir $*) -o $@ $<
 
 clean:
 	$(RM) -r $(BUILD_DIR) build/psp-bootstrap
