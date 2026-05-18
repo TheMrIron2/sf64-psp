@@ -231,60 +231,76 @@ static void psp_renderer_mtx_copy(f32 out[4][4], f32 in[4][4]) {
     }
 }
 
-static void psp_renderer_transform_vec3(f32 mtx[4][4], f32 inX, f32 inY, f32 inZ, f32* x, f32* y, f32* z, f32* w) {
-    /*
-     * N64/PSP matrix convention bring-up:
-     *
-     * The pure row-major transform improved orientation, but left the 64 logo
-     * centered and huge. That strongly indicates the rotation basis was closer,
-     * but translation/depth were being read from the wrong side of the matrix.
-     *
-     * Use row-major basis rows, but take translation from row 3. This should
-     * restore modelview translation/depth while preserving the improved
-     * orientation.
-     */
+static void psp_renderer_transform_modelview_vec3(f32 mtx[4][4], f32 inX, f32 inY, f32 inZ, f32* x, f32* y, f32* z,
+                                                  f32* w) {
     *x = (mtx[0][0] * inX) + (mtx[0][1] * inY) + (mtx[0][2] * inZ) + mtx[3][0];
     *y = (mtx[1][0] * inX) + (mtx[1][1] * inY) + (mtx[1][2] * inZ) + mtx[3][1];
     *z = (mtx[2][0] * inX) + (mtx[2][1] * inY) + (mtx[2][2] * inZ) + mtx[3][2];
-
-    /*
-     * Keep W in the original column-style form for now. Projection W is the
-     * most sensitive part of size/depth; this keeps perspective divide tied to
-     * the conventional N64 fixed matrix layout while testing translation.
-     */
     *w = (mtx[0][3] * inX) + (mtx[1][3] * inY) + (mtx[2][3] * inZ) + mtx[3][3];
 }
 
-static int psp_renderer_transform_vertex(const PspRspVertex* src, f32* x, f32* y, f32* z) {
-    f32 vx = src->x;
-    f32 vy = src->y;
-    f32 vz = src->z;
+static void psp_renderer_transform_projection_vec3(f32 mtx[4][4], f32 inX, f32 inY, f32 inZ, f32* x, f32* y, f32* z,
+                                                   f32* w) {
+    *x = (mtx[0][0] * inX) + (mtx[1][0] * inY) + (mtx[2][0] * inZ) + mtx[3][0];
+    *y = (mtx[0][1] * inX) + (mtx[1][1] * inY) + (mtx[2][1] * inZ) + mtx[3][1];
+    *z = (mtx[0][2] * inX) + (mtx[1][2] * inY) + (mtx[2][2] * inZ) + mtx[3][2];
+    *w = (mtx[0][3] * inX) + (mtx[1][3] * inY) + (mtx[2][3] * inZ) + mtx[3][3];
+}
+
+static int psp_renderer_project_model_point(f32 inX, f32 inY, f32 inZ, f32* x, f32* y, f32* z) {
+    f32 vx = inX;
+    f32 vy = inY;
+    f32 vz = inZ;
     f32 vw = 1.0f;
+    f32 clipX;
+    f32 clipY;
+    f32 clipZ;
+    f32 clipW;
 
     if (sRenderer.hasModelview) {
-        psp_renderer_transform_vec3(sRenderer.modelview, vx, vy, vz, &vx, &vy, &vz, &vw);
+        psp_renderer_transform_modelview_vec3(sRenderer.modelview, vx, vy, vz, &vx, &vy, &vz, &vw);
     }
 
-    if (sRenderer.hasProjection) {
-        f32 clipX;
-        f32 clipY;
-        f32 clipZ;
-        f32 clipW;
-
-        psp_renderer_transform_vec3(sRenderer.projection, vx, vy, vz, &clipX, &clipY, &clipZ, &clipW);
-        if ((clipW > -0.001f) && (clipW < 0.001f)) {
-            return 0;
-        }
-
-        *x = ((clipX / clipW) + 1.0f) * (N64_SCREEN_WIDTH * 0.5f);
-        *y = (1.0f - (clipY / clipW)) * (N64_SCREEN_HEIGHT * 0.5f);
-        *z = clipZ / clipW;
+    if (!sRenderer.hasProjection) {
+        *x = vx;
+        *y = vy;
+        *z = vz;
         return 1;
     }
 
-    *x = vx;
-    *y = vy;
-    *z = vz;
+    psp_renderer_transform_projection_vec3(sRenderer.projection, vx, vy, vz, &clipX, &clipY, &clipZ, &clipW);
+    if ((clipW > -0.001f) && (clipW < 0.001f)) {
+        return 0;
+    }
+
+    *x = ((clipX / clipW) + 1.0f) * (N64_SCREEN_WIDTH * 0.5f);
+    *y = (1.0f - (clipY / clipW)) * (N64_SCREEN_HEIGHT * 0.5f);
+    *z = clipZ / clipW;
+    return 1;
+}
+
+static int psp_renderer_transform_vertex(const PspRspVertex* src, f32* x, f32* y, f32* z) {
+    if (!psp_renderer_project_model_point(src->x, src->y, src->z, x, y, z)) {
+        return 0;
+    }
+
+    if (sRenderer.title64Active) {
+        f32 centerX;
+        f32 centerY;
+        f32 centerZ;
+        f32 dx;
+        f32 dy;
+
+        if (!psp_renderer_project_model_point(0.0f, 0.0f, 0.0f, &centerX, &centerY, &centerZ)) {
+            return 0;
+        }
+
+        dx = *x - centerX;
+        dy = *y - centerY;
+        *x = centerX - dy;
+        *y = centerY + dx;
+    }
+
     return 1;
 }
 

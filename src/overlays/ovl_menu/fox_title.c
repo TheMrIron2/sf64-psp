@@ -2997,15 +2997,15 @@ static void Title_Matrix_RotateX90_Apply(Matrix* mtx) {
     mtx->zx = src.zx;
     mtx->wx = src.wx;
 
-    mtx->xy = -src.xz;
-    mtx->yy = -src.yz;
-    mtx->zy = -src.zz;
-    mtx->wy = -src.wz;
+    mtx->xy = src.xz;
+    mtx->yy = src.yz;
+    mtx->zy = src.zz;
+    mtx->wy = src.wz;
 
-    mtx->xz = src.xy;
-    mtx->yz = src.yy;
-    mtx->zz = src.zy;
-    mtx->wz = src.wy;
+    mtx->xz = -src.xy;
+    mtx->yz = -src.yy;
+    mtx->zz = -src.zy;
+    mtx->wz = -src.wy;
 
     mtx->xw = src.xw;
     mtx->yw = src.yw;
