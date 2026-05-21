@@ -26,8 +26,14 @@
 #define PSP_SCREEN_GUARD 128
 #define PSP_RENDERER_MAX_STARS 512
 
-#define PSP_COORD_X(x) ((f32) (x) * 1.5f)
-#define PSP_COORD_Y(y) ((f32) (y) + 16.0f)
+#define PSP_PRESENT_SCALE ((f32) PSP_SCREEN_HEIGHT / (f32) N64_SCREEN_HEIGHT)
+#define PSP_PRESENT_WIDTH ((f32) N64_SCREEN_WIDTH * PSP_PRESENT_SCALE)
+#define PSP_PRESENT_HEIGHT ((f32) N64_SCREEN_HEIGHT * PSP_PRESENT_SCALE)
+#define PSP_PRESENT_OFFSET_X (((f32) PSP_SCREEN_WIDTH - PSP_PRESENT_WIDTH) * 0.5f)
+#define PSP_PRESENT_OFFSET_Y (((f32) PSP_SCREEN_HEIGHT - PSP_PRESENT_HEIGHT) * 0.5f)
+
+#define PSP_COORD_X(x) (PSP_PRESENT_OFFSET_X + ((f32) (x) * PSP_PRESENT_SCALE))
+#define PSP_COORD_Y(y) (PSP_PRESENT_OFFSET_Y + ((f32) (y) * PSP_PRESENT_SCALE))
 #define PSP_GBI_OPCODE(cmd) ((u8) (cmd))
 
 typedef struct {
@@ -233,9 +239,9 @@ static void psp_renderer_mtx_copy(f32 out[4][4], f32 in[4][4]) {
 
 static void psp_renderer_transform_modelview_vec3(f32 mtx[4][4], f32 inX, f32 inY, f32 inZ, f32* x, f32* y, f32* z,
                                                   f32* w) {
-    *x = (mtx[0][0] * inX) + (mtx[0][1] * inY) + (mtx[0][2] * inZ) + mtx[3][0];
-    *y = (mtx[1][0] * inX) + (mtx[1][1] * inY) + (mtx[1][2] * inZ) + mtx[3][1];
-    *z = (mtx[2][0] * inX) + (mtx[2][1] * inY) + (mtx[2][2] * inZ) + mtx[3][2];
+    *x = (mtx[0][0] * inX) + (mtx[1][0] * inY) + (mtx[2][0] * inZ) + mtx[3][0];
+    *y = (mtx[0][1] * inX) + (mtx[1][1] * inY) + (mtx[2][1] * inZ) + mtx[3][1];
+    *z = (mtx[0][2] * inX) + (mtx[1][2] * inY) + (mtx[2][2] * inZ) + mtx[3][2];
     *w = (mtx[0][3] * inX) + (mtx[1][3] * inY) + (mtx[2][3] * inZ) + mtx[3][3];
 }
 
@@ -280,28 +286,7 @@ static int psp_renderer_project_model_point(f32 inX, f32 inY, f32 inZ, f32* x, f
 }
 
 static int psp_renderer_transform_vertex(const PspRspVertex* src, f32* x, f32* y, f32* z) {
-    if (!psp_renderer_project_model_point(src->x, src->y, src->z, x, y, z)) {
-        return 0;
-    }
-
-    if (sRenderer.title64Active) {
-        f32 centerX;
-        f32 centerY;
-        f32 centerZ;
-        f32 dx;
-        f32 dy;
-
-        if (!psp_renderer_project_model_point(0.0f, 0.0f, 0.0f, &centerX, &centerY, &centerZ)) {
-            return 0;
-        }
-
-        dx = *x - centerX;
-        dy = *y - centerY;
-        *x = centerX - dy;
-        *y = centerY + dx;
-    }
-
-    return 1;
+    return psp_renderer_project_model_point(src->x, src->y, src->z, x, y, z);
 }
 
 static char* psp_renderer_append_text(char* out, const char* text) {
@@ -579,6 +564,21 @@ static char* psp_renderer_append_s32(char* out, s32 value) {
     return psp_renderer_append_u32(out, (u32) value);
 }
 
+static char* psp_renderer_append_f32_1000(char* out, f32 value) {
+    s32 scaled = (s32) (value * 1000.0f);
+
+    if (scaled < 0) {
+        *out++ = '-';
+        scaled = -scaled;
+    }
+    out = psp_renderer_append_u32(out, (u32) (scaled / 1000));
+    *out++ = '.';
+    *out++ = (char) ('0' + ((scaled / 100) % 10));
+    *out++ = (char) ('0' + ((scaled / 10) % 10));
+    *out++ = (char) ('0' + (scaled % 10));
+    return out;
+}
+
 static void psp_renderer_log_pair(char** out, const char* label, u32 value) {
     *out = psp_renderer_append_text(*out, label);
     *out = psp_renderer_append_u32(*out, value);
@@ -587,6 +587,29 @@ static void psp_renderer_log_pair(char** out, const char* label, u32 value) {
 static void psp_renderer_log_pair_s32(char** out, const char* label, s32 value) {
     *out = psp_renderer_append_text(*out, label);
     *out = psp_renderer_append_s32(*out, value);
+}
+
+static void psp_renderer_log_matrix(const char* label, f32 mtx[4][4]) {
+    char line[256];
+    u32 row;
+
+    for (row = 0; row < 4; row++) {
+        char* out = line;
+
+        out = psp_renderer_append_text(out, "[psp] renderer title64 ");
+        out = psp_renderer_append_text(out, label);
+        psp_renderer_log_pair(&out, " r", row);
+        out = psp_renderer_append_text(out, " ");
+        out = psp_renderer_append_f32_1000(out, mtx[row][0]);
+        out = psp_renderer_append_text(out, " ");
+        out = psp_renderer_append_f32_1000(out, mtx[row][1]);
+        out = psp_renderer_append_text(out, " ");
+        out = psp_renderer_append_f32_1000(out, mtx[row][2]);
+        out = psp_renderer_append_text(out, " ");
+        out = psp_renderer_append_f32_1000(out, mtx[row][3]);
+        *out = '\0';
+        PspPlatform_LogLine(line);
+    }
 }
 
 static s32 psp_renderer_clamp_s32(s32 value, s32 min, s32 max) {
@@ -684,6 +707,9 @@ static u8 psp_renderer_top_unsupported(void) {
 static void psp_renderer_log_title64(void) {
     char line[256];
     char* out = line;
+    f32 originX;
+    f32 originY;
+    f32 originZ;
 
     if (sRenderer.title64.entered == 0) {
         return;
@@ -712,6 +738,20 @@ static void psp_renderer_log_title64(void) {
     *out = '\0';
     PspPlatform_LogLine(line);
 
+    if ((sRenderer.hasModelview != 0) && (sRenderer.hasProjection != 0) &&
+        psp_renderer_project_model_point(0.0f, 0.0f, 0.0f, &originX, &originY, &originZ)) {
+        out = line;
+        out = psp_renderer_append_text(out, "[psp] renderer title64 origin:");
+        out = psp_renderer_append_text(out, " x ");
+        out = psp_renderer_append_f32_1000(out, originX);
+        out = psp_renderer_append_text(out, " y ");
+        out = psp_renderer_append_f32_1000(out, originY);
+        out = psp_renderer_append_text(out, " z ");
+        out = psp_renderer_append_f32_1000(out, originZ);
+        *out = '\0';
+        PspPlatform_LogLine(line);
+    }
+
     if (sRenderer.title64.hasBounds) {
         out = line;
         out = psp_renderer_append_text(out, "[psp] renderer title64 bounds:");
@@ -721,6 +761,20 @@ static void psp_renderer_log_title64(void) {
         psp_renderer_log_pair_s32(&out, " y1 ", sRenderer.title64.maxY);
         *out = '\0';
         PspPlatform_LogLine(line);
+
+        out = line;
+        out = psp_renderer_append_text(out, "[psp] renderer title64 present:");
+        psp_renderer_log_pair_s32(&out, " x0 ", (s32) PSP_COORD_X(sRenderer.title64.minX));
+        psp_renderer_log_pair_s32(&out, " y0 ", (s32) PSP_COORD_Y(sRenderer.title64.minY));
+        psp_renderer_log_pair_s32(&out, " x1 ", (s32) PSP_COORD_X(sRenderer.title64.maxX));
+        psp_renderer_log_pair_s32(&out, " y1 ", (s32) PSP_COORD_Y(sRenderer.title64.maxY));
+        *out = '\0';
+        PspPlatform_LogLine(line);
+    }
+
+    if ((sRenderer.taskIndex <= 35) || ((sRenderer.taskIndex % 30) == 0)) {
+        psp_renderer_log_matrix("modelview", sRenderer.modelview);
+        psp_renderer_log_matrix("projection", sRenderer.projection);
     }
 }
 

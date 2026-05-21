@@ -27,6 +27,14 @@ static void Psp_MtxZero(Mtx* m) {
     }
 }
 
+static void Psp_MtxIdentity(Mtx* m) {
+    Psp_MtxZero(m);
+    Psp_SetMtxElement(m, 0, 0, 1.0f);
+    Psp_SetMtxElement(m, 1, 1, 1.0f);
+    Psp_SetMtxElement(m, 2, 2, 1.0f);
+    Psp_SetMtxElement(m, 3, 3, 1.0f);
+}
+
 static void Psp_GuPerspective(Mtx* m, u16* perspNorm, f32 fovy, f32 aspect, f32 near, f32 far, f32 scale) {
     f32 cot;
 
@@ -153,7 +161,11 @@ void Lib_InitPerspective(Gfx** dList) {
     PSP_TRACE("perspective: matrix 0");
     gSPMatrix((*dList)++, gGfxMtx++, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);
     PSP_TRACE("perspective: guLookAt");
+#ifdef TARGET_PSP
+    Psp_MtxIdentity(gGfxMtx);
+#else
     guLookAt(gGfxMtx, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, -12800.0f, 0.0f, 1.0f, 0.0f);
+#endif
     PSP_TRACE("perspective: matrix 1");
     gSPMatrix((*dList)++, gGfxMtx++, G_MTX_NOPUSH | G_MTX_MUL | G_MTX_PROJECTION);
     PSP_TRACE("perspective: matrix copy");
