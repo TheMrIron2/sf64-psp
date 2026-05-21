@@ -2,7 +2,11 @@
 #include "sf64audio_external.h"
 #include "mods.h"
 
-#ifdef TARGET_PSP
+#if defined(TARGET_PSP) && !defined(PSP_TRACE_ENABLED)
+#define PSP_TRACE_ENABLED 0
+#endif
+
+#if defined(TARGET_PSP) && PSP_TRACE_ENABLED
 void PspPlatform_LogLine(const char* line);
 void PspPlatform_LogFrame(const char* phase, u32 frame);
 #define PSP_TRACE(msg) PspPlatform_LogLine("[psp] " msg)

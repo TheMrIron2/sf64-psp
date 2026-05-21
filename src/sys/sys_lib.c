@@ -1,6 +1,10 @@
 #include "sys.h"
 
-#ifdef TARGET_PSP
+#if defined(TARGET_PSP) && !defined(PSP_TRACE_ENABLED)
+#define PSP_TRACE_ENABLED 0
+#endif
+
+#if defined(TARGET_PSP) && PSP_TRACE_ENABLED
 void PspPlatform_LogLine(const char* line);
 #define PSP_TRACE(msg) PspPlatform_LogLine("[psp] " msg)
 #else

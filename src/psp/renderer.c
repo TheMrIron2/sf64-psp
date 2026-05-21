@@ -26,6 +26,10 @@
 #define PSP_SCREEN_GUARD 128
 #define PSP_RENDERER_MAX_STARS 512
 
+#ifndef PSP_RENDERER_DIAGNOSTICS
+#define PSP_RENDERER_DIAGNOSTICS 0
+#endif
+
 #define PSP_PRESENT_SCALE ((f32) PSP_SCREEN_HEIGHT / (f32) N64_SCREEN_HEIGHT)
 #define PSP_PRESENT_WIDTH ((f32) N64_SCREEN_WIDTH * PSP_PRESENT_SCALE)
 #define PSP_PRESENT_HEIGHT ((f32) N64_SCREEN_HEIGHT * PSP_PRESENT_SCALE)
@@ -289,12 +293,14 @@ static int psp_renderer_transform_vertex(const PspRspVertex* src, f32* x, f32* y
     return psp_renderer_project_model_point(src->x, src->y, src->z, x, y, z);
 }
 
+#if PSP_RENDERER_DIAGNOSTICS
 static char* psp_renderer_append_text(char* out, const char* text) {
     while ((text != NULL) && (*text != '\0')) {
         *out++ = *text++;
     }
     return out;
 }
+#endif
 
 static void psp_renderer_draw_rsp_triangle(u8 i0, u8 i1, u8 i2) {
     PspRendererTexture texture;
@@ -537,6 +543,7 @@ static void psp_renderer_handle_tri2(const Gfx* gfx) {
     psp_renderer_draw_rsp_triangle(a1, b1, c1);
 }
 
+#if PSP_RENDERER_DIAGNOSTICS
 static char* psp_renderer_append_u32(char* out, u32 value) {
     char digits[10];
     s32 count = 0;
@@ -554,6 +561,11 @@ static char* psp_renderer_append_u32(char* out, u32 value) {
         *out++ = digits[--count];
     }
     return out;
+}
+
+static void psp_renderer_log_pair(char** out, const char* label, u32 value) {
+    *out = psp_renderer_append_text(*out, label);
+    *out = psp_renderer_append_u32(*out, value);
 }
 
 static char* psp_renderer_append_s32(char* out, s32 value) {
@@ -577,11 +589,6 @@ static char* psp_renderer_append_f32_1000(char* out, f32 value) {
     *out++ = (char) ('0' + ((scaled / 10) % 10));
     *out++ = (char) ('0' + (scaled % 10));
     return out;
-}
-
-static void psp_renderer_log_pair(char** out, const char* label, u32 value) {
-    *out = psp_renderer_append_text(*out, label);
-    *out = psp_renderer_append_u32(*out, value);
 }
 
 static void psp_renderer_log_pair_s32(char** out, const char* label, s32 value) {
@@ -611,6 +618,7 @@ static void psp_renderer_log_matrix(const char* label, f32 mtx[4][4]) {
         PspPlatform_LogLine(line);
     }
 }
+#endif
 
 static s32 psp_renderer_clamp_s32(s32 value, s32 min, s32 max) {
     if (value < min) {
@@ -676,6 +684,7 @@ static void psp_renderer_reset_census(void) {
 
 static void psp_renderer_note_unsupported(u8 opcode) {
     if (sRenderer.census.unsupported[opcode] == 0) {
+#if PSP_RENDERER_DIAGNOSTICS
         char line[96];
         char* out = line;
 
@@ -683,6 +692,7 @@ static void psp_renderer_note_unsupported(u8 opcode) {
         out = psp_renderer_append_u32(out, opcode);
         *out = '\0';
         PspPlatform_LogLine(line);
+#endif
 
         sRenderer.census.unsupportedCount++;
     }
@@ -690,6 +700,7 @@ static void psp_renderer_note_unsupported(u8 opcode) {
     sRenderer.census.unsupported[opcode]++;
 }
 
+#if PSP_RENDERER_DIAGNOSTICS
 static u8 psp_renderer_top_unsupported(void) {
     u32 i;
     u32 bestCount = 0;
@@ -811,6 +822,11 @@ static void psp_renderer_log_census(u32 taskIndex) {
     }
 
 }
+#else
+static void psp_renderer_log_census(u32 taskIndex) {
+    (void) taskIndex;
+}
+#endif
 
 static void psp_renderer_reset_rdp_state(void) {
     sRenderer.rdp.primColor = psp_rgba32(255, 255, 255, 255);
@@ -889,10 +905,13 @@ static void psp_renderer_setup_task_ranges(SPTask* task) {
     title64End = psp_renderer_find_static_dl_end(aTitle64LogoDL, 256);
     if (title64End != NULL) {
         psp_renderer_add_range(aTitle64LogoDL, title64End);
+#if PSP_RENDERER_DIAGNOSTICS
         PspPlatform_LogLine("[psp] renderer: registered aTitle64LogoDL");
+#endif
     }
 }
 
+#if PSP_RENDERER_DIAGNOSTICS
 static void psp_renderer_trace_task_range(SPTask* task, u32 taskIndex) {
     char line[160];
     char* out;
@@ -911,6 +930,12 @@ static void psp_renderer_trace_task_range(SPTask* task, u32 taskIndex) {
     *out = '\0';
     PspPlatform_LogLine(line);
 }
+#else
+static void psp_renderer_trace_task_range(SPTask* task, u32 taskIndex) {
+    (void) task;
+    (void) taskIndex;
+}
+#endif
 
 static const Gfx* psp_renderer_range_end_for(const Gfx* ptr) {
     u32 i;
@@ -969,12 +994,19 @@ static void psp_renderer_handle_mtx(const Gfx* gfx) {
     *hasTarget = 1;
 }
 
-static void psp_renderer_begin_frame(void) {
+static void psp_renderer_init_buffers(void) {
     sceGuStart(GU_DIRECT, sGuList);
 
     sceGuDrawBuffer(GU_PSM_8888, (void*) 0, PSP_FRAMEBUFFER_WIDTH);
     sceGuDispBuffer(PSP_SCREEN_WIDTH, PSP_SCREEN_HEIGHT, (void*) 0x88000, PSP_FRAMEBUFFER_WIDTH);
     sceGuDepthBuffer((void*) 0x110000, PSP_FRAMEBUFFER_WIDTH);
+
+    sceGuFinish();
+    sceGuSync(0, 0);
+}
+
+static void psp_renderer_begin_frame(void) {
+    sceGuStart(GU_DIRECT, sGuList);
 
     sceGuOffset(2048 - (PSP_SCREEN_WIDTH / 2), 2048 - (PSP_SCREEN_HEIGHT / 2));
     sceGuViewport(2048, 2048, PSP_SCREEN_WIDTH, PSP_SCREEN_HEIGHT);
@@ -1505,6 +1537,7 @@ static void psp_renderer_execute_dl(const Gfx* start) {
                 u32 param = (pc->words.w0 >> 16) & 0xFF;
 
                 sRenderer.census.dlCount++;
+#if PSP_RENDERER_DIAGNOSTICS
                 if (((sRenderer.taskIndex <= 4) || ((sRenderer.taskIndex % 30) == 0) ||
                      (target == aTitle64LogoDL)) && (sRenderer.dlTraceCount < 12)) {
                     char line[160];
@@ -1519,6 +1552,7 @@ static void psp_renderer_execute_dl(const Gfx* start) {
                     PspPlatform_LogLine(line);
                     sRenderer.dlTraceCount++;
                 }
+#endif
                 if (target == aTitle64LogoDL) {
                     sRenderer.title64.entered++;
                 }
@@ -1526,6 +1560,7 @@ static void psp_renderer_execute_dl(const Gfx* start) {
                     targetEnd = psp_renderer_try_register_static_dl(target);
                 }
                 if (targetEnd == NULL) {
+#if PSP_RENDERER_DIAGNOSTICS
                     char line[128];
                     char* out = line;
 
@@ -1533,6 +1568,7 @@ static void psp_renderer_execute_dl(const Gfx* start) {
                     psp_renderer_log_pair(&out, "target ", (u32) target);
                     *out = '\0';
                     PspPlatform_LogLine(line);
+#endif
 
                     sRenderer.census.rangeRejects++;
                     pc++;
@@ -1686,6 +1722,7 @@ void PspRenderer_Init(void) {
     PspRendererTexture_Reset();
 
     sceGuInit();
+    psp_renderer_init_buffers();
     psp_renderer_begin_frame();
     psp_renderer_end_frame();
     sceGuDisplay(GU_TRUE);

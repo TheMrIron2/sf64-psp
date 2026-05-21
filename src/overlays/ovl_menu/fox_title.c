@@ -11,7 +11,11 @@
 #include "assets/ast_title.h"
 #include "assets/ast_text.h"
 
-#ifdef TARGET_PSP
+#if defined(TARGET_PSP) && !defined(PSP_TRACE_ENABLED)
+#define PSP_TRACE_ENABLED 0
+#endif
+
+#if defined(TARGET_PSP) && PSP_TRACE_ENABLED
 void PspPlatform_LogLine(const char* line);
 #define PSP_TRACE(msg) PspPlatform_LogLine("[psp] " msg)
 
@@ -40,7 +44,11 @@ static char* PspTitle_AppendU32(char* out, u32 value) {
     }
     return out;
 }
+#else
+#define PSP_TRACE(msg) ((void) 0)
+#endif
 
+#ifdef TARGET_PSP
 static f32 PspTitle_WrapRadians(f32 angle) {
     while (angle > M_PI) {
         angle -= M_PI * 2.0f;
@@ -61,8 +69,6 @@ static f32 PspTitle_SinApprox(f32 angle) {
 static f32 PspTitle_CosApprox(f32 angle) {
     return PspTitle_SinApprox(angle + (M_PI * 0.5f));
 }
-#else
-#define PSP_TRACE(msg) ((void) 0)
 #endif
 
 f32 D_menu_801B7BB0;
@@ -3039,7 +3045,7 @@ void Title_64Logo_Draw(void) {
     Matrix_SetGfxMtx(&gMasterDisp);
 
     PSP_TRACE("64 logo: display list");
-    #ifdef TARGET_PSP
+#if defined(TARGET_PSP) && PSP_TRACE_ENABLED
     {
         char line[96];
         char* out = line;
@@ -3049,7 +3055,7 @@ void Title_64Logo_Draw(void) {
         *out = '\0';
         PspPlatform_LogLine(line);
     }
-    #endif
+#endif
     gSPDisplayList(gMasterDisp++, aTitle64LogoDL);
 
     PSP_TRACE("64 logo: matrix pop");

@@ -52,6 +52,12 @@ float sqrtf(float x);
 
 #define PSP_VI_PER_FRAME 2
 #define PSP_LOG_PATH "ms0:/sf64_psp.log"
+#ifndef PSP_LOG_ENABLED
+#define PSP_LOG_ENABLED 0
+#endif
+#ifndef PSP_DEBUG_OVERLAY_ENABLED
+#define PSP_DEBUG_OVERLAY_ENABLED 0
+#endif
 #define PSP_O_WRONLY 0x0002
 #define PSP_O_APPEND 0x0100
 #define PSP_O_CREAT 0x0200
@@ -184,6 +190,7 @@ PSP_EMPTY_SEGMENT(ovl_menu);
 PSP_EMPTY_SEGMENT(ovl_ending);
 PSP_EMPTY_SEGMENT(ovl_unused);
 
+#if PSP_LOG_ENABLED
 static u32 psp_strlen(const char* text) {
     u32 len = 0;
 
@@ -192,6 +199,7 @@ static u32 psp_strlen(const char* text) {
     }
     return len;
 }
+#endif
 
 static char* psp_append_text(char* out, const char* text) {
     while ((text != NULL) && (*text != '\0')) {
@@ -220,6 +228,7 @@ static char* psp_append_u32(char* out, u32 value) {
 }
 
 void PspPlatform_LogLine(const char* line) {
+#if PSP_LOG_ENABLED
     SceUID fd;
     static int sLogReady;
 
@@ -238,6 +247,9 @@ void PspPlatform_LogLine(const char* line) {
         sceIoWrite(fd, "\n", 1);
         sceIoClose(fd);
     }
+#else
+    (void) line;
+#endif
 }
 
 void PspPlatform_LogFrame(const char* phase, u32 frame) {
@@ -308,8 +320,10 @@ static void psp_map_buttons(SceCtrlData* in, OSContPad* out) {
 
 void PspPlatform_Init(void) {
     sExitRequested = 0;
+#if PSP_LOG_ENABLED
     sceIoRemove(PSP_LOG_PATH);
     PspPlatform_LogLine("[psp] log start");
+#endif
     sceCtrlSetSamplingCycle(0);
     sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
     PspRenderer_Init();
@@ -372,9 +386,11 @@ void PspPlatform_RunGfxTask(SPTask* task) {
 
     PspRenderer_RenderGfxTask(task, sGfxTaskCount);
 
+#if PSP_LOG_ENABLED
     if ((sGfxTaskCount <= 4) || ((sGfxTaskCount % 30) == 0)) {
         PspPlatform_LogFrame("gfx task complete", sGfxTaskCount);
     }
+#endif
     if (sEvents[OS_EVENT_SP].mq != NULL) {
         osSendMesg(sEvents[OS_EVENT_SP].mq, sEvents[OS_EVENT_SP].msg, OS_MESG_NOBLOCK);
     }
@@ -392,6 +408,7 @@ void PspPlatform_RunAudioTask(SPTask* task) {
 }
 
 void PspPlatform_DebugFrame(void) {
+#if PSP_DEBUG_OVERLAY_ENABLED
     static u32 sLastFrame;
     static u32 sLastLoggedFrame;
 
@@ -404,11 +421,16 @@ void PspPlatform_DebugFrame(void) {
                              (unsigned long) sGfxTaskCount,
                              (unsigned long) sAudioTaskCount);
 
+#if PSP_LOG_ENABLED
         if ((gSysFrameCount <= 4) || ((gSysFrameCount - sLastLoggedFrame) >= 30)) {
             sLastLoggedFrame = gSysFrameCount;
             PspPlatform_LogFrame("heartbeat", gSysFrameCount);
         }
+#else
+        (void) sLastLoggedFrame;
+#endif
     }
+#endif
 }
 
 void AudioLoad_Init(void) {
