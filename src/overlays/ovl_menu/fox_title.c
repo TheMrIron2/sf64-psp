@@ -15,35 +15,13 @@
 #define PSP_TRACE_ENABLED 0
 #endif
 
+#if defined(TARGET_PSP) && !defined(PSP_TITLE_ARWING_BODY_ENABLED)
+#define PSP_TITLE_ARWING_BODY_ENABLED 0
+#endif
+
 #if defined(TARGET_PSP) && PSP_TRACE_ENABLED
 void PspPlatform_LogLine(const char* line);
 #define PSP_TRACE(msg) PspPlatform_LogLine("[psp] " msg)
-
-static char* PspTitle_AppendText(char* out, const char* text) {
-    while ((text != NULL) && (*text != '\0')) {
-        *out++ = *text++;
-    }
-    return out;
-}
-
-static char* PspTitle_AppendU32(char* out, u32 value) {
-    char digits[10];
-    s32 count = 0;
-
-    if (value == 0) {
-        *out++ = '0';
-        return out;
-    }
-
-    while (value != 0) {
-        digits[count++] = (char) ('0' + (value % 10));
-        value /= 10;
-    }
-    while (count > 0) {
-        *out++ = digits[--count];
-    }
-    return out;
-}
 #else
 #define PSP_TRACE(msg) ((void) 0)
 #endif
@@ -1022,7 +1000,6 @@ void Title_Screen_Update(void) {
 }
 
 void Title_Screen_Draw(void) {
-    // bringup stub
     s32 i;
     static TitleTeam D_menu_801ADA84[4] = { TEAM_FOX, TEAM_FALCO, TEAM_SLIPPY, TEAM_PEPPY };
 
@@ -1063,11 +1040,12 @@ void Title_Screen_Draw(void) {
     gAmbientG = D_menu_801B8320;
     gAmbientB = D_menu_801B8324;
 
-#ifndef TARGET_PSP
+#if !defined(TARGET_PSP) || PSP_TITLE_ARWING_BODY_ENABLED
+#if defined(TARGET_PSP) && PSP_TITLE_ARWING_BODY_ENABLED
+    PspPlatform_LogLine("[psp] title arwing body: draw request");
+#endif
     Title_SetLightRot(D_menu_801B86D0, D_menu_801B86D4, 100.0f, &D_menu_801B82E0, &D_menu_801B82E4, &D_menu_801B82E8);
     Title_Arwing_Draw(0);
-#else
-    PSP_TRACE("title screen draw: PSP skip title arwing model");
 #endif
 
     PSP_TRACE("title screen draw: done");
@@ -2427,10 +2405,23 @@ void Title_Arwing_Draw(TitleTeam teamIdx) {
         arwing.bottomRightFlapYrot = arwing.upperLeftFlapYrot = arwing.bottomLeftFlapYrot = arwing.unk_28 = 0.0f;
 
     arwing.laserGunsYpos = sTitleArwing[teamIdx].laserGunsYpos;
+#ifdef TARGET_PSP
+    arwing.drawFace = 0;
+#else
     arwing.drawFace = sTitleArwing[teamIdx].drawFace;
+#endif
     arwing.teamFaceXrot = sTitleArwing[teamIdx].teamFaceXrot;
     arwing.teamFaceYrot = sTitleArwing[teamIdx].teamFaceYrot;
     arwing.cockpitGlassXrot = sTitleArwing[teamIdx].cockpitGlassXrot;
+
+#ifdef TARGET_PSP
+#if PSP_TITLE_ARWING_BODY_ENABLED
+    PspPlatform_LogLine("[psp] title arwing body: submit arwing skeleton");
+    Display_Arwing_Skel(&arwing);
+#endif
+    Matrix_Pop(&gGfxMatrix);
+    return;
+#endif
 
     Display_Arwing_Skel(&arwing);
 
@@ -3045,17 +3036,6 @@ void Title_64Logo_Draw(void) {
     Matrix_SetGfxMtx(&gMasterDisp);
 
     PSP_TRACE("64 logo: display list");
-#if defined(TARGET_PSP) && PSP_TRACE_ENABLED
-    {
-        char line[96];
-        char* out = line;
-
-        out = PspTitle_AppendText(out, "[psp] 64 logo: dl addr ");
-        out = PspTitle_AppendU32(out, (u32) aTitle64LogoDL);
-        *out = '\0';
-        PspPlatform_LogLine(line);
-    }
-#endif
     gSPDisplayList(gMasterDisp++, aTitle64LogoDL);
 
     PSP_TRACE("64 logo: matrix pop");

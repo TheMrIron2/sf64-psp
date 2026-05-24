@@ -60,6 +60,48 @@ static const fu zero = { 0x00000000 };
  */
 
 float fcos(float x) {
+#ifdef TARGET_PSP
+    float absx;
+    double dx;
+    double xsq;
+    double poly;
+    double dn;
+    int n;
+    double result;
+    int ix;
+    int xpt;
+
+    ix = *(int*) &x;
+    xpt = (ix >> 22);
+    xpt &= 0x1ff;
+
+    if (xpt < 0x136) {
+        absx = ABS(x);
+        dx = absx;
+        dn = dx * 0.31830988618379067154 + 0.5;
+        n = ROUND(dn);
+        dn = n;
+        dn -= 0.5;
+        dx = dx - dn * 3.14159262180328369141;
+        dx = dx - dn * 3.17865095470563966824e-8;
+        xsq = dx * dx;
+        poly = (((2.5907305186363371282e-6 * xsq - 1.9515295891e-4) * xsq + 8.3321608736e-3) * xsq) -
+               1.6666654611e-1;
+        result = dx + (dx * xsq) * poly;
+
+        if ((n & 1) == 0) {
+            return (float) result;
+        }
+
+        return -(float) result;
+    }
+
+    if (x != x) {
+        return (__libm_qnan_f);
+    }
+
+    return zero.f;
+#else
     float absx;
     double dx, xsq, poly;
     double dn;
@@ -122,4 +164,5 @@ float fcos(float x) {
     /* just give up and return 0.0 */
 
     return (zero.f);
+#endif
 }
