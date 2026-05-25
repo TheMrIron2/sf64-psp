@@ -13,6 +13,8 @@ Contributions are welcome! This is an educational project that welcomes other co
 
 If you'd like to contribute, aim for the most native code possible, and don't be afraid to collaborate or ask for help! We'd love to work together to make this port a benchmark for the PSP scene.
 
+You can find us on the [PSP Homebrew Community](https://discord.gg/bePrj9W) on Discord for real-time updates and collaboration!
+
 The original README continues below. Follow the build instructions and compile with `make psp`.
 
 [![Discord Invitation](https://discordapp.com/api/guilds/1190102597521133700/widget.png?style=banner2 'Starfox 64')](https://discord.gg/tuwdmuTTqc)
