@@ -15,8 +15,8 @@
 #define PSP_TRACE_ENABLED 0
 #endif
 
-#if defined(TARGET_PSP) && !defined(PSP_TITLE_ARWING_BODY_ENABLED)
-#define PSP_TITLE_ARWING_BODY_ENABLED 0
+#if defined(TARGET_PSP) && !defined(PSP_TITLE_ARWING_ENABLED)
+#define PSP_TITLE_ARWING_ENABLED 0
 #endif
 
 #if defined(TARGET_PSP) && PSP_TRACE_ENABLED
@@ -1040,10 +1040,7 @@ void Title_Screen_Draw(void) {
     gAmbientG = D_menu_801B8320;
     gAmbientB = D_menu_801B8324;
 
-#if !defined(TARGET_PSP) || PSP_TITLE_ARWING_BODY_ENABLED
-#if defined(TARGET_PSP) && PSP_TITLE_ARWING_BODY_ENABLED
-    PspPlatform_LogLine("[psp] title arwing body: draw request");
-#endif
+#if !defined(TARGET_PSP) || PSP_TITLE_ARWING_ENABLED
     Title_SetLightRot(D_menu_801B86D0, D_menu_801B86D4, 100.0f, &D_menu_801B82E0, &D_menu_801B82E4, &D_menu_801B82E8);
     Title_Arwing_Draw(0);
 #endif
@@ -2415,8 +2412,7 @@ void Title_Arwing_Draw(TitleTeam teamIdx) {
     arwing.cockpitGlassXrot = sTitleArwing[teamIdx].cockpitGlassXrot;
 
 #ifdef TARGET_PSP
-#if PSP_TITLE_ARWING_BODY_ENABLED
-    PspPlatform_LogLine("[psp] title arwing body: submit arwing skeleton");
+#if PSP_TITLE_ARWING_ENABLED
     Display_Arwing_Skel(&arwing);
 #endif
     Matrix_Pop(&gGfxMatrix);
@@ -3014,6 +3010,14 @@ static void Title_Matrix_RotateX90_Apply(Matrix* mtx) {
 void Title_64Logo_Draw(void) {
     PSP_TRACE("64 logo: setupdl");
     RCP_SetupDL(&gMasterDisp, SETUPDL_53);
+#ifdef TARGET_PSP
+    /*
+     * The title "64" is a foreground logo element. Keep it isolated from the
+     * newly-enabled title Arwing depth and PSP-side winding differences until
+     * the full N64 viewport/culling path is matched.
+     */
+    gSPClearGeometryMode(gMasterDisp++, G_ZBUFFER | G_CULL_BACK);
+#endif
 
     PSP_TRACE("64 logo: matrix push");
     Matrix_Push(&gGfxMatrix);

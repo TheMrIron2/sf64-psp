@@ -2,7 +2,6 @@
 #include "libultra/ultra64.h"
 #include "sf64thread.h"
 #include "macros.h"
-#include "assets/ast_arwing.h"
 #include "assets/ast_title.h"
 #include "src/psp/platform.h"
 #include "src/psp/renderer.h"
@@ -19,11 +18,14 @@
 #define PSP_RENDERER_UNSUPPORTED_BUCKETS 256
 #define PSP_RENDERER_RANGES 32
 #define PSP_RENDERER_STATIC_DL_SCAN_COMMANDS 512
+
+/* Logical game space stays N64-native; GU output presents it as centered 4:3. */
 #define PSP_SCREEN_WIDTH 480
 #define PSP_SCREEN_HEIGHT 272
 #define PSP_FRAMEBUFFER_WIDTH 512
 #define N64_SCREEN_WIDTH 320
 #define N64_SCREEN_HEIGHT 240
+
 #define PSP_SCREEN_GUARD 128
 #define PSP_RENDERER_MAX_STARS 512
 
@@ -76,43 +78,11 @@ typedef struct {
     const Gfx* end;
 } PspDlFrame;
 
-#if PSP_RENDERER_DIAGNOSTICS
-typedef struct {
-    u32 active;
-    u32 commands;
-    u32 vtxOps;
-    u32 tri1Ops;
-    u32 tri2Ops;
-    u32 setTimgOps;
-    u32 textureOps;
-    u32 setTileOps;
-    u32 setTileSizeOps;
-    u32 loadBlockOps;
-    u32 unsupportedOps;
-    u32 firstOpcodes[12];
-    u32 firstOpcodeCount;
-    u32 startDrawn;
-    u32 startSkipped;
-    u32 startBad;
-    s32 minX;
-    s32 minY;
-    s32 maxX;
-    s32 maxY;
-    s32 minVx;
-    s32 minVy;
-    s32 minVz;
-    s32 maxVx;
-    s32 maxVy;
-    s32 maxVz;
-    int hasBounds;
-    int hasViewBounds;
-} PspArwingTrace;
-#endif
-
 typedef struct {
     u32 primColor;
     u32 fillColor;
     u32 envColor;
+    u32 renderMode;
     void* textureImage;
     u32 textureFmt;
     u32 textureSiz;
@@ -155,7 +125,7 @@ typedef struct {
     u32 texRectDrawSkipped;
 } PspRendererCensus;
 
-typedef struct {    
+typedef struct {
     PspRdpState rdp;
     PspRspState rsp;
     PspRspVertex vertices[64];
@@ -167,14 +137,6 @@ typedef struct {
     PspDlRange ranges[PSP_RENDERER_RANGES];
     u32 rangeCount;
     u32 taskIndex;
-#if PSP_RENDERER_DIAGNOSTICS
-    u32 arwingBodyDlHits;
-    const Mtx* lastMtxPtr;
-    u32 lastMtxFlags;
-    int lastMtxWasProjection;
-    f32 lastLoadedMtx[4][4];
-    PspArwingTrace arwingTrace;
-#endif
 } PspRendererState;
 
 typedef struct {
@@ -200,16 +162,16 @@ static PspStarPoint sStarfieldStars[PSP_RENDERER_MAX_STARS];
 static u32 sStarfieldCount;
 static int sStarfieldReady;
 
-#if PSP_RENDERER_DIAGNOSTICS
-static void psp_renderer_trace_arwing_view_vertex(f32 x, f32 y, f32 z);
-#endif
-
 static u8 psp_gfx_opcode(const Gfx* gfx) {
     return (u8) (gfx->words.w0 >> 24);
 }
 
 static u32 psp_rgba32(u8 r, u8 g, u8 b, u8 a) {
     return ((u32) a << 24) | ((u32) b << 16) | ((u32) g << 8) | (u32) r;
+}
+
+static u8 psp_rgba32_alpha(u32 color) {
+    return (u8) (color >> 24);
 }
 
 static u32 psp_rgba16_to_8888(u16 color) {
@@ -306,10 +268,6 @@ static int psp_renderer_project_model_point(f32 inX, f32 inY, f32 inZ, f32* x, f
     if (sRenderer.hasModelview) {
         psp_renderer_transform_modelview_vec3(sRenderer.modelview, vx, vy, vz, &vx, &vy, &vz, &vw);
     }
-#if PSP_RENDERER_DIAGNOSTICS
-    psp_renderer_trace_arwing_view_vertex(vx, vy, vz);
-#endif
-
     if (!sRenderer.hasProjection) {
         *x = vx;
         *y = vy;
@@ -333,10 +291,6 @@ static int psp_renderer_transform_vertex(const PspRspVertex* src, f32* x, f32* y
 }
 
 static s32 psp_renderer_clamp_s32(s32 value, s32 min, s32 max);
-#if PSP_RENDERER_DIAGNOSTICS
-static const Gfx* psp_renderer_range_end_for(const Gfx* ptr);
-static void psp_renderer_trace_arwing_projected_vertex(f32 x, f32 y);
-#endif
 
 static s16 psp_renderer_depth_to_s16(f32 z) {
     s32 depth = (s32) (((1.0f - z) * 0.5f) * 32767.0f);
@@ -346,7 +300,7 @@ static s16 psp_renderer_depth_to_s16(f32 z) {
 
 static u32 psp_renderer_vertex_color(const PspRspVertex* vertex) {
     if ((sRenderer.rsp.mode & G_LIGHTING) != 0) {
-        return psp_rgba32(192, 192, 192, 255);
+        return psp_rgba32(192, 192, 192, psp_rgba32_alpha(sRenderer.rdp.primColor));
     }
     if ((sRenderer.rsp.mode & G_SHADE) == 0) {
         return sRenderer.rdp.primColor;
@@ -375,13 +329,59 @@ static int psp_renderer_should_cull_triangle(const PspProjectedVertex projected[
 }
 
 static void psp_renderer_apply_rsp_depth_state(void) {
-    if ((sRenderer.rsp.mode & G_ZBUFFER) != 0) {
+    int depthCompare = ((sRenderer.rsp.mode & G_ZBUFFER) != 0) && ((sRenderer.rdp.renderMode & Z_CMP) != 0);
+    int depthUpdate = ((sRenderer.rsp.mode & G_ZBUFFER) != 0) && ((sRenderer.rdp.renderMode & Z_UPD) != 0);
+
+    if (depthCompare) {
         sceGuEnable(GU_DEPTH_TEST);
-        sceGuDepthMask(GU_FALSE);
         sceGuDepthFunc(GU_GEQUAL);
     } else {
         sceGuDisable(GU_DEPTH_TEST);
-        sceGuDepthMask(GU_TRUE);
+    }
+    sceGuDepthMask(depthUpdate ? GU_FALSE : GU_TRUE);
+}
+
+static int psp_renderer_should_blend(void) {
+    if ((sRenderer.rdp.renderMode & FORCE_BL) != 0) {
+        return 1;
+    }
+    if ((sRenderer.rdp.renderMode & ZMODE_XLU) != 0) {
+        return 1;
+    }
+    if (psp_rgba32_alpha(sRenderer.rdp.primColor) < 255) {
+        return 1;
+    }
+    return 0;
+}
+
+static int psp_renderer_should_modulate_texture(void) {
+    if ((sRenderer.rsp.mode & (G_SHADE | G_LIGHTING)) != 0) {
+        return 1;
+    }
+    if (psp_rgba32_alpha(sRenderer.rdp.primColor) < 255) {
+        return 1;
+    }
+    return 0;
+}
+
+static int psp_renderer_should_alpha_test(void) {
+    return (sRenderer.rdp.renderMode & (CVG_X_ALPHA | ALPHA_CVG_SEL)) == (CVG_X_ALPHA | ALPHA_CVG_SEL);
+}
+
+static void psp_renderer_apply_rsp_blend_state(void) {
+    if (psp_renderer_should_blend()) {
+        sceGuEnable(GU_BLEND);
+    } else {
+        sceGuDisable(GU_BLEND);
+    }
+}
+
+static void psp_renderer_apply_rsp_alpha_state(void) {
+    if (psp_renderer_should_alpha_test()) {
+        sceGuEnable(GU_ALPHA_TEST);
+        sceGuAlphaFunc(GU_GREATER, 0, 0xFF);
+    } else {
+        sceGuDisable(GU_ALPHA_TEST);
     }
 }
 
@@ -434,9 +434,6 @@ static void psp_renderer_draw_rsp_triangle(u8 i0, u8 i1, u8 i2) {
             sRenderer.census.texRectDrawSkipped++;
             return;
         }
-#if PSP_RENDERER_DIAGNOSTICS
-        psp_renderer_trace_arwing_projected_vertex(projected[i].x, projected[i].y);
-#endif
         projected[i].u = in[i]->s >> 5;
         projected[i].v = in[i]->t >> 5;
         projected[i].color = psp_renderer_vertex_color(in[i]);
@@ -448,6 +445,8 @@ static void psp_renderer_draw_rsp_triangle(u8 i0, u8 i1, u8 i2) {
     }
 
     psp_renderer_apply_rsp_depth_state();
+    psp_renderer_apply_rsp_blend_state();
+    psp_renderer_apply_rsp_alpha_state();
 
     requestedTexture = ((sRenderer.rsp.textureEnabled != 0) && (sRenderer.rdp.textureImage != NULL));
     textureWidth = sRenderer.rdp.tileWidth;
@@ -506,7 +505,7 @@ static void psp_renderer_draw_rsp_triangle(u8 i0, u8 i1, u8 i2) {
         sceGuEnable(GU_TEXTURE_2D);
         sceGuTexMode(GU_PSM_8888, 0, 0, GU_FALSE);
         sceGuTexImage(0, texture.textureWidth, texture.textureHeight, texture.textureWidth, texture.pixels);
-        sceGuTexFunc(GU_TFX_REPLACE, GU_TCC_RGBA);
+        sceGuTexFunc(psp_renderer_should_modulate_texture() ? GU_TFX_MODULATE : GU_TFX_REPLACE, GU_TCC_RGBA);
         sceGuTexFilter(GU_NEAREST, GU_NEAREST);
         sceGuTexWrap(GU_CLAMP, GU_CLAMP);
         sceGuTexScale(1.0f / (f32) texture.textureWidth, 1.0f / (f32) texture.textureHeight);
@@ -647,315 +646,6 @@ static void psp_renderer_log_pair(char** out, const char* label, u32 value) {
     *out = psp_renderer_append_u32(*out, value);
 }
 
-static char* psp_renderer_append_s32(char* out, s32 value) {
-    if (value < 0) {
-        *out++ = '-';
-        value = -value;
-    }
-    return psp_renderer_append_u32(out, (u32) value);
-}
-
-static void psp_renderer_log_pair_s32(char** out, const char* label, s32 value) {
-    *out = psp_renderer_append_text(*out, label);
-    *out = psp_renderer_append_s32(*out, value);
-}
-
-static void psp_renderer_log_pair_f32_1000(char** out, const char* label, f32 value) {
-    *out = psp_renderer_append_text(*out, label);
-    *out = psp_renderer_append_s32(*out, (s32) (value * 1000.0f));
-}
-
-static void psp_renderer_trace_mtx_row(const char* label, f32 mtx[4][4], u32 row) {
-    char line[180];
-    char* out = line;
-
-    out = psp_renderer_append_text(out, "[psp] renderer ");
-    out = psp_renderer_append_text(out, label);
-    psp_renderer_log_pair(&out, " task ", sRenderer.taskIndex);
-    psp_renderer_log_pair(&out, " r ", row);
-    psp_renderer_log_pair_f32_1000(&out, " c0 ", mtx[row][0]);
-    psp_renderer_log_pair_f32_1000(&out, " c1 ", mtx[row][1]);
-    psp_renderer_log_pair_f32_1000(&out, " c2 ", mtx[row][2]);
-    psp_renderer_log_pair_f32_1000(&out, " c3 ", mtx[row][3]);
-    *out = '\0';
-    PspPlatform_LogLine(line);
-}
-
-static void psp_renderer_trace_arwing_body_ref(const char* label, u32 index, const Gfx* pc) {
-    char line[160];
-    char* out = line;
-
-    out = psp_renderer_append_text(out, "[psp] renderer arwing:");
-    out = psp_renderer_append_text(out, " ");
-    out = psp_renderer_append_text(out, label);
-    psp_renderer_log_pair(&out, " task ", sRenderer.taskIndex);
-    psp_renderer_log_pair(&out, " idx ", index);
-    psp_renderer_log_pair(&out, " pc ", (u32) pc);
-    psp_renderer_log_pair(&out, " body ", (u32) aAwBodyDL);
-    *out = '\0';
-    PspPlatform_LogLine(line);
-}
-
-static void psp_renderer_trace_arwing_body_range(const char* label, const Gfx* start, const Gfx* end) {
-    const Gfx* pc;
-    u32 index = 0;
-
-    if ((start == NULL) || (end == NULL)) {
-        return;
-    }
-
-    for (pc = start; pc < end; pc++, index++) {
-        if ((psp_gfx_opcode(pc) == G_DL) && ((const Gfx*) pc->words.w1 == aAwBodyDL)) {
-            psp_renderer_trace_arwing_body_ref(label, index, pc);
-        }
-    }
-}
-
-static int psp_renderer_is_arwing_body_pc(const Gfx* pc) {
-    const Gfx* end = psp_renderer_range_end_for(aAwBodyDL);
-
-    return (end != NULL) && (pc >= aAwBodyDL) && (pc < end);
-}
-
-static void psp_renderer_trace_arwing_begin(void) {
-    char line[180];
-    char* out = line;
-    u32 row;
-
-    sRenderer.arwingTrace.active = 1;
-    sRenderer.arwingTrace.commands = 0;
-    sRenderer.arwingTrace.vtxOps = 0;
-    sRenderer.arwingTrace.tri1Ops = 0;
-    sRenderer.arwingTrace.tri2Ops = 0;
-    sRenderer.arwingTrace.setTimgOps = 0;
-    sRenderer.arwingTrace.textureOps = 0;
-    sRenderer.arwingTrace.setTileOps = 0;
-    sRenderer.arwingTrace.setTileSizeOps = 0;
-    sRenderer.arwingTrace.loadBlockOps = 0;
-    sRenderer.arwingTrace.unsupportedOps = 0;
-    sRenderer.arwingTrace.firstOpcodeCount = 0;
-    sRenderer.arwingTrace.startDrawn = sRenderer.census.texturedRectCount + sRenderer.census.placeholderRectCount;
-    sRenderer.arwingTrace.startSkipped = sRenderer.census.texRectDrawSkipped;
-    sRenderer.arwingTrace.startBad = sRenderer.census.validationFailures + sRenderer.census.rangeRejects;
-    sRenderer.arwingTrace.minX = 0;
-    sRenderer.arwingTrace.minY = 0;
-    sRenderer.arwingTrace.maxX = 0;
-    sRenderer.arwingTrace.maxY = 0;
-    sRenderer.arwingTrace.minVx = 0;
-    sRenderer.arwingTrace.minVy = 0;
-    sRenderer.arwingTrace.minVz = 0;
-    sRenderer.arwingTrace.maxVx = 0;
-    sRenderer.arwingTrace.maxVy = 0;
-    sRenderer.arwingTrace.maxVz = 0;
-    sRenderer.arwingTrace.hasBounds = 0;
-    sRenderer.arwingTrace.hasViewBounds = 0;
-
-    out = psp_renderer_append_text(out, "[psp] renderer arwing mtx:");
-    psp_renderer_log_pair(&out, " task ", sRenderer.taskIndex);
-    psp_renderer_log_pair(&out, " hasmv ", sRenderer.hasModelview);
-    psp_renderer_log_pair(&out, " haspr ", sRenderer.hasProjection);
-    psp_renderer_log_pair(&out, " lastptr ", (u32) sRenderer.lastMtxPtr);
-    psp_renderer_log_pair(&out, " flags ", sRenderer.lastMtxFlags);
-    psp_renderer_log_pair(&out, " proj ", sRenderer.lastMtxWasProjection);
-    *out = '\0';
-    PspPlatform_LogLine(line);
-
-    for (row = 0; row < 4; row++) {
-        psp_renderer_trace_mtx_row("arwing mv", sRenderer.modelview, row);
-    }
-    for (row = 0; row < 4; row++) {
-        psp_renderer_trace_mtx_row("arwing last", sRenderer.lastLoadedMtx, row);
-    }
-}
-
-static void psp_renderer_trace_arwing_view_vertex(f32 x, f32 y, f32 z) {
-    s32 sx = (s32) x;
-    s32 sy = (s32) y;
-    s32 sz = (s32) z;
-
-    if (!sRenderer.arwingTrace.active) {
-        return;
-    }
-
-    if (!sRenderer.arwingTrace.hasViewBounds) {
-        sRenderer.arwingTrace.minVx = sx;
-        sRenderer.arwingTrace.maxVx = sx;
-        sRenderer.arwingTrace.minVy = sy;
-        sRenderer.arwingTrace.maxVy = sy;
-        sRenderer.arwingTrace.minVz = sz;
-        sRenderer.arwingTrace.maxVz = sz;
-        sRenderer.arwingTrace.hasViewBounds = 1;
-        return;
-    }
-
-    if (sx < sRenderer.arwingTrace.minVx) {
-        sRenderer.arwingTrace.minVx = sx;
-    }
-    if (sx > sRenderer.arwingTrace.maxVx) {
-        sRenderer.arwingTrace.maxVx = sx;
-    }
-    if (sy < sRenderer.arwingTrace.minVy) {
-        sRenderer.arwingTrace.minVy = sy;
-    }
-    if (sy > sRenderer.arwingTrace.maxVy) {
-        sRenderer.arwingTrace.maxVy = sy;
-    }
-    if (sz < sRenderer.arwingTrace.minVz) {
-        sRenderer.arwingTrace.minVz = sz;
-    }
-    if (sz > sRenderer.arwingTrace.maxVz) {
-        sRenderer.arwingTrace.maxVz = sz;
-    }
-}
-
-static void psp_renderer_trace_arwing_projected_vertex(f32 x, f32 y) {
-    s32 sx = (s32) x;
-    s32 sy = (s32) y;
-
-    if (!sRenderer.arwingTrace.active) {
-        return;
-    }
-
-    if (!sRenderer.arwingTrace.hasBounds) {
-        sRenderer.arwingTrace.minX = sx;
-        sRenderer.arwingTrace.maxX = sx;
-        sRenderer.arwingTrace.minY = sy;
-        sRenderer.arwingTrace.maxY = sy;
-        sRenderer.arwingTrace.hasBounds = 1;
-        return;
-    }
-
-    if (sx < sRenderer.arwingTrace.minX) {
-        sRenderer.arwingTrace.minX = sx;
-    }
-    if (sx > sRenderer.arwingTrace.maxX) {
-        sRenderer.arwingTrace.maxX = sx;
-    }
-    if (sy < sRenderer.arwingTrace.minY) {
-        sRenderer.arwingTrace.minY = sy;
-    }
-    if (sy > sRenderer.arwingTrace.maxY) {
-        sRenderer.arwingTrace.maxY = sy;
-    }
-}
-
-static void psp_renderer_trace_arwing_opcode(u8 opcode) {
-    if (!sRenderer.arwingTrace.active) {
-        return;
-    }
-
-    sRenderer.arwingTrace.commands++;
-    if (sRenderer.arwingTrace.firstOpcodeCount < ARRAY_COUNT(sRenderer.arwingTrace.firstOpcodes)) {
-        sRenderer.arwingTrace.firstOpcodes[sRenderer.arwingTrace.firstOpcodeCount++] = opcode;
-    }
-
-    switch (opcode) {
-        case PSP_GBI_OPCODE(G_VTX):
-            sRenderer.arwingTrace.vtxOps++;
-            break;
-        case PSP_GBI_OPCODE(G_TRI1):
-            sRenderer.arwingTrace.tri1Ops++;
-            break;
-        case PSP_GBI_OPCODE(G_TRI2):
-            sRenderer.arwingTrace.tri2Ops++;
-            break;
-        case G_SETTIMG:
-            sRenderer.arwingTrace.setTimgOps++;
-            break;
-        case PSP_GBI_OPCODE(G_TEXTURE):
-            sRenderer.arwingTrace.textureOps++;
-            break;
-        case G_SETTILE:
-            sRenderer.arwingTrace.setTileOps++;
-            break;
-        case G_SETTILESIZE:
-            sRenderer.arwingTrace.setTileSizeOps++;
-            break;
-        case G_LOADBLOCK:
-            sRenderer.arwingTrace.loadBlockOps++;
-            break;
-        default:
-            break;
-    }
-}
-
-static void psp_renderer_trace_arwing_end(void) {
-    char line[256];
-    char* out = line;
-    u32 drawn = sRenderer.census.texturedRectCount + sRenderer.census.placeholderRectCount;
-    u32 bad = sRenderer.census.validationFailures + sRenderer.census.rangeRejects;
-    u32 i;
-
-    if (!sRenderer.arwingTrace.active) {
-        return;
-    }
-
-    out = psp_renderer_append_text(out, "[psp] renderer arwing body:");
-    psp_renderer_log_pair(&out, " task ", sRenderer.taskIndex);
-    psp_renderer_log_pair(&out, " cmd ", sRenderer.arwingTrace.commands);
-    psp_renderer_log_pair(&out, " vtx ", sRenderer.arwingTrace.vtxOps);
-    psp_renderer_log_pair(&out, " tri1 ", sRenderer.arwingTrace.tri1Ops);
-    psp_renderer_log_pair(&out, " tri2 ", sRenderer.arwingTrace.tri2Ops);
-    psp_renderer_log_pair(&out, " drawn ", drawn - sRenderer.arwingTrace.startDrawn);
-    psp_renderer_log_pair(&out, " skip ", sRenderer.census.texRectDrawSkipped - sRenderer.arwingTrace.startSkipped);
-    psp_renderer_log_pair(&out, " bad ", bad - sRenderer.arwingTrace.startBad);
-    *out = '\0';
-    PspPlatform_LogLine(line);
-
-    out = line;
-    out = psp_renderer_append_text(out, "[psp] renderer arwing rdp:");
-    psp_renderer_log_pair(&out, " task ", sRenderer.taskIndex);
-    psp_renderer_log_pair(&out, " timg ", sRenderer.arwingTrace.setTimgOps);
-    psp_renderer_log_pair(&out, " tex ", sRenderer.arwingTrace.textureOps);
-    psp_renderer_log_pair(&out, " tile ", sRenderer.arwingTrace.setTileOps);
-    psp_renderer_log_pair(&out, " size ", sRenderer.arwingTrace.setTileSizeOps);
-    psp_renderer_log_pair(&out, " load ", sRenderer.arwingTrace.loadBlockOps);
-    psp_renderer_log_pair(&out, " unsup ", sRenderer.arwingTrace.unsupportedOps);
-    *out = '\0';
-    PspPlatform_LogLine(line);
-
-    out = line;
-    out = psp_renderer_append_text(out, "[psp] renderer arwing opcodes:");
-    psp_renderer_log_pair(&out, " task ", sRenderer.taskIndex);
-    for (i = 0; i < sRenderer.arwingTrace.firstOpcodeCount; i++) {
-        psp_renderer_log_pair(&out, " ", sRenderer.arwingTrace.firstOpcodes[i]);
-    }
-    *out = '\0';
-    PspPlatform_LogLine(line);
-
-    if (sRenderer.arwingTrace.hasBounds) {
-        out = line;
-        out = psp_renderer_append_text(out, "[psp] renderer arwing bounds:");
-        psp_renderer_log_pair(&out, " task ", sRenderer.taskIndex);
-        psp_renderer_log_pair_s32(&out, " x0 ", sRenderer.arwingTrace.minX);
-        psp_renderer_log_pair_s32(&out, " y0 ", sRenderer.arwingTrace.minY);
-        psp_renderer_log_pair_s32(&out, " x1 ", sRenderer.arwingTrace.maxX);
-        psp_renderer_log_pair_s32(&out, " y1 ", sRenderer.arwingTrace.maxY);
-        psp_renderer_log_pair_s32(&out, " px0 ", (s32) PSP_COORD_X(sRenderer.arwingTrace.minX));
-        psp_renderer_log_pair_s32(&out, " py0 ", (s32) PSP_COORD_Y(sRenderer.arwingTrace.minY));
-        psp_renderer_log_pair_s32(&out, " px1 ", (s32) PSP_COORD_X(sRenderer.arwingTrace.maxX));
-        psp_renderer_log_pair_s32(&out, " py1 ", (s32) PSP_COORD_Y(sRenderer.arwingTrace.maxY));
-        *out = '\0';
-        PspPlatform_LogLine(line);
-    }
-
-    if (sRenderer.arwingTrace.hasViewBounds) {
-        out = line;
-        out = psp_renderer_append_text(out, "[psp] renderer arwing view:");
-        psp_renderer_log_pair(&out, " task ", sRenderer.taskIndex);
-        psp_renderer_log_pair_s32(&out, " x0 ", sRenderer.arwingTrace.minVx);
-        psp_renderer_log_pair_s32(&out, " y0 ", sRenderer.arwingTrace.minVy);
-        psp_renderer_log_pair_s32(&out, " z0 ", sRenderer.arwingTrace.minVz);
-        psp_renderer_log_pair_s32(&out, " x1 ", sRenderer.arwingTrace.maxVx);
-        psp_renderer_log_pair_s32(&out, " y1 ", sRenderer.arwingTrace.maxVy);
-        psp_renderer_log_pair_s32(&out, " z1 ", sRenderer.arwingTrace.maxVz);
-        *out = '\0';
-        PspPlatform_LogLine(line);
-    }
-
-    sRenderer.arwingTrace.active = 0;
-}
-
 #endif
 
 static s32 psp_renderer_clamp_s32(s32 value, s32 min, s32 max) {
@@ -997,10 +687,6 @@ static void psp_renderer_reset_census(void) {
     for (i = 0; i < ARRAY_COUNT(sRenderer.census.unsupported); i++) {
         sRenderer.census.unsupported[i] = 0;
     }
-#if PSP_RENDERER_DIAGNOSTICS
-    sRenderer.arwingBodyDlHits = 0;
-    sRenderer.arwingTrace.active = 0;
-#endif
 }
 
 static void psp_renderer_note_unsupported(u8 opcode) {
@@ -1077,6 +763,7 @@ static void psp_renderer_reset_rdp_state(void) {
     sRenderer.rdp.primColor = psp_rgba32(255, 255, 255, 255);
     sRenderer.rdp.fillColor = psp_rgba32(0, 0, 0, 255);
     sRenderer.rdp.envColor = psp_rgba32(255, 255, 255, 255);
+    sRenderer.rdp.renderMode = G_RM_AA_OPA_SURF | G_RM_AA_OPA_SURF2;
     sRenderer.rdp.textureImage = NULL;
     sRenderer.rdp.textureFmt = 0;
     sRenderer.rdp.textureSiz = 0;
@@ -1135,7 +822,6 @@ static void psp_renderer_setup_task_ranges(SPTask* task) {
     GfxPool* pool = (GfxPool*) task;
     const Gfx* masterStart;
     const Gfx* masterEnd;
-    const Gfx* arwingBodyEnd;
     const Gfx* title64End;
 
     sRenderer.rangeCount = 0;
@@ -1149,19 +835,6 @@ static void psp_renderer_setup_task_ranges(SPTask* task) {
     psp_renderer_add_range(masterStart, masterEnd);
     psp_renderer_add_range(pool->unkDL1, pool->unkDL1 + ARRAY_COUNT(pool->unkDL1));
     psp_renderer_add_range(pool->unkDL2, pool->unkDL2 + ARRAY_COUNT(pool->unkDL2));
-
-#if PSP_RENDERER_DIAGNOSTICS
-    if ((sRenderer.taskIndex <= 60) || ((sRenderer.taskIndex % 30) == 0)) {
-        psp_renderer_trace_arwing_body_range("master", masterStart, masterEnd);
-        psp_renderer_trace_arwing_body_range("unk1", pool->unkDL1, pool->unkDL1 + ARRAY_COUNT(pool->unkDL1));
-        psp_renderer_trace_arwing_body_range("unk2", pool->unkDL2, pool->unkDL2 + ARRAY_COUNT(pool->unkDL2));
-    }
-#endif
-
-    arwingBodyEnd = psp_renderer_find_static_dl_end(aAwBodyDL, PSP_RENDERER_STATIC_DL_SCAN_COMMANDS);
-    if (arwingBodyEnd != NULL) {
-        psp_renderer_add_range(aAwBodyDL, arwingBodyEnd);
-    }
 
     title64End = psp_renderer_find_static_dl_end(aTitle64LogoDL, 256);
     if (title64End != NULL) {
@@ -1237,12 +910,6 @@ static void psp_renderer_handle_mtx(const Gfx* gfx) {
     }
 
     psp_renderer_mtx_l2f(loaded, mtx);
-#if PSP_RENDERER_DIAGNOSTICS
-    sRenderer.lastMtxPtr = mtx;
-    sRenderer.lastMtxFlags = flags;
-    sRenderer.lastMtxWasProjection = isProjection;
-    psp_renderer_mtx_copy(sRenderer.lastLoadedMtx, loaded);
-#endif
     if ((flags & G_MTX_LOAD) != 0) {
         psp_renderer_mtx_copy(target, loaded);
     } else if (*hasTarget) {
@@ -1278,6 +945,7 @@ static void psp_renderer_begin_frame(void) {
     sceGuDepthRange(65535, 0);
     sceGuDisable(GU_CULL_FACE);
     sceGuDisable(GU_TEXTURE_2D);
+    sceGuDisable(GU_ALPHA_TEST);
 
     sceGuEnable(GU_BLEND);
     sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA, 0, 0);
@@ -1363,6 +1031,8 @@ static void psp_renderer_draw_solid_rect(s32 ulx, s32 uly, s32 lrx, s32 lry, u32
 
     sceGuDisable(GU_DEPTH_TEST);
     sceGuDepthMask(GU_TRUE);
+    sceGuEnable(GU_BLEND);
+    sceGuDisable(GU_ALPHA_TEST);
 
     v[0].color = color;
     v[0].x = x0;
@@ -1537,6 +1207,8 @@ static void psp_renderer_draw_textured_rect(s32 ulx, s32 uly, s32 lrx, s32 lry, 
 
     sceGuDisable(GU_DEPTH_TEST);
     sceGuDepthMask(GU_TRUE);
+    sceGuEnable(GU_BLEND);
+    sceGuDisable(GU_ALPHA_TEST);
 
     vertices[0].u = 0;
     vertices[0].v = 0;
@@ -1612,6 +1284,22 @@ static void psp_renderer_handle_setfillcolor(const Gfx* gfx) {
     u16 color16 = (u16) ((gfx->words.w1 >> 16) & 0xFFFF);
 
     sRenderer.rdp.fillColor = psp_rgba16_to_8888(color16);
+}
+
+static void psp_renderer_handle_setcombine(const Gfx* gfx) {
+    /* Combine words are accepted here; current texture paths derive behavior
+     * from render mode, primitive alpha, and geometry shade state.
+     */
+    (void) gfx;
+}
+
+static void psp_renderer_handle_setothermode_l(const Gfx* gfx) {
+    u32 shift = (gfx->words.w0 >> 8) & 0xFF;
+    u32 length = gfx->words.w0 & 0xFF;
+
+    if ((shift == G_MDSFT_RENDERMODE) && (length == 29)) {
+        sRenderer.rdp.renderMode = gfx->words.w1;
+    }
 }
 
 static void psp_renderer_handle_settimg(const Gfx* gfx) {
@@ -1778,11 +1466,6 @@ static void psp_renderer_execute_dl(const Gfx* start) {
 
         opcode = psp_gfx_opcode(pc);
         sRenderer.census.commandCount++;
-#if PSP_RENDERER_DIAGNOSTICS
-        if (psp_renderer_is_arwing_body_pc(pc)) {
-            psp_renderer_trace_arwing_opcode(opcode);
-        }
-#endif
 
         switch (opcode) {
             case G_NOOP:
@@ -1790,25 +1473,28 @@ static void psp_renderer_execute_dl(const Gfx* start) {
             case G_RDPLOADSYNC:
             case G_RDPTILESYNC:
             case G_RDPFULLSYNC:
-            case G_SETCOMBINE:
             case G_SETCIMG:
             case G_SETZIMG:
             case G_RDPSETOTHERMODE:
             case PSP_GBI_OPCODE(G_SETOTHERMODE_H):
-            case PSP_GBI_OPCODE(G_SETOTHERMODE_L):
             case G_SETSCISSOR:
             case PSP_GBI_OPCODE(G_RDPHALF_1):
             case PSP_GBI_OPCODE(G_RDPHALF_2):
                 pc++;
                 break;
 
+            case G_SETCOMBINE:
+                psp_renderer_handle_setcombine(pc);
+                pc++;
+                break;
+
+            case PSP_GBI_OPCODE(G_SETOTHERMODE_L):
+                psp_renderer_handle_setothermode_l(pc);
+                pc++;
+                break;
+
             case PSP_GBI_OPCODE(G_ENDDL):
                 sRenderer.census.endDlCount++;
-#if PSP_RENDERER_DIAGNOSTICS
-                if (psp_renderer_is_arwing_body_pc(pc)) {
-                    psp_renderer_trace_arwing_end();
-                }
-#endif
                 if (depth == 0) {
                     return;
                 }
@@ -1824,11 +1510,6 @@ static void psp_renderer_execute_dl(const Gfx* start) {
 
                 sRenderer.census.dlCount++;
 #if PSP_RENDERER_DIAGNOSTICS
-                if (target == aAwBodyDL) {
-                    sRenderer.arwingBodyDlHits++;
-                    psp_renderer_trace_arwing_begin();
-                    psp_renderer_trace_arwing_body_ref("enter", sRenderer.census.commandCount, pc);
-                }
                 if ((sRenderer.taskIndex <= 4) || ((sRenderer.taskIndex % 30) == 0)) {
                     char line[160];
                     char* out = line;
@@ -1981,11 +1662,6 @@ static void psp_renderer_execute_dl(const Gfx* start) {
                 break;
 
             default:
-#if PSP_RENDERER_DIAGNOSTICS
-                if (sRenderer.arwingTrace.active) {
-                    sRenderer.arwingTrace.unsupportedOps++;
-                }
-#endif
                 psp_renderer_note_unsupported(opcode);
                 pc++;
                 break;
