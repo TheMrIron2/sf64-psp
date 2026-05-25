@@ -125,6 +125,9 @@ endif
 ifeq ($(PSP_TITLE_ARWING_BODY),1)
 CFLAGS += -DPSP_TITLE_ARWING_ENABLED=1
 endif
+ifeq ($(PSP_TITLE_TEAM),1)
+CFLAGS += -DPSP_TITLE_TEAM_ENABLED=1
+endif
 
 LDFLAGS := -L$(PSPDEV)/psp/lib -L$(PSPSDK)/lib
 LDFLAGS += -Wl,-Map,$(PSP_MAP) -Wl,-zmax-page-size=128

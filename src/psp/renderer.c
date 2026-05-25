@@ -11,6 +11,7 @@
 #include <pspgu.h>
 #include <pspkernel.h>
 #include <psputils.h>
+#include <math.h>
 #include <stdint.h>
 
 #define PSP_RENDERER_DL_MAX_DEPTH 8
@@ -28,6 +29,7 @@
 
 #define PSP_SCREEN_GUARD 128
 #define PSP_RENDERER_MAX_STARS 512
+#define PSP_RENDERER_MAX_LIGHTS 7
 
 #ifndef PSP_RENDERER_DIAGNOSTICS
 #define PSP_RENDERER_DIAGNOSTICS 0
@@ -42,6 +44,17 @@
 #define PSP_COORD_X(x) (PSP_PRESENT_OFFSET_X + ((f32) (x) * PSP_PRESENT_SCALE))
 #define PSP_COORD_Y(y) (PSP_PRESENT_OFFSET_Y + ((f32) (y) * PSP_PRESENT_SCALE))
 #define PSP_GBI_OPCODE(cmd) ((u8) (cmd))
+
+typedef enum {
+    PSP_COMBINE_UNKNOWN,
+    PSP_COMBINE_SHADE,
+    PSP_COMBINE_PRIMITIVE,
+    PSP_COMBINE_DECAL_RGB,
+    PSP_COMBINE_DECAL_RGBA,
+    PSP_COMBINE_MODULATE_SHADE_DECAL_ALPHA,
+    PSP_COMBINE_MODULATE_SHADE_ALPHA,
+    PSP_COMBINE_MODULATE_PRIM_ALPHA,
+} PspCombineMode;
 
 typedef struct {
     u32 color;
@@ -66,7 +79,20 @@ typedef struct {
     s16 s;
     s16 t;
     u32 color;
+    s8 nx;
+    s8 ny;
+    s8 nz;
+    u8 alpha;
 } PspRspVertex;
+
+typedef struct {
+    u8 r;
+    u8 g;
+    u8 b;
+    s8 x;
+    s8 y;
+    s8 z;
+} PspRspLight;
 
 typedef struct {
     const Gfx* start;
@@ -83,6 +109,7 @@ typedef struct {
     u32 fillColor;
     u32 envColor;
     u32 renderMode;
+    PspCombineMode combineMode;
     void* textureImage;
     u32 textureFmt;
     u32 textureSiz;
@@ -96,6 +123,11 @@ typedef struct {
 typedef struct {
     u32 mode;
     int textureEnabled;
+    u32 lightCount;
+    PspRspLight lights[PSP_RENDERER_MAX_LIGHTS];
+    u8 ambientR;
+    u8 ambientG;
+    u8 ambientB;
 } PspRspState;
 
 typedef struct {
@@ -298,14 +330,96 @@ static s16 psp_renderer_depth_to_s16(f32 z) {
     return (s16) psp_renderer_clamp_s32(depth, 0, 32767);
 }
 
-static u32 psp_renderer_vertex_color(const PspRspVertex* vertex) {
-    if ((sRenderer.rsp.mode & G_LIGHTING) != 0) {
-        return psp_rgba32(192, 192, 192, psp_rgba32_alpha(sRenderer.rdp.primColor));
+static u8 psp_renderer_modulate_u8(u8 a, u8 b) {
+    return (u8) (((u32) a * (u32) b) / 255U);
+}
+
+static void psp_renderer_normalize_vec3(f32* x, f32* y, f32* z) {
+    f32 lengthSq = (*x * *x) + (*y * *y) + (*z * *z);
+
+    if (lengthSq > 0.000001f) {
+        f32 invLength = 1.0f / sqrtf(lengthSq);
+
+        *x *= invLength;
+        *y *= invLength;
+        *z *= invLength;
     }
+}
+
+static u32 psp_renderer_lit_vertex_color(const PspRspVertex* vertex) {
+    f32 normalX = (f32) vertex->nx;
+    f32 normalY = (f32) vertex->ny;
+    f32 normalZ = (f32) vertex->nz;
+    f32 r = sRenderer.rsp.ambientR;
+    f32 g = sRenderer.rsp.ambientG;
+    f32 b = sRenderer.rsp.ambientB;
+    u32 i;
+
+    if (sRenderer.hasModelview) {
+        f32 x = normalX;
+        f32 y = normalY;
+        f32 z = normalZ;
+
+        normalX = (sRenderer.modelview[0][0] * x) + (sRenderer.modelview[1][0] * y) + (sRenderer.modelview[2][0] * z);
+        normalY = (sRenderer.modelview[0][1] * x) + (sRenderer.modelview[1][1] * y) + (sRenderer.modelview[2][1] * z);
+        normalZ = (sRenderer.modelview[0][2] * x) + (sRenderer.modelview[1][2] * y) + (sRenderer.modelview[2][2] * z);
+    }
+    psp_renderer_normalize_vec3(&normalX, &normalY, &normalZ);
+
+    for (i = 0; i < sRenderer.rsp.lightCount; i++) {
+        const PspRspLight* light = &sRenderer.rsp.lights[i];
+        f32 lightX = (f32) light->x;
+        f32 lightY = (f32) light->y;
+        f32 lightZ = (f32) light->z;
+        f32 dot;
+
+        psp_renderer_normalize_vec3(&lightX, &lightY, &lightZ);
+        dot = -((normalX * lightX) + (normalY * lightY) + (normalZ * lightZ));
+
+        if (dot > 0.0f) {
+            r += light->r * dot;
+            g += light->g * dot;
+            b += light->b * dot;
+        }
+    }
+
+    return psp_rgba32(
+        (u8) psp_renderer_clamp_s32((s32) r, 0, 255),
+        (u8) psp_renderer_clamp_s32((s32) g, 0, 255),
+        (u8) psp_renderer_clamp_s32((s32) b, 0, 255),
+        psp_renderer_modulate_u8(vertex->alpha, psp_rgba32_alpha(sRenderer.rdp.primColor))
+    );
+}
+
+static u32 psp_renderer_shade_vertex_color(const PspRspVertex* vertex) {
+    if ((sRenderer.rsp.mode & G_LIGHTING) != 0) {
+        return psp_renderer_lit_vertex_color(vertex);
+    }
+    return vertex->color;
+}
+
+static u32 psp_renderer_vertex_color(const PspRspVertex* vertex) {
+    u32 shadeColor;
+
     if ((sRenderer.rsp.mode & G_SHADE) == 0) {
         return sRenderer.rdp.primColor;
     }
-    return vertex->color;
+
+    shadeColor = psp_renderer_shade_vertex_color(vertex);
+    switch (sRenderer.rdp.combineMode) {
+        case PSP_COMBINE_PRIMITIVE:
+        case PSP_COMBINE_MODULATE_PRIM_ALPHA:
+            return sRenderer.rdp.primColor;
+        case PSP_COMBINE_DECAL_RGB:
+        case PSP_COMBINE_DECAL_RGBA:
+            return psp_rgba32(255, 255, 255, psp_rgba32_alpha(shadeColor));
+        case PSP_COMBINE_SHADE:
+        case PSP_COMBINE_MODULATE_SHADE_DECAL_ALPHA:
+        case PSP_COMBINE_MODULATE_SHADE_ALPHA:
+        case PSP_COMBINE_UNKNOWN:
+        default:
+            return shadeColor;
+    }
 }
 
 static int psp_renderer_should_cull_triangle(const PspProjectedVertex projected[3]) {
@@ -355,6 +469,15 @@ static int psp_renderer_should_blend(void) {
 }
 
 static int psp_renderer_should_modulate_texture(void) {
+    if ((sRenderer.rdp.combineMode == PSP_COMBINE_DECAL_RGB) ||
+        (sRenderer.rdp.combineMode == PSP_COMBINE_DECAL_RGBA)) {
+        return 0;
+    }
+    if ((sRenderer.rdp.combineMode == PSP_COMBINE_MODULATE_SHADE_DECAL_ALPHA) ||
+        (sRenderer.rdp.combineMode == PSP_COMBINE_MODULATE_SHADE_ALPHA) ||
+        (sRenderer.rdp.combineMode == PSP_COMBINE_MODULATE_PRIM_ALPHA)) {
+        return 1;
+    }
     if ((sRenderer.rsp.mode & (G_SHADE | G_LIGHTING)) != 0) {
         return 1;
     }
@@ -602,6 +725,10 @@ static void psp_renderer_handle_vtx(const Gfx* gfx) {
         out->s = in->v.tc[0];
         out->t = in->v.tc[1];
         out->color = psp_rgba32(in->v.cn[0], in->v.cn[1], in->v.cn[2], in->v.cn[3]);
+        out->nx = in->n.n[0];
+        out->ny = in->n.n[1];
+        out->nz = in->n.n[2];
+        out->alpha = in->n.a;
     }
 }
 
@@ -644,6 +771,19 @@ static char* psp_renderer_append_u32(char* out, u32 value) {
 static void psp_renderer_log_pair(char** out, const char* label, u32 value) {
     *out = psp_renderer_append_text(*out, label);
     *out = psp_renderer_append_u32(*out, value);
+}
+
+static char* psp_renderer_append_s32(char* out, s32 value) {
+    if (value < 0) {
+        *out++ = '-';
+        value = -value;
+    }
+    return psp_renderer_append_u32(out, (u32) value);
+}
+
+static void psp_renderer_log_signed_pair(char** out, const char* label, s32 value) {
+    *out = psp_renderer_append_text(*out, label);
+    *out = psp_renderer_append_s32(*out, value);
 }
 
 #endif
@@ -752,6 +892,24 @@ static void psp_renderer_log_census(u32 taskIndex) {
         PspPlatform_LogLine(line);
     }
 
+    if (sRenderer.rsp.lightCount != 0) {
+        const PspRspLight* light = &sRenderer.rsp.lights[0];
+
+        out = line;
+        out = psp_renderer_append_text(out, "[psp] renderer light:");
+        psp_renderer_log_pair(&out, " count ", sRenderer.rsp.lightCount);
+        psp_renderer_log_pair(&out, " ambR ", sRenderer.rsp.ambientR);
+        psp_renderer_log_pair(&out, " ambG ", sRenderer.rsp.ambientG);
+        psp_renderer_log_pair(&out, " ambB ", sRenderer.rsp.ambientB);
+        psp_renderer_log_pair(&out, " l0R ", light->r);
+        psp_renderer_log_pair(&out, " l0G ", light->g);
+        psp_renderer_log_pair(&out, " l0B ", light->b);
+        psp_renderer_log_signed_pair(&out, " x ", light->x);
+        psp_renderer_log_signed_pair(&out, " y ", light->y);
+        psp_renderer_log_signed_pair(&out, " z ", light->z);
+        *out = '\0';
+        PspPlatform_LogLine(line);
+    }
 }
 #else
 static void psp_renderer_log_census(u32 taskIndex) {
@@ -764,6 +922,7 @@ static void psp_renderer_reset_rdp_state(void) {
     sRenderer.rdp.fillColor = psp_rgba32(0, 0, 0, 255);
     sRenderer.rdp.envColor = psp_rgba32(255, 255, 255, 255);
     sRenderer.rdp.renderMode = G_RM_AA_OPA_SURF | G_RM_AA_OPA_SURF2;
+    sRenderer.rdp.combineMode = PSP_COMBINE_UNKNOWN;
     sRenderer.rdp.textureImage = NULL;
     sRenderer.rdp.textureFmt = 0;
     sRenderer.rdp.textureSiz = 0;
@@ -773,6 +932,10 @@ static void psp_renderer_reset_rdp_state(void) {
     sRenderer.rdp.paletteCount = 0;
     sRenderer.rsp.mode = 0;
     sRenderer.rsp.textureEnabled = 0;
+    sRenderer.rsp.lightCount = 0;
+    sRenderer.rsp.ambientR = 255;
+    sRenderer.rsp.ambientG = 255;
+    sRenderer.rsp.ambientB = 255;
     psp_renderer_identity_mtx(sRenderer.modelview);
     psp_renderer_identity_mtx(sRenderer.projection);
     sRenderer.hasModelview = 0;
@@ -1286,11 +1449,59 @@ static void psp_renderer_handle_setfillcolor(const Gfx* gfx) {
     sRenderer.rdp.fillColor = psp_rgba16_to_8888(color16);
 }
 
+static int psp_renderer_combine_cycle0_matches(u32 mux0, u32 mux1, u32 a, u32 b, u32 c, u32 d, u32 aa, u32 ab, u32 ac,
+                                               u32 ad) {
+    u32 ca = (mux0 >> 20) & 0xF;
+    u32 cc = (mux0 >> 15) & 0x1F;
+    u32 caa = (mux0 >> 12) & 0x7;
+    u32 cac = (mux0 >> 9) & 0x7;
+    u32 cb = (mux1 >> 28) & 0xF;
+    u32 cd = (mux1 >> 15) & 0x7;
+    u32 cab = (mux1 >> 12) & 0x7;
+    u32 cad = (mux1 >> 9) & 0x7;
+
+    return (ca == (a & 0xF)) && (cb == (b & 0xF)) && (cc == (c & 0x1F)) && (cd == (d & 0x7)) &&
+           (caa == (aa & 0x7)) && (cab == (ab & 0x7)) && (cac == (ac & 0x7)) && (cad == (ad & 0x7));
+}
+
 static void psp_renderer_handle_setcombine(const Gfx* gfx) {
-    /* Combine words are accepted here; current texture paths derive behavior
-     * from render mode, primitive alpha, and geometry shade state.
-     */
-    (void) gfx;
+    u32 mux0 = gfx->words.w0 & 0x00FFFFFF;
+    u32 mux1 = gfx->words.w1;
+
+    if (psp_renderer_combine_cycle0_matches(mux0, mux1, G_CCMUX_0, G_CCMUX_0, G_CCMUX_0, G_CCMUX_SHADE,
+                                            G_ACMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_SHADE)) {
+        sRenderer.rdp.combineMode = PSP_COMBINE_SHADE;
+    } else if (psp_renderer_combine_cycle0_matches(mux0, mux1, G_CCMUX_0, G_CCMUX_0, G_CCMUX_0, G_CCMUX_PRIMITIVE,
+                                                   G_ACMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_PRIMITIVE)) {
+        sRenderer.rdp.combineMode = PSP_COMBINE_PRIMITIVE;
+    } else if (psp_renderer_combine_cycle0_matches(mux0, mux1, G_CCMUX_0, G_CCMUX_0, G_CCMUX_0, G_CCMUX_TEXEL0,
+                                                   G_ACMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_SHADE)) {
+        sRenderer.rdp.combineMode = PSP_COMBINE_DECAL_RGB;
+    } else if (psp_renderer_combine_cycle0_matches(mux0, mux1, G_CCMUX_0, G_CCMUX_0, G_CCMUX_0, G_CCMUX_TEXEL0,
+                                                   G_ACMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_TEXEL0)) {
+        sRenderer.rdp.combineMode = PSP_COMBINE_DECAL_RGBA;
+    } else if (psp_renderer_combine_cycle0_matches(mux0, mux1, G_CCMUX_TEXEL0, G_CCMUX_0, G_CCMUX_SHADE,
+                                                   G_CCMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_SHADE)) {
+        sRenderer.rdp.combineMode = PSP_COMBINE_MODULATE_SHADE_ALPHA;
+    } else if (psp_renderer_combine_cycle0_matches(mux0, mux1, G_CCMUX_TEXEL0, G_CCMUX_0, G_CCMUX_SHADE,
+                                                   G_CCMUX_0, G_ACMUX_TEXEL0, G_ACMUX_0, G_ACMUX_SHADE, G_ACMUX_0)) {
+        sRenderer.rdp.combineMode = PSP_COMBINE_MODULATE_SHADE_ALPHA;
+    } else if (psp_renderer_combine_cycle0_matches(mux0, mux1, G_CCMUX_TEXEL0, G_CCMUX_0, G_CCMUX_SHADE,
+                                                   G_CCMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_TEXEL0)) {
+        sRenderer.rdp.combineMode = PSP_COMBINE_MODULATE_SHADE_DECAL_ALPHA;
+    } else if (psp_renderer_combine_cycle0_matches(mux0, mux1, G_CCMUX_TEXEL0, G_CCMUX_0, G_CCMUX_PRIMITIVE,
+                                                   G_CCMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_PRIMITIVE)) {
+        sRenderer.rdp.combineMode = PSP_COMBINE_MODULATE_PRIM_ALPHA;
+    } else if (psp_renderer_combine_cycle0_matches(mux0, mux1, G_CCMUX_TEXEL0, G_CCMUX_0, G_CCMUX_PRIMITIVE,
+                                                   G_CCMUX_0, G_ACMUX_TEXEL0, G_ACMUX_0, G_ACMUX_PRIMITIVE,
+                                                   G_ACMUX_0)) {
+        sRenderer.rdp.combineMode = PSP_COMBINE_MODULATE_PRIM_ALPHA;
+    } else if (psp_renderer_combine_cycle0_matches(mux0, mux1, G_CCMUX_TEXEL0, G_CCMUX_0, G_CCMUX_PRIMITIVE,
+                                                   G_CCMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_TEXEL0)) {
+        sRenderer.rdp.combineMode = PSP_COMBINE_MODULATE_PRIM_ALPHA;
+    } else {
+        sRenderer.rdp.combineMode = PSP_COMBINE_UNKNOWN;
+    }
 }
 
 static void psp_renderer_handle_setothermode_l(const Gfx* gfx) {
@@ -1367,6 +1578,55 @@ static void psp_renderer_handle_loadtlut(const Gfx* gfx) {
         sRenderer.rdp.paletteCount = count;
     }
     sRenderer.census.loadTlutCount++;
+}
+
+static void psp_renderer_handle_moveword(const Gfx* gfx) {
+    u32 offset = (gfx->words.w0 >> 8) & 0xFFFF;
+    u32 index = gfx->words.w0 & 0xFF;
+    u32 data = gfx->words.w1;
+    u32 lightCount;
+
+    if ((index != G_MW_NUMLIGHT) || (offset != G_MWO_NUMLIGHT)) {
+        return;
+    }
+
+    lightCount = ((data & 0x7FFFFFFF) / 32U);
+    if (lightCount != 0) {
+        lightCount--;
+    }
+    if (lightCount > PSP_RENDERER_MAX_LIGHTS) {
+        lightCount = PSP_RENDERER_MAX_LIGHTS;
+    }
+    sRenderer.rsp.lightCount = lightCount;
+}
+
+static void psp_renderer_handle_movemem(const Gfx* gfx) {
+    const Light* src = (const Light*) gfx->words.w1;
+    u32 index = (gfx->words.w0 >> 16) & 0xFF;
+    u32 length = gfx->words.w0 & 0xFFFF;
+    u32 lightSlot;
+
+    if ((length < sizeof(Light)) || (src == NULL) || !PSP_IS_NATIVE_PTR(src)) {
+        return;
+    }
+
+    if ((index < G_MV_L0) || (index > G_MV_L7) || (((index - G_MV_L0) & 1U) != 0)) {
+        return;
+    }
+
+    lightSlot = (index - G_MV_L0) >> 1;
+    if (lightSlot < sRenderer.rsp.lightCount) {
+        sRenderer.rsp.lights[lightSlot].r = src->l.col[0];
+        sRenderer.rsp.lights[lightSlot].g = src->l.col[1];
+        sRenderer.rsp.lights[lightSlot].b = src->l.col[2];
+        sRenderer.rsp.lights[lightSlot].x = src->l.dir[0];
+        sRenderer.rsp.lights[lightSlot].y = src->l.dir[1];
+        sRenderer.rsp.lights[lightSlot].z = src->l.dir[2];
+    } else if (lightSlot == sRenderer.rsp.lightCount) {
+        sRenderer.rsp.ambientR = src->l.col[0];
+        sRenderer.rsp.ambientG = src->l.col[1];
+        sRenderer.rsp.ambientB = src->l.col[2];
+    }
 }
 
 static void psp_renderer_handle_fillrect(const Gfx* gfx) {
@@ -1642,7 +1902,12 @@ static void psp_renderer_execute_dl(const Gfx* start) {
                 break;
 
             case PSP_GBI_OPCODE(G_MOVEMEM):
+                psp_renderer_handle_movemem(pc);
+                pc++;
+                break;
+
             case PSP_GBI_OPCODE(G_MOVEWORD):
+                psp_renderer_handle_moveword(pc);
                 pc++;
                 break;
 

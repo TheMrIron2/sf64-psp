@@ -19,6 +19,10 @@
 #define PSP_TITLE_ARWING_ENABLED 0
 #endif
 
+#if defined(TARGET_PSP) && !defined(PSP_TITLE_TEAM_ENABLED)
+#define PSP_TITLE_TEAM_ENABLED 0
+#endif
+
 #if defined(TARGET_PSP) && PSP_TRACE_ENABLED
 void PspPlatform_LogLine(const char* line);
 #define PSP_TRACE(msg) PspPlatform_LogLine("[psp] " msg)
@@ -1012,7 +1016,7 @@ void Title_Screen_Draw(void) {
     gAmbientG = D_menu_801B8308;
     gAmbientB = D_menu_801B830C;
 
-#ifndef TARGET_PSP
+#if !defined(TARGET_PSP) || PSP_TITLE_TEAM_ENABLED
     if ((D_menu_801B86A4 < 2) && (D_menu_801B9040 != 0)) {
         D_menu_801B86D8 = RAD_TO_DEG(Math_Atan2F(-D_menu_801B9060, sqrtf(SQ(-D_menu_801B905C) + SQ(-D_menu_801B9064))));
         D_menu_801B86DC = RAD_TO_DEG(Math_Atan2F(D_menu_801B905C, D_menu_801B9064));
@@ -1023,10 +1027,15 @@ void Title_Screen_Draw(void) {
 
     Title_SetLightRot(D_menu_801B86C8, D_menu_801B86CC, 100.0f, &D_menu_801B82E0, &D_menu_801B82E4, &D_menu_801B82E8);
 
+#if defined(TARGET_PSP)
+    Title_Team_Draw(TEAM_FOX);
+    sTitleTeam[TEAM_FOX].frameCount += sTitleTeam[TEAM_FOX].unk_5C;
+#else
     for (i = 0; i < ARRAY_COUNT(D_menu_801ADA84); i++) {
         Title_Team_Draw(D_menu_801ADA84[i]);
         sTitleTeam[D_menu_801ADA84[i]].frameCount += sTitleTeam[D_menu_801ADA84[i]].unk_5C;
     }
+#endif
 #else
     (void) i;
     PSP_TRACE("title screen draw: PSP skip title team models");
@@ -3678,21 +3687,6 @@ void Title_SetCamUp2(f32 arg0, f32 arg1, f32 arg2, f32* arg3, f32* arg4, f32* ar
 }
 
 void Title_SetLightRot(f32 xRot, f32 yRot, f32 zSrc, f32* dirX, f32* dirY, f32* dirZ) {
-#ifdef TARGET_PSP // stub for bringup
-    (void) xRot;
-    (void) yRot;
-
-    if (dirX != NULL) {
-        *dirX = 0.0f;
-    }
-    if (dirY != NULL) {
-        *dirY = 0.0f;
-    }
-    if (dirZ != NULL) {
-        *dirZ = zSrc;
-    }
-    return;
-#else
     f32 xRotTarget;
     f32 yRotTarget;
     Vec3f dest;
@@ -3714,7 +3708,6 @@ void Title_SetLightRot(f32 xRot, f32 yRot, f32 zSrc, f32* dirX, f32* dirY, f32* 
     *dirX = dest.x;
     *dirY = dest.y;
     *dirZ = dest.z;
-#endif
 }
 
 void Title_GetCamRot(f32* xRot, f32* yRot) {
