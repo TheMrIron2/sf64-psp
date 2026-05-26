@@ -355,17 +355,6 @@ static u32 psp_renderer_lit_vertex_color(const PspRspVertex* vertex) {
     f32 b = sRenderer.rsp.ambientB;
     u32 i;
 
-    if (sRenderer.hasModelview) {
-        f32 x = normalX;
-        f32 y = normalY;
-        f32 z = normalZ;
-
-        normalX = (sRenderer.modelview[0][0] * x) + (sRenderer.modelview[1][0] * y) + (sRenderer.modelview[2][0] * z);
-        normalY = (sRenderer.modelview[0][1] * x) + (sRenderer.modelview[1][1] * y) + (sRenderer.modelview[2][1] * z);
-        normalZ = (sRenderer.modelview[0][2] * x) + (sRenderer.modelview[1][2] * y) + (sRenderer.modelview[2][2] * z);
-    }
-    psp_renderer_normalize_vec3(&normalX, &normalY, &normalZ);
-
     for (i = 0; i < sRenderer.rsp.lightCount; i++) {
         const PspRspLight* light = &sRenderer.rsp.lights[i];
         f32 lightX = (f32) light->x;
@@ -373,10 +362,30 @@ static u32 psp_renderer_lit_vertex_color(const PspRspVertex* vertex) {
         f32 lightZ = (f32) light->z;
         f32 dot;
 
+        lightX /= 127.0f;
+        lightY /= 127.0f;
+        lightZ /= 127.0f;
+
+        if (sRenderer.hasModelview) {
+            f32 x = lightX;
+            f32 y = lightY;
+            f32 z = lightZ;
+
+            lightX = (x * sRenderer.modelview[0][0]) + (y * sRenderer.modelview[0][1]) +
+                     (z * sRenderer.modelview[0][2]);
+            lightY = (x * sRenderer.modelview[1][0]) + (y * sRenderer.modelview[1][1]) +
+                     (z * sRenderer.modelview[1][2]);
+            lightZ = (x * sRenderer.modelview[2][0]) + (y * sRenderer.modelview[2][1]) +
+                     (z * sRenderer.modelview[2][2]);
+        }
+
         psp_renderer_normalize_vec3(&lightX, &lightY, &lightZ);
-        dot = -((normalX * lightX) + (normalY * lightY) + (normalZ * lightZ));
+        dot = ((normalX * lightX) + (normalY * lightY) + (normalZ * lightZ)) / 127.0f;
 
         if (dot > 0.0f) {
+            if (dot > 1.0f) {
+                dot = 1.0f;
+            }
             r += light->r * dot;
             g += light->g * dot;
             b += light->b * dot;
