@@ -13,6 +13,7 @@
 #include <psputils.h>
 #include <math.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #define PSP_RENDERER_DL_MAX_DEPTH 8
 #define PSP_RENDERER_DL_MAX_COMMANDS 8192
@@ -33,6 +34,15 @@
 
 #ifndef PSP_RENDERER_DIAGNOSTICS
 #define PSP_RENDERER_DIAGNOSTICS 0
+#endif
+
+#define PSP_LIGHT_VARIANT_RAW 0
+#define PSP_LIGHT_VARIANT_MODELVIEW_ROW 1
+#define PSP_LIGHT_VARIANT_MODELVIEW_COLUMN 2
+#define PSP_LIGHT_VARIANT_MODELVIEW_COLUMN_NEGATED 3
+
+#ifndef PSP_RENDERER_LIGHT_VARIANT
+#define PSP_RENDERER_LIGHT_VARIANT PSP_LIGHT_VARIANT_RAW
 #endif
 
 #define PSP_PRESENT_SCALE ((f32) PSP_SCREEN_HEIGHT / (f32) N64_SCREEN_HEIGHT)
@@ -155,6 +165,24 @@ typedef struct {
     u32 texCacheHits;
     u32 texCacheMisses;
     u32 texRectDrawSkipped;
+#if PSP_RENDERER_DIAGNOSTICS
+    u32 lightTransformLogged;
+    u32 shadeSampleCount;
+    u32 shadeLitCount;
+    u32 shadeMinR;
+    u32 shadeMinG;
+    u32 shadeMinB;
+    u32 shadeMaxR;
+    u32 shadeMaxG;
+    u32 shadeMaxB;
+    u32 shadeSumR;
+    u32 shadeSumG;
+    u32 shadeSumB;
+    s32 shadeDotMilliSum;
+    u32 shadeDotSampleCount;
+    u32 texFuncModulateCount;
+    u32 texFuncReplaceCount;
+#endif
 } PspRendererCensus;
 
 typedef struct {
@@ -346,6 +374,47 @@ static void psp_renderer_normalize_vec3(f32* x, f32* y, f32* z) {
     }
 }
 
+static void psp_renderer_transform_light_vec3(f32 rawX, f32 rawY, f32 rawZ, f32* outX, f32* outY, f32* outZ) {
+    f32 lightX = rawX;
+    f32 lightY = rawY;
+    f32 lightZ = rawZ;
+
+#if PSP_RENDERER_LIGHT_VARIANT == PSP_LIGHT_VARIANT_RAW
+    (void) rawX;
+    (void) rawY;
+    (void) rawZ;
+#elif PSP_RENDERER_LIGHT_VARIANT == PSP_LIGHT_VARIANT_MODELVIEW_ROW
+    if (sRenderer.hasModelview) {
+        lightX = (rawX * sRenderer.modelview[0][0]) + (rawY * sRenderer.modelview[0][1]) +
+                 (rawZ * sRenderer.modelview[0][2]);
+        lightY = (rawX * sRenderer.modelview[1][0]) + (rawY * sRenderer.modelview[1][1]) +
+                 (rawZ * sRenderer.modelview[1][2]);
+        lightZ = (rawX * sRenderer.modelview[2][0]) + (rawY * sRenderer.modelview[2][1]) +
+                 (rawZ * sRenderer.modelview[2][2]);
+    }
+#else
+    if (sRenderer.hasModelview) {
+        lightX = (sRenderer.modelview[0][0] * rawX) + (sRenderer.modelview[1][0] * rawY) +
+                 (sRenderer.modelview[2][0] * rawZ);
+        lightY = (sRenderer.modelview[0][1] * rawX) + (sRenderer.modelview[1][1] * rawY) +
+                 (sRenderer.modelview[2][1] * rawZ);
+        lightZ = (sRenderer.modelview[0][2] * rawX) + (sRenderer.modelview[1][2] * rawY) +
+                 (sRenderer.modelview[2][2] * rawZ);
+    }
+#if PSP_RENDERER_LIGHT_VARIANT == PSP_LIGHT_VARIANT_MODELVIEW_COLUMN_NEGATED
+    lightX = -lightX;
+    lightY = -lightY;
+    lightZ = -lightZ;
+#endif
+#endif
+
+    *outX = lightX;
+    *outY = lightY;
+    *outZ = lightZ;
+}
+
+#include "src/psp/renderer_diag.inc.c"
+
 static u32 psp_renderer_lit_vertex_color(const PspRspVertex* vertex) {
     f32 normalX = (f32) vertex->nx;
     f32 normalY = (f32) vertex->ny;
@@ -353,33 +422,40 @@ static u32 psp_renderer_lit_vertex_color(const PspRspVertex* vertex) {
     f32 r = sRenderer.rsp.ambientR;
     f32 g = sRenderer.rsp.ambientG;
     f32 b = sRenderer.rsp.ambientB;
+    f32 dotSum = 0.0f;
+    u32 dotCount = 0;
+    u32 color;
     u32 i;
 
     for (i = 0; i < sRenderer.rsp.lightCount; i++) {
         const PspRspLight* light = &sRenderer.rsp.lights[i];
-        f32 lightX = (f32) light->x;
-        f32 lightY = (f32) light->y;
-        f32 lightZ = (f32) light->z;
+        f32 rawX = (f32) light->x / 127.0f;
+        f32 rawY = (f32) light->y / 127.0f;
+        f32 rawZ = (f32) light->z / 127.0f;
+        f32 lightX;
+        f32 lightY;
+        f32 lightZ;
+#if PSP_RENDERER_DIAGNOSTICS
+        f32 transformedX;
+        f32 transformedY;
+        f32 transformedZ;
+#endif
         f32 dot;
 
-        lightX /= 127.0f;
-        lightY /= 127.0f;
-        lightZ /= 127.0f;
-
-        if (sRenderer.hasModelview) {
-            f32 x = lightX;
-            f32 y = lightY;
-            f32 z = lightZ;
-
-            lightX = (x * sRenderer.modelview[0][0]) + (y * sRenderer.modelview[0][1]) +
-                     (z * sRenderer.modelview[0][2]);
-            lightY = (x * sRenderer.modelview[1][0]) + (y * sRenderer.modelview[1][1]) +
-                     (z * sRenderer.modelview[1][2]);
-            lightZ = (x * sRenderer.modelview[2][0]) + (y * sRenderer.modelview[2][1]) +
-                     (z * sRenderer.modelview[2][2]);
-        }
+        psp_renderer_transform_light_vec3(rawX, rawY, rawZ, &lightX, &lightY, &lightZ);
+#if PSP_RENDERER_DIAGNOSTICS
+        transformedX = lightX;
+        transformedY = lightY;
+        transformedZ = lightZ;
+#endif
 
         psp_renderer_normalize_vec3(&lightX, &lightY, &lightZ);
+#if PSP_RENDERER_DIAGNOSTICS
+        if (i == 0) {
+            psp_renderer_log_light_transform(light->x, light->y, light->z, transformedX, transformedY, transformedZ,
+                                             lightX, lightY, lightZ);
+        }
+#endif
         dot = ((normalX * lightX) + (normalY * lightY) + (normalZ * lightZ)) / 127.0f;
 
         if (dot > 0.0f) {
@@ -389,15 +465,21 @@ static u32 psp_renderer_lit_vertex_color(const PspRspVertex* vertex) {
             r += light->r * dot;
             g += light->g * dot;
             b += light->b * dot;
+            dotSum += dot;
+            dotCount++;
         }
     }
 
-    return psp_rgba32(
+    color = psp_rgba32(
         (u8) psp_renderer_clamp_s32((s32) r, 0, 255),
         (u8) psp_renderer_clamp_s32((s32) g, 0, 255),
         (u8) psp_renderer_clamp_s32((s32) b, 0, 255),
         psp_renderer_modulate_u8(vertex->alpha, psp_rgba32_alpha(sRenderer.rdp.primColor))
     );
+#if PSP_RENDERER_DIAGNOSTICS
+    psp_renderer_record_shade_sample(color, dotSum, dotCount);
+#endif
+    return color;
 }
 
 static u32 psp_renderer_shade_vertex_color(const PspRspVertex* vertex) {
@@ -428,6 +510,19 @@ static u32 psp_renderer_vertex_color(const PspRspVertex* vertex) {
         case PSP_COMBINE_UNKNOWN:
         default:
             return shadeColor;
+    }
+}
+
+static void psp_renderer_clear_directional_lights(void) {
+    u32 i;
+
+    for (i = 0; i < ARRAY_COUNT(sRenderer.rsp.lights); i++) {
+        sRenderer.rsp.lights[i].r = 0;
+        sRenderer.rsp.lights[i].g = 0;
+        sRenderer.rsp.lights[i].b = 0;
+        sRenderer.rsp.lights[i].x = 0;
+        sRenderer.rsp.lights[i].y = 0;
+        sRenderer.rsp.lights[i].z = 0;
     }
 }
 
@@ -517,15 +612,6 @@ static void psp_renderer_apply_rsp_alpha_state(void) {
     }
 }
 
-#if PSP_RENDERER_DIAGNOSTICS
-static char* psp_renderer_append_text(char* out, const char* text) {
-    while ((text != NULL) && (*text != '\0')) {
-        *out++ = *text++;
-    }
-    return out;
-}
-#endif
-
 static void psp_renderer_draw_rsp_triangle(u8 i0, u8 i1, u8 i2) {
     PspRendererTexture texture;
     PspVertex2DTexture* v;
@@ -541,6 +627,7 @@ static void psp_renderer_draw_rsp_triangle(u8 i0, u8 i1, u8 i2) {
     u32 i;
     int requestedTexture;
     int useTexture;
+    int texModulates;
 
     if ((i0 >= ARRAY_COUNT(sRenderer.vertices)) ||
         (i1 >= ARRAY_COUNT(sRenderer.vertices)) ||
@@ -637,7 +724,15 @@ static void psp_renderer_draw_rsp_triangle(u8 i0, u8 i1, u8 i2) {
         sceGuEnable(GU_TEXTURE_2D);
         sceGuTexMode(GU_PSM_8888, 0, 0, GU_FALSE);
         sceGuTexImage(0, texture.textureWidth, texture.textureHeight, texture.textureWidth, texture.pixels);
-        sceGuTexFunc(psp_renderer_should_modulate_texture() ? GU_TFX_MODULATE : GU_TFX_REPLACE, GU_TCC_RGBA);
+        texModulates = psp_renderer_should_modulate_texture();
+#if PSP_RENDERER_DIAGNOSTICS
+        if (texModulates) {
+            sRenderer.census.texFuncModulateCount++;
+        } else {
+            sRenderer.census.texFuncReplaceCount++;
+        }
+#endif
+        sceGuTexFunc(texModulates ? GU_TFX_MODULATE : GU_TFX_REPLACE, GU_TCC_RGBA);
         sceGuTexFilter(GU_NEAREST, GU_NEAREST);
         sceGuTexWrap(GU_CLAMP, GU_CLAMP);
         sceGuTexScale(1.0f / (f32) texture.textureWidth, 1.0f / (f32) texture.textureHeight);
@@ -757,46 +852,6 @@ static void psp_renderer_handle_tri2(const Gfx* gfx) {
     psp_renderer_draw_rsp_triangle(a1, b1, c1);
 }
 
-#if PSP_RENDERER_DIAGNOSTICS
-static char* psp_renderer_append_u32(char* out, u32 value) {
-    char digits[10];
-    s32 count = 0;
-
-    if (value == 0) {
-        *out++ = '0';
-        return out;
-    }
-
-    while (value != 0) {
-        digits[count++] = (char) ('0' + (value % 10));
-        value /= 10;
-    }
-    while (count > 0) {
-        *out++ = digits[--count];
-    }
-    return out;
-}
-
-static void psp_renderer_log_pair(char** out, const char* label, u32 value) {
-    *out = psp_renderer_append_text(*out, label);
-    *out = psp_renderer_append_u32(*out, value);
-}
-
-static char* psp_renderer_append_s32(char* out, s32 value) {
-    if (value < 0) {
-        *out++ = '-';
-        value = -value;
-    }
-    return psp_renderer_append_u32(out, (u32) value);
-}
-
-static void psp_renderer_log_signed_pair(char** out, const char* label, s32 value) {
-    *out = psp_renderer_append_text(*out, label);
-    *out = psp_renderer_append_s32(*out, value);
-}
-
-#endif
-
 static s32 psp_renderer_clamp_s32(s32 value, s32 min, s32 max) {
     if (value < min) {
         return min;
@@ -832,6 +887,24 @@ static void psp_renderer_reset_census(void) {
     sRenderer.census.texCacheHits = 0;
     sRenderer.census.texCacheMisses = 0;
     sRenderer.census.texRectDrawSkipped = 0;
+#if PSP_RENDERER_DIAGNOSTICS
+    sRenderer.census.lightTransformLogged = 0;
+    sRenderer.census.shadeSampleCount = 0;
+    sRenderer.census.shadeLitCount = 0;
+    sRenderer.census.shadeMinR = 255;
+    sRenderer.census.shadeMinG = 255;
+    sRenderer.census.shadeMinB = 255;
+    sRenderer.census.shadeMaxR = 0;
+    sRenderer.census.shadeMaxG = 0;
+    sRenderer.census.shadeMaxB = 0;
+    sRenderer.census.shadeSumR = 0;
+    sRenderer.census.shadeSumG = 0;
+    sRenderer.census.shadeSumB = 0;
+    sRenderer.census.shadeDotMilliSum = 0;
+    sRenderer.census.shadeDotSampleCount = 0;
+    sRenderer.census.texFuncModulateCount = 0;
+    sRenderer.census.texFuncReplaceCount = 0;
+#endif
 
     for (i = 0; i < ARRAY_COUNT(sRenderer.census.unsupported); i++) {
         sRenderer.census.unsupported[i] = 0;
@@ -856,76 +929,6 @@ static void psp_renderer_note_unsupported(u8 opcode) {
     sRenderer.census.unsupported[opcode]++;
 }
 
-#if PSP_RENDERER_DIAGNOSTICS
-static u8 psp_renderer_top_unsupported(void) {
-    u32 i;
-    u32 bestCount = 0;
-    u8 bestOpcode = 0;
-
-    for (i = 0; i < ARRAY_COUNT(sRenderer.census.unsupported); i++) {
-        if (sRenderer.census.unsupported[i] > bestCount) {
-            bestCount = sRenderer.census.unsupported[i];
-            bestOpcode = (u8) i;
-        }
-    }
-    return bestOpcode;
-}
-
-static void psp_renderer_log_census(u32 taskIndex) {
-    char line[256];
-    char* out = line;
-
-    if ((taskIndex > 4) && ((taskIndex % 30) != 0)) {
-        return;
-    }
-
-    out = psp_renderer_append_text(out, "[psp] renderer:");
-    psp_renderer_log_pair(&out, " task ", taskIndex);
-    psp_renderer_log_pair(&out, " bytes ", sRenderer.census.taskBytes);
-    psp_renderer_log_pair(&out, " cmds ", sRenderer.census.commandCount);
-    psp_renderer_log_pair(&out, " dl ", sRenderer.census.dlCount);
-    psp_renderer_log_pair(&out, " fill ", sRenderer.census.fillRectCount);
-    psp_renderer_log_pair(&out, " tex ", sRenderer.census.texRectCount + sRenderer.census.texRectFlipCount);
-    psp_renderer_log_pair(&out, " drawn ", sRenderer.census.texturedRectCount + sRenderer.census.placeholderRectCount);
-    psp_renderer_log_pair(&out, " skip ", sRenderer.census.texRectDrawSkipped);
-    psp_renderer_log_pair(&out, " bad ", sRenderer.census.validationFailures + sRenderer.census.rangeRejects);
-    *out = '\0';
-    PspPlatform_LogLine(line);
-
-    if (sRenderer.census.unsupportedCount != 0) {
-        out = line;
-        out = psp_renderer_append_text(out, "[psp] renderer unsupported:");
-        psp_renderer_log_pair(&out, " kinds ", sRenderer.census.unsupportedCount);
-        psp_renderer_log_pair(&out, " top ", psp_renderer_top_unsupported());
-        *out = '\0';
-        PspPlatform_LogLine(line);
-    }
-
-    if (sRenderer.rsp.lightCount != 0) {
-        const PspRspLight* light = &sRenderer.rsp.lights[0];
-
-        out = line;
-        out = psp_renderer_append_text(out, "[psp] renderer light:");
-        psp_renderer_log_pair(&out, " count ", sRenderer.rsp.lightCount);
-        psp_renderer_log_pair(&out, " ambR ", sRenderer.rsp.ambientR);
-        psp_renderer_log_pair(&out, " ambG ", sRenderer.rsp.ambientG);
-        psp_renderer_log_pair(&out, " ambB ", sRenderer.rsp.ambientB);
-        psp_renderer_log_pair(&out, " l0R ", light->r);
-        psp_renderer_log_pair(&out, " l0G ", light->g);
-        psp_renderer_log_pair(&out, " l0B ", light->b);
-        psp_renderer_log_signed_pair(&out, " x ", light->x);
-        psp_renderer_log_signed_pair(&out, " y ", light->y);
-        psp_renderer_log_signed_pair(&out, " z ", light->z);
-        *out = '\0';
-        PspPlatform_LogLine(line);
-    }
-}
-#else
-static void psp_renderer_log_census(u32 taskIndex) {
-    (void) taskIndex;
-}
-#endif
-
 static void psp_renderer_reset_rdp_state(void) {
     sRenderer.rdp.primColor = psp_rgba32(255, 255, 255, 255);
     sRenderer.rdp.fillColor = psp_rgba32(0, 0, 0, 255);
@@ -945,6 +948,7 @@ static void psp_renderer_reset_rdp_state(void) {
     sRenderer.rsp.ambientR = 255;
     sRenderer.rsp.ambientG = 255;
     sRenderer.rsp.ambientB = 255;
+    psp_renderer_clear_directional_lights();
     psp_renderer_identity_mtx(sRenderer.modelview);
     psp_renderer_identity_mtx(sRenderer.projection);
     sRenderer.hasModelview = 0;
@@ -1248,82 +1252,7 @@ static void psp_renderer_draw_solid_rect(s32 ulx, s32 uly, s32 lrx, s32 lry, u32
     );
 }
 
-static void psp_renderer_draw_starfield_batch(void) {
-    PspVertex2DColor* vertices;
-    u32 i;
-    u32 out = 0;
-
-    if (!sStarfieldReady || (sStarfieldCount == 0)) {
-        return;
-    }
-
-    vertices = (PspVertex2DColor*) sceGuGetMemory(sStarfieldCount * 6 * sizeof(PspVertex2DColor));
-    if (vertices == NULL) {
-        sRenderer.census.validationFailures++;
-        sStarfieldReady = 0;
-        return;
-    }
-
-    for (i = 0; i < sStarfieldCount; i++) {
-        PspStarPoint* star = &sStarfieldStars[i];
-        s16 x0 = (s16) PSP_COORD_X(star->x);
-        s16 y0 = (s16) PSP_COORD_Y(star->y);
-        s16 x1 = (s16) PSP_COORD_X(star->x + 1);
-        s16 y1 = (s16) PSP_COORD_Y(star->y + 1);
-        u32 color = star->color;
-
-        vertices[out].color = color;
-        vertices[out].x = x0;
-        vertices[out].y = y0;
-        vertices[out].z = 0;
-        out++;
-
-        vertices[out].color = color;
-        vertices[out].x = x1;
-        vertices[out].y = y0;
-        vertices[out].z = 0;
-        out++;
-
-        vertices[out].color = color;
-        vertices[out].x = x0;
-        vertices[out].y = y1;
-        vertices[out].z = 0;
-        out++;
-
-        vertices[out].color = color;
-        vertices[out].x = x1;
-        vertices[out].y = y0;
-        vertices[out].z = 0;
-        out++;
-
-        vertices[out].color = color;
-        vertices[out].x = x1;
-        vertices[out].y = y1;
-        vertices[out].z = 0;
-        out++;
-
-        vertices[out].color = color;
-        vertices[out].x = x0;
-        vertices[out].y = y1;
-        vertices[out].z = 0;
-        out++;
-    }
-
-    sceKernelDcacheWritebackRange(vertices, out * sizeof(PspVertex2DColor));
-
-    sceGuDisable(GU_TEXTURE_2D);
-    sceGuDrawArray(
-        GU_TRIANGLES,
-        GU_COLOR_8888 | GU_VERTEX_16BIT | GU_TRANSFORM_2D,
-        out,
-        0,
-        vertices
-    );
-
-    // consume once so a frame that does not submit stars does not keep drawing stale stars
-
-    sStarfieldReady = 0;
-}
+#include "src/psp/renderer_starfield.inc.c"
 
 static void psp_renderer_draw_textured_rect(s32 ulx, s32 uly, s32 lrx, s32 lry, u32 width, u32 height, u32 sourceS, u32 sourceT) {
     PspRendererTexture texture;
@@ -1607,6 +1536,18 @@ static void psp_renderer_handle_moveword(const Gfx* gfx) {
         lightCount = PSP_RENDERER_MAX_LIGHTS;
     }
     sRenderer.rsp.lightCount = lightCount;
+    psp_renderer_clear_directional_lights();
+#if PSP_RENDERER_DIAGNOSTICS
+    {
+        char line[160];
+
+        snprintf(line, sizeof(line), "[psp] renderer gSPNumLights raw %lu dirCount %lu mode %lu",
+                 (unsigned long) data,
+                 (unsigned long) sRenderer.rsp.lightCount,
+                 (unsigned long) sRenderer.rsp.mode);
+        PspPlatform_LogLine(line);
+    }
+#endif
 }
 
 static void psp_renderer_handle_movemem(const Gfx* gfx) {
@@ -1631,10 +1572,40 @@ static void psp_renderer_handle_movemem(const Gfx* gfx) {
         sRenderer.rsp.lights[lightSlot].x = src->l.dir[0];
         sRenderer.rsp.lights[lightSlot].y = src->l.dir[1];
         sRenderer.rsp.lights[lightSlot].z = src->l.dir[2];
+#if PSP_RENDERER_DIAGNOSTICS
+        {
+            char line[192];
+
+            snprintf(line, sizeof(line),
+                     "[psp] renderer gSPLight slot %lu directional rgb %u,%u,%u dir %ld,%ld,%ld mode %lu",
+                     (unsigned long) lightSlot,
+                     src->l.col[0],
+                     src->l.col[1],
+                     src->l.col[2],
+                     (long) src->l.dir[0],
+                     (long) src->l.dir[1],
+                     (long) src->l.dir[2],
+                     (unsigned long) sRenderer.rsp.mode);
+            PspPlatform_LogLine(line);
+        }
+#endif
     } else if (lightSlot == sRenderer.rsp.lightCount) {
         sRenderer.rsp.ambientR = src->l.col[0];
         sRenderer.rsp.ambientG = src->l.col[1];
         sRenderer.rsp.ambientB = src->l.col[2];
+#if PSP_RENDERER_DIAGNOSTICS
+        {
+            char line[160];
+
+            snprintf(line, sizeof(line), "[psp] renderer gSPLight slot %lu ambient rgb %u,%u,%u mode %lu",
+                     (unsigned long) lightSlot,
+                     src->l.col[0],
+                     src->l.col[1],
+                     src->l.col[2],
+                     (unsigned long) sRenderer.rsp.mode);
+            PspPlatform_LogLine(line);
+        }
+#endif
     }
 }
 
@@ -1944,28 +1915,6 @@ static void psp_renderer_execute_dl(const Gfx* start) {
 
     sRenderer.census.commandLimitHit++;
     PspPlatform_LogLine("[psp] renderer: command limit");
-}
-
-void PspRenderer_BeginStarfield(void) {
-    sStarfieldCount = 0;
-    sStarfieldReady = 0;
-}
-
-void PspRenderer_AddStar(s16 x, s16 y, u32 color) {
-    PspStarPoint* star;
-
-    if (sStarfieldCount >= ARRAY_COUNT(sStarfieldStars)) {
-        return;
-    }
-
-    star = &sStarfieldStars[sStarfieldCount++];
-    star->x = x;
-    star->y = y;
-    star->color = color;
-}
-
-void PspRenderer_EndStarfield(void) {
-    sStarfieldReady = 1;
 }
 
 void PspRenderer_Init(void) {
