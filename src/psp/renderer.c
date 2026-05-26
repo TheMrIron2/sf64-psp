@@ -41,8 +41,16 @@
 #define PSP_LIGHT_VARIANT_MODELVIEW_COLUMN 2
 #define PSP_LIGHT_VARIANT_MODELVIEW_COLUMN_NEGATED 3
 
+#define PSP_NORMAL_VARIANT_RAW 0
+#define PSP_NORMAL_VARIANT_MODELVIEW 1
+#define PSP_NORMAL_VARIANT_MODELVIEW_NEGATED 2
+
 #ifndef PSP_RENDERER_LIGHT_VARIANT
 #define PSP_RENDERER_LIGHT_VARIANT PSP_LIGHT_VARIANT_RAW
+#endif
+
+#ifndef PSP_RENDERER_NORMAL_VARIANT
+#define PSP_RENDERER_NORMAL_VARIANT PSP_NORMAL_VARIANT_RAW
 #endif
 
 #define PSP_PRESENT_SCALE ((f32) PSP_SCREEN_HEIGHT / (f32) N64_SCREEN_HEIGHT)
@@ -413,12 +421,42 @@ static void psp_renderer_transform_light_vec3(f32 rawX, f32 rawY, f32 rawZ, f32*
     *outZ = lightZ;
 }
 
+static void psp_renderer_transform_normal_vec3(f32 rawX, f32 rawY, f32 rawZ, f32* outX, f32* outY, f32* outZ) {
+    f32 normalX = rawX;
+    f32 normalY = rawY;
+    f32 normalZ = rawZ;
+
+#if PSP_RENDERER_NORMAL_VARIANT == PSP_NORMAL_VARIANT_RAW
+    (void) rawX;
+    (void) rawY;
+    (void) rawZ;
+#else
+    if (sRenderer.hasModelview) {
+        normalX = (sRenderer.modelview[0][0] * rawX) + (sRenderer.modelview[1][0] * rawY) +
+                  (sRenderer.modelview[2][0] * rawZ);
+        normalY = (sRenderer.modelview[0][1] * rawX) + (sRenderer.modelview[1][1] * rawY) +
+                  (sRenderer.modelview[2][1] * rawZ);
+        normalZ = (sRenderer.modelview[0][2] * rawX) + (sRenderer.modelview[1][2] * rawY) +
+                  (sRenderer.modelview[2][2] * rawZ);
+    }
+#if PSP_RENDERER_NORMAL_VARIANT == PSP_NORMAL_VARIANT_MODELVIEW_NEGATED
+    normalX = -normalX;
+    normalY = -normalY;
+    normalZ = -normalZ;
+#endif
+#endif
+
+    *outX = normalX;
+    *outY = normalY;
+    *outZ = normalZ;
+}
+
 #include "src/psp/renderer_diag.inc.c"
 
 static u32 psp_renderer_lit_vertex_color(const PspRspVertex* vertex) {
-    f32 normalX = (f32) vertex->nx;
-    f32 normalY = (f32) vertex->ny;
-    f32 normalZ = (f32) vertex->nz;
+    f32 normalX;
+    f32 normalY;
+    f32 normalZ;
     f32 r = sRenderer.rsp.ambientR;
     f32 g = sRenderer.rsp.ambientG;
     f32 b = sRenderer.rsp.ambientB;
@@ -426,6 +464,10 @@ static u32 psp_renderer_lit_vertex_color(const PspRspVertex* vertex) {
     u32 dotCount = 0;
     u32 color;
     u32 i;
+
+    psp_renderer_transform_normal_vec3((f32) vertex->nx, (f32) vertex->ny, (f32) vertex->nz, &normalX, &normalY,
+                                       &normalZ);
+    psp_renderer_normalize_vec3(&normalX, &normalY, &normalZ);
 
     for (i = 0; i < sRenderer.rsp.lightCount; i++) {
         const PspRspLight* light = &sRenderer.rsp.lights[i];
@@ -456,7 +498,7 @@ static u32 psp_renderer_lit_vertex_color(const PspRspVertex* vertex) {
                                              lightX, lightY, lightZ);
         }
 #endif
-        dot = ((normalX * lightX) + (normalY * lightY) + (normalZ * lightZ)) / 127.0f;
+        dot = (normalX * lightX) + (normalY * lightY) + (normalZ * lightZ);
 
         if (dot > 0.0f) {
             if (dot > 1.0f) {

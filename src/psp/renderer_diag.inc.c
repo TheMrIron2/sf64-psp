@@ -11,6 +11,16 @@ static const char* psp_renderer_light_variant_name(void) {
 #endif
 }
 
+static const char* psp_renderer_normal_variant_name(void) {
+#if PSP_RENDERER_NORMAL_VARIANT == PSP_NORMAL_VARIANT_RAW
+    return "raw";
+#elif PSP_RENDERER_NORMAL_VARIANT == PSP_NORMAL_VARIANT_MODELVIEW_NEGATED
+    return "modelview-negated";
+#else
+    return "modelview";
+#endif
+}
+
 static char* psp_renderer_append_text(char* out, const char* text) {
     while ((text != NULL) && (*text != '\0')) {
         *out++ = *text++;
@@ -64,8 +74,9 @@ static void psp_renderer_log_light_transform(s32 rawX, s32 rawY, s32 rawZ, f32 t
     }
     sRenderer.census.lightTransformLogged = 1;
     snprintf(line, sizeof(line),
-             "[psp] renderer light transform variant %s raw %ld,%ld,%ld transformed %ld,%ld,%ld normalized %ld,%ld,%ld mode %lu",
+             "[psp] renderer light transform variant %s normal %s raw %ld,%ld,%ld transformed %ld,%ld,%ld normalized %ld,%ld,%ld mode %lu",
              psp_renderer_light_variant_name(),
+             psp_renderer_normal_variant_name(),
              (long) rawX,
              (long) rawY,
              (long) rawZ,

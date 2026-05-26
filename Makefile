@@ -122,6 +122,9 @@ endif
 ifneq ($(PSP_RENDERER_LIGHT_VARIANT),)
 CFLAGS += -DPSP_RENDERER_LIGHT_VARIANT=$(PSP_RENDERER_LIGHT_VARIANT)
 endif
+ifneq ($(PSP_RENDERER_NORMAL_VARIANT),)
+CFLAGS += -DPSP_RENDERER_NORMAL_VARIANT=$(PSP_RENDERER_NORMAL_VARIANT)
+endif
 ifeq ($(PSP_TITLE_ARWING),1)
 CFLAGS += -DPSP_TITLE_ARWING_ENABLED=1
 endif
@@ -155,6 +158,7 @@ O_FILES := $(patsubst %.c,$(BUILD_DIR)/%.o,$(C_FILES))
 DEP_FILES := $(O_FILES:.o=.d)
 ASSET_C_FILES := $(filter src/assets/%,$(PSP_GAME_C_FILES))
 ASSET_PREFLIGHT_STAMP := $(BUILD_DIR)/asset-preflight.stamp
+COMPILE_FLAGS_STAMP := $(BUILD_DIR)/compile-flags.stamp
 
 check-python-deps:
 	@$(PYTHON) -c "import yaml" || (echo "Missing Python deps. Run: make python-deps  or  make venv" && false)
@@ -247,7 +251,12 @@ ifneq ($(PROFILE_PSP),1)
 	$(V)$(PSP_FIXUP_IMPORTS) $@
 endif
 
-$(BUILD_DIR)/%.o: %.c Makefile src/psp/sources.mk
+$(COMPILE_FLAGS_STAMP): FORCE
+	@mkdir -p $(dir $@)
+	@printf '%s\n' '$(CFLAGS)' > $@.tmp
+	@if ! cmp -s $@.tmp $@; then mv $@.tmp $@; else rm -f $@.tmp; fi
+
+$(BUILD_DIR)/%.o: %.c Makefile src/psp/sources.mk $(COMPILE_FLAGS_STAMP)
 	@mkdir -p $(dir $@)
 	$(call print,Compiling:,$<,$@)
 	$(V)$(CC) -c $(CFLAGS) $(source_warning_flags) -I$(dir $*) -o $@ $<
@@ -261,4 +270,4 @@ print-%:
 
 -include $(DEP_FILES)
 
-.PHONY: tools-init toolchain torch init decompress extract assets clean-generated
+.PHONY: tools-init toolchain torch init decompress extract assets clean-generated FORCE
