@@ -5,6 +5,15 @@
 
 PSP_BOOTSTRAP_C_FILES := src/psp/main.c
 
+ifeq ($(PSP_RENDERER_BACKEND),legacy_rsp)
+PSP_RENDERER_C_FILES := \
+    src/psp/renderer.c \
+    src/psp/renderer_texture.c
+else ifeq ($(PSP_RENDERER_BACKEND),pspgl)
+PSP_RENDERER_C_FILES := \
+    src/psp/renderer_pspgl.c
+endif
+
 PSP_GAME_C_FILES := \
     src/buffers.c \
     src/dmatable.c \
@@ -145,8 +154,7 @@ PSP_GAME_C_FILES := \
     src/psp/main.c \
     src/psp/platform.c \
     src/psp/ultra_reimpl.c \
-    src/psp/renderer.c \
-    src/psp/renderer_texture.c \
+    $(PSP_RENDERER_C_FILES) \
     src/sys/sys_fault.c \
     src/sys/sys_joybus.c \
     src/sys/sys_lib.c \

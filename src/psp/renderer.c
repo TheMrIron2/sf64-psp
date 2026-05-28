@@ -50,7 +50,7 @@
 #endif
 
 #ifndef PSP_RENDERER_NORMAL_VARIANT
-#define PSP_RENDERER_NORMAL_VARIANT PSP_NORMAL_VARIANT_RAW
+#define PSP_RENDERER_NORMAL_VARIANT PSP_NORMAL_VARIANT_MODELVIEW
 #endif
 
 #define PSP_PRESENT_SCALE ((f32) PSP_SCREEN_HEIGHT / (f32) N64_SCREEN_HEIGHT)
@@ -987,9 +987,9 @@ static void psp_renderer_reset_rdp_state(void) {
     sRenderer.rsp.mode = 0;
     sRenderer.rsp.textureEnabled = 0;
     sRenderer.rsp.lightCount = 0;
-    sRenderer.rsp.ambientR = 255;
-    sRenderer.rsp.ambientG = 255;
-    sRenderer.rsp.ambientB = 255;
+    sRenderer.rsp.ambientR = 0;
+    sRenderer.rsp.ambientG = 0;
+    sRenderer.rsp.ambientB = 0;
     psp_renderer_clear_directional_lights();
     psp_renderer_identity_mtx(sRenderer.modelview);
     psp_renderer_identity_mtx(sRenderer.projection);
@@ -1565,31 +1565,48 @@ static void psp_renderer_handle_moveword(const Gfx* gfx) {
     u32 index = gfx->words.w0 & 0xFF;
     u32 data = gfx->words.w1;
     u32 lightCount;
+    u32 lightIndex;
 
-    if ((index != G_MW_NUMLIGHT) || (offset != G_MWO_NUMLIGHT)) {
+    if ((index == G_MW_NUMLIGHT) && (offset == G_MWO_NUMLIGHT)) {
+        /*
+         * For this non-F3DEX2 path, NUML(n) is:
+         *   ((n + 1) * 32) + 0x80000000
+         *
+         * Mask the high bit, divide by 32, then subtract the ambient slot.
+         */
+        lightCount = ((data & 0x7FFFFFFF) / 32U);
+        if (lightCount != 0) {
+            lightCount--;
+        }
+        if (lightCount > PSP_RENDERER_MAX_LIGHTS) {
+            lightCount = PSP_RENDERER_MAX_LIGHTS;
+        }
+
+        sRenderer.rsp.lightCount = lightCount;
+        psp_renderer_clear_directional_lights();
         return;
     }
 
-    lightCount = ((data & 0x7FFFFFFF) / 32U);
-    if (lightCount != 0) {
-        lightCount--;
-    }
-    if (lightCount > PSP_RENDERER_MAX_LIGHTS) {
-        lightCount = PSP_RENDERER_MAX_LIGHTS;
-    }
-    sRenderer.rsp.lightCount = lightCount;
-    psp_renderer_clear_directional_lights();
-#if PSP_RENDERER_DIAGNOSTICS
-    {
-        char line[160];
+    if (index == G_MW_LIGHTCOL) {
+        /*
+         * gSPLightColor writes both G_MWO_aLIGHT_n and G_MWO_bLIGHT_n.
+         * Both carry the same RGB value; accept either.
+         */
+        if (((offset & 0x1F) == 0x00) || ((offset & 0x1F) == 0x04)) {
+            lightIndex = offset >> 5;
 
-        snprintf(line, sizeof(line), "[psp] renderer gSPNumLights raw %lu dirCount %lu mode %lu",
-                 (unsigned long) data,
-                 (unsigned long) sRenderer.rsp.lightCount,
-                 (unsigned long) sRenderer.rsp.mode);
-        PspPlatform_LogLine(line);
+            if (lightIndex < PSP_RENDERER_MAX_LIGHTS) {
+                sRenderer.rsp.lights[lightIndex].r = (u8) ((data >> 24) & 0xFF);
+                sRenderer.rsp.lights[lightIndex].g = (u8) ((data >> 16) & 0xFF);
+                sRenderer.rsp.lights[lightIndex].b = (u8) ((data >> 8) & 0xFF);
+            } else if (lightIndex == sRenderer.rsp.lightCount) {
+                sRenderer.rsp.ambientR = (u8) ((data >> 24) & 0xFF);
+                sRenderer.rsp.ambientG = (u8) ((data >> 16) & 0xFF);
+                sRenderer.rsp.ambientB = (u8) ((data >> 8) & 0xFF);
+            }
+        }
+        return;
     }
-#endif
 }
 
 static void psp_renderer_handle_movemem(const Gfx* gfx) {

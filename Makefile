@@ -18,6 +18,7 @@ VERSION ?= us
 REV ?= rev1
 PSP_FULL ?= 1
 PROFILE_PSP ?= 0
+PSP_RENDERER_BACKEND ?= legacy_rsp
 COLOR ?= 1
 VERBOSE ?= 0
 N_THREADS ?= $(shell nproc 2>/dev/null || echo 1)
@@ -41,6 +42,7 @@ PSP_PRXGEN ?= psp-prxgen
 MKSFOEX ?= mksfoex
 PACK_PBP ?= pack-pbp
 PSP_STRIP ?= psp-strip
+PSPGL_CONFIG ?= pspgl-config
 
 PSPSDK ?= $(shell $(PSP_CONFIG) --pspsdk-path 2>/dev/null)
 PSPDEV ?= $(shell $(PSP_CONFIG) --psp-prefix 2>/dev/null | sed 's,/psp$$,,')
@@ -133,6 +135,30 @@ CFLAGS += -DPSP_TITLE_ARWING_ENABLED=1
 endif
 ifeq ($(PSP_TITLE_TEAM),1)
 CFLAGS += -DPSP_TITLE_TEAM_ENABLED=1
+endif
+
+ifeq ($(PSP_RENDERER_BACKEND),legacy_rsp)
+else ifeq ($(PSP_RENDERER_BACKEND),pspgl)
+PSPGL_CONFIG_PATH := $(shell command -v $(PSPGL_CONFIG) 2>/dev/null)
+ifneq ($(PSPGL_CONFIG_PATH),)
+PSPGL_CFLAGS := $(shell $(PSPGL_CONFIG) --cflags)
+PSPGL_LIBS := $(shell $(PSPGL_CONFIG) --libs)
+else
+PSPGL_HEADER := $(firstword $(wildcard $(PSPDEV)/psp/include/GLES/egl.h) $(wildcard $(PSPDEV)/psp/include/GL/gl.h))
+PSPGL_LIBRARY := $(firstword $(wildcard $(PSPDEV)/psp/lib/libGL.a))
+ifeq ($(PSPGL_HEADER),)
+$(error PSPGL not found. Install PSPGL or build with PSP_RENDERER_BACKEND=legacy_rsp.)
+endif
+ifeq ($(PSPGL_LIBRARY),)
+$(error PSPGL not found. Install PSPGL or build with PSP_RENDERER_BACKEND=legacy_rsp.)
+endif
+PSPGL_CFLAGS :=
+PSPGL_LIBS := -lGL -lpspvfpu
+endif
+CFLAGS += -DPSP_RENDERER_BACKEND_PSPGL=1 $(PSPGL_CFLAGS)
+PSP_LIBS := $(PSPGL_LIBS) $(PSP_LIBS)
+else
+$(error Unknown PSP_RENDERER_BACKEND '$(PSP_RENDERER_BACKEND)'. Supported backends: legacy_rsp pspgl)
 endif
 
 LDFLAGS := -L$(PSPDEV)/psp/lib -L$(PSPSDK)/lib
