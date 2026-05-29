@@ -74,7 +74,7 @@ Starship renderer semantics
     -> improve PSPGL and/or replace hot paths with direct GU
 ```
 
-This follows the Dreamcast port’s precedent of relying on the GL renderer path rather than rebuilding the N64 renderer from first principles.
+This follows the Dreamcast port’s precedent of relying on the GL renderer path rather than rebuilding the N64 renderer from first principles. The Dreamcast `sf64-dc` port and its GLdc renderer should be treated as the highest-priority renderer reference before attempting to backport modern Starship/libultraship renderer code, because it already represents a legacy OpenGL-style console backend much closer to PSPGL’s likely feature profile.
 
 ## Why PSPGL first?
 
