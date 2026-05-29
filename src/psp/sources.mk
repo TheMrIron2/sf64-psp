@@ -11,6 +11,8 @@ PSP_RENDERER_C_FILES := \
     src/psp/renderer_texture.c
 else ifeq ($(PSP_RENDERER_BACKEND),pspgl)
 PSP_RENDERER_C_FILES := \
+    src/psp/gfx/gfx_psp.c \
+    src/psp/gfx/gfx_pspgl.c \
     src/psp/renderer_pspgl.c
 endif
 
