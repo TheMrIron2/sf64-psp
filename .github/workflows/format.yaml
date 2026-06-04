@@ -4,13 +4,22 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      scope:
+        description: "Format scope"
+        required: true
+        default: "psp"
+        type: choice
+        options:
+          - psp
+          - full
 
 permissions:
   contents: read
 
 jobs:
   format:
-    name: Check format
+    name: Check format (${{ github.event.inputs.scope || 'psp' }})
     runs-on: ubuntu-latest
 
     steps:
@@ -22,5 +31,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y python3 python3-pip clang-format-14 clang-tidy-14
 
-      - name: Check format
+      - name: Check PSP format
+        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.scope == 'psp' }}
+        run: |
+          find src/psp -type f \( -name '*.c' -o -name '*.h' -o -name '*.inc.c' \) -print0 \
+            | xargs -0 clang-format-14 --dry-run --Werror
+
+      - name: Check full inherited format
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.scope == 'full' }}
         run: ./tools/check_format.sh
