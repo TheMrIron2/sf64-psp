@@ -1,5 +1,7 @@
 # Star Fox 64 PSP
 
+[![CI](https://github.com/TheMrIron2/sf64-psp/actions/workflows/ci.yaml/badge.svg)](https://github.com/TheMrIron2/sf64-psp/actions/workflows/ci.yaml)
+
 A work-in-progress port of **Star Fox 64** to PSP, based on the SF64 decomp project.
 
 This port has a few key goals:
