@@ -28,9 +28,13 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Install Python
+        run: |
+          apk add --no-cache python3 py3-pip
+
       - name: Install Python dependencies
         run: |
-          python3 -m pip install -r tools/requirements-python.txt
+          python3 -m pip install --break-system-packages -r tools/requirements-python.txt
 
       - name: Show toolchain info
         run: |
