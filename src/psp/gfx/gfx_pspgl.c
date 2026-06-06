@@ -1,8 +1,8 @@
+#include "src/psp/gfx/gfx_psp.h"
 #include "src/psp/gfx/gfx_pspgl.h"
 
-#include "src/psp/gfx/gfx_psp.h"
-
 #include <GLES/gl.h>
+#include <stddef.h>
 
 typedef struct {
     GLfloat x;
@@ -70,5 +70,21 @@ void PspGfxPspgl_DrawTestTriangle(void) {
     glVertexPointer(3, GL_FLOAT, 0, sTriangleVertices);
     glColorPointer(4, GL_FLOAT, 0, sTriangleColors);
     glDrawArrays(GL_TRIANGLES, 0, 3);
+    glFlush();
+}
+
+void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u32 vertexCount) {
+    if ((vertices == NULL) || (vertexCount == 0)) {
+        return;
+    }
+
+    glEnableClientState(GL_VERTEX_ARRAY);
+    glEnableClientState(GL_COLOR_ARRAY);
+    glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+    glDisable(GL_TEXTURE_2D);
+
+    glVertexPointer(3, GL_FLOAT, sizeof(PspGfxPspglColorVertex), &vertices[0].x);
+    glColorPointer(4, GL_FLOAT, sizeof(PspGfxPspglColorVertex), &vertices[0].r);
+    glDrawArrays(GL_TRIANGLES, 0, vertexCount);
     glFlush();
 }

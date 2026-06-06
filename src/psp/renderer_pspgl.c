@@ -1,11 +1,10 @@
 #include "PR/ultratypes.h"
 #include "sf64thread.h"
+#include "src/psp/gfx/gfx_psp_dl.h"
 #include "src/psp/gfx/gfx_psp.h"
 #include "src/psp/gfx/gfx_pspgl.h"
 #include "src/psp/platform.h"
 #include "src/psp/renderer.h"
-
-static int sPspglLoggedIgnoredTask;
 
 void PspRenderer_Init(void) {
     if (PspGfx_IsReady()) {
@@ -25,8 +24,8 @@ void PspRenderer_Init(void) {
 }
 
 void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
-    (void) task;
-    (void) taskIndex;
+    PspGfxDlStats stats;
+    const Gfx* dl;
 
     if (!PspGfx_IsReady()) {
         PspRenderer_Init();
@@ -35,14 +34,19 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
         return;
     }
 
-    if (!sPspglLoggedIgnoredTask) {
-        sPspglLoggedIgnoredTask = 1;
-        PspPlatform_LogLine("[pspgl] render task ignored");
-    }
-
     PspGfx_BeginFrame();
     PspGfxPspgl_BeginFrame();
-    PspGfxPspgl_DrawTestTriangle();
+
+    if ((task == NULL) || (task->task.t.data_ptr == NULL)) {
+        PspGfxPspgl_DrawTestTriangle();
+    } else {
+        dl = (const Gfx*) task->task.t.data_ptr;
+        if (!PspGfxDl_Run(dl, taskIndex, &stats) || (stats.drawVertexCount == 0)) {
+            PspPlatform_LogLine("[pspgl] no drawable display-list triangles, drawing fallback triangle");
+            PspGfxPspgl_DrawTestTriangle();
+        }
+    }
+
     PspGfx_EndFrame();
 }
 
