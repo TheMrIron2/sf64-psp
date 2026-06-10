@@ -1027,7 +1027,7 @@ void Title_Screen_Draw(void) {
 
     Title_SetLightRot(D_menu_801B86C8, D_menu_801B86CC, 100.0f, &D_menu_801B82E0, &D_menu_801B82E4, &D_menu_801B82E8);
 
-#if defined(TARGET_PSP)
+#if defined(TARGET_PSP) && !defined(PSP_RENDERER_BACKEND_PSPGL)
     Title_Team_Draw(TEAM_FOX);
     sTitleTeam[TEAM_FOX].frameCount += sTitleTeam[TEAM_FOX].unk_5C;
 #else

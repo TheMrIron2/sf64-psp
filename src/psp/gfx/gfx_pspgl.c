@@ -5,7 +5,7 @@
 #include <stddef.h>
 
 #define PSP_GFX_PSPGL_TEXTURE_CACHE_SIZE 64
-#define PSP_GFX_PSPGL_MAX_TEXTURE_PIXELS (64 * 64)
+#define PSP_GFX_PSPGL_MAX_TEXTURE_PIXELS (256 * 32)
 #define PSP_GFX_PSPGL_MIN_TEXTURE_DIMENSION 8
 
 typedef struct {
@@ -185,6 +185,7 @@ void PspGfxPspgl_BeginFrame(void) {
     glViewport(0, 0, PspGfx_GetWidth(), PspGfx_GetHeight());
 
     glDisable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
     glDisable(GL_TEXTURE_2D);
     glDisable(GL_BLEND);
 
@@ -195,6 +196,7 @@ void PspGfxPspgl_BeginFrame(void) {
 
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glDepthMask(GL_FALSE);
 }
 
 u32 PspGfxPspgl_GetCi8Texture(const u8* indices, const u16* palette, u32 width, u32 height, u32* uploadWidth,
@@ -343,13 +345,24 @@ u32 PspGfxPspgl_GetIa16Texture(const u16* pixels, u32 width, u32 height, u32* up
                                                uploadHeight);
 }
 
-void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u32 vertexCount, u32 textureId) {
+void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u32 vertexCount, u32 textureId,
+                                      PspGfxPspglTextureEnv textureEnv, int depthTest) {
+    GLint glTextureEnv;
+
     if ((vertices == NULL) || (vertexCount == 0)) {
         return;
     }
 
     glEnableClientState(GL_VERTEX_ARRAY);
     glEnableClientState(GL_COLOR_ARRAY);
+    if (depthTest) {
+        glEnable(GL_DEPTH_TEST);
+        glDepthFunc(GL_LEQUAL);
+        glDepthMask(GL_TRUE);
+    } else {
+        glDisable(GL_DEPTH_TEST);
+        glDepthMask(GL_FALSE);
+    }
     if (textureId != 0) {
         glEnableClientState(GL_TEXTURE_COORD_ARRAY);
         glEnable(GL_TEXTURE_2D);
@@ -359,7 +372,12 @@ void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u3
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glBindTexture(GL_TEXTURE_2D, textureId);
         glTexCoordPointer(2, GL_FLOAT, sizeof(PspGfxPspglColorVertex), &vertices[0].u);
-        glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+        if (textureEnv == PSP_GFX_PSPGL_TEX_MODULATE) {
+            glTextureEnv = GL_MODULATE;
+        } else {
+            glTextureEnv = GL_REPLACE;
+        }
+        glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, glTextureEnv);
     } else {
         glDisableClientState(GL_TEXTURE_COORD_ARRAY);
         glDisable(GL_TEXTURE_2D);
