@@ -72,6 +72,7 @@ typedef struct {
     const u16* texturePalette;
     u32 textureFormat;
     u32 textureSize;
+    u32 texturePaletteIndex;
     u32 textureWidth;
     u32 textureHeight;
     u32 textureUploadWidth;
@@ -525,6 +526,7 @@ static void psp_gfx_dl_handle_set_tile(PspGfxDlContext* ctx, const Gfx* gfx) {
 
     ctx->textureFormat = (gfx->words.w0 >> 21) & 0x7;
     ctx->textureSize = (gfx->words.w0 >> 19) & 0x3;
+    ctx->texturePaletteIndex = (gfx->words.w1 >> 20) & 0xF;
 }
 
 static void psp_gfx_dl_handle_set_tile_size(PspGfxDlContext* ctx, const Gfx* gfx) {
@@ -551,6 +553,18 @@ static void psp_gfx_dl_handle_set_tile_size(PspGfxDlContext* ctx, const Gfx* gfx
         } else {
             ctx->stats.textureRejected++;
         }
+    } else if ((ctx->textureFormat == G_IM_FMT_CI) && (ctx->textureSize == G_IM_SIZ_4b) &&
+               (ctx->textureImage != NULL) && (ctx->texturePalette != NULL)) {
+        ctx->textureId =
+            PspGfxPspgl_GetCi4Texture((const u8*) ctx->textureImage,
+                                     ctx->texturePalette + (ctx->texturePaletteIndex * 16), ctx->textureWidth,
+                                     ctx->textureHeight, &ctx->textureUploadWidth, &ctx->textureUploadHeight);
+        if (ctx->textureId != 0) {
+            ctx->stats.textureCount++;
+            ctx->stats.ci4TextureCount++;
+        } else {
+            ctx->stats.textureRejected++;
+        }
     } else if ((ctx->textureFormat == G_IM_FMT_RGBA) && (ctx->textureSize == G_IM_SIZ_16b) &&
                (ctx->textureImage != NULL)) {
         ctx->textureId =
@@ -558,6 +572,28 @@ static void psp_gfx_dl_handle_set_tile_size(PspGfxDlContext* ctx, const Gfx* gfx
                                         &ctx->textureUploadWidth, &ctx->textureUploadHeight);
         if (ctx->textureId != 0) {
             ctx->stats.textureCount++;
+        } else {
+            ctx->stats.textureRejected++;
+        }
+    } else if ((ctx->textureFormat == G_IM_FMT_IA) && (ctx->textureSize == G_IM_SIZ_8b) &&
+               (ctx->textureImage != NULL)) {
+        ctx->textureId =
+            PspGfxPspgl_GetIa8Texture((const u8*) ctx->textureImage, ctx->textureWidth, ctx->textureHeight,
+                                     &ctx->textureUploadWidth, &ctx->textureUploadHeight);
+        if (ctx->textureId != 0) {
+            ctx->stats.textureCount++;
+            ctx->stats.ia8TextureCount++;
+        } else {
+            ctx->stats.textureRejected++;
+        }
+    } else if ((ctx->textureFormat == G_IM_FMT_IA) && (ctx->textureSize == G_IM_SIZ_16b) &&
+               (ctx->textureImage != NULL)) {
+        ctx->textureId =
+            PspGfxPspgl_GetIa16Texture((const u16*) ctx->textureImage, ctx->textureWidth, ctx->textureHeight,
+                                      &ctx->textureUploadWidth, &ctx->textureUploadHeight);
+        if (ctx->textureId != 0) {
+            ctx->stats.textureCount++;
+            ctx->stats.ia16TextureCount++;
         } else {
             ctx->stats.textureRejected++;
         }
@@ -700,7 +736,7 @@ static void psp_gfx_dl_reset_context(PspGfxDlContext* ctx) {
 
 int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
     PspGfxDlContext* ctx = &sPspGfxDlContext;
-    char line[320];
+    char line[384];
 
     psp_gfx_dl_reset_context(ctx);
     psp_gfx_dl_run_internal(ctx, dl, 0);
@@ -715,7 +751,7 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
         snprintf(line, sizeof(line),
                  "[pspgl-dl] task=%lu cmds=%lu vtx=%lu tri=%lu drawv=%lu dl=%lu reject=%lu mtx=%lu unsup=%lu "
                  "push=%lu pop=%lu mtxReject=%lu vp=%lu invalid=%lu outside=%lu tex=%lu texReject=%lu "
-                 "texRect=%lu rectReject=%lu "
+                 "ci4=%lu ia8=%lu ia16=%lu texRect=%lu rectReject=%lu "
                  "firstUnsup=0x%02lx "
                  "cmdLimit=%lu depthLimit=%lu",
                  (unsigned long) taskIndex, (unsigned long) ctx->stats.commandCount,
@@ -726,7 +762,9 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
                  (unsigned long) ctx->stats.mtxPopCount, (unsigned long) ctx->stats.mtxStackRejected,
                  (unsigned long) ctx->stats.viewportCount, (unsigned long) ctx->stats.invalidVertexCount,
                  (unsigned long) ctx->stats.outsideVertexCount, (unsigned long) ctx->stats.textureCount,
-                 (unsigned long) ctx->stats.textureRejected, (unsigned long) ctx->stats.textureRectangleCount,
+                 (unsigned long) ctx->stats.textureRejected, (unsigned long) ctx->stats.ci4TextureCount,
+                 (unsigned long) ctx->stats.ia8TextureCount, (unsigned long) ctx->stats.ia16TextureCount,
+                 (unsigned long) ctx->stats.textureRectangleCount,
                  (unsigned long) ctx->stats.textureRectangleRejected,
                  (unsigned long) ctx->stats.firstUnsupportedOpcode,
                  (unsigned long) ctx->stats.commandLimitHit, (unsigned long) ctx->stats.depthLimitHit);
