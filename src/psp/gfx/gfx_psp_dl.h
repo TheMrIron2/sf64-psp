@@ -21,6 +21,8 @@ typedef struct {
     u32 outsideVertexCount;
     u32 textureCount;
     u32 textureRejected;
+    u32 textureRectangleCount;
+    u32 textureRectangleRejected;
     u32 commandLimitHit;
     u32 depthLimitHit;
     u32 drawVertexCount;

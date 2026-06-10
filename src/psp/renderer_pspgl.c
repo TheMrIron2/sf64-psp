@@ -19,7 +19,6 @@ void PspRenderer_Init(void) {
     PspPlatform_LogLine("[pspgl] renderer init");
     PspGfx_BeginFrame();
     PspGfxPspgl_BeginFrame();
-    PspGfxPspgl_DrawTestTriangle();
     PspGfx_EndFrame();
 }
 
@@ -36,12 +35,9 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
     PspGfx_BeginFrame();
     PspGfxPspgl_BeginFrame();
 
-    if ((task == NULL) || (task->task.t.data_ptr == NULL)) {
-        PspGfxPspgl_DrawTestTriangle();
-    } else {
+    if ((task != NULL) && (task->task.t.data_ptr != NULL)) {
         dl = (const Gfx*) task->task.t.data_ptr;
         PspGfxDl_Run(dl, taskIndex, NULL);
-        PspGfxPspgl_DrawTestTriangle();
     }
 
     PspGfx_EndFrame();

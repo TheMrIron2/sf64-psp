@@ -370,6 +370,66 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
     ctx->stats.triangleCount++;
 }
 
+static void psp_gfx_dl_emit_rect_vertex(PspGfxDlContext* ctx, float x, float y, float u, float v) {
+    PspGfxPspglColorVertex* dst;
+
+    if (ctx->batchCount >= PSP_GFX_DL_BATCH_VERTICES) {
+        psp_gfx_dl_flush(ctx);
+    }
+    dst = &ctx->batch[ctx->batchCount++];
+    dst->x = (x / 160.0f) - 1.0f;
+    dst->y = 1.0f - (y / 120.0f);
+    dst->z = 0.0f;
+    dst->r = 1.0f;
+    dst->g = 1.0f;
+    dst->b = 1.0f;
+    dst->a = 1.0f;
+    dst->u = u / (float) ctx->textureUploadWidth;
+    dst->v = v / (float) ctx->textureUploadHeight;
+}
+
+static void psp_gfx_dl_handle_texture_rectangle(PspGfxDlContext* ctx, const Gfx* cmd, const Gfx* half1,
+                                                const Gfx* half2, int flip) {
+    float x0 = (float) ((cmd->words.w1 >> 12) & 0xFFF) * 0.25f;
+    float y0 = (float) (cmd->words.w1 & 0xFFF) * 0.25f;
+    float x1 = (float) ((cmd->words.w0 >> 12) & 0xFFF) * 0.25f;
+    float y1 = (float) (cmd->words.w0 & 0xFFF) * 0.25f;
+    float s0 = (float) (s16) (half1->words.w1 >> 16) / 32.0f;
+    float t0 = (float) (s16) (half1->words.w1 & 0xFFFF) / 32.0f;
+    float dsdx = (float) (s16) (half2->words.w1 >> 16) / 1024.0f;
+    float dtdy = (float) (s16) (half2->words.w1 & 0xFFFF) / 1024.0f;
+    float s1;
+    float t1;
+
+    if ((psp_gfx_dl_opcode(half1) != PSP_GFX_OP_F3D_RDPHALF_1) ||
+        (psp_gfx_dl_opcode(half2) != PSP_GFX_OP_F3D_RDPHALF_2) || (ctx->textureId == 0) ||
+        (ctx->textureUploadWidth == 0) || (ctx->textureUploadHeight == 0)) {
+        ctx->stats.textureRectangleRejected++;
+        return;
+    }
+
+    if (flip) {
+        s1 = s0 + ((y1 - y0) * dsdx);
+        t1 = t0 + ((x1 - x0) * dtdy);
+        psp_gfx_dl_emit_rect_vertex(ctx, x0, y0, s0, t0);
+        psp_gfx_dl_emit_rect_vertex(ctx, x1, y0, s0, t1);
+        psp_gfx_dl_emit_rect_vertex(ctx, x1, y1, s1, t1);
+        psp_gfx_dl_emit_rect_vertex(ctx, x0, y0, s0, t0);
+        psp_gfx_dl_emit_rect_vertex(ctx, x1, y1, s1, t1);
+        psp_gfx_dl_emit_rect_vertex(ctx, x0, y1, s1, t0);
+    } else {
+        s1 = s0 + ((x1 - x0) * dsdx);
+        t1 = t0 + ((y1 - y0) * dtdy);
+        psp_gfx_dl_emit_rect_vertex(ctx, x0, y0, s0, t0);
+        psp_gfx_dl_emit_rect_vertex(ctx, x1, y0, s1, t0);
+        psp_gfx_dl_emit_rect_vertex(ctx, x1, y1, s1, t1);
+        psp_gfx_dl_emit_rect_vertex(ctx, x0, y0, s0, t0);
+        psp_gfx_dl_emit_rect_vertex(ctx, x1, y1, s1, t1);
+        psp_gfx_dl_emit_rect_vertex(ctx, x0, y1, s0, t1);
+    }
+    ctx->stats.textureRectangleCount++;
+}
+
 static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
     const Vtx* src = (const Vtx*) psp_gfx_dl_resolve_ptr(gfx->words.w1);
     u32 w0 = gfx->words.w0;
@@ -491,6 +551,16 @@ static void psp_gfx_dl_handle_set_tile_size(PspGfxDlContext* ctx, const Gfx* gfx
         } else {
             ctx->stats.textureRejected++;
         }
+    } else if ((ctx->textureFormat == G_IM_FMT_RGBA) && (ctx->textureSize == G_IM_SIZ_16b) &&
+               (ctx->textureImage != NULL)) {
+        ctx->textureId =
+            PspGfxPspgl_GetRgba16Texture((const u16*) ctx->textureImage, ctx->textureWidth, ctx->textureHeight,
+                                        &ctx->textureUploadWidth, &ctx->textureUploadHeight);
+        if (ctx->textureId != 0) {
+            ctx->stats.textureCount++;
+        } else {
+            ctx->stats.textureRejected++;
+        }
     }
 }
 
@@ -572,6 +642,21 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
             continue;
         }
 
+        if ((opcode == G_TEXRECT) || (opcode == G_TEXRECTFLIP)) {
+            const Gfx* half1;
+            const Gfx* half2;
+
+            if ((ctx->stats.commandCount + 2) > PSP_GFX_DL_MAX_COMMANDS) {
+                ctx->stats.commandLimitHit++;
+                return 0;
+            }
+            half1 = pc++;
+            half2 = pc++;
+            ctx->stats.commandCount += 2;
+            psp_gfx_dl_handle_texture_rectangle(ctx, cmd, half1, half2, opcode == G_TEXRECTFLIP);
+            continue;
+        }
+
         if (opcode == PSP_GFX_OP_F3D_TRI1) {
             u32 w1 = cmd->words.w1;
             psp_gfx_dl_emit_tri(ctx, psp_gfx_dl_decode_tri_index((w1 >> 16) & 0xFF),
@@ -615,7 +700,7 @@ static void psp_gfx_dl_reset_context(PspGfxDlContext* ctx) {
 
 int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
     PspGfxDlContext* ctx = &sPspGfxDlContext;
-    char line[256];
+    char line[320];
 
     psp_gfx_dl_reset_context(ctx);
     psp_gfx_dl_run_internal(ctx, dl, 0);
@@ -630,6 +715,7 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
         snprintf(line, sizeof(line),
                  "[pspgl-dl] task=%lu cmds=%lu vtx=%lu tri=%lu drawv=%lu dl=%lu reject=%lu mtx=%lu unsup=%lu "
                  "push=%lu pop=%lu mtxReject=%lu vp=%lu invalid=%lu outside=%lu tex=%lu texReject=%lu "
+                 "texRect=%lu rectReject=%lu "
                  "firstUnsup=0x%02lx "
                  "cmdLimit=%lu depthLimit=%lu",
                  (unsigned long) taskIndex, (unsigned long) ctx->stats.commandCount,
@@ -640,7 +726,9 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
                  (unsigned long) ctx->stats.mtxPopCount, (unsigned long) ctx->stats.mtxStackRejected,
                  (unsigned long) ctx->stats.viewportCount, (unsigned long) ctx->stats.invalidVertexCount,
                  (unsigned long) ctx->stats.outsideVertexCount, (unsigned long) ctx->stats.textureCount,
-                 (unsigned long) ctx->stats.textureRejected, (unsigned long) ctx->stats.firstUnsupportedOpcode,
+                 (unsigned long) ctx->stats.textureRejected, (unsigned long) ctx->stats.textureRectangleCount,
+                 (unsigned long) ctx->stats.textureRectangleRejected,
+                 (unsigned long) ctx->stats.firstUnsupportedOpcode,
                  (unsigned long) ctx->stats.commandLimitHit, (unsigned long) ctx->stats.depthLimitHit);
         PspPlatform_LogLine(line);
     }
