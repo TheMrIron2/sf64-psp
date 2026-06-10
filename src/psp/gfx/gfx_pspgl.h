@@ -11,11 +11,15 @@ typedef struct {
     float g;
     float b;
     float a;
+    float u;
+    float v;
 } PspGfxPspglColorVertex;
 
 void PspGfxPspgl_Init(void);
 void PspGfxPspgl_BeginFrame(void);
 void PspGfxPspgl_DrawTestTriangle(void);
-void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u32 vertexCount);
+u32 PspGfxPspgl_GetCi8Texture(const u8* indices, const u16* palette, u32 width, u32 height, u32* uploadWidth,
+                              u32* uploadHeight);
+void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u32 vertexCount, u32 textureId);
 
 #endif

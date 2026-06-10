@@ -41,6 +41,9 @@ int sceDisplayWaitVblankStart(void);
 SceUID sceKernelCreateThread(const char* name, int (*entry)(SceSize, void*), int initPriority, int stackSize,
                              int attr, void* option);
 int sceKernelStartThread(SceUID thid, SceSize arglen, void* argp);
+SceUID sceKernelCreateSema(const char* name, int attr, int initVal, int maxVal, void* option);
+int sceKernelWaitSema(SceUID semaid, int signal, unsigned int* timeout);
+int sceKernelSignalSema(SceUID semaid, int signal);
 void sceKernelExitGame(void);
 SceUID sceIoOpen(const char* file, int flags, SceMode mode);
 int sceIoWrite(SceUID fd, const void* data, SceSize size);
@@ -73,6 +76,9 @@ static OSMesgQueue* sViMq;
 static OSMesg sViMsg;
 static u32 sViRetraceCount = 1;
 static SceUID sViThreadId = -1;
+#if PSP_LOG_ENABLED
+static SceUID sLogSemaId = -1;
+#endif
 static volatile int sExitRequested;
 static u32 sGfxTaskCount;
 static u32 sAudioTaskCount;
@@ -236,7 +242,9 @@ void PspPlatform_LogLine(const char* line) {
         return;
     }
 
-    //pspDebugScreenPrintf("%s\n", line);
+    if (sLogSemaId >= 0) {
+        sceKernelWaitSema(sLogSemaId, 1, NULL);
+    }
 
     fd = sceIoOpen(PSP_LOG_PATH, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_APPEND, 0777);
     if (fd >= 0) {
@@ -246,6 +254,9 @@ void PspPlatform_LogLine(const char* line) {
         sceIoWrite(fd, line, psp_strlen(line));
         sceIoWrite(fd, "\n", 1);
         sceIoClose(fd);
+    }
+    if (sLogSemaId >= 0) {
+        sceKernelSignalSema(sLogSemaId, 1);
     }
 #else
     (void) line;
@@ -321,6 +332,9 @@ static void psp_map_buttons(SceCtrlData* in, OSContPad* out) {
 void PspPlatform_Init(void) {
     sExitRequested = 0;
 #if PSP_LOG_ENABLED
+    if (sLogSemaId < 0) {
+        sLogSemaId = sceKernelCreateSema("sf64_log", 0, 1, 1, NULL);
+    }
     sceIoRemove(PSP_LOG_PATH);
     PspPlatform_LogLine("[psp] log start");
 #endif

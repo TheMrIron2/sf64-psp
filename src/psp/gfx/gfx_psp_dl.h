@@ -11,7 +11,16 @@ typedef struct {
     u32 nestedDlFollowed;
     u32 nestedDlRejected;
     u32 unsupportedCount;
+    u32 firstUnsupportedOpcode;
     u32 mtxCount;
+    u32 mtxPushCount;
+    u32 mtxPopCount;
+    u32 mtxStackRejected;
+    u32 viewportCount;
+    u32 invalidVertexCount;
+    u32 outsideVertexCount;
+    u32 textureCount;
+    u32 textureRejected;
     u32 commandLimitHit;
     u32 depthLimitHit;
     u32 drawVertexCount;

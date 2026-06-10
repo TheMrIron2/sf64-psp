@@ -24,7 +24,6 @@ void PspRenderer_Init(void) {
 }
 
 void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
-    PspGfxDlStats stats;
     const Gfx* dl;
 
     if (!PspGfx_IsReady()) {
@@ -41,10 +40,8 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
         PspGfxPspgl_DrawTestTriangle();
     } else {
         dl = (const Gfx*) task->task.t.data_ptr;
-        if (!PspGfxDl_Run(dl, taskIndex, &stats) || (stats.drawVertexCount == 0)) {
-            PspPlatform_LogLine("[pspgl] no drawable display-list triangles, drawing fallback triangle");
-            PspGfxPspgl_DrawTestTriangle();
-        }
+        PspGfxDl_Run(dl, taskIndex, NULL);
+        PspGfxPspgl_DrawTestTriangle();
     }
 
     PspGfx_EndFrame();

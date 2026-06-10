@@ -19,6 +19,7 @@ REV ?= rev1
 PSP_FULL ?= 1
 PROFILE_PSP ?= 0
 PSP_RENDERER_BACKEND ?= legacy_rsp
+PSP_LOG ?= $(if $(filter pspgl,$(PSP_RENDERER_BACKEND)),1,0)
 COLOR ?= 1
 VERBOSE ?= 0
 N_THREADS ?= $(shell nproc 2>/dev/null || echo 1)

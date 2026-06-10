@@ -4,7 +4,7 @@
 #include "assets/ast_logo.h"
 #include "mods.h"
 
-#ifdef TARGET_PSP
+#if defined(TARGET_PSP) && defined(PSP_TRACE_ENABLED) && PSP_TRACE_ENABLED
 void PspPlatform_LogLine(const char* line);
 #define PSP_TRACE(msg) PspPlatform_LogLine("[psp] " msg)
 #else
