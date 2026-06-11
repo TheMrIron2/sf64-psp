@@ -39,6 +39,8 @@ typedef struct {
     u32 ia8TextureCount;
     u32 ia16TextureCount;
     u32 texturedTriangleCount;
+    u32 alphaTestTriangleCount;
+    u32 blendTriangleCount;
     u32 textureRectangleCount;
     u32 textureRectangleRejected;
     u32 commandLimitHit;

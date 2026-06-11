@@ -122,7 +122,10 @@ typedef struct {
     u8 primitiveA;
     PspGfxDlCombineMode combineMode;
     PspGfxPspglTextureEnv batchTextureEnv;
+    int combineUsesTextureAlpha;
     int textureEnabled;
+    int batchAlphaTest;
+    int batchBlend;
     int batchDepthTest;
     int batchDepthWrite;
     u32 otherModeL;
@@ -137,6 +140,15 @@ static int sLoggedFirstDrawableTask;
 #endif
 
 static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred);
+
+static int psp_gfx_dl_alpha_test_enabled(PspGfxDlContext* ctx) {
+    return ctx->combineUsesTextureAlpha &&
+           (((ctx->otherModeL & 3U) != G_AC_NONE) || ((ctx->otherModeL & CVG_X_ALPHA) != 0));
+}
+
+static int psp_gfx_dl_blend_enabled(PspGfxDlContext* ctx) {
+    return ctx->combineUsesTextureAlpha && ((ctx->otherModeL & FORCE_BL) != 0);
+}
 
 static u8 psp_gfx_dl_opcode(const Gfx* gfx) {
     return (u8) (gfx->words.w0 >> 24);
@@ -430,18 +442,23 @@ static void psp_gfx_dl_flush(PspGfxDlContext* ctx) {
         return;
     }
     PspGfxPspgl_DrawColoredTriangles(ctx->batch, ctx->batchCount, ctx->batchTextureId, ctx->batchTextureEnv,
-                                     ctx->batchDepthTest, ctx->batchDepthWrite);
+                                     ctx->batchAlphaTest, ctx->batchBlend, ctx->batchDepthTest,
+                                     ctx->batchDepthWrite);
     ctx->stats.drawVertexCount += ctx->batchCount;
     ctx->batchCount = 0;
 }
 
-static void psp_gfx_dl_set_batch_texture(PspGfxDlContext* ctx, u32 textureId, PspGfxPspglTextureEnv textureEnv) {
+static void psp_gfx_dl_set_batch_texture(PspGfxDlContext* ctx, u32 textureId, PspGfxPspglTextureEnv textureEnv,
+                                         int alphaTest, int blend) {
     if ((ctx->batchCount != 0) &&
-        ((ctx->batchTextureId != textureId) || (ctx->batchTextureEnv != textureEnv))) {
+        ((ctx->batchTextureId != textureId) || (ctx->batchTextureEnv != textureEnv) ||
+         (ctx->batchAlphaTest != alphaTest) || (ctx->batchBlend != blend))) {
         psp_gfx_dl_flush(ctx);
     }
     ctx->batchTextureId = textureId;
     ctx->batchTextureEnv = textureEnv;
+    ctx->batchAlphaTest = alphaTest;
+    ctx->batchBlend = blend;
 }
 
 static void psp_gfx_dl_set_batch_depth(PspGfxDlContext* ctx, int depthTest, int depthWrite) {
@@ -539,7 +556,8 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
         (ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_PRIM_ALPHA)) {
         textureEnv = PSP_GFX_PSPGL_TEX_MODULATE;
     }
-    psp_gfx_dl_set_batch_texture(ctx, textureId, textureEnv);
+    psp_gfx_dl_set_batch_texture(ctx, textureId, textureEnv, psp_gfx_dl_alpha_test_enabled(ctx),
+                                 psp_gfx_dl_blend_enabled(ctx));
     psp_gfx_dl_set_batch_depth(ctx, (ctx->geometryMode & G_ZBUFFER) != 0, (ctx->otherModeL & Z_UPD) != 0);
     if (ctx->batchDepthTest) {
         ctx->stats.depthTestTriangleCount++;
@@ -553,6 +571,12 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
     ctx->stats.triangleCount++;
     if (textureId != 0) {
         ctx->stats.texturedTriangleCount++;
+        if (ctx->batchAlphaTest) {
+            ctx->stats.alphaTestTriangleCount++;
+        }
+        if (ctx->batchBlend) {
+            ctx->stats.blendTriangleCount++;
+        }
     }
 }
 
@@ -597,7 +621,8 @@ static void psp_gfx_dl_handle_texture_rectangle(PspGfxDlContext* ctx, const Gfx*
         return;
     }
 
-    psp_gfx_dl_set_batch_texture(ctx, ctx->textureId, PSP_GFX_PSPGL_TEX_MODULATE);
+    psp_gfx_dl_set_batch_texture(ctx, ctx->textureId, PSP_GFX_PSPGL_TEX_MODULATE,
+                                 psp_gfx_dl_alpha_test_enabled(ctx), psp_gfx_dl_blend_enabled(ctx));
     psp_gfx_dl_set_batch_depth(ctx, 0, 0);
 
     if (flip) {
@@ -651,36 +676,48 @@ static void psp_gfx_dl_handle_set_combine(PspGfxDlContext* ctx, const Gfx* gfx) 
     if (psp_gfx_dl_combine_cycle0_matches(mux0, mux1, G_CCMUX_0, G_CCMUX_0, G_CCMUX_0, G_CCMUX_SHADE,
                                           G_ACMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_SHADE)) {
         ctx->combineMode = PSP_GFX_DL_COMBINE_SHADE;
+        ctx->combineUsesTextureAlpha = 0;
     } else if (psp_gfx_dl_combine_cycle0_matches(mux0, mux1, G_CCMUX_0, G_CCMUX_0, G_CCMUX_0,
                                                  G_CCMUX_PRIMITIVE, G_ACMUX_0, G_ACMUX_0, G_ACMUX_0,
                                                  G_ACMUX_PRIMITIVE)) {
         ctx->combineMode = PSP_GFX_DL_COMBINE_PRIMITIVE;
+        ctx->combineUsesTextureAlpha = 0;
     } else if (psp_gfx_dl_combine_cycle0_matches(mux0, mux1, G_CCMUX_0, G_CCMUX_0, G_CCMUX_0, G_CCMUX_TEXEL0,
                                                  G_ACMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_SHADE)) {
         ctx->combineMode = PSP_GFX_DL_COMBINE_DECAL_RGB;
+        ctx->combineUsesTextureAlpha = 0;
     } else if (psp_gfx_dl_combine_cycle0_matches(mux0, mux1, G_CCMUX_0, G_CCMUX_0, G_CCMUX_0, G_CCMUX_TEXEL0,
                                                  G_ACMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_TEXEL0)) {
         ctx->combineMode = PSP_GFX_DL_COMBINE_DECAL_RGBA;
+        ctx->combineUsesTextureAlpha = 1;
     } else if (psp_gfx_dl_combine_cycle0_matches(mux0, mux1, G_CCMUX_TEXEL0, G_CCMUX_0, G_CCMUX_SHADE,
-                                                 G_CCMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_SHADE) ||
-               psp_gfx_dl_combine_cycle0_matches(mux0, mux1, G_CCMUX_TEXEL0, G_CCMUX_0, G_CCMUX_SHADE,
+                                                 G_CCMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_SHADE)) {
+        ctx->combineMode = PSP_GFX_DL_COMBINE_MODULATE_SHADE_ALPHA;
+        ctx->combineUsesTextureAlpha = 0;
+    } else if (psp_gfx_dl_combine_cycle0_matches(mux0, mux1, G_CCMUX_TEXEL0, G_CCMUX_0, G_CCMUX_SHADE,
                                                  G_CCMUX_0, G_ACMUX_TEXEL0, G_ACMUX_0, G_ACMUX_SHADE,
                                                  G_ACMUX_0)) {
         ctx->combineMode = PSP_GFX_DL_COMBINE_MODULATE_SHADE_ALPHA;
+        ctx->combineUsesTextureAlpha = 1;
     } else if (psp_gfx_dl_combine_cycle0_matches(mux0, mux1, G_CCMUX_TEXEL0, G_CCMUX_0, G_CCMUX_SHADE,
                                                  G_CCMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_TEXEL0)) {
         ctx->combineMode = PSP_GFX_DL_COMBINE_MODULATE_SHADE_DECAL_ALPHA;
+        ctx->combineUsesTextureAlpha = 1;
     } else if (psp_gfx_dl_combine_cycle0_matches(mux0, mux1, G_CCMUX_TEXEL0, G_CCMUX_0, G_CCMUX_PRIMITIVE,
                                                  G_CCMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_0,
-                                                 G_ACMUX_PRIMITIVE) ||
-               psp_gfx_dl_combine_cycle0_matches(mux0, mux1, G_CCMUX_TEXEL0, G_CCMUX_0, G_CCMUX_PRIMITIVE,
+                                                 G_ACMUX_PRIMITIVE)) {
+        ctx->combineMode = PSP_GFX_DL_COMBINE_MODULATE_PRIM_ALPHA;
+        ctx->combineUsesTextureAlpha = 0;
+    } else if (psp_gfx_dl_combine_cycle0_matches(mux0, mux1, G_CCMUX_TEXEL0, G_CCMUX_0, G_CCMUX_PRIMITIVE,
                                                  G_CCMUX_0, G_ACMUX_TEXEL0, G_ACMUX_0, G_ACMUX_PRIMITIVE,
                                                  G_ACMUX_0) ||
                psp_gfx_dl_combine_cycle0_matches(mux0, mux1, G_CCMUX_TEXEL0, G_CCMUX_0, G_CCMUX_PRIMITIVE,
                                                  G_CCMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_TEXEL0)) {
         ctx->combineMode = PSP_GFX_DL_COMBINE_MODULATE_PRIM_ALPHA;
+        ctx->combineUsesTextureAlpha = 1;
     } else {
         ctx->combineMode = PSP_GFX_DL_COMBINE_UNKNOWN;
+        ctx->combineUsesTextureAlpha = 1;
     }
 }
 
@@ -832,7 +869,8 @@ static void psp_gfx_dl_handle_other_mode_l(PspGfxDlContext* ctx, const Gfx* gfx)
         return;
     }
     mask = (length == 32) ? 0xFFFFFFFFU : (((1U << length) - 1U) << shift);
-    if ((ctx->batchCount != 0) && (((ctx->otherModeL ^ gfx->words.w1) & mask & Z_UPD) != 0)) {
+    if ((ctx->batchCount != 0) &&
+        (((ctx->otherModeL ^ gfx->words.w1) & mask & (3U | CVG_X_ALPHA | FORCE_BL | Z_UPD)) != 0)) {
         psp_gfx_dl_flush(ctx);
     }
     ctx->otherModeL = (ctx->otherModeL & ~mask) | (gfx->words.w1 & mask);
@@ -1134,6 +1172,7 @@ static void psp_gfx_dl_reset_context(PspGfxDlContext* ctx) {
     ctx->primitiveG = 255;
     ctx->primitiveB = 255;
     ctx->primitiveA = 255;
+    ctx->combineUsesTextureAlpha = 1;
 }
 
 int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
@@ -1156,7 +1195,8 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
         snprintf(line, sizeof(line),
                  "[pspgl-dl] task=%lu cmds=%lu vtx=%lu tri=%lu drawv=%lu dl=%lu reject=%lu mtx=%lu unsup=%lu "
                  "push=%lu pop=%lu mtxReject=%lu vp=%lu invalid=%lu outside=%lu tex=%lu texReject=%lu "
-                 "rgba16=%lu ci4=%lu ia8=%lu ia16=%lu texTri=%lu texRect=%lu rectReject=%lu "
+                 "rgba16=%lu ci4=%lu ia8=%lu ia16=%lu texTri=%lu alphaTestTri=%lu blendTri=%lu "
+                 "texRect=%lu rectReject=%lu "
                  "firstUnsup=0x%02lx "
                  "cmdLimit=%lu depthLimit=%lu",
                  (unsigned long) taskIndex, (unsigned long) ctx->stats.commandCount,
@@ -1170,6 +1210,8 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
                  (unsigned long) ctx->stats.textureRejected, (unsigned long) ctx->stats.rgba16TextureCount,
                  (unsigned long) ctx->stats.ci4TextureCount, (unsigned long) ctx->stats.ia8TextureCount,
                  (unsigned long) ctx->stats.ia16TextureCount, (unsigned long) ctx->stats.texturedTriangleCount,
+                 (unsigned long) ctx->stats.alphaTestTriangleCount,
+                 (unsigned long) ctx->stats.blendTriangleCount,
                  (unsigned long) ctx->stats.textureRectangleCount,
                  (unsigned long) ctx->stats.textureRectangleRejected,
                  (unsigned long) ctx->stats.firstUnsupportedOpcode,

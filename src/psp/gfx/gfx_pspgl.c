@@ -346,7 +346,8 @@ u32 PspGfxPspgl_GetIa16Texture(const u16* pixels, u32 width, u32 height, u32* up
 }
 
 void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u32 vertexCount, u32 textureId,
-                                      PspGfxPspglTextureEnv textureEnv, int depthTest, int depthWrite) {
+                                      PspGfxPspglTextureEnv textureEnv, int alphaTest, int blend, int depthTest,
+                                      int depthWrite) {
     GLint glTextureEnv;
 
     if ((vertices == NULL) || (vertexCount == 0)) {
@@ -365,10 +366,18 @@ void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u3
     if (textureId != 0) {
         glEnableClientState(GL_TEXTURE_COORD_ARRAY);
         glEnable(GL_TEXTURE_2D);
-        glEnable(GL_ALPHA_TEST);
-        glEnable(GL_BLEND);
-        glAlphaFunc(GL_GREATER, 0.0f);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        if (alphaTest) {
+            glEnable(GL_ALPHA_TEST);
+            glAlphaFunc(GL_GREATER, 0.0f);
+        } else {
+            glDisable(GL_ALPHA_TEST);
+        }
+        if (blend) {
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        } else {
+            glDisable(GL_BLEND);
+        }
         glBindTexture(GL_TEXTURE_2D, textureId);
         glTexCoordPointer(2, GL_FLOAT, sizeof(PspGfxPspglColorVertex), &vertices[0].u);
         if (textureEnv == PSP_GFX_PSPGL_TEX_MODULATE) {
