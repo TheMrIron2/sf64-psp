@@ -19,6 +19,19 @@ typedef struct {
     u32 viewportCount;
     u32 invalidVertexCount;
     u32 outsideVertexCount;
+    u32 nearZeroWCount;
+    u32 behindEyeVertexCount;
+    u32 invalidTriangleCount;
+    u32 sharedClipTriangleCount;
+    u32 eyePlaneCrossingTriangleCount;
+    u32 behindEyeTriangleCount;
+    u32 degenerateTriangleCount;
+    u32 depthTestTriangleCount;
+    u32 depthWriteTriangleCount;
+    u32 deferredTextureCount;
+    u32 matrixPointerRejected;
+    u32 vertexPointerRejected;
+    u32 displayListPointerRejected;
     u32 textureCount;
     u32 textureRejected;
     u32 rgba16TextureCount;
@@ -30,6 +43,7 @@ typedef struct {
     u32 textureRectangleRejected;
     u32 commandLimitHit;
     u32 depthLimitHit;
+    u32 maxDepthReached;
     u32 drawVertexCount;
 } PspGfxDlStats;
 

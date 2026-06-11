@@ -44,6 +44,26 @@ including command, vertex, triangle, nested-list, matrix, texture, texrect,
 unsupported-opcode, and traversal-limit counts. These diagnostics are part of
 the port's educational value and should remain bounded rather than removed.
 
+Geometry investigations also emit a bounded `[pspgl-geom]` summary when PSP
+logging or renderer diagnostics are enabled. It distinguishes near-zero clip
+`w`, vertices and triangles behind the eye, triangles crossing the eye plane,
+triangles sharing an outside clip plane, degenerate projected triangles,
+invalid vertex-cache references, pointer-resolution failures, maximum nested
+display-list depth, and depth-tested versus depth-writing triangles. These are
+observations only: the frontend does not discard geometry merely because it is
+outside the clip volume.
+
+Texture preparation is deferred until draw time when display lists declare tile
+dimensions before `G_SETTIMG`. This ordering is used by effects such as the
+title sun glare. The diagnostic summary reports successful deferred uploads as
+`deferTex`.
+
+Depth testing and depth writes are separate state. `G_ZBUFFER` controls depth
+testing, while the RDP `Z_UPD` render-mode bit controls `glDepthMask`. Texture
+rectangles remain depth-neutral. This matches the Dreamcast frontend/backend
+split and prevents translucent or non-depth-writing geometry from
+unintentionally occluding later scene structures.
+
 Per-command logging should be used only for short, targeted investigations.
 
 ## Future Native Backend

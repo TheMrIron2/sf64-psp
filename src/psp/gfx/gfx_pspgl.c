@@ -346,7 +346,7 @@ u32 PspGfxPspgl_GetIa16Texture(const u16* pixels, u32 width, u32 height, u32* up
 }
 
 void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u32 vertexCount, u32 textureId,
-                                      PspGfxPspglTextureEnv textureEnv, int depthTest) {
+                                      PspGfxPspglTextureEnv textureEnv, int depthTest, int depthWrite) {
     GLint glTextureEnv;
 
     if ((vertices == NULL) || (vertexCount == 0)) {
@@ -358,11 +358,10 @@ void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u3
     if (depthTest) {
         glEnable(GL_DEPTH_TEST);
         glDepthFunc(GL_LEQUAL);
-        glDepthMask(GL_TRUE);
     } else {
         glDisable(GL_DEPTH_TEST);
-        glDepthMask(GL_FALSE);
     }
+    glDepthMask(depthWrite ? GL_TRUE : GL_FALSE);
     if (textureId != 0) {
         glEnableClientState(GL_TEXTURE_COORD_ARRAY);
         glEnable(GL_TEXTURE_2D);

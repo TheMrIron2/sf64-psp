@@ -21,7 +21,7 @@ Star Fox 64 display-list interpreter
     -> PSPGL implementation
     -> PSP swap/pacing
 
-Do not begin by importing modern Starship/libultraship. Do not continue expanding the legacy PSP RSP/RDP renderer unless using it for comparison.
+Do not begin by importing modern Starship/libultraship.
 
 ## Files Inspected
 
@@ -256,6 +256,19 @@ glTexCoordPointer(...)
 glColorPointer(...)
 glDrawArrays(GL_TRIANGLES, ...)
 ```
+
+The Dreamcast frontend keeps depth testing and depth writes independent:
+`G_ZBUFFER` selects depth testing, while the RDP `Z_UPD` bit selects the depth
+mask. The PSPGL frontend follows this distinction. Treating all depth-tested
+geometry as depth-writing can hide large structures drawn later in the same
+frame.
+
+The Dreamcast vertex path also retains clip-space `w` and a six-plane trivial
+reject code. It rejects only when all three triangle vertices share an outside
+plane, leaving partial clipping to GL. The PSPGL staging frontend currently
+pre-divides vertices, so it records shared-plane, behind-eye, and eye-crossing
+counts before division to make clipping failures visible without adding an
+untested rejection or clipping policy.
 
 2D texture rectangles use a four-vertex path and `glDrawArrays(GL_QUADS, ...)`.
 
