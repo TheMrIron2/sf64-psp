@@ -15,14 +15,6 @@
 #define PSP_TRACE_ENABLED 0
 #endif
 
-#if defined(TARGET_PSP) && !defined(PSP_TITLE_ARWING_ENABLED)
-#define PSP_TITLE_ARWING_ENABLED 0
-#endif
-
-#if defined(TARGET_PSP) && !defined(PSP_TITLE_TEAM_ENABLED)
-#define PSP_TITLE_TEAM_ENABLED 0
-#endif
-
 #if defined(TARGET_PSP) && PSP_TRACE_ENABLED
 void PspPlatform_LogLine(const char* line);
 #define PSP_TRACE(msg) PspPlatform_LogLine("[psp] " msg)
@@ -1016,7 +1008,6 @@ void Title_Screen_Draw(void) {
     gAmbientG = D_menu_801B8308;
     gAmbientB = D_menu_801B830C;
 
-#if !defined(TARGET_PSP) || PSP_TITLE_TEAM_ENABLED
     if ((D_menu_801B86A4 < 2) && (D_menu_801B9040 != 0)) {
         D_menu_801B86D8 = RAD_TO_DEG(Math_Atan2F(-D_menu_801B9060, sqrtf(SQ(-D_menu_801B905C) + SQ(-D_menu_801B9064))));
         D_menu_801B86DC = RAD_TO_DEG(Math_Atan2F(D_menu_801B905C, D_menu_801B9064));
@@ -1027,19 +1018,10 @@ void Title_Screen_Draw(void) {
 
     Title_SetLightRot(D_menu_801B86C8, D_menu_801B86CC, 100.0f, &D_menu_801B82E0, &D_menu_801B82E4, &D_menu_801B82E8);
 
-#if defined(TARGET_PSP) && !defined(PSP_RENDERER_BACKEND_PSPGL)
-    Title_Team_Draw(TEAM_FOX);
-    sTitleTeam[TEAM_FOX].frameCount += sTitleTeam[TEAM_FOX].unk_5C;
-#else
     for (i = 0; i < ARRAY_COUNT(D_menu_801ADA84); i++) {
         Title_Team_Draw(D_menu_801ADA84[i]);
         sTitleTeam[D_menu_801ADA84[i]].frameCount += sTitleTeam[D_menu_801ADA84[i]].unk_5C;
     }
-#endif
-#else
-    (void) i;
-    PSP_TRACE("title screen draw: PSP skip title team models");
-#endif
 
     gLight1R = D_menu_801B8310;
     gLight1G = D_menu_801B8314;
@@ -1049,10 +1031,8 @@ void Title_Screen_Draw(void) {
     gAmbientG = D_menu_801B8320;
     gAmbientB = D_menu_801B8324;
 
-#if !defined(TARGET_PSP) || PSP_TITLE_ARWING_ENABLED
     Title_SetLightRot(D_menu_801B86D0, D_menu_801B86D4, 100.0f, &D_menu_801B82E0, &D_menu_801B82E4, &D_menu_801B82E8);
     Title_Arwing_Draw(0);
-#endif
 
     PSP_TRACE("title screen draw: done");
 }
@@ -2421,9 +2401,7 @@ void Title_Arwing_Draw(TitleTeam teamIdx) {
     arwing.cockpitGlassXrot = sTitleArwing[teamIdx].cockpitGlassXrot;
 
 #ifdef TARGET_PSP
-#if PSP_TITLE_ARWING_ENABLED
     Display_Arwing_Skel(&arwing);
-#endif
     Matrix_Pop(&gGfxMatrix);
     return;
 #endif

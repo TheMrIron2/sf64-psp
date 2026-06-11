@@ -18,8 +18,7 @@ VERSION ?= us
 REV ?= rev1
 PSP_FULL ?= 1
 PROFILE_PSP ?= 0
-PSP_RENDERER_BACKEND ?= legacy_rsp
-PSP_LOG ?= $(if $(filter pspgl,$(PSP_RENDERER_BACKEND)),1,0)
+PSP_LOG ?= 1
 COLOR ?= 1
 VERBOSE ?= 0
 N_THREADS ?= $(shell nproc 2>/dev/null || echo 1)
@@ -122,28 +121,6 @@ endif
 ifeq ($(PSP_RENDERER_DIAGNOSTICS),1)
 CFLAGS += -DPSP_RENDERER_DIAGNOSTICS=1
 endif
-ifneq ($(PSP_RENDERER_LIGHT_VARIANT),)
-CFLAGS += -DPSP_RENDERER_LIGHT_VARIANT=$(PSP_RENDERER_LIGHT_VARIANT)
-endif
-ifneq ($(PSP_RENDERER_NORMAL_VARIANT),)
-CFLAGS += -DPSP_RENDERER_NORMAL_VARIANT=$(PSP_RENDERER_NORMAL_VARIANT)
-endif
-ifeq ($(PSP_RENDERER_BACKEND),pspgl)
-CFLAGS += -DPSP_TITLE_ARWING_ENABLED=1 -DPSP_TITLE_TEAM_ENABLED=1
-else
-ifeq ($(PSP_TITLE_ARWING),1)
-CFLAGS += -DPSP_TITLE_ARWING_ENABLED=1
-endif
-ifeq ($(PSP_TITLE_ARWING_BODY),1)
-CFLAGS += -DPSP_TITLE_ARWING_ENABLED=1
-endif
-ifeq ($(PSP_TITLE_TEAM),1)
-CFLAGS += -DPSP_TITLE_TEAM_ENABLED=1
-endif
-endif
-
-ifeq ($(PSP_RENDERER_BACKEND),legacy_rsp)
-else ifeq ($(PSP_RENDERER_BACKEND),pspgl)
 PSPGL_CONFIG_PATH := $(shell command -v $(PSPGL_CONFIG) 2>/dev/null)
 ifneq ($(PSPGL_CONFIG_PATH),)
 PSPGL_CFLAGS := $(shell $(PSPGL_CONFIG) --cflags)
@@ -152,19 +129,16 @@ else
 PSPGL_HEADER := $(firstword $(wildcard $(PSPDEV)/psp/include/GLES/egl.h) $(wildcard $(PSPDEV)/psp/include/GL/gl.h))
 PSPGL_LIBRARY := $(firstword $(wildcard $(PSPDEV)/psp/lib/libGL.a))
 ifeq ($(PSPGL_HEADER),)
-$(error PSPGL not found. Install PSPGL or build with PSP_RENDERER_BACKEND=legacy_rsp.)
+$(error PSPGL not found. Install PSPGL before building the PSP port.)
 endif
 ifeq ($(PSPGL_LIBRARY),)
-$(error PSPGL not found. Install PSPGL or build with PSP_RENDERER_BACKEND=legacy_rsp.)
+$(error PSPGL not found. Install PSPGL before building the PSP port.)
 endif
 PSPGL_CFLAGS :=
 PSPGL_LIBS := -lGL -lpspvfpu
 endif
-CFLAGS += -DPSP_RENDERER_BACKEND_PSPGL=1 $(PSPGL_CFLAGS)
+CFLAGS += $(PSPGL_CFLAGS)
 PSP_LIBS := $(PSPGL_LIBS) $(PSP_LIBS)
-else
-$(error Unknown PSP_RENDERER_BACKEND '$(PSP_RENDERER_BACKEND)'. Supported backends: legacy_rsp pspgl)
-endif
 
 LDFLAGS := -L$(PSPDEV)/psp/lib -L$(PSPSDK)/lib
 LDFLAGS += -Wl,-Map,$(PSP_MAP) -Wl,-zmax-page-size=128

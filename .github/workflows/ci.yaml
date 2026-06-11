@@ -10,17 +10,10 @@ permissions:
 
 jobs:
   psp-bootstrap:
-    name: PSP bootstrap (${{ matrix.backend }})
+    name: PSPGL bootstrap
     runs-on: ubuntu-latest
     container:
       image: pspdev/pspdev:latest
-
-    strategy:
-      fail-fast: false
-      matrix:
-        backend:
-          - legacy_rsp
-          - pspgl
 
     steps:
       - name: Checkout
@@ -47,4 +40,4 @@ jobs:
 
       - name: Build bootstrap EBOOT
         run: |
-          make bootstrap COLOR=0 VERBOSE=1 PSP_RENDERER_BACKEND=${{ matrix.backend }}
+          make bootstrap COLOR=0 VERBOSE=1

@@ -296,25 +296,30 @@ src/psp/platform.c
     -> PspRenderer_RenderGfxTask(task, taskIndex)
 ```
 
-`legacy_rsp` currently interprets the display list inside `src/psp/renderer.c` and emits native GU commands directly. This has proven PSP hardware setup, texture conversion progress, starfield batching, and useful diagnostics, but the renderer is now entangled with RSP/RDP semantic debt.
+The retired native experiment interprets the display list inside
+`src/psp/renderer.c` and emits GU commands directly. It proved PSP hardware
+setup, texture conversion, starfield batching, and useful diagnostics, but is
+no longer compiled by the normal build because its frontend and backend are
+too tightly coupled.
 
-`pspgl` currently preserves the same public PSP renderer API but only performs clear/swap proof-of-life:
+The active PSPGL path preserves the same public PSP renderer API:
 
 ```text
 PspRenderer_Init()
 PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex)
 ```
 
-The Dreamcast architecture maps cleanly onto the PSP API if the PSPGL backend eventually does:
+The Dreamcast architecture now maps onto the PSP API as:
 
 ```text
 PspRenderer_Init()
-    -> gfx_init(&gfx_psp, &gfx_pspgl_api, "Star Fox 64", false)
+    -> initialise the PSPGL context and backend
 
 PspRenderer_RenderGfxTask(task, taskIndex)
-    -> gfx_start_frame()
-    -> gfx_run((Gfx*) task->task.t.data_ptr)
-    -> gfx_end_frame()
+    -> begin the PSPGL frame
+    -> interpret (Gfx*) task->task.t.data_ptr
+    -> submit client-array batches
+    -> swap the PSP framebuffer
 ```
 
 The PSP backend does not need to rewrite `src/sys/sys_main.c` the way Dreamcast did. It can keep the existing PSP task handoff and make the new PSPGL backend consume `task->task.t.data_ptr`.
@@ -353,27 +358,18 @@ Before importing the full Dreamcast interpreter, write small PSPGL probes or gua
 * `glFog*`.
 * Texture cache lifetime and `glDeleteTextures` behavior under memory pressure.
 
-## Recommended First Implementation Milestone
+## Continuing Implementation
 
-Keep the current backend selector and leave `legacy_rsp` untouched.
+The clear-screen, client-array triangle, real display-list traversal, texture,
+depth, starfield, combine, and initial lighting milestones are complete. The
+remaining Dreamcast-inspired work should continue in layers:
 
-First real PSPGL milestone:
-
-```text
-PspRenderer_RenderGfxTask(task, taskIndex)
-    -> call a tiny PSPGL renderer API using one hard-coded client-array triangle
-    -> exercise matrix load, vertex/color arrays, depth state, and swap
-```
-
-Then port the Dreamcast renderer in layers:
-
-1. Add platform-neutral `src/psp/gfx/` staging files with the Dreamcast API shapes.
-2. Implement `gfx_psp` window API over the existing PSPGL context/swap.
-3. Implement a minimal `gfx_pspgl_api` from `gfx_gldc.c` using only clear, matrix, client arrays, depth/blend, and triangle draw.
-4. Import the smallest `gfx_retro_dc.c` subset that can run a trivial display list containing matrix, vertex, triangle, and end commands.
-5. Add texture upload and texrect support after triangle geometry works.
-6. Add Dreamcast-style vertex-load-time lighting after matrix and vertex colors are visibly correct.
-7. Add combine/fog/effect workarounds incrementally, each with a short comment and a screenshot or hardware note where possible.
+1. Improve geometry rejection, clipping, and matrix fidelity.
+2. Complete texture/tile/sampler interpretation and cache behavior.
+3. Improve combine, alpha, blend, render-mode, and depth fidelity.
+4. Refine Dreamcast-style vertex-load-time lighting.
+5. Add fog and effect behavior incrementally, with diagnostics and hardware
+   notes where useful.
 
 The important architectural move is to reuse the Dreamcast split:
 
@@ -384,4 +380,8 @@ Star Fox 64 display-list interpreter
     -> PSP swap/pacing
 ```
 
-That gives PSPGL the same kind of staging role GLdc has on Dreamcast, while preserving the current native GU renderer as `legacy_rsp` for reference and future optimization.
+PSPGL is the primary backend and should remain available long term. A future
+native sceGu/GE backend should sit beneath the same display-list frontend so
+the two implementations can be compared for correctness, performance, and
+educational value. The retired native interpreter remains source material, not
+the architecture of that future backend.
