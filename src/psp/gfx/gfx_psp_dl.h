@@ -25,6 +25,10 @@ typedef struct {
     u32 sharedClipTriangleCount;
     u32 eyePlaneCrossingTriangleCount;
     u32 behindEyeTriangleCount;
+    u32 clippedTriangleCount;
+    u32 nearPlaneClippedTriangleCount;
+    u32 clipRejectedTriangleCount;
+    u32 clipGeneratedTriangleCount;
     u32 degenerateTriangleCount;
     u32 depthTestTriangleCount;
     u32 depthWriteTriangleCount;
