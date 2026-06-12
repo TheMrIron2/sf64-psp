@@ -29,6 +29,14 @@ typedef struct {
     u32 nearPlaneClippedTriangleCount;
     u32 clipRejectedTriangleCount;
     u32 clipGeneratedTriangleCount;
+    u32 texturedClippedTriangleCount;
+    u32 untexturedClippedTriangleCount;
+    u32 clipGeneratedVertexCount;
+    u32 clipMaxPolygonVertexCount;
+    u32 perspectiveSplitCount;
+    u32 perspectiveTriangleCount;
+    u32 projectedTriangleCount;
+    u32 pretransformedTriangleCount;
     u32 degenerateTriangleCount;
     u32 depthTestTriangleCount;
     u32 depthWriteTriangleCount;

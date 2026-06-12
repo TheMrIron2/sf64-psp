@@ -347,12 +347,21 @@ u32 PspGfxPspgl_GetIa16Texture(const u16* pixels, u32 width, u32 height, u32* up
 
 void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u32 vertexCount, u32 textureId,
                                       PspGfxPspglTextureEnv textureEnv, int alphaTest, int blend, int depthTest,
-                                      int depthWrite) {
+                                      int depthWrite, const float* projectionMatrix, int pretransformed) {
     GLint glTextureEnv;
 
     if ((vertices == NULL) || (vertexCount == 0)) {
         return;
     }
+
+    glMatrixMode(GL_PROJECTION);
+    if (pretransformed || (projectionMatrix == NULL)) {
+        glLoadIdentity();
+    } else {
+        glLoadMatrixf(projectionMatrix);
+    }
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
 
     glEnableClientState(GL_VERTEX_ARRAY);
     glEnableClientState(GL_COLOR_ARRAY);

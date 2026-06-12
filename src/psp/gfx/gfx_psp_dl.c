@@ -24,6 +24,8 @@
 #define PSP_GFX_DL_MTX_STACK_DEPTH 32
 #define PSP_GFX_DL_CLIP_PLANES 6
 #define PSP_GFX_DL_MAX_CLIP_VERTICES 12
+#define PSP_GFX_DL_PERSPECTIVE_W_RATIO 1.5f
+#define PSP_GFX_DL_PERSPECTIVE_MAX_DEPTH 5
 
 #define PSP_GFX_OP_F3D_SPNOOP 0x00
 #define PSP_GFX_OP_F3D_MTX 0x01
@@ -49,10 +51,16 @@ typedef struct {
     float x;
     float y;
     float z;
+    float viewX;
+    float viewY;
+    float viewZ;
+    float viewW;
     float clipX;
     float clipY;
     float clipZ;
     float clipW;
+    float projection[4][4];
+    u32 projectionSerial;
     u8 r;
     u8 g;
     u8 b;
@@ -68,12 +76,17 @@ typedef struct {
     float y;
     float z;
     float w;
+    float viewX;
+    float viewY;
+    float viewZ;
+    float viewW;
     float r;
     float g;
     float b;
     float a;
     float u;
     float v;
+    int generated;
 } PspGfxDlClipVertex;
 
 typedef struct {
@@ -103,8 +116,11 @@ typedef struct {
     float modelview[4][4];
     float projection[4][4];
     float modelviewStack[PSP_GFX_DL_MTX_STACK_DEPTH][4][4];
+    float batchProjection[4][4];
     u32 batchCount;
     u32 modelviewStackDepth;
+    u32 projectionSerial;
+    u32 batchProjectionSerial;
     u32 matrixFlagsSeen;
     s16 viewportScaleX;
     s16 viewportScaleY;
@@ -146,15 +162,34 @@ typedef struct {
     int batchBlend;
     int batchDepthTest;
     int batchDepthWrite;
+    int batchPretransformed;
+    int batchTransformSet;
     u32 otherModeL;
     int hasModelview;
     int hasProjection;
     int hasVertexBounds;
+    int hasClipSample;
+    u32 clipSampleVertexCount;
+    u32 clipSampleGeneratedCount;
+    float clipLargestWRatio;
+    float clipSampleMinW;
+    float clipSampleMaxW;
+    float clipSampleMinX;
+    float clipSampleMaxX;
+    float clipSampleMinY;
+    float clipSampleMaxY;
+    float clipSampleMinZ;
+    float clipSampleMaxZ;
+    float clipSampleMinU;
+    float clipSampleMaxU;
+    float clipSampleMinV;
+    float clipSampleMaxV;
 } PspGfxDlContext;
 
 static PspGfxDlContext sPspGfxDlContext;
 #if PSP_LOG_ENABLED || PSP_RENDERER_DIAGNOSTICS
 static int sLoggedFirstDrawableTask;
+static int sLoggedTexturedClipSample;
 #endif
 
 static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred);
@@ -283,7 +318,7 @@ static void psp_gfx_dl_mtx_l2f(float out[4][4], const Mtx* src) {
     }
 }
 
-static void psp_gfx_dl_mtx_copy(float out[4][4], float in[4][4]) {
+static void psp_gfx_dl_mtx_copy(float out[4][4], const float in[4][4]) {
     u32 row;
     u32 col;
 
@@ -332,6 +367,10 @@ static int psp_gfx_dl_transform_vertex(PspGfxDlContext* ctx, const Vtx* in, PspG
     if (ctx->hasModelview) {
         psp_gfx_dl_transform(ctx->modelview, x, y, z, &x, &y, &z, &w);
     }
+    out->viewX = x;
+    out->viewY = y;
+    out->viewZ = z;
+    out->viewW = w;
     if (!ctx->hasProjection) {
         out->x = x / 320.0f;
         out->y = -y / 240.0f;
@@ -341,9 +380,12 @@ static int psp_gfx_dl_transform_vertex(PspGfxDlContext* ctx, const Vtx* in, PspG
         out->clipZ = out->z;
         out->clipW = 1.0f;
         out->clipCode = psp_gfx_dl_clip_code(out->x, out->y, out->z, out->clipW);
+        out->projectionSerial = 0;
         return 1;
     }
 
+    psp_gfx_dl_mtx_copy(out->projection, ctx->projection);
+    out->projectionSerial = ctx->projectionSerial;
     psp_gfx_dl_transform(ctx->projection, x, y, z, &clipX, &clipY, &clipZ, &clipW);
     if ((clipW > -0.001f) && (clipW < 0.001f)) {
         ctx->stats.nearZeroWCount++;
@@ -404,6 +446,12 @@ static void psp_gfx_dl_handle_mtx(PspGfxDlContext* ctx, const Gfx* gfx) {
         psp_gfx_dl_mtx_copy(target, loaded);
     }
     *hasTarget = 1;
+    if ((flags & G_MTX_PROJECTION) != 0) {
+        ctx->projectionSerial++;
+        if (ctx->projectionSerial == 0) {
+            ctx->projectionSerial = 1;
+        }
+    }
 }
 
 static void psp_gfx_dl_handle_pop_mtx(PspGfxDlContext* ctx) {
@@ -467,7 +515,8 @@ static void psp_gfx_dl_flush(PspGfxDlContext* ctx) {
     }
     PspGfxPspgl_DrawColoredTriangles(ctx->batch, ctx->batchCount, ctx->batchTextureId, ctx->batchTextureEnv,
                                      ctx->batchAlphaTest, ctx->batchBlend, ctx->batchDepthTest,
-                                     ctx->batchDepthWrite);
+                                     ctx->batchDepthWrite, &ctx->batchProjection[0][0],
+                                     ctx->batchPretransformed);
     ctx->stats.drawVertexCount += ctx->batchCount;
     ctx->batchCount = 0;
 }
@@ -494,6 +543,26 @@ static void psp_gfx_dl_set_batch_depth(PspGfxDlContext* ctx, int depthTest, int 
     ctx->batchDepthWrite = depthWrite;
 }
 
+static void psp_gfx_dl_set_batch_transform(PspGfxDlContext* ctx, int pretransformed, u32 projectionSerial,
+                                           const float projection[4][4]) {
+    if ((ctx->batchCount != 0) &&
+        ((ctx->batchPretransformed != pretransformed) ||
+         (!pretransformed && (ctx->batchProjectionSerial != projectionSerial)))) {
+        psp_gfx_dl_flush(ctx);
+    }
+    if (!ctx->batchTransformSet || (ctx->batchPretransformed != pretransformed) ||
+        (!pretransformed && (ctx->batchProjectionSerial != projectionSerial))) {
+        ctx->batchPretransformed = pretransformed;
+        ctx->batchProjectionSerial = projectionSerial;
+        if (!pretransformed && (projection != NULL)) {
+            psp_gfx_dl_mtx_copy(ctx->batchProjection, projection);
+        } else {
+            psp_gfx_dl_identity(ctx->batchProjection);
+        }
+        ctx->batchTransformSet = 1;
+    }
+}
+
 static int psp_gfx_dl_vertex_is_valid(PspGfxDlContext* ctx, u8 index) {
     return (index < PSP_GFX_DL_MAX_VERTICES) && ctx->vertices[index].valid;
 }
@@ -504,6 +573,10 @@ static void psp_gfx_dl_build_clip_vertex(PspGfxDlContext* ctx, const PspGfxDlVer
     dst->y = src->clipY;
     dst->z = src->clipZ;
     dst->w = src->clipW;
+    dst->viewX = src->viewX;
+    dst->viewY = src->viewY;
+    dst->viewZ = src->viewZ;
+    dst->viewW = src->viewW;
     if ((ctx->combineMode == PSP_GFX_DL_COMBINE_PRIMITIVE) ||
         (ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_PRIM_ALPHA) ||
         ((ctx->geometryMode & G_SHADE) == 0)) {
@@ -530,21 +603,28 @@ static void psp_gfx_dl_build_clip_vertex(PspGfxDlContext* ctx, const PspGfxDlVer
         dst->u = 0.0f;
         dst->v = 0.0f;
     }
+    dst->generated = 0;
 }
 
 static void psp_gfx_dl_emit_clip_vertex(PspGfxDlContext* ctx, const PspGfxDlClipVertex* src) {
     PspGfxPspglColorVertex* dst;
-    float inverseW;
 
     if (ctx->batchCount >= PSP_GFX_DL_BATCH_VERTICES) {
         psp_gfx_dl_flush(ctx);
     }
 
-    inverseW = 1.0f / src->w;
     dst = &ctx->batch[ctx->batchCount++];
-    dst->x = src->x * inverseW;
-    dst->y = src->y * inverseW;
-    dst->z = src->z * inverseW;
+    if (ctx->batchPretransformed) {
+        float inverseW = 1.0f / src->w;
+
+        dst->x = src->x * inverseW;
+        dst->y = src->y * inverseW;
+        dst->z = src->z * inverseW;
+    } else {
+        dst->x = src->viewX;
+        dst->y = src->viewY;
+        dst->z = src->viewZ;
+    }
     dst->r = src->r;
     dst->g = src->g;
     dst->b = src->b;
@@ -576,12 +656,103 @@ static void psp_gfx_dl_interpolate_clip_vertex(PspGfxDlClipVertex* out, const Ps
     out->y = from->y + ((to->y - from->y) * t);
     out->z = from->z + ((to->z - from->z) * t);
     out->w = from->w + ((to->w - from->w) * t);
+    out->viewX = from->viewX + ((to->viewX - from->viewX) * t);
+    out->viewY = from->viewY + ((to->viewY - from->viewY) * t);
+    out->viewZ = from->viewZ + ((to->viewZ - from->viewZ) * t);
+    out->viewW = from->viewW + ((to->viewW - from->viewW) * t);
     out->r = from->r + ((to->r - from->r) * t);
     out->g = from->g + ((to->g - from->g) * t);
     out->b = from->b + ((to->b - from->b) * t);
     out->a = from->a + ((to->a - from->a) * t);
     out->u = from->u + ((to->u - from->u) * t);
     out->v = from->v + ((to->v - from->v) * t);
+    out->generated = 1;
+}
+
+static float psp_gfx_dl_triangle_w_ratio(const PspGfxDlClipVertex* a, const PspGfxDlClipVertex* b,
+                                         const PspGfxDlClipVertex* c) {
+    float minW = a->w;
+    float maxW = a->w;
+
+    if (b->w < minW) {
+        minW = b->w;
+    }
+    if (c->w < minW) {
+        minW = c->w;
+    }
+    if (b->w > maxW) {
+        maxW = b->w;
+    }
+    if (c->w > maxW) {
+        maxW = c->w;
+    }
+    if (minW <= 0.0f) {
+        return 1.0f;
+    }
+    return maxW / minW;
+}
+
+static u32 psp_gfx_dl_emit_perspective_triangle(PspGfxDlContext* ctx, const PspGfxDlClipVertex* a,
+                                                const PspGfxDlClipVertex* b, const PspGfxDlClipVertex* c,
+                                                u32 depth) {
+    const PspGfxDlClipVertex* low = a;
+    const PspGfxDlClipVertex* high = a;
+    PspGfxDlClipVertex midpoint;
+
+    if ((depth >= PSP_GFX_DL_PERSPECTIVE_MAX_DEPTH) ||
+        (psp_gfx_dl_triangle_w_ratio(a, b, c) <= PSP_GFX_DL_PERSPECTIVE_W_RATIO)) {
+        psp_gfx_dl_emit_clip_vertex(ctx, a);
+        psp_gfx_dl_emit_clip_vertex(ctx, b);
+        psp_gfx_dl_emit_clip_vertex(ctx, c);
+        ctx->stats.perspectiveTriangleCount++;
+        return 1;
+    }
+
+    if (b->w < low->w) {
+        low = b;
+    }
+    if (c->w < low->w) {
+        low = c;
+    }
+    if (b->w > high->w) {
+        high = b;
+    }
+    if (c->w > high->w) {
+        high = c;
+    }
+    psp_gfx_dl_interpolate_clip_vertex(&midpoint, low, high, 0.5f);
+    ctx->stats.perspectiveSplitCount++;
+
+    if ((low == a) && (high == b)) {
+        return psp_gfx_dl_emit_perspective_triangle(ctx, a, &midpoint, c, depth + 1) +
+               psp_gfx_dl_emit_perspective_triangle(ctx, &midpoint, b, c, depth + 1);
+    }
+    if ((low == b) && (high == a)) {
+        return psp_gfx_dl_emit_perspective_triangle(ctx, a, &midpoint, c, depth + 1) +
+               psp_gfx_dl_emit_perspective_triangle(ctx, &midpoint, b, c, depth + 1);
+    }
+    if ((low == b) && (high == c)) {
+        return psp_gfx_dl_emit_perspective_triangle(ctx, a, b, &midpoint, depth + 1) +
+               psp_gfx_dl_emit_perspective_triangle(ctx, a, &midpoint, c, depth + 1);
+    }
+    if ((low == c) && (high == b)) {
+        return psp_gfx_dl_emit_perspective_triangle(ctx, a, b, &midpoint, depth + 1) +
+               psp_gfx_dl_emit_perspective_triangle(ctx, a, &midpoint, c, depth + 1);
+    }
+    return psp_gfx_dl_emit_perspective_triangle(ctx, a, b, &midpoint, depth + 1) +
+           psp_gfx_dl_emit_perspective_triangle(ctx, &midpoint, b, c, depth + 1);
+}
+
+static u32 psp_gfx_dl_emit_textured_triangle(PspGfxDlContext* ctx, const PspGfxDlClipVertex* a,
+                                             const PspGfxDlClipVertex* b, const PspGfxDlClipVertex* c) {
+    if (ctx->batchPretransformed) {
+        return psp_gfx_dl_emit_perspective_triangle(ctx, a, b, c, 0);
+    }
+    psp_gfx_dl_emit_clip_vertex(ctx, a);
+    psp_gfx_dl_emit_clip_vertex(ctx, b);
+    psp_gfx_dl_emit_clip_vertex(ctx, c);
+    ctx->stats.perspectiveTriangleCount++;
+    return 1;
 }
 
 static u32 psp_gfx_dl_clip_polygon_plane(const PspGfxDlClipVertex* input, u32 inputCount,
@@ -624,12 +795,13 @@ static u32 psp_gfx_dl_clip_polygon_plane(const PspGfxDlClipVertex* input, u32 in
 }
 
 static u32 psp_gfx_dl_emit_clipped_triangle(PspGfxDlContext* ctx, const PspGfxDlVertex* a,
-                                            const PspGfxDlVertex* b, const PspGfxDlVertex* c) {
+                                            const PspGfxDlVertex* b, const PspGfxDlVertex* c, int textured) {
     PspGfxDlClipVertex buffers[2][PSP_GFX_DL_MAX_CLIP_VERTICES];
     PspGfxDlClipVertex* input = buffers[0];
     PspGfxDlClipVertex* output = buffers[1];
     PspGfxDlClipVertex* swap;
     u32 vertexCount = 3;
+    u32 generatedCount = 0;
     u32 plane;
     u32 i;
 
@@ -646,10 +818,110 @@ static u32 psp_gfx_dl_emit_clipped_triangle(PspGfxDlContext* ctx, const PspGfxDl
         output = swap;
     }
 
+    if (vertexCount > ctx->stats.clipMaxPolygonVertexCount) {
+        ctx->stats.clipMaxPolygonVertexCount = vertexCount;
+    }
+    if (textured) {
+        float minW = input[0].w;
+        float maxW = input[0].w;
+        float minX = input[0].x / input[0].w;
+        float maxX = minX;
+        float minY = input[0].y / input[0].w;
+        float maxY = minY;
+        float minZ = input[0].z / input[0].w;
+        float maxZ = minZ;
+        float minU = input[0].u;
+        float maxU = minU;
+        float minV = input[0].v;
+        float maxV = minV;
+
+        for (i = 0; i < vertexCount; i++) {
+            float ndcX = input[i].x / input[i].w;
+            float ndcY = input[i].y / input[i].w;
+            float ndcZ = input[i].z / input[i].w;
+
+            if (input[i].generated) {
+                generatedCount++;
+            }
+            if (input[i].w < minW) {
+                minW = input[i].w;
+            }
+            if (input[i].w > maxW) {
+                maxW = input[i].w;
+            }
+            if (ndcX < minX) {
+                minX = ndcX;
+            }
+            if (ndcX > maxX) {
+                maxX = ndcX;
+            }
+            if (ndcY < minY) {
+                minY = ndcY;
+            }
+            if (ndcY > maxY) {
+                maxY = ndcY;
+            }
+            if (ndcZ < minZ) {
+                minZ = ndcZ;
+            }
+            if (ndcZ > maxZ) {
+                maxZ = ndcZ;
+            }
+            if (input[i].u < minU) {
+                minU = input[i].u;
+            }
+            if (input[i].u > maxU) {
+                maxU = input[i].u;
+            }
+            if (input[i].v < minV) {
+                minV = input[i].v;
+            }
+            if (input[i].v > maxV) {
+                maxV = input[i].v;
+            }
+        }
+        ctx->stats.clipGeneratedVertexCount += generatedCount;
+        if (minW > 0.0f) {
+            float wRatio = maxW / minW;
+
+            if (wRatio > ctx->clipLargestWRatio) {
+                ctx->clipLargestWRatio = wRatio;
+            }
+        }
+        if (!ctx->hasClipSample) {
+            ctx->hasClipSample = 1;
+            ctx->clipSampleVertexCount = vertexCount;
+            ctx->clipSampleGeneratedCount = generatedCount;
+            ctx->clipSampleMinW = minW;
+            ctx->clipSampleMaxW = maxW;
+            ctx->clipSampleMinX = minX;
+            ctx->clipSampleMaxX = maxX;
+            ctx->clipSampleMinY = minY;
+            ctx->clipSampleMaxY = maxY;
+            ctx->clipSampleMinZ = minZ;
+            ctx->clipSampleMaxZ = maxZ;
+            ctx->clipSampleMinU = minU;
+            ctx->clipSampleMaxU = maxU;
+            ctx->clipSampleMinV = minV;
+            ctx->clipSampleMaxV = maxV;
+        }
+    } else {
+        for (i = 0; i < vertexCount; i++) {
+            if (input[i].generated) {
+                generatedCount++;
+            }
+        }
+        ctx->stats.clipGeneratedVertexCount += generatedCount;
+    }
+
     for (i = 1; i + 1 < vertexCount; i++) {
-        psp_gfx_dl_emit_clip_vertex(ctx, &input[0]);
-        psp_gfx_dl_emit_clip_vertex(ctx, &input[i]);
-        psp_gfx_dl_emit_clip_vertex(ctx, &input[i + 1]);
+        if (textured) {
+            psp_gfx_dl_emit_textured_triangle(ctx, &input[0], &input[i], &input[i + 1]);
+        } else {
+            psp_gfx_dl_emit_clip_vertex(ctx, &input[0]);
+            psp_gfx_dl_emit_clip_vertex(ctx, &input[i]);
+            psp_gfx_dl_emit_clip_vertex(ctx, &input[i + 1]);
+        }
     }
     return vertexCount - 2;
 }
@@ -664,6 +936,7 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
     u32 emittedTriangles;
     u32 textureId;
     PspGfxPspglTextureEnv textureEnv = PSP_GFX_PSPGL_TEX_REPLACE;
+    int pretransformed;
 
     if (!psp_gfx_dl_vertex_is_valid(ctx, a) || !psp_gfx_dl_vertex_is_valid(ctx, b) ||
         !psp_gfx_dl_vertex_is_valid(ctx, c)) {
@@ -679,6 +952,15 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
     va = &ctx->vertices[a];
     vb = &ctx->vertices[b];
     vc = &ctx->vertices[c];
+    pretransformed = !ctx->hasProjection || (va->projectionSerial == 0) ||
+                     (va->projectionSerial != vb->projectionSerial) ||
+                     (va->projectionSerial != vc->projectionSerial);
+    if (pretransformed) {
+        ctx->stats.pretransformedTriangleCount++;
+    } else {
+        ctx->stats.projectedTriangleCount++;
+    }
+    psp_gfx_dl_set_batch_transform(ctx, pretransformed, va->projectionSerial, va->projection);
     sharedClipCode = va->clipCode & vb->clipCode & vc->clipCode;
     combinedClipCode = va->clipCode | vb->clipCode | vc->clipCode;
     if (sharedClipCode != 0) {
@@ -713,24 +995,33 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
         ctx->stats.clipRejectedTriangleCount++;
     } else if (combinedClipCode != 0) {
         ctx->stats.clippedTriangleCount++;
+        if (textureId != 0) {
+            ctx->stats.texturedClippedTriangleCount++;
+        } else {
+            ctx->stats.untexturedClippedTriangleCount++;
+        }
         if ((combinedClipCode & (1U << 4)) != 0) {
             ctx->stats.nearPlaneClippedTriangleCount++;
         }
-        emittedTriangles = psp_gfx_dl_emit_clipped_triangle(ctx, va, vb, vc);
+        emittedTriangles = psp_gfx_dl_emit_clipped_triangle(ctx, va, vb, vc, textureId != 0);
         if (emittedTriangles == 0) {
             ctx->stats.clipRejectedTriangleCount++;
         } else {
             ctx->stats.clipGeneratedTriangleCount += emittedTriangles;
         }
     } else {
-        PspGfxDlClipVertex vertex;
+        PspGfxDlClipVertex vertices[3];
 
-        psp_gfx_dl_build_clip_vertex(ctx, va, &vertex);
-        psp_gfx_dl_emit_clip_vertex(ctx, &vertex);
-        psp_gfx_dl_build_clip_vertex(ctx, vb, &vertex);
-        psp_gfx_dl_emit_clip_vertex(ctx, &vertex);
-        psp_gfx_dl_build_clip_vertex(ctx, vc, &vertex);
-        psp_gfx_dl_emit_clip_vertex(ctx, &vertex);
+        psp_gfx_dl_build_clip_vertex(ctx, va, &vertices[0]);
+        psp_gfx_dl_build_clip_vertex(ctx, vb, &vertices[1]);
+        psp_gfx_dl_build_clip_vertex(ctx, vc, &vertices[2]);
+        if (textureId != 0) {
+            psp_gfx_dl_emit_textured_triangle(ctx, &vertices[0], &vertices[1], &vertices[2]);
+        } else {
+            psp_gfx_dl_emit_clip_vertex(ctx, &vertices[0]);
+            psp_gfx_dl_emit_clip_vertex(ctx, &vertices[1]);
+            psp_gfx_dl_emit_clip_vertex(ctx, &vertices[2]);
+        }
         emittedTriangles = 1;
     }
     ctx->stats.triangleCount++;
@@ -789,6 +1080,7 @@ static void psp_gfx_dl_handle_texture_rectangle(PspGfxDlContext* ctx, const Gfx*
     psp_gfx_dl_set_batch_texture(ctx, ctx->textureId, PSP_GFX_PSPGL_TEX_MODULATE,
                                  psp_gfx_dl_alpha_test_enabled(ctx), psp_gfx_dl_blend_enabled(ctx));
     psp_gfx_dl_set_batch_depth(ctx, 0, 0);
+    psp_gfx_dl_set_batch_transform(ctx, 1, 0, NULL);
 
     if (flip) {
         s1 = s0 + ((y1 - y0) * dsdx);
@@ -1391,7 +1683,9 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
         snprintf(line, sizeof(line),
                  "[pspgl-geom] task=%lu nearW=%lu behindVtx=%lu invalidTri=%lu sharedClipTri=%lu "
                  "eyeCrossTri=%lu behindTri=%lu clippedTri=%lu nearClipTri=%lu clipRejectTri=%lu "
-                 "clipGenTri=%lu degenerateTri=%lu depthTestTri=%lu depthWriteTri=%lu deferTex=%lu "
+                 "clipGenTri=%lu clipTex=%lu/%lu clipGenVtx=%lu clipPolyMax=%lu wRatioMax=%.2f "
+                 "perspSplit=%lu perspTri=%lu gpuProjTri=%lu preXformTri=%lu "
+                 "degenerateTri=%lu depthTestTri=%lu depthWriteTri=%lu deferTex=%lu "
                  "ptrReject=%lu/%lu/%lu maxDlDepth=%lu",
                  (unsigned long) taskIndex, (unsigned long) ctx->stats.nearZeroWCount,
                  (unsigned long) ctx->stats.behindEyeVertexCount, (unsigned long) ctx->stats.invalidTriangleCount,
@@ -1402,6 +1696,15 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
                  (unsigned long) ctx->stats.nearPlaneClippedTriangleCount,
                  (unsigned long) ctx->stats.clipRejectedTriangleCount,
                  (unsigned long) ctx->stats.clipGeneratedTriangleCount,
+                 (unsigned long) ctx->stats.texturedClippedTriangleCount,
+                 (unsigned long) ctx->stats.untexturedClippedTriangleCount,
+                 (unsigned long) ctx->stats.clipGeneratedVertexCount,
+                 (unsigned long) ctx->stats.clipMaxPolygonVertexCount,
+                 ctx->clipLargestWRatio,
+                 (unsigned long) ctx->stats.perspectiveSplitCount,
+                 (unsigned long) ctx->stats.perspectiveTriangleCount,
+                 (unsigned long) ctx->stats.projectedTriangleCount,
+                 (unsigned long) ctx->stats.pretransformedTriangleCount,
                  (unsigned long) ctx->stats.degenerateTriangleCount,
                  (unsigned long) ctx->stats.depthTestTriangleCount,
                  (unsigned long) ctx->stats.depthWriteTriangleCount,
@@ -1411,6 +1714,19 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
                  (unsigned long) ctx->stats.displayListPointerRejected,
                  (unsigned long) ctx->stats.maxDepthReached);
         PspPlatform_LogLine(line);
+    }
+
+    if (!sLoggedTexturedClipSample && ctx->hasClipSample) {
+        snprintf(line, sizeof(line),
+                 "[pspgl-clip-sample] task=%lu verts=%lu generated=%lu w=%.3f..%.3f "
+                 "ndc=%.3f..%.3f,%.3f..%.3f,%.3f..%.3f uv=%.3f..%.3f,%.3f..%.3f",
+                 (unsigned long) taskIndex, (unsigned long) ctx->clipSampleVertexCount,
+                 (unsigned long) ctx->clipSampleGeneratedCount, ctx->clipSampleMinW, ctx->clipSampleMaxW,
+                 ctx->clipSampleMinX, ctx->clipSampleMaxX, ctx->clipSampleMinY, ctx->clipSampleMaxY,
+                 ctx->clipSampleMinZ, ctx->clipSampleMaxZ, ctx->clipSampleMinU, ctx->clipSampleMaxU,
+                 ctx->clipSampleMinV, ctx->clipSampleMaxV);
+        PspPlatform_LogLine(line);
+        sLoggedTexturedClipSample = 1;
     }
 
     if (!sLoggedFirstDrawableTask && (ctx->stats.triangleCount != 0)) {
