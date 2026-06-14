@@ -68,6 +68,17 @@ static void Psp_GuPerspective(Mtx* m, u16* perspNorm, f32 fovy, f32 aspect, f32 
     }
     PSP_TRACE("perspective: psp filled");
 }
+
+static void Psp_GuOrtho(Mtx* m, f32 left, f32 right, f32 bottom, f32 top, f32 near, f32 far, f32 scale) {
+    Psp_MtxZero(m);
+    Psp_SetMtxElement(m, 0, 0, (2.0f / (right - left)) * scale);
+    Psp_SetMtxElement(m, 1, 1, (2.0f / (top - bottom)) * scale);
+    Psp_SetMtxElement(m, 2, 2, (-2.0f / (far - near)) * scale);
+    Psp_SetMtxElement(m, 3, 0, (-(right + left) / (right - left)) * scale);
+    Psp_SetMtxElement(m, 3, 1, (-(top + bottom) / (top - bottom)) * scale);
+    Psp_SetMtxElement(m, 3, 2, (-(far + near) / (far - near)) * scale);
+    Psp_SetMtxElement(m, 3, 3, scale);
+}
 #endif
 
 s32 Lib_vsPrintf(char* dst, const char* fmt, va_list args) {
@@ -178,10 +189,23 @@ void Lib_InitPerspective(Gfx** dList) {
 }
 
 void Lib_InitOrtho(Gfx** dList) {
+#ifdef TARGET_PSP
+    /*
+     * Orthographic UI meshes are commonly placed at z = 0. Include that
+     * plane explicitly so PSPGL clipping does not reject them at the near edge.
+     */
+    Psp_GuOrtho(gGfxMtx, -SCREEN_WIDTH / 2, SCREEN_WIDTH / 2, -SCREEN_HEIGHT / 2, SCREEN_HEIGHT / 2, 0.0f,
+                gProjectFar, 1.0f);
+#else
     guOrtho(gGfxMtx, -SCREEN_WIDTH / 2, SCREEN_WIDTH / 2, -SCREEN_HEIGHT / 2, SCREEN_HEIGHT / 2, gProjectNear,
             gProjectFar, 1.0f);
+#endif
     gSPMatrix((*dList)++, gGfxMtx++, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);
+#ifdef TARGET_PSP
+    Psp_MtxIdentity(gGfxMtx);
+#else
     guLookAt(gGfxMtx, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, -12800.0f, 0.0f, 1.0f, 0.0f);
+#endif
     gSPMatrix((*dList)++, gGfxMtx++, G_MTX_NOPUSH | G_MTX_MUL | G_MTX_PROJECTION);
     Matrix_Copy(gGfxMatrix, &gIdentityMatrix);
 }
