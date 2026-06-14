@@ -154,6 +154,12 @@ typedef struct {
     u8 ambientR;
     u8 ambientG;
     u8 ambientB;
+    u32 lightingVertexCount;
+    float lightingRawMin;
+    float lightingRawMax;
+    u8 lightingMappedMin;
+    u8 lightingMappedMax;
+    int hasLightingRange;
     u8 primitiveR;
     u8 primitiveG;
     u8 primitiveB;
@@ -209,12 +215,39 @@ typedef struct {
 } PspGfxDlContext;
 
 static PspGfxDlContext sPspGfxDlContext;
+static u8 sLightingRemap[256];
+static int sLightingRemapInitialized;
 #if PSP_LOG_ENABLED || PSP_RENDERER_DIAGNOSTICS
 static int sLoggedFirstDrawableTask;
+static int sLoggedFirstLightingTask;
 static int sLoggedTexturedClipSample;
 #endif
 
 static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int premultiply);
+
+static void psp_gfx_dl_init_lighting_remap(void) {
+    u32 i;
+
+    if (sLightingRemapInitialized) {
+        return;
+    }
+    /* Match the N64 brightness response used by the Dreamcast renderer. */
+    for (i = 0; i < 256; i++) {
+        sLightingRemap[i] = (u8) (255.0f * sqrtf((float) i / 255.0f));
+    }
+    sLightingRemapInitialized = 1;
+}
+
+static u8 psp_gfx_dl_remap_lighting(float value) {
+    if (value <= 0.0f) {
+        return 0;
+    }
+    if (value >= 255.0f) {
+        return 255;
+    }
+
+    return sLightingRemap[(u8) value];
+}
 
 static float psp_gfx_dl_fog_distance(const float projection[4][4], float ndcZ) {
     float denominator = projection[2][2] - (ndcZ * projection[2][3]);
@@ -1450,9 +1483,35 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
                     b += (float) light->b * dot;
                 }
             }
-            out->r = (u8) ((r > 255.0f) ? 255.0f : r);
-            out->g = (u8) ((g > 255.0f) ? 255.0f : g);
-            out->b = (u8) ((b > 255.0f) ? 255.0f : b);
+            out->r = psp_gfx_dl_remap_lighting(r);
+            out->g = psp_gfx_dl_remap_lighting(g);
+            out->b = psp_gfx_dl_remap_lighting(b);
+            ctx->lightingVertexCount++;
+            if (!ctx->hasLightingRange) {
+                ctx->lightingRawMin = fminf(r, fminf(g, b));
+                ctx->lightingRawMax = fmaxf(r, fmaxf(g, b));
+                ctx->lightingMappedMin = out->r;
+                ctx->lightingMappedMax = out->r;
+                ctx->hasLightingRange = 1;
+            } else {
+                ctx->lightingRawMin = fminf(ctx->lightingRawMin, fminf(r, fminf(g, b)));
+                ctx->lightingRawMax = fmaxf(ctx->lightingRawMax, fmaxf(r, fmaxf(g, b)));
+            }
+            if (out->g < ctx->lightingMappedMin) {
+                ctx->lightingMappedMin = out->g;
+            }
+            if (out->b < ctx->lightingMappedMin) {
+                ctx->lightingMappedMin = out->b;
+            }
+            if (out->r > ctx->lightingMappedMax) {
+                ctx->lightingMappedMax = out->r;
+            }
+            if (out->g > ctx->lightingMappedMax) {
+                ctx->lightingMappedMax = out->g;
+            }
+            if (out->b > ctx->lightingMappedMax) {
+                ctx->lightingMappedMax = out->b;
+            }
         } else {
             out->r = in->v.cn[0];
             out->g = in->v.cn[1];
@@ -1826,6 +1885,7 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
     char line[512];
 #endif
 
+    psp_gfx_dl_init_lighting_remap();
     psp_gfx_dl_reset_context(ctx);
     psp_gfx_dl_run_internal(ctx, dl, 0);
     psp_gfx_dl_flush(ctx);
@@ -1923,6 +1983,19 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
                  ctx->clipSampleMinV, ctx->clipSampleMaxV);
         PspPlatform_LogLine(line);
         sLoggedTexturedClipSample = 1;
+    }
+
+    if ((ctx->lightingVertexCount != 0) &&
+        (!sLoggedFirstLightingTask || (taskIndex < 4) || ((taskIndex % 30) == 0))) {
+        snprintf(line, sizeof(line),
+                 "[pspgl-light] task=%lu vertices=%lu lights=%lu ambient=%u,%u,%u "
+                 "linear=%.1f..%.1f mapped=%u..%u",
+                 (unsigned long) taskIndex, (unsigned long) ctx->lightingVertexCount,
+                 (unsigned long) ctx->lightCount, ctx->ambientR, ctx->ambientG, ctx->ambientB,
+                 ctx->lightingRawMin, ctx->lightingRawMax, ctx->lightingMappedMin,
+                 ctx->lightingMappedMax);
+        PspPlatform_LogLine(line);
+        sLoggedFirstLightingTask = 1;
     }
 
     if (!sLoggedFirstDrawableTask && (ctx->stats.triangleCount != 0)) {
