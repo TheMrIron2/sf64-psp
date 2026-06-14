@@ -40,6 +40,7 @@ typedef struct {
     u32 degenerateTriangleCount;
     u32 depthTestTriangleCount;
     u32 depthWriteTriangleCount;
+    u32 fogTriangleCount;
     u32 deferredTextureCount;
     u32 matrixPointerRejected;
     u32 vertexPointerRejected;

@@ -346,9 +346,13 @@ u32 PspGfxPspgl_GetIa16Texture(const u16* pixels, u32 width, u32 height, u32* up
 }
 
 void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u32 vertexCount, u32 textureId,
-                                      PspGfxPspglTextureEnv textureEnv, int alphaTest, int blend, int depthTest,
-                                      int depthWrite, const float* projectionMatrix, int pretransformed) {
+                                      PspGfxPspglTextureEnv textureEnv, PspGfxPspglTextureWrap wrapS,
+                                      PspGfxPspglTextureWrap wrapT, int alphaTest, int blend, int depthTest,
+                                      int depthWrite, int fog, const float* fogColor, float fogStart, float fogEnd,
+                                      const float* projectionMatrix, int pretransformed) {
     GLint glTextureEnv;
+    GLint glWrapS;
+    GLint glWrapT;
 
     if ((vertices == NULL) || (vertexCount == 0)) {
         return;
@@ -372,6 +376,15 @@ void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u3
         glDisable(GL_DEPTH_TEST);
     }
     glDepthMask(depthWrite ? GL_TRUE : GL_FALSE);
+    if (fog && !pretransformed && (fogColor != NULL) && (fogEnd > fogStart)) {
+        glEnable(GL_FOG);
+        glFogf(GL_FOG_MODE, GL_LINEAR);
+        glFogfv(GL_FOG_COLOR, fogColor);
+        glFogf(GL_FOG_START, fogStart);
+        glFogf(GL_FOG_END, fogEnd);
+    } else {
+        glDisable(GL_FOG);
+    }
     if (textureId != 0) {
         glEnableClientState(GL_TEXTURE_COORD_ARRAY);
         glEnable(GL_TEXTURE_2D);
@@ -388,6 +401,10 @@ void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u3
             glDisable(GL_BLEND);
         }
         glBindTexture(GL_TEXTURE_2D, textureId);
+        glWrapS = (wrapS == PSP_GFX_PSPGL_WRAP_CLAMP) ? GL_CLAMP_TO_EDGE : GL_REPEAT;
+        glWrapT = (wrapT == PSP_GFX_PSPGL_WRAP_CLAMP) ? GL_CLAMP_TO_EDGE : GL_REPEAT;
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, glWrapS);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, glWrapT);
         glTexCoordPointer(2, GL_FLOAT, sizeof(PspGfxPspglColorVertex), &vertices[0].u);
         if (textureEnv == PSP_GFX_PSPGL_TEX_MODULATE) {
             glTextureEnv = GL_MODULATE;

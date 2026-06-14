@@ -141,6 +141,10 @@ typedef struct {
     u32 textureHeight;
     u32 textureUploadWidth;
     u32 textureUploadHeight;
+    u32 textureCms;
+    u32 textureCmt;
+    u32 textureMaskS;
+    u32 textureMaskT;
     u32 textureId;
     int textureUploadAttempted;
     u32 batchTextureId;
@@ -156,15 +160,27 @@ typedef struct {
     u8 primitiveA;
     PspGfxDlCombineMode combineMode;
     PspGfxPspglTextureEnv batchTextureEnv;
+    PspGfxPspglTextureWrap batchWrapS;
+    PspGfxPspglTextureWrap batchWrapT;
     int combineUsesTextureAlpha;
     int textureEnabled;
     int batchAlphaTest;
     int batchBlend;
     int batchDepthTest;
     int batchDepthWrite;
+    int batchFog;
+    float batchFogColor[4];
+    float batchFogStart;
+    float batchFogEnd;
     int batchPretransformed;
     int batchTransformSet;
     u32 otherModeL;
+    u8 fogR;
+    u8 fogG;
+    u8 fogB;
+    u8 fogA;
+    s16 fogMul;
+    s16 fogOffset;
     int hasModelview;
     int hasProjection;
     int hasVertexBounds;
@@ -193,6 +209,28 @@ static int sLoggedTexturedClipSample;
 #endif
 
 static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred);
+
+static float psp_gfx_dl_fog_distance(const float projection[4][4], float ndcZ) {
+    float denominator = projection[2][2] - (ndcZ * projection[2][3]);
+
+    if ((denominator > -0.000001f) && (denominator < 0.000001f)) {
+        return 0.0f;
+    }
+    return (projection[3][2] - (ndcZ * projection[3][3])) / denominator;
+}
+
+static PspGfxPspglTextureWrap psp_gfx_dl_texture_wrap(u32 mode, u32 mask) {
+    if ((mode & G_TX_CLAMP) != 0) {
+        return PSP_GFX_PSPGL_WRAP_CLAMP;
+    }
+    if (mask == G_TX_NOMASK) {
+        return PSP_GFX_PSPGL_WRAP_CLAMP;
+    }
+    if ((mode & G_TX_MIRROR) != 0) {
+        return PSP_GFX_PSPGL_WRAP_MIRROR;
+    }
+    return PSP_GFX_PSPGL_WRAP_REPEAT;
+}
 
 static int psp_gfx_dl_alpha_test_enabled(PspGfxDlContext* ctx) {
     return ctx->combineUsesTextureAlpha &&
@@ -514,22 +552,27 @@ static void psp_gfx_dl_flush(PspGfxDlContext* ctx) {
         return;
     }
     PspGfxPspgl_DrawColoredTriangles(ctx->batch, ctx->batchCount, ctx->batchTextureId, ctx->batchTextureEnv,
-                                     ctx->batchAlphaTest, ctx->batchBlend, ctx->batchDepthTest,
-                                     ctx->batchDepthWrite, &ctx->batchProjection[0][0],
-                                     ctx->batchPretransformed);
+                                     ctx->batchWrapS, ctx->batchWrapT, ctx->batchAlphaTest, ctx->batchBlend,
+                                     ctx->batchDepthTest, ctx->batchDepthWrite, ctx->batchFog,
+                                     ctx->batchFogColor, ctx->batchFogStart, ctx->batchFogEnd,
+                                     &ctx->batchProjection[0][0], ctx->batchPretransformed);
     ctx->stats.drawVertexCount += ctx->batchCount;
     ctx->batchCount = 0;
 }
 
 static void psp_gfx_dl_set_batch_texture(PspGfxDlContext* ctx, u32 textureId, PspGfxPspglTextureEnv textureEnv,
-                                         int alphaTest, int blend) {
+                                         PspGfxPspglTextureWrap wrapS, PspGfxPspglTextureWrap wrapT, int alphaTest,
+                                         int blend) {
     if ((ctx->batchCount != 0) &&
         ((ctx->batchTextureId != textureId) || (ctx->batchTextureEnv != textureEnv) ||
-         (ctx->batchAlphaTest != alphaTest) || (ctx->batchBlend != blend))) {
+         (ctx->batchWrapS != wrapS) || (ctx->batchWrapT != wrapT) || (ctx->batchAlphaTest != alphaTest) ||
+         (ctx->batchBlend != blend))) {
         psp_gfx_dl_flush(ctx);
     }
     ctx->batchTextureId = textureId;
     ctx->batchTextureEnv = textureEnv;
+    ctx->batchWrapS = wrapS;
+    ctx->batchWrapT = wrapT;
     ctx->batchAlphaTest = alphaTest;
     ctx->batchBlend = blend;
 }
@@ -541,6 +584,42 @@ static void psp_gfx_dl_set_batch_depth(PspGfxDlContext* ctx, int depthTest, int 
     }
     ctx->batchDepthTest = depthTest;
     ctx->batchDepthWrite = depthWrite;
+}
+
+static void psp_gfx_dl_set_batch_fog(PspGfxDlContext* ctx, int fog, const float projection[4][4]) {
+    float color[4];
+    float start = 0.0f;
+    float end = 0.0f;
+
+    fog = fog && (ctx->fogMul != 0);
+    color[0] = (float) ctx->fogR / 255.0f;
+    color[1] = (float) ctx->fogG / 255.0f;
+    color[2] = (float) ctx->fogB / 255.0f;
+    color[3] = (float) ctx->fogA / 255.0f;
+    if (fog) {
+        float startNdc = -(float) ctx->fogOffset / (float) ctx->fogMul;
+        float endNdc = (255.0f - (float) ctx->fogOffset) / (float) ctx->fogMul;
+
+        start = psp_gfx_dl_fog_distance(projection, startNdc);
+        end = psp_gfx_dl_fog_distance(projection, endNdc);
+        if ((start < 0.0f) || (end <= start)) {
+            fog = 0;
+        }
+    }
+    if ((ctx->batchCount != 0) &&
+        ((ctx->batchFog != fog) || (ctx->batchFogColor[0] != color[0]) ||
+         (ctx->batchFogColor[1] != color[1]) || (ctx->batchFogColor[2] != color[2]) ||
+         (ctx->batchFogColor[3] != color[3]) || (ctx->batchFogStart != start) ||
+         (ctx->batchFogEnd != end))) {
+        psp_gfx_dl_flush(ctx);
+    }
+    ctx->batchFog = fog;
+    ctx->batchFogColor[0] = color[0];
+    ctx->batchFogColor[1] = color[1];
+    ctx->batchFogColor[2] = color[2];
+    ctx->batchFogColor[3] = color[3];
+    ctx->batchFogStart = start;
+    ctx->batchFogEnd = end;
 }
 
 static void psp_gfx_dl_set_batch_transform(PspGfxDlContext* ctx, int pretransformed, u32 projectionSerial,
@@ -981,14 +1060,20 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
         (ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_PRIM_ALPHA)) {
         textureEnv = PSP_GFX_PSPGL_TEX_MODULATE;
     }
-    psp_gfx_dl_set_batch_texture(ctx, textureId, textureEnv, psp_gfx_dl_alpha_test_enabled(ctx),
-                                 psp_gfx_dl_blend_enabled(ctx));
+    psp_gfx_dl_set_batch_texture(ctx, textureId, textureEnv,
+                                 psp_gfx_dl_texture_wrap(ctx->textureCms, ctx->textureMaskS),
+                                 psp_gfx_dl_texture_wrap(ctx->textureCmt, ctx->textureMaskT),
+                                 psp_gfx_dl_alpha_test_enabled(ctx), psp_gfx_dl_blend_enabled(ctx));
     psp_gfx_dl_set_batch_depth(ctx, (ctx->geometryMode & G_ZBUFFER) != 0, (ctx->otherModeL & Z_UPD) != 0);
+    psp_gfx_dl_set_batch_fog(ctx, !pretransformed && ((ctx->geometryMode & G_FOG) != 0), va->projection);
     if (ctx->batchDepthTest) {
         ctx->stats.depthTestTriangleCount++;
     }
     if (ctx->batchDepthWrite) {
         ctx->stats.depthWriteTriangleCount++;
+    }
+    if (ctx->batchFog) {
+        ctx->stats.fogTriangleCount++;
     }
     if (sharedClipCode != 0) {
         emittedTriangles = 0;
@@ -1078,8 +1163,11 @@ static void psp_gfx_dl_handle_texture_rectangle(PspGfxDlContext* ctx, const Gfx*
     }
 
     psp_gfx_dl_set_batch_texture(ctx, ctx->textureId, PSP_GFX_PSPGL_TEX_MODULATE,
+                                 psp_gfx_dl_texture_wrap(ctx->textureCms, ctx->textureMaskS),
+                                 psp_gfx_dl_texture_wrap(ctx->textureCmt, ctx->textureMaskT),
                                  psp_gfx_dl_alpha_test_enabled(ctx), psp_gfx_dl_blend_enabled(ctx));
     psp_gfx_dl_set_batch_depth(ctx, 0, 0);
+    psp_gfx_dl_set_batch_fog(ctx, 0, ctx->projection);
     psp_gfx_dl_set_batch_transform(ctx, 1, 0, NULL);
 
     if (flip) {
@@ -1109,6 +1197,16 @@ static void psp_gfx_dl_handle_set_primitive_color(PspGfxDlContext* ctx, const Gf
     ctx->primitiveG = (u8) (gfx->words.w1 >> 16);
     ctx->primitiveB = (u8) (gfx->words.w1 >> 8);
     ctx->primitiveA = (u8) gfx->words.w1;
+}
+
+static void psp_gfx_dl_handle_set_fog_color(PspGfxDlContext* ctx, const Gfx* gfx) {
+    if (ctx->batchCount != 0) {
+        psp_gfx_dl_flush(ctx);
+    }
+    ctx->fogR = (u8) (gfx->words.w1 >> 24);
+    ctx->fogG = (u8) (gfx->words.w1 >> 16);
+    ctx->fogB = (u8) (gfx->words.w1 >> 8);
+    ctx->fogA = (u8) gfx->words.w1;
 }
 
 static int psp_gfx_dl_combine_cycle0_matches(u32 mux0, u32 mux1, u32 a, u32 b, u32 c, u32 d, u32 aa, u32 ab,
@@ -1305,6 +1403,14 @@ static void psp_gfx_dl_handle_move_word(PspGfxDlContext* ctx, const Gfx* gfx) {
     u32 index = gfx->words.w0 & 0xFF;
     u32 encodedCount;
 
+    if ((index == G_MW_FOG) && (offset == G_MWO_FOG)) {
+        if (ctx->batchCount != 0) {
+            psp_gfx_dl_flush(ctx);
+        }
+        ctx->fogMul = (s16) (gfx->words.w1 >> 16);
+        ctx->fogOffset = (s16) gfx->words.w1;
+        return;
+    }
     if ((index != G_MW_NUMLIGHT) || (offset != G_MWO_NUMLIGHT)) {
         return;
     }
@@ -1334,11 +1440,17 @@ static void psp_gfx_dl_handle_other_mode_l(PspGfxDlContext* ctx, const Gfx* gfx)
 }
 
 static void psp_gfx_dl_handle_geometry_mode(PspGfxDlContext* ctx, const Gfx* gfx, int set) {
+    u32 nextGeometryMode;
+
     if (set) {
-        ctx->geometryMode |= gfx->words.w1;
+        nextGeometryMode = ctx->geometryMode | gfx->words.w1;
     } else {
-        ctx->geometryMode &= ~gfx->words.w1;
+        nextGeometryMode = ctx->geometryMode & ~gfx->words.w1;
     }
+    if ((ctx->batchCount != 0) && (((ctx->geometryMode ^ nextGeometryMode) & G_FOG) != 0)) {
+        psp_gfx_dl_flush(ctx);
+    }
+    ctx->geometryMode = nextGeometryMode;
 }
 
 static void psp_gfx_dl_handle_texture(PspGfxDlContext* ctx, const Gfx* gfx) {
@@ -1379,6 +1491,10 @@ static void psp_gfx_dl_handle_set_tile(PspGfxDlContext* ctx, const Gfx* gfx) {
     ctx->textureFormat = (gfx->words.w0 >> 21) & 0x7;
     ctx->textureSize = (gfx->words.w0 >> 19) & 0x3;
     ctx->texturePaletteIndex = (gfx->words.w1 >> 20) & 0xF;
+    ctx->textureCmt = (gfx->words.w1 >> 18) & 0x3;
+    ctx->textureMaskT = (gfx->words.w1 >> 14) & 0xF;
+    ctx->textureCms = (gfx->words.w1 >> 8) & 0x3;
+    ctx->textureMaskS = (gfx->words.w1 >> 4) & 0xF;
     ctx->textureUploadAttempted = 0;
 }
 
@@ -1551,6 +1667,11 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
             continue;
         }
 
+        if (opcode == G_SETFOGCOLOR) {
+            psp_gfx_dl_handle_set_fog_color(ctx, cmd);
+            continue;
+        }
+
         if (opcode == G_SETCOMBINE) {
             psp_gfx_dl_handle_set_combine(ctx, cmd);
             continue;
@@ -1629,6 +1750,7 @@ static void psp_gfx_dl_reset_context(PspGfxDlContext* ctx) {
     ctx->primitiveG = 255;
     ctx->primitiveB = 255;
     ctx->primitiveA = 255;
+    ctx->fogA = 255;
     ctx->combineUsesTextureAlpha = 1;
 }
 
@@ -1685,7 +1807,7 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
                  "eyeCrossTri=%lu behindTri=%lu clippedTri=%lu nearClipTri=%lu clipRejectTri=%lu "
                  "clipGenTri=%lu clipTex=%lu/%lu clipGenVtx=%lu clipPolyMax=%lu wRatioMax=%.2f "
                  "perspSplit=%lu perspTri=%lu gpuProjTri=%lu preXformTri=%lu "
-                 "degenerateTri=%lu depthTestTri=%lu depthWriteTri=%lu deferTex=%lu "
+                 "degenerateTri=%lu depthTestTri=%lu depthWriteTri=%lu fogTri=%lu deferTex=%lu "
                  "ptrReject=%lu/%lu/%lu maxDlDepth=%lu",
                  (unsigned long) taskIndex, (unsigned long) ctx->stats.nearZeroWCount,
                  (unsigned long) ctx->stats.behindEyeVertexCount, (unsigned long) ctx->stats.invalidTriangleCount,
@@ -1708,6 +1830,7 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
                  (unsigned long) ctx->stats.degenerateTriangleCount,
                  (unsigned long) ctx->stats.depthTestTriangleCount,
                  (unsigned long) ctx->stats.depthWriteTriangleCount,
+                 (unsigned long) ctx->stats.fogTriangleCount,
                  (unsigned long) ctx->stats.deferredTextureCount,
                  (unsigned long) ctx->stats.matrixPointerRejected,
                  (unsigned long) ctx->stats.vertexPointerRejected,
