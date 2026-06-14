@@ -148,6 +148,7 @@ PSP_GAME_C_FILES := \
     src/overlays/ovl_menu/fox_option.c \
     src/overlays/ovl_menu/fox_title.c \
     src/overlays/ovl_unused/fox_unused.c \
+    src/psp/input.c \
     src/psp/main.c \
     src/psp/platform.c \
     src/psp/ultra_reimpl.c \

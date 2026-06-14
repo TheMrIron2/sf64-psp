@@ -5,38 +5,14 @@
 #include "PR/os_eeprom.h"
 #include "PR/ucode.h"
 #include "sf64dma.h"
+#include "src/psp/input.h"
 #include "src/psp/platform.h"
 #include "src/psp/renderer.h"
-
-#define PSP_CTRL_SELECT 0x000001
-#define PSP_CTRL_START 0x000008
-#define PSP_CTRL_UP 0x000010
-#define PSP_CTRL_RIGHT 0x000020
-#define PSP_CTRL_DOWN 0x000040
-#define PSP_CTRL_LEFT 0x000080
-#define PSP_CTRL_LTRIGGER 0x000100
-#define PSP_CTRL_RTRIGGER 0x000200
-#define PSP_CTRL_TRIANGLE 0x001000
-#define PSP_CTRL_CIRCLE 0x002000
-#define PSP_CTRL_CROSS 0x004000
-#define PSP_CTRL_SQUARE 0x008000
-#define PSP_CTRL_MODE_ANALOG 1
 
 typedef int SceUID;
 typedef unsigned int SceSize;
 typedef unsigned int SceMode;
 
-typedef struct SceCtrlData {
-    u32 TimeStamp;
-    u32 Buttons;
-    u8 Lx;
-    u8 Ly;
-    u8 Rsrv[6];
-} SceCtrlData;
-
-int sceCtrlSetSamplingCycle(int cycle);
-int sceCtrlSetSamplingMode(int mode);
-int sceCtrlReadBufferPositive(SceCtrlData* pad_data, int count);
 int sceDisplayWaitVblankStart(void);
 SceUID sceKernelCreateThread(const char* name, int (*entry)(SceSize, void*), int initPriority, int stackSize,
                              int attr, void* option);
@@ -288,47 +264,6 @@ static int psp_vi_thread(SceSize args, void* argp) {
     return 0;
 }
 
-static void psp_map_buttons(SceCtrlData* in, OSContPad* out) {
-    out->button = 0;
-    out->stick_x = (s8) (((s32) in->Lx - 128) * 80 / 128);
-    out->stick_y = (s8) ((128 - (s32) in->Ly) * 80 / 128);
-    out->errno = 0;
-
-    if (in->Buttons & PSP_CTRL_CROSS) {
-        out->button |= A_BUTTON;
-    }
-    if (in->Buttons & PSP_CTRL_CIRCLE) {
-        out->button |= B_BUTTON;
-    }
-    if (in->Buttons & PSP_CTRL_SQUARE) {
-        out->button |= Z_TRIG;
-    }
-    if (in->Buttons & PSP_CTRL_LTRIGGER) {
-        out->button |= L_TRIG;
-    }
-    if (in->Buttons & PSP_CTRL_RTRIGGER) {
-        out->button |= R_TRIG;
-    }
-    if (in->Buttons & PSP_CTRL_START) {
-        out->button |= START_BUTTON;
-    }
-    if (in->Buttons & PSP_CTRL_UP) {
-        out->button |= U_JPAD;
-    }
-    if (in->Buttons & PSP_CTRL_DOWN) {
-        out->button |= D_JPAD;
-    }
-    if (in->Buttons & PSP_CTRL_LEFT) {
-        out->button |= L_JPAD;
-    }
-    if (in->Buttons & PSP_CTRL_RIGHT) {
-        out->button |= R_JPAD;
-    }
-    if (in->Buttons & PSP_CTRL_TRIANGLE) {
-        out->button |= U_CBUTTONS;
-    }
-}
-
 void PspPlatform_Init(void) {
     sExitRequested = 0;
 #if PSP_LOG_ENABLED
@@ -338,8 +273,7 @@ void PspPlatform_Init(void) {
     sceIoRemove(PSP_LOG_PATH);
     PspPlatform_LogLine("[psp] log start");
 #endif
-    sceCtrlSetSamplingCycle(0);
-    sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
+    PspInput_Init();
     PspRenderer_Init();
 
     if (sViThreadId < 0) {
@@ -376,20 +310,7 @@ void PspPlatform_PostViEvent(void) {
 }
 
 void PspPlatform_PollInput(OSContPad* pads) {
-    SceCtrlData pad;
-    s32 i;
-
-    sceCtrlReadBufferPositive(&pad, 1);
-    for (i = 0; i < MAXCONTROLLERS; i++) {
-        pads[i].button = 0;
-        pads[i].stick_x = 0;
-        pads[i].stick_y = 0;
-        pads[i].errno = (i == 0) ? 0 : CONT_NO_RESPONSE_ERROR;
-    }
-
-    psp_map_buttons(&pad, &pads[0]);
-
-    if ((pad.Buttons & PSP_CTRL_SELECT) && (pad.Buttons & PSP_CTRL_START)) {
+    if (PspInput_Poll(pads)) {
         PspPlatform_RequestExit();
         sceKernelExitGame();
     }
