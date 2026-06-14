@@ -221,6 +221,7 @@ void PspGfxPspgl_Init(void) {
     glDisable(GL_TEXTURE_2D);
     glDisable(GL_CULL_FACE);
     glDisable(GL_BLEND);
+    glShadeModel(GL_SMOOTH);
 
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
