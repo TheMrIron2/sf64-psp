@@ -19,6 +19,7 @@
 
 #define PSP_GFX_DL_MAX_DEPTH 8
 #define PSP_GFX_DL_MAX_COMMANDS 8192
+#define PSP_GFX_DL_MAX_NESTED_COMMANDS 2048
 #define PSP_GFX_DL_MAX_VERTICES 64
 #define PSP_GFX_DL_BATCH_VERTICES 3072
 #define PSP_GFX_DL_MTX_STACK_DEPTH 32
@@ -111,6 +112,8 @@ typedef enum {
 
 typedef struct {
     PspGfxDlStats stats;
+    u32 taskIndex;
+    u32 segments[16];
     PspGfxDlVertex vertices[PSP_GFX_DL_MAX_VERTICES];
     PspGfxPspglColorVertex batch[PSP_GFX_DL_BATCH_VERTICES];
     float modelview[4][4];
@@ -221,6 +224,7 @@ static int sLightingRemapInitialized;
 static int sLoggedFirstDrawableTask;
 static int sLoggedFirstLightingTask;
 static int sLoggedTexturedClipSample;
+static u32 sLoggedRejectedDlTargets;
 #endif
 
 static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int premultiply);
@@ -300,7 +304,7 @@ static int psp_gfx_dl_is_native_ptr(uintptr_t ptr) {
     return (ptr >= 0x08000000U) && (ptr < 0x0A000000U);
 }
 
-static const void* psp_gfx_dl_resolve_ptr(u32 raw) {
+static const void* psp_gfx_dl_resolve_ptr(const PspGfxDlContext* ctx, u32 raw) {
     uintptr_t ptr = (uintptr_t) raw;
     u32 segment;
     u32 base;
@@ -313,15 +317,26 @@ static const void* psp_gfx_dl_resolve_ptr(u32 raw) {
     }
 
     segment = (raw >> 24) & 0xF;
-    base = gSegments[segment];
+    base = ctx->segments[segment];
     if (base == 0) {
         return NULL;
     }
-    return SEGMENTED_TO_VIRTUAL(raw);
+    return (const void*) (uintptr_t) (base + (raw & 0xFFFFFFU));
 }
 
 static int psp_gfx_dl_is_end(u8 opcode) {
     return opcode == PSP_GFX_OP_F3D_ENDDL;
+}
+
+static int psp_gfx_dl_has_bounded_end(const Gfx* dl) {
+    u32 i;
+
+    for (i = 0; i < PSP_GFX_DL_MAX_NESTED_COMMANDS; i++) {
+        if (psp_gfx_dl_is_end(psp_gfx_dl_opcode(&dl[i]))) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static int psp_gfx_dl_is_noop_state(u8 opcode) {
@@ -496,7 +511,7 @@ static int psp_gfx_dl_transform_vertex(PspGfxDlContext* ctx, const Vtx* in, PspG
 }
 
 static void psp_gfx_dl_handle_mtx(PspGfxDlContext* ctx, const Gfx* gfx) {
-    const Mtx* src = (const Mtx*) psp_gfx_dl_resolve_ptr(gfx->words.w1);
+    const Mtx* src = (const Mtx*) psp_gfx_dl_resolve_ptr(ctx, gfx->words.w1);
     u32 flags = (gfx->words.w0 >> 16) & 0xFF;
     float loaded[4][4];
     float (*target)[4];
@@ -562,7 +577,7 @@ static void psp_gfx_dl_handle_movemem(PspGfxDlContext* ctx, const Gfx* gfx) {
     u32 lightSlot;
 
     if (index == G_MV_VIEWPORT) {
-        viewport = (const Vp*) psp_gfx_dl_resolve_ptr(gfx->words.w1);
+        viewport = (const Vp*) psp_gfx_dl_resolve_ptr(ctx, gfx->words.w1);
         if (viewport == NULL) {
             psp_gfx_dl_count_unsupported(ctx, PSP_GFX_OP_F3D_MOVEMEM);
             return;
@@ -579,7 +594,7 @@ static void psp_gfx_dl_handle_movemem(PspGfxDlContext* ctx, const Gfx* gfx) {
         return;
     }
 
-    light = (const Light*) psp_gfx_dl_resolve_ptr(gfx->words.w1);
+    light = (const Light*) psp_gfx_dl_resolve_ptr(ctx, gfx->words.w1);
     if (light == NULL) {
         return;
     }
@@ -1378,7 +1393,7 @@ static void psp_gfx_dl_handle_set_combine(PspGfxDlContext* ctx, const Gfx* gfx) 
 }
 
 static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
-    const Vtx* src = (const Vtx*) psp_gfx_dl_resolve_ptr(gfx->words.w1);
+    const Vtx* src = (const Vtx*) psp_gfx_dl_resolve_ptr(ctx, gfx->words.w1);
     u32 w0 = gfx->words.w0;
     u32 count;
     s32 v0;
@@ -1530,6 +1545,14 @@ static void psp_gfx_dl_handle_move_word(PspGfxDlContext* ctx, const Gfx* gfx) {
     u32 index = gfx->words.w0 & 0xFF;
     u32 encodedCount;
 
+    if ((index == G_MW_SEGMENT) && ((offset & 3U) == 0)) {
+        u32 segment = offset >> 2;
+
+        if (segment < ARRAY_COUNT(ctx->segments)) {
+            ctx->segments[segment] = gfx->words.w1;
+        }
+        return;
+    }
     if ((index == G_MW_FOG) && (offset == G_MWO_FOG)) {
         if (ctx->batchCount != 0) {
             psp_gfx_dl_flush(ctx);
@@ -1591,7 +1614,7 @@ static void psp_gfx_dl_handle_set_texture_image(PspGfxDlContext* ctx, const Gfx*
     psp_gfx_dl_flush(ctx);
     ctx->textureFormat = (gfx->words.w0 >> 21) & 0x7;
     ctx->textureSize = (gfx->words.w0 >> 19) & 0x3;
-    ctx->textureImage = psp_gfx_dl_resolve_ptr(gfx->words.w1);
+    ctx->textureImage = psp_gfx_dl_resolve_ptr(ctx, gfx->words.w1);
     ctx->textureId = 0;
     ctx->textureUploadWidth = 0;
     ctx->textureUploadHeight = 0;
@@ -1720,12 +1743,26 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
         }
 
         if (opcode == PSP_GFX_OP_F3D_DL) {
-            const Gfx* child = (const Gfx*) psp_gfx_dl_resolve_ptr(cmd->words.w1);
+            const Gfx* child = (const Gfx*) psp_gfx_dl_resolve_ptr(ctx, cmd->words.w1);
             int noPush = ((cmd->words.w0 >> 16) & 0xFF) == G_DL_NOPUSH;
+            int childHasEnd = (child != NULL) && psp_gfx_dl_has_bounded_end(child);
 
-            if (child == NULL) {
+            if (!childHasEnd) {
                 ctx->stats.nestedDlRejected++;
                 ctx->stats.displayListPointerRejected++;
+#if PSP_LOG_ENABLED || PSP_RENDERER_DIAGNOSTICS
+                if (sLoggedRejectedDlTargets < 8) {
+                    char line[192];
+
+                    snprintf(line, sizeof(line),
+                             "[pspgl-dl] rejected target task=%lu depth=%lu cmd=%p w0=%08lx w1=%08lx target=%p",
+                             (unsigned long) ctx->taskIndex, (unsigned long) depth, (const void*) cmd,
+                             (unsigned long) cmd->words.w0, (unsigned long) cmd->words.w1,
+                             (const void*) child);
+                    PspPlatform_LogLine(line);
+                    sLoggedRejectedDlTargets++;
+                }
+#endif
                 continue;
             }
 
@@ -1887,6 +1924,7 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
 
     psp_gfx_dl_init_lighting_remap();
     psp_gfx_dl_reset_context(ctx);
+    ctx->taskIndex = taskIndex;
     psp_gfx_dl_run_internal(ctx, dl, 0);
     psp_gfx_dl_flush(ctx);
 
