@@ -24,6 +24,7 @@ typedef struct {
     u32 height;
     u32 uploadWidth;
     u32 uploadHeight;
+    int premultiplied;
     GLuint texture;
 } PspGfxRgba16TextureCacheEntry;
 
@@ -62,6 +63,56 @@ static void psp_gfx_pspgl_rgba16_to_rgba8(u16 color, u8* out) {
     out[3] = (color & 1) ? 255 : 0;
 }
 
+static int psp_gfx_pspgl_is_dark_rgba16_mask(const u16* pixels, u32 width, u32 height) {
+    u32 pixelCount = width * height;
+    u32 opaqueCount = 0;
+    u32 i;
+
+    for (i = 0; i < pixelCount; i++) {
+        u16 color = pixels[i];
+
+        if ((color & 1) == 0) {
+            continue;
+        }
+        opaqueCount++;
+        if (((color >> 11) & 0x1F) > 2 || ((color >> 6) & 0x1F) > 2 || ((color >> 1) & 0x1F) > 2) {
+            return 0;
+        }
+    }
+    return (opaqueCount != 0) && (opaqueCount != pixelCount);
+}
+
+static u8 psp_gfx_pspgl_filtered_rgba16_alpha(const u16* pixels, u32 width, u32 height, u32 x, u32 y) {
+    static const u32 weights[3] = { 1, 2, 1 };
+    u32 alpha = 0;
+    s32 ky;
+    s32 kx;
+
+    for (ky = -1; ky <= 1; ky++) {
+        s32 sampleY = (s32) y + ky;
+
+        if (sampleY < 0) {
+            sampleY = 0;
+        } else if (sampleY >= (s32) height) {
+            sampleY = (s32) height - 1;
+        }
+        for (kx = -1; kx <= 1; kx++) {
+            s32 sampleX = (s32) x + kx;
+            u32 weight = weights[kx + 1] * weights[ky + 1];
+
+            if (sampleX < 0) {
+                sampleX = 0;
+            } else if (sampleX >= (s32) width) {
+                sampleX = (s32) width - 1;
+            }
+            if ((pixels[(sampleY * width) + sampleX] & 1) != 0) {
+                alpha += 255U * weight;
+            }
+        }
+    }
+    return (u8) ((alpha + 8U) / 16U);
+}
+
 static u32 psp_gfx_pspgl_next_power_of_two(u32 value) {
     u32 result = PSP_GFX_PSPGL_MIN_TEXTURE_DIMENSION;
 
@@ -92,7 +143,6 @@ static u32 psp_gfx_pspgl_get_converted_texture(const void* pixels, const u16* pa
     if (finalPixelCount > PSP_GFX_PSPGL_MAX_TEXTURE_PIXELS) {
         return 0;
     }
-
     for (i = 0; i < sConvertedTextureCacheCount; i++) {
         entry = &sConvertedTextureCache[i];
         if ((entry->pixels == pixels) && (entry->palette == palette) && (entry->width == width) &&
@@ -272,7 +322,8 @@ u32 PspGfxPspgl_GetCi4Texture(const u8* indices, const u16* palette, u32 width, 
                                                uploadHeight);
 }
 
-u32 PspGfxPspgl_GetRgba16Texture(const u16* pixels, u32 width, u32 height, u32* uploadWidth, u32* uploadHeight) {
+u32 PspGfxPspgl_GetRgba16Texture(const u16* pixels, u32 width, u32 height, int premultiply, u32* uploadWidth,
+                                 u32* uploadHeight) {
     PspGfxRgba16TextureCacheEntry* entry;
     u32 finalWidth;
     u32 finalHeight;
@@ -280,6 +331,7 @@ u32 PspGfxPspgl_GetRgba16Texture(const u16* pixels, u32 width, u32 height, u32* 
     u32 x;
     u32 y;
     u32 i;
+    int softenAlpha;
 
     if ((pixels == NULL) || (width == 0) || (height == 0) || (uploadWidth == NULL) || (uploadHeight == NULL)) {
         return 0;
@@ -290,10 +342,12 @@ u32 PspGfxPspgl_GetRgba16Texture(const u16* pixels, u32 width, u32 height, u32* 
     if (finalPixelCount > PSP_GFX_PSPGL_MAX_TEXTURE_PIXELS) {
         return 0;
     }
+    softenAlpha = premultiply && psp_gfx_pspgl_is_dark_rgba16_mask(pixels, width, height);
 
     for (i = 0; i < sRgba16TextureCacheCount; i++) {
         entry = &sRgba16TextureCache[i];
-        if ((entry->pixels == pixels) && (entry->width == width) && (entry->height == height)) {
+        if ((entry->pixels == pixels) && (entry->width == width) && (entry->height == height) &&
+            (entry->premultiplied == premultiply)) {
             *uploadWidth = entry->uploadWidth;
             *uploadHeight = entry->uploadHeight;
             return entry->texture;
@@ -307,7 +361,20 @@ u32 PspGfxPspgl_GetRgba16Texture(const u16* pixels, u32 width, u32 height, u32* 
             u32 srcIndex = (srcY * width) + srcX;
             u32 dstIndex = (y * finalWidth) + x;
 
-            psp_gfx_pspgl_rgba16_to_rgba8(pixels[srcIndex], &sTextureUpload[dstIndex * 4]);
+            u8* out = &sTextureUpload[dstIndex * 4];
+
+            psp_gfx_pspgl_rgba16_to_rgba8(pixels[srcIndex], out);
+            if (softenAlpha) {
+                out[0] = 0;
+                out[1] = 0;
+                out[2] = 0;
+                out[3] = psp_gfx_pspgl_filtered_rgba16_alpha(pixels, width, height, srcX, srcY);
+            }
+            if (premultiply) {
+                out[0] = (u8) (((u32) out[0] * out[3] + 127U) / 255U);
+                out[1] = (u8) (((u32) out[1] * out[3] + 127U) / 255U);
+                out[2] = (u8) (((u32) out[2] * out[3] + 127U) / 255U);
+            }
         }
     }
 
@@ -323,6 +390,7 @@ u32 PspGfxPspgl_GetRgba16Texture(const u16* pixels, u32 width, u32 height, u32* 
     entry->height = height;
     entry->uploadWidth = finalWidth;
     entry->uploadHeight = finalHeight;
+    entry->premultiplied = premultiply;
     glGenTextures(1, &entry->texture);
     glBindTexture(GL_TEXTURE_2D, entry->texture);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -347,9 +415,9 @@ u32 PspGfxPspgl_GetIa16Texture(const u16* pixels, u32 width, u32 height, u32* up
 
 void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u32 vertexCount, u32 textureId,
                                       PspGfxPspglTextureEnv textureEnv, PspGfxPspglTextureWrap wrapS,
-                                      PspGfxPspglTextureWrap wrapT, int alphaTest, int blend, int depthTest,
-                                      int depthWrite, int fog, const float* fogColor, float fogStart, float fogEnd,
-                                      const float* projectionMatrix, int pretransformed) {
+                                      PspGfxPspglTextureWrap wrapT, int alphaTest, int blend, int premultiplied,
+                                      int depthTest, int depthWrite, int fog, const float* fogColor, float fogStart,
+                                      float fogEnd, const float* projectionMatrix, int pretransformed) {
     GLint glTextureEnv;
     GLint glWrapS;
     GLint glWrapT;
@@ -380,8 +448,8 @@ void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u3
         glEnable(GL_FOG);
         glFogf(GL_FOG_MODE, GL_LINEAR);
         glFogfv(GL_FOG_COLOR, fogColor);
-        glFogf(GL_FOG_START, fogStart);
-        glFogf(GL_FOG_END, fogEnd);
+        glFogf(GL_FOG_START, fogStart * 0.45f);
+        glFogf(GL_FOG_END, fogEnd * 0.5f);
     } else {
         glDisable(GL_FOG);
     }
@@ -396,7 +464,7 @@ void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u3
         }
         if (blend) {
             glEnable(GL_BLEND);
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glBlendFunc(premultiplied ? GL_ONE : GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         } else {
             glDisable(GL_BLEND);
         }

@@ -32,13 +32,14 @@ u32 PspGfxPspgl_GetCi8Texture(const u8* indices, const u16* palette, u32 width, 
                               u32* uploadHeight);
 u32 PspGfxPspgl_GetCi4Texture(const u8* indices, const u16* palette, u32 width, u32 height, u32* uploadWidth,
                               u32* uploadHeight);
-u32 PspGfxPspgl_GetRgba16Texture(const u16* pixels, u32 width, u32 height, u32* uploadWidth, u32* uploadHeight);
+u32 PspGfxPspgl_GetRgba16Texture(const u16* pixels, u32 width, u32 height, int premultiply, u32* uploadWidth,
+                                 u32* uploadHeight);
 u32 PspGfxPspgl_GetIa8Texture(const u8* pixels, u32 width, u32 height, u32* uploadWidth, u32* uploadHeight);
 u32 PspGfxPspgl_GetIa16Texture(const u16* pixels, u32 width, u32 height, u32* uploadWidth, u32* uploadHeight);
 void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u32 vertexCount, u32 textureId,
                                       PspGfxPspglTextureEnv textureEnv, PspGfxPspglTextureWrap wrapS,
-                                      PspGfxPspglTextureWrap wrapT, int alphaTest, int blend, int depthTest,
-                                      int depthWrite, int fog, const float* fogColor, float fogStart, float fogEnd,
-                                      const float* projectionMatrix, int pretransformed);
+                                      PspGfxPspglTextureWrap wrapT, int alphaTest, int blend, int premultiplied,
+                                      int depthTest, int depthWrite, int fog, const float* fogColor, float fogStart,
+                                      float fogEnd, const float* projectionMatrix, int pretransformed);
 
 #endif
