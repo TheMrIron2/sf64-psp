@@ -936,7 +936,9 @@ void AudioLoad_Init(void) {
 #endif
 #ifdef TARGET_PSP
     volatile u8* pspAudioHeap;
+    volatile u8 pspAudioProbe;
 #endif
+
     void* ramAddr;
 
 #ifdef TARGET_PSP
@@ -944,15 +946,21 @@ void AudioLoad_Init(void) {
 
     pspAudioHeap = (volatile u8*) gAudioHeap;
 
-    PspPlatform_LogValue("audio heap address", (u32) (uintptr_t) pspAudioHeap);
+    PspPlatform_LogValue("audio heap runtime address",
+                         (u32) (uintptr_t) pspAudioHeap);
 
-    PspPlatform_LogLine("[psp-audio] pointer-helper read begin");
-    PspPlatform_LogValue("audio heap first byte", AudioLoad_PspReadByte(pspAudioHeap));
-    PspPlatform_LogLine("[psp-audio] pointer-helper read complete");
+    PspPlatform_LogLine("[psp-audio] heap read begin");
+    pspAudioProbe = AudioLoad_PspReadByte(pspAudioHeap);
+    PspPlatform_LogLine("[psp-audio] heap read complete");
 
-    PspPlatform_LogLine("[psp-audio] pointer-helper write begin");
+    PspPlatform_LogLine("[psp-audio] heap write begin");
     AudioLoad_PspStoreZero(pspAudioHeap);
-    PspPlatform_LogLine("[psp-audio] pointer-helper write complete");
+    PspPlatform_LogLine("[psp-audio] heap write complete");
+
+    PspPlatform_LogValue("audio heap address",
+                         (u32) (uintptr_t) pspAudioHeap);
+    PspPlatform_LogValue("audio heap first byte",
+                         (u32) pspAudioProbe);
 
     PspPlatform_LogLine("[psp-audio] reset timer write begin");
 #endif
@@ -961,9 +969,9 @@ void AudioLoad_Init(void) {
 
 #ifdef TARGET_PSP
     PspPlatform_LogLine("[psp-audio] reset timer write complete");
-
+#endif
+#ifdef TARGET_PSP
     PspPlatform_LogValue("audio heap size", (u32) gAudioHeapSize);
-    PspPlatform_LogValue("audio heap address", (u32) (uintptr_t) pspAudioHeap);
 
     if ((gAudioHeapSize <= 0) || (gAudioHeapSize > 0xB0000)) {
         PspPlatform_LogLine("[psp-audio] invalid audio heap size");
