@@ -63,13 +63,19 @@ static void psp_gfx_pspgl_rgba16_to_rgba8(u16 color, u8* out) {
     out[3] = (color & 1) ? 255 : 0;
 }
 
+static u16 psp_gfx_pspgl_read_u16(const void* base, u32 index) {
+    const u8* bytes = (const u8*) base + (index * 2);
+
+    return (u16) bytes[0] | ((u16) bytes[1] << 8);
+}
+
 static int psp_gfx_pspgl_is_dark_rgba16_mask(const u16* pixels, u32 width, u32 height) {
     u32 pixelCount = width * height;
     u32 opaqueCount = 0;
     u32 i;
 
     for (i = 0; i < pixelCount; i++) {
-        u16 color = pixels[i];
+        u16 color = psp_gfx_pspgl_read_u16(pixels, i);
 
         if ((color & 1) == 0) {
             continue;
@@ -105,7 +111,7 @@ static u8 psp_gfx_pspgl_filtered_rgba16_alpha(const u16* pixels, u32 width, u32 
             } else if (sampleX >= (s32) width) {
                 sampleX = (s32) width - 1;
             }
-            if ((pixels[(sampleY * width) + sampleX] & 1) != 0) {
+            if ((psp_gfx_pspgl_read_u16(pixels, ((u32) sampleY * width) + (u32) sampleX) & 1) != 0) {
                 alpha += 255U * weight;
             }
         }
@@ -167,7 +173,7 @@ static u32 psp_gfx_pspgl_get_converted_texture(const void* pixels, const u16* pa
                 u8 packed = indices[srcIndex >> 1];
                 u8 index = (srcIndex & 1) ? (packed & 0xF) : (packed >> 4);
 
-                psp_gfx_pspgl_rgba16_to_rgba8(palette[index], out);
+                psp_gfx_pspgl_rgba16_to_rgba8(psp_gfx_pspgl_read_u16(palette, index), out);
             } else if (format == PSP_GFX_TEXTURE_IA8) {
                 u8 packed = ((const u8*) pixels)[srcIndex];
                 u8 intensity = (packed >> 4) * 17;
@@ -177,7 +183,7 @@ static u32 psp_gfx_pspgl_get_converted_texture(const void* pixels, const u16* pa
                 out[2] = intensity;
                 out[3] = (packed & 0xF) * 17;
             } else {
-                u16 packed = ((const u16*) pixels)[srcIndex];
+                u16 packed = psp_gfx_pspgl_read_u16(pixels, srcIndex);
                 u8 intensity = (u8) (packed >> 8);
 
                 out[0] = intensity;
@@ -288,7 +294,7 @@ u32 PspGfxPspgl_GetCi8Texture(const u8* indices, const u16* palette, u32 width, 
             u32 srcIndex = (srcY * width) + srcX;
             u32 dstIndex = (y * finalWidth) + x;
 
-            psp_gfx_pspgl_rgba16_to_rgba8(palette[indices[srcIndex]], &sTextureUpload[dstIndex * 4]);
+            psp_gfx_pspgl_rgba16_to_rgba8(psp_gfx_pspgl_read_u16(palette, indices[srcIndex]), &sTextureUpload[dstIndex * 4]);
         }
     }
 
@@ -364,7 +370,7 @@ u32 PspGfxPspgl_GetRgba16Texture(const u16* pixels, u32 width, u32 height, int p
 
             u8* out = &sTextureUpload[dstIndex * 4];
 
-            psp_gfx_pspgl_rgba16_to_rgba8(pixels[srcIndex], out);
+            psp_gfx_pspgl_rgba16_to_rgba8(psp_gfx_pspgl_read_u16(pixels, srcIndex), out);
             if (softenAlpha) {
                 out[0] = 0;
                 out[1] = 0;
