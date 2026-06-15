@@ -1,6 +1,9 @@
 #include "sys.h"
 #include "sf64audio_external.h"
 #include "mods.h"
+#ifdef TARGET_PSP
+#include "src/psp/platform.h"
+#endif
 
 #if defined(TARGET_PSP) && !defined(PSP_TRACE_ENABLED)
 #define PSP_TRACE_ENABLED 0
@@ -124,10 +127,20 @@ void Audio_ThreadEntry(void* arg0) {
 
     PSP_TRACE("audio init");
     AudioLoad_Init();
+#ifdef TARGET_PSP
+    PspPlatform_LogLine("[psp-audio] sound initialization begin");
+#endif
     Audio_InitSounds();
+#ifdef TARGET_PSP
+    PspPlatform_LogLine("[psp-audio] sound initialization complete");
+    PspPlatform_LogLine("[psp-audio] first synthesis begin");
+#endif
     PSP_TRACE("audio ready");
 
     task = AudioThread_CreateTask();
+#ifdef TARGET_PSP
+    PspPlatform_LogLine("[psp-audio] first synthesis complete");
+#endif
     if (task != NULL) {
         task->mesgQueue = &gAudioTaskMesgQueue;
         task->msg = (OSMesg) TASK_MESG_1;

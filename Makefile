@@ -66,7 +66,7 @@ PSP_ELF := $(BUILD_DIR)/$(TARGET).psp.elf
 PSP_PRX := $(BUILD_DIR)/$(TARGET).psp.prx
 PSP_MAP := $(BUILD_DIR)/$(TARGET).psp.map
 
-PSP_LIBS ?= -lm -lpspdebug -lpspdisplay -lpspgu -lpspge -lpspctrl -lpspnet -lpspnet_apctl
+PSP_LIBS ?= -lm -lpspdebug -lpspdisplay -lpspgu -lpspge -lpspctrl -lpspaudio -lpspnet -lpspnet_apctl
 
 ifeq ($(COLOR),1)
 NO_COL := \033[0m
@@ -160,6 +160,9 @@ C_FILES := $(PSP_BOOTSTRAP_C_FILES)
 endif
 
 O_FILES := $(patsubst %.c,$(BUILD_DIR)/%.o,$(C_FILES))
+ifeq ($(PSP_FULL),1)
+O_FILES += $(patsubst %.S,$(BUILD_DIR)/%.o,$(PSP_GAME_S_FILES))
+endif
 DEP_FILES := $(O_FILES:.o=.d)
 ASSET_C_FILES := $(filter src/assets/%,$(PSP_GAME_C_FILES))
 ASSET_PREFLIGHT_STAMP := $(BUILD_DIR)/asset-preflight.stamp
@@ -265,6 +268,13 @@ $(BUILD_DIR)/%.o: %.c Makefile src/psp/sources.mk $(COMPILE_FLAGS_STAMP)
 	@mkdir -p $(dir $@)
 	$(call print,Compiling:,$<,$@)
 	$(V)$(CC) -c $(CFLAGS) $(source_warning_flags) -I$(dir $*) -o $@ $<
+
+$(BUILD_DIR)/src/psp/audio_mixer.o: CFLAGS += -std=gnu99
+
+$(BUILD_DIR)/%.o: %.S Makefile src/psp/sources.mk $(COMPILE_FLAGS_STAMP)
+	@mkdir -p $(dir $@)
+	$(call print,Assembling:,$<,$@)
+	$(V)$(CC) -c $(CFLAGS) -I$(dir $*) -o $@ $<
 
 clean:
 	$(RM) -r $(BUILD_DIR) build/psp-bootstrap

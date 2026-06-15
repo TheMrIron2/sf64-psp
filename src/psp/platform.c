@@ -5,6 +5,7 @@
 #include "PR/os_eeprom.h"
 #include "PR/ucode.h"
 #include "sf64dma.h"
+#include "src/psp/audio_output.h"
 #include "src/psp/input.h"
 #include "src/psp/platform.h"
 #include "src/psp/renderer.h"
@@ -62,11 +63,9 @@ static u32 sViCount;
 
 u32 osMemSize = 24 * 1024 * 1024;
 s32 osTvType = OS_TV_NTSC;
-f32 gDefaultSfxSource[3] = { 0.0f, 0.0f, 0.0f };
-f32 gDefaultMod = 1.0f;
-s8 gDefaultReverb = 0;
-
 long long int rspbootTextStart[1], rspbootTextEnd[1];
+long long int aspMainTextStart[1];
+long long int aspMainDataStart[1], aspMainDataEnd[1];
 long long int gspF3DEX_fifoTextStart[1], gspF3DEX_fifoTextEnd[1];
 long long int gspF3DEX_fifoDataStart[1], gspF3DEX_fifoDataEnd[1];
 
@@ -98,9 +97,6 @@ long long int gspF3DEX_fifoDataStart[1], gspF3DEX_fifoDataEnd[1];
 PSP_EMPTY_SEGMENT(makerom);
 PSP_EMPTY_SEGMENT(main);
 PSP_EMPTY_SEGMENT(dma_table);
-PSP_EMPTY_SEGMENT(audio_seq);
-PSP_EMPTY_SEGMENT(audio_bank);
-PSP_EMPTY_SEGMENT(audio_table);
 PSP_EMPTY_SEGMENT(ast_common);
 PSP_EMPTY_SEGMENT(ast_bg_space);
 PSP_EMPTY_SEGMENT(ast_bg_planet);
@@ -265,6 +261,8 @@ static int psp_vi_thread(SceSize args, void* argp) {
 }
 
 void PspPlatform_Init(void) {
+    int audioResult;
+
     sExitRequested = 0;
 #if PSP_LOG_ENABLED
     if (sLogSemaId < 0) {
@@ -274,6 +272,16 @@ void PspPlatform_Init(void) {
     PspPlatform_LogLine("[psp] log start");
 #endif
     PspInput_Init();
+    audioResult = PspAudioOutput_Init();
+#if PSP_LOG_ENABLED
+    if (audioResult < 0) {
+        PspPlatform_LogLine("[psp-audio] output initialization failed");
+    } else {
+        PspPlatform_LogLine("[psp-audio] scalar software backend, 32000 Hz stereo");
+    }
+#else
+    (void) audioResult;
+#endif
     PspRenderer_Init();
 
     if (sViThreadId < 0) {
@@ -368,240 +376,7 @@ void PspPlatform_DebugFrame(void) {
 #endif
 }
 
-void AudioLoad_Init(void) {
-}
 
-void Audio_dummy_80016A50(void) {
-}
-
-void Audio_InitSounds(void) {
-}
-
-void Audio_Update(void) {
-}
-
-SPTask* AudioThread_CreateTask(void) {
-    return NULL;
-}
-
-void AudioThread_PreNMIReset(void) {
-}
-
-void Audio_PlayVoice(s32 msgId) {
-    (void) msgId;
-}
-
-void Audio_PlayVoiceWithoutBGM(u32 msgId) {
-    (void) msgId;
-}
-
-void Audio_ClearVoice(void) {
-}
-
-s32 Audio_GetCurrentVoice(void) {
-    return -1;
-}
-
-s32 Audio_GetCurrentVoiceStatus(void) {
-    return 0;
-}
-
-void Audio_SetUnkVoiceParam(u8 unkVoiceParam) {
-    (void) unkVoiceParam;
-}
-
-u8* Audio_UpdateFrequencyAnalysis(void) {
-    static u8 sSilentAnalysis[0x40];
-    return sSilentAnalysis;
-}
-
-void Audio_SetVolume(u8 audioType, u8 volume) {
-    (void) audioType;
-    (void) volume;
-}
-
-void Audio_FadeOutAll(u8 fadeoutTime) {
-    (void) fadeoutTime;
-}
-
-void Audio_SetAudioSpec(u8 unused, u16 specParam) {
-    (void) unused;
-    (void) specParam;
-}
-
-void Audio_SetBgmParam(s8 bgmParam) {
-    (void) bgmParam;
-}
-
-void Audio_PlaySequence(u8 seqPlayId, u16 seqId, u8 fadeinTime, u8 bgmParam) {
-    (void) seqPlayId;
-    (void) seqId;
-    (void) fadeinTime;
-    (void) bgmParam;
-}
-
-void Audio_PlayFanfare(u16 seqId, u8 bgmVolume, u8 bgmFadeoutTime, u8 bgmFadeinTime) {
-    (void) seqId;
-    (void) bgmVolume;
-    (void) bgmFadeoutTime;
-    (void) bgmFadeinTime;
-}
-
-void Audio_PlayDeathSequence(void) {
-}
-
-void Audio_PlaySoundTest(u8 enable) {
-    (void) enable;
-}
-
-void Audio_PlaySequenceDistorted(u8 seqPlayId, u16 seqId, u16 distortion, u8 fadeinTime, u8 unused) {
-    (void) seqPlayId;
-    (void) seqId;
-    (void) distortion;
-    (void) fadeinTime;
-    (void) unused;
-}
-
-void Audio_PlaySoundTestTrack(u8 trackNumber) {
-    (void) trackNumber;
-}
-
-void Audio_PlayBgm(u16 seqId) {
-    (void) seqId;
-}
-
-void Audio_QueueSeqCmd(s32 cmd) {
-    (void) cmd;
-}
-
-void Audio_PlaySfx(u32 sfxId, f32* sfxSource, u8 token, f32* freqMod, f32* volMod, s8* reverbAdd) {
-    (void) sfxId;
-    (void) sfxSource;
-    (void) token;
-    (void) freqMod;
-    (void) volMod;
-    (void) reverbAdd;
-}
-
-void Audio_KillSfxByBank(u8 bankId) {
-    (void) bankId;
-}
-
-void Audio_StopSfxByBankAndSource(u8 bankId, f32* sfxSource) {
-    (void) bankId;
-    (void) sfxSource;
-}
-
-void Audio_KillSfxByBankAndSource(u8 bankId, f32* sfxSource) {
-    (void) bankId;
-    (void) sfxSource;
-}
-
-void Audio_KillSfxBySource(f32* sfxSource) {
-    (void) sfxSource;
-}
-
-void Audio_KillSfxBySourceAndId(f32* sfxSource, u32 sfxId) {
-    (void) sfxSource;
-    (void) sfxId;
-}
-
-void Audio_KillSfxByTokenAndId(u8 token, u32 sfxId) {
-    (void) token;
-    (void) sfxId;
-}
-
-void Audio_KillSfxById(u32 sfxId) {
-    (void) sfxId;
-}
-
-void Audio_StartPlayerNoise(u8 playerId) {
-    (void) playerId;
-}
-
-void Audio_StopPlayerNoise(u8 playerId) {
-    (void) playerId;
-}
-
-void Audio_InitBombSfx(u8 playerId, u8 type) {
-    (void) playerId;
-    (void) type;
-}
-
-void Audio_PlayBombFlightSfx(u8 playerId, f32* sfxSource) {
-    (void) playerId;
-    (void) sfxSource;
-}
-
-void Audio_PlayBombExplodeSfx(u8 playerId, f32* sfxSource) {
-    (void) playerId;
-    (void) sfxSource;
-}
-
-void Audio_StopEngineNoise(f32* sfxSource) {
-    (void) sfxSource;
-}
-
-void Audio_SetSfxSpeedModulation(f32 vel) {
-    (void) vel;
-}
-
-void Audio_SetTransposeAndPlaySfx(f32* sfxSource, u32 sfxId, u8 semitones) {
-    (void) sfxSource;
-    (void) sfxId;
-    (void) semitones;
-}
-
-void Audio_SetModulationAndPlaySfx(f32* sfxSource, u32 sfxId, f32 freqMod) {
-    (void) sfxSource;
-    (void) sfxId;
-    (void) freqMod;
-}
-
-void Audio_PlaySfxModulated(f32* sfxSource, u32 sfxId) {
-    (void) sfxSource;
-    (void) sfxId;
-}
-
-void Audio_SetSfxMapModulation(u8 fMod) {
-    (void) fMod;
-}
-
-void Audio_SetHeatAlarmParams(u8 shields, u8 heightParam) {
-    (void) shields;
-    (void) heightParam;
-}
-
-void Audio_PlayEventSfx(f32* sfxSource, u16 eventSfxId) {
-    (void) sfxSource;
-    (void) eventSfxId;
-}
-
-void Audio_StopEventSfx(f32* sfxSource, u16 eventSfxId) {
-    (void) sfxSource;
-    (void) eventSfxId;
-}
-
-void Audio_SetEnvSfxReverb(s8 reverb) {
-    (void) reverb;
-}
-
-void Audio_PlayPauseSfx(u8 active) {
-    (void) active;
-}
-
-void Audio_PlayMapMenuSfx(u8 active) {
-    (void) active;
-}
-
-void Audio_KillAllSfx(void) {
-}
-
-void Audio_RestartSeqPlayers(void) {
-}
-
-void Audio_StartReset(void) {
-}
 
 void Mio0_Decompress(void* header, u8* dst) {
     (void) header;

@@ -2,6 +2,9 @@
 #include "sys.h"
 #include "sf64dma.h"
 #include "sf64audio.h"
+#ifdef TARGET_PSP
+#include "src/psp/platform.h"
+#endif
 
 s32 D_80146D80;
 s32 PAD_80146D88[2];
@@ -218,7 +221,7 @@ void AudioLoad_InitTable(AudioTable* table, u8* romAddr, u16 medium) {
 
 // Original name: Nas_PreLoadBank
 void* AudioLoad_SyncLoadSeqFonts(s32 seqId, u32* outFontId) {
-    s32 index = ((u16*) gSeqFontTable)[AudioLoad_GetLoadTableIndex(SEQUENCE_TABLE, seqId)];
+    s32 index = __builtin_bswap16(((u16*) gSeqFontTable)[AudioLoad_GetLoadTableIndex(SEQUENCE_TABLE, seqId)]);
     s32 fontId = 0xFF;
     s32 numFonts = gSeqFontTable[index++];
     void* soundFontData;
@@ -309,7 +312,8 @@ void AudioLoad_AsyncLoadSampleBank(s32 sampleBankId, s32 nChunks, s32 retData, O
 
 // Original name: Nas_PreLoadBank_BG
 void AudioLoad_AsyncLoadSeq(s32 seqId, s32 nChunks, s32 retData, OSMesgQueue* retQueue) {
-    s32 index = *((u16*) gSeqFontTable + AudioLoad_GetLoadTableIndex(SEQUENCE_TABLE, seqId));
+    s32 index =
+        __builtin_bswap16(*((u16*) gSeqFontTable + AudioLoad_GetLoadTableIndex(SEQUENCE_TABLE, seqId)));
     s32 fontsLeft = gSeqFontTable[index++];
 
     for (fontsLeft; fontsLeft > 0; fontsLeft--) {
@@ -320,7 +324,8 @@ void AudioLoad_AsyncLoadSeq(s32 seqId, s32 nChunks, s32 retData, OSMesgQueue* re
 
 // Original name: Nas_SeqToBank
 u8* AudioLoad_GetFontsForSequence(s32 seqId, u32* outNumFonts) {
-    s32 index = *((u16*) gSeqFontTable + AudioLoad_GetLoadTableIndex(SEQUENCE_TABLE, seqId));
+    s32 index =
+        __builtin_bswap16(*((u16*) gSeqFontTable + AudioLoad_GetLoadTableIndex(SEQUENCE_TABLE, seqId)));
 
     *outNumFonts = gSeqFontTable[index++];
     if (*outNumFonts == 0) {
@@ -332,7 +337,8 @@ u8* AudioLoad_GetFontsForSequence(s32 seqId, u32* outNumFonts) {
 
 // Original name: Nas_FlushBank
 void AudioLoad_DiscardSeqFonts(s32 seqId) {
-    s32 index = *((u16*) gSeqFontTable + AudioLoad_GetLoadTableIndex(SEQUENCE_TABLE, seqId));
+    s32 index =
+        __builtin_bswap16(*((u16*) gSeqFontTable + AudioLoad_GetLoadTableIndex(SEQUENCE_TABLE, seqId)));
     s32 numFonts = gSeqFontTable[index++];
     u32 fontId;
 
@@ -390,6 +396,9 @@ void AudioLoad_SyncInitSeqPlayerInternal(s32 playerIdx, s32 seqId, s32 arg2) {
     AudioSeq_SequencePlayerDisable(&gSeqPlayers[playerIdx]);
 
     index = *((u16*) gSeqFontTable + seqId);
+#ifdef TARGET_PSP
+    index = __builtin_bswap16(index);
+#endif
     numFonts = gSeqFontTable[index++];
     fontId = 0xFF;
 
@@ -633,8 +642,8 @@ AudioTable* AudioLoad_GetLoadTable(AudioTableType tableType) {
 
 // Original name: Nas_BankOfsToAddr_Inner
 void AudioLoad_RelocateFont(s32 fontId, uintptr_t fontBaseAddr, void* relocData) {
-    uintptr_t* fontDataPtrs = fontBaseAddr;
-    uintptr_t** drumDataPtrs = fontBaseAddr;
+    u32* fontDataPtrs = (u32*) fontBaseAddr;
+    u32** drumDataPtrs = (u32**) fontBaseAddr;
     s32 numDrums;
     Drum* drum;
     Instrument* instrument;
@@ -646,17 +655,17 @@ void AudioLoad_RelocateFont(s32 fontId, uintptr_t fontBaseAddr, void* relocData)
     numInstruments = gSoundFontList[fontId].numInstruments;
 
     if ((fontDataPtrs[0] != 0) && (numDrums != 0)) {
-        fontDataPtrs[0] += (uintptr_t) fontBaseAddr;
+        fontDataPtrs[0] = __builtin_bswap32(fontDataPtrs[0]) + fontBaseAddr;
 
         for (i = 0; i < numDrums; i++) {
-            offset = *(*drumDataPtrs + i);
+            offset = __builtin_bswap32(*(*drumDataPtrs + i));
             if (offset != 0) {
                 drum = offset += fontBaseAddr;
-                *(*drumDataPtrs + i) = drum;
+                *(*drumDataPtrs + i) = (u32) drum;
 
                 if (!drum->isRelocated) {
                     AudioLoad_RelocateSample(&drum->tunedSample, fontBaseAddr, relocData);
-                    offset = (uintptr_t) drum->envelope;
+                    offset = __builtin_bswap32((u32) drum->envelope);
                     drum->envelope = offset + fontBaseAddr;
                     drum->isRelocated = true;
                 }
@@ -667,9 +676,8 @@ void AudioLoad_RelocateFont(s32 fontId, uintptr_t fontBaseAddr, void* relocData)
     for (i = 1; i <= numInstruments; i++) {
         if (fontDataPtrs[i] != 0) {
 
-            fontDataPtrs[i] += fontBaseAddr;
-
-            instrument = fontDataPtrs[i];
+            fontDataPtrs[i] = __builtin_bswap32(fontDataPtrs[i]) + fontBaseAddr;
+            instrument = (Instrument*) fontDataPtrs[i];
             if (!instrument->isRelocated) {
                 if (instrument->normalRangeLo != 0) {
                     AudioLoad_RelocateSample(&instrument->lowPitchTunedSample, fontBaseAddr, relocData);
@@ -678,7 +686,7 @@ void AudioLoad_RelocateFont(s32 fontId, uintptr_t fontBaseAddr, void* relocData)
                 if (instrument->normalRangeHi != 0x7F) {
                     AudioLoad_RelocateSample(&instrument->highPitchTunedSample, fontBaseAddr, relocData);
                 }
-                offset = (uintptr_t) instrument->envelope;
+                offset = __builtin_bswap32((u32) instrument->envelope);
                 instrument->envelope = offset + fontBaseAddr;
                 instrument->isRelocated = true;
             }
@@ -906,21 +914,31 @@ void AudioLoad_Init(void) {
     s32 i;
     s32 j;
     s32 numFonts;
+#ifndef TARGET_PSP
     s32 dwordsLeft;
     u64* clearContext;
+#endif
     void* ramAddr;
 
+#ifdef TARGET_PSP
+    PspPlatform_LogLine("[psp-audio] driver initialization begin");
+#endif
     gAudioResetTimer = 0;
 
     for (i = 0; i < gAudioHeapSize / 8; i++) {
         *((u64*) gAudioHeap + i) = 0;
     }
+#ifdef TARGET_PSP
+    PspPlatform_LogLine("[psp-audio] heap clear complete");
+#endif
 
+#ifndef TARGET_PSP
     clearContext = gAudioContextStart;
     dwordsLeft = ((u32) gAudioContextEnd - (u32) gAudioContextStart) / 8;
     for (; dwordsLeft >= 0; dwordsLeft--) {
         *clearContext++ = 0;
     }
+#endif
 
     // 1000 is a conversion from seconds to milliseconds
     switch (osTvType) {
@@ -942,6 +960,9 @@ void AudioLoad_Init(void) {
     }
 
     AudioThread_Init();
+#ifdef TARGET_PSP
+    PspPlatform_LogLine("[psp-audio] driver queues initialized");
+#endif
 
     for (i = 0; i < ARRAY_COUNT(gAiBuffLengths); i++) {
         gAiBuffLengths[i] = 0xA0;
@@ -975,6 +996,9 @@ void AudioLoad_Init(void) {
     gAudioSpecId = AUDIOSPEC_CO;
     gAudioResetStep = 1;
     AudioHeap_ResetStep();
+#ifdef TARGET_PSP
+    PspPlatform_LogLine("[psp-audio] initial audio spec configured");
+#endif
 
     gSequenceTable = &gSeqTableInit;
     gSoundFontTable = &gSoundFontTableInit;
@@ -985,6 +1009,9 @@ void AudioLoad_Init(void) {
     AudioLoad_InitTable(gSequenceTable, SEGMENT_ROM_START(audio_seq), gSequenceMedium);
     AudioLoad_InitTable(gSoundFontTable, SEGMENT_ROM_START(audio_bank), gSoundFontMedium);
     AudioLoad_InitTable(gSampleBankTable, SEGMENT_ROM_START(audio_table), gSampleBankMedium);
+#ifdef TARGET_PSP
+    PspPlatform_LogLine("[psp-audio] audio tables initialized");
+#endif
 
     numFonts = gSoundFontTable->base.numEntries;
 
@@ -1004,6 +1031,9 @@ void AudioLoad_Init(void) {
 
     AudioHeap_InitPool(&gPermanentPool.pool, ramAddr, gPermanentPoolSize);
     AudioSeq_InitSequencePlayers();
+#ifdef TARGET_PSP
+    PspPlatform_LogLine("[psp-audio] driver initialization complete");
+#endif
 }
 
 static const char devstr38[] = "Entry--- %d %d\n";
@@ -1335,14 +1365,17 @@ void AudioLoad_AsyncDmaDisk(u32 devAddr, u8* ramAddr, size_t size, s32 diskParam
 void AudioLoad_RelocateSample(TunedSample* tSample, uintptr_t fontDataAddr, SampleBankRelocInfo* relocInfo) {
     void* reloc;
     Sample* sample;
+    u32 sampleSize;
+    u32 sampleOffset;
 
-    if ((u32) tSample->sample > AUDIO_RELOCATED_ADDRESS_START) {
+    sampleOffset = __builtin_bswap32((u32) tSample->sample);
+    if (sampleOffset > AUDIO_RELOCATED_ADDRESS_START) {
         PRINTF("Error: Already wavetable is touched %x.\n", (u32) tSample->sample);
         // Sample has been relocated.
         return;
     }
 
-    sample = tSample->sample = reloc = (u32) tSample->sample + fontDataAddr;
+    sample = tSample->sample = reloc = sampleOffset + fontDataAddr;
 
     // If the sample exists and has not already been relocated
     // Note: this is important, as the same sample can be used by different drums, sound effects, instruments
@@ -1352,8 +1385,10 @@ void AudioLoad_RelocateSample(TunedSample* tSample, uintptr_t fontDataAddr, Samp
     }
 
     if (sample->isRelocated != 1) {
-        sample->loop = reloc = (uintptr_t) sample->loop + fontDataAddr;
-        sample->book = reloc = (uintptr_t) sample->book + fontDataAddr;
+        sampleSize = sample->size;
+        sample->size = __builtin_bswap16(sampleSize >> 8);
+        sample->loop = reloc = __builtin_bswap32((u32) sample->loop) + fontDataAddr;
+        sample->book = reloc = __builtin_bswap32((u32) sample->book) + fontDataAddr;
 
         // Resolve the sample medium 2-bit bitfield into a real value based on relocInfo.
         // Then relocate the offset sample within the sampleBank (not the fontData) into absolute address.
@@ -1361,11 +1396,11 @@ void AudioLoad_RelocateSample(TunedSample* tSample, uintptr_t fontDataAddr, Samp
         // in practice, this is always in rom
         switch (sample->medium) {
             case MEDIUM_RAM:
-                sample->sampleAddr = reloc = sample->sampleAddr + relocInfo->baseAddr1;
+                sample->sampleAddr = reloc = __builtin_bswap32((u32) sample->sampleAddr) + relocInfo->baseAddr1;
                 sample->medium = relocInfo->medium1;
                 break;
             case MEDIUM_DISK:
-                sample->sampleAddr = reloc = sample->sampleAddr + relocInfo->baseAddr2;
+                sample->sampleAddr = reloc = __builtin_bswap32((u32) sample->sampleAddr) + relocInfo->baseAddr2;
                 sample->medium = relocInfo->medium2;
                 break;
             case MEDIUM_CART:

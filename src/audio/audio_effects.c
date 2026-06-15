@@ -14,6 +14,15 @@
 #include "sys.h"
 #include "sf64audio.h"
 
+#ifdef TARGET_PSP
+static s16 AudioEffects_ReadEnvelopeValue(AdsrState* adsr, s16 value) {
+    if (adsr->envelope == gDefaultEnvelope) {
+        return value;
+    }
+    return (s16) __builtin_bswap16(value);
+}
+#endif
+
 static const char devstr[] = "Audio:Envp: overflow  %f\n";
 
 // Original name: __Nas_CallWaveProcess_Sub
@@ -248,7 +257,11 @@ f32 AudioEffects_UpdateAdsr(AdsrState* adsr) {
         retry:
             // Fallthrough
         case ADSR_STATE_LOOP:
+#ifdef TARGET_PSP
+            adsr->delay = AudioEffects_ReadEnvelopeValue(adsr, adsr->envelope[adsr->envIndex].delay);
+#else
             adsr->delay = adsr->envelope[adsr->envIndex].delay;
+#endif
             switch (adsr->delay) {
                 case ADSR_DISABLE:
                     adsr->state = ADSR_STATE_DISABLED;
@@ -259,7 +272,11 @@ f32 AudioEffects_UpdateAdsr(AdsrState* adsr) {
                     break;
 
                 case ADSR_GOTO:
+#ifdef TARGET_PSP
+                    adsr->envIndex = AudioEffects_ReadEnvelopeValue(adsr, adsr->envelope[adsr->envIndex].value);
+#else
                     adsr->envIndex = adsr->envelope[adsr->envIndex].value;
+#endif
                     goto retry;
 
                 case ADSR_RESTART:
@@ -275,7 +292,12 @@ f32 AudioEffects_UpdateAdsr(AdsrState* adsr) {
                         adsr->delay = 1;
                     }
 
+#ifdef TARGET_PSP
+                    adsr->target =
+                        AudioEffects_ReadEnvelopeValue(adsr, adsr->envelope[adsr->envIndex].value) / 32767.0f;
+#else
                     adsr->target = adsr->envelope[adsr->envIndex].value / 32767.0f;
+#endif
                     adsr->target = SQ(adsr->target);
                     adsr->velocity = (adsr->target - adsr->current) / adsr->delay;
                     adsr->state = ADSR_STATE_FADE;

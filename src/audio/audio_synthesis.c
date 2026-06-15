@@ -1,5 +1,8 @@
 #include "sys.h"
 #include "sf64audio.h"
+#ifdef TARGET_PSP
+#include "src/psp/audio_mixer.h"
+#endif
 
 #define DMEM_WET_SCRATCH 0x470
 #define DMEM_COMPRESSED_ADPCM_DATA 0x990
@@ -925,7 +928,11 @@ Acmd* AudioSynth_ProcessSample(s32 noteIndex, NoteSampleState* sampleState, Note
         bookSample = *((Sample**) sampleState->waveSampleAddr);
         loopInfo = bookSample->loop;
 
+#ifdef TARGET_PSP
+        endPos = __builtin_bswap32(loopInfo->end);
+#else
         endPos = loopInfo->end;
+#endif
         sampleAddr = bookSample->sampleAddr;
         resampledTempLen = 0;
 
@@ -963,7 +970,12 @@ Acmd* AudioSynth_ProcessSample(s32 noteIndex, NoteSampleState* sampleState, Note
                         break;
                 }
 
+#ifdef TARGET_PSP
+                nEntries = (SAMPLES_PER_FRAME * __builtin_bswap32(bookSample->book->order)) *
+                           __builtin_bswap32(bookSample->book->numPredictors);
+#else
                 nEntries = (SAMPLES_PER_FRAME * bookSample->book->order) * bookSample->book->numPredictors;
+#endif
                 aLoadADPCM(aList++, nEntries, OS_K0_TO_PHYSICAL(currentBook));
             }
 
@@ -1156,7 +1168,11 @@ Acmd* AudioSynth_ProcessSample(s32 noteIndex, NoteSampleState* sampleState, Note
                     break; // break out of the for-loop
                 } else if (loopToPoint) {
                     synthState->restart = true;
+#ifdef TARGET_PSP
+                    synthState->samplePosInt = __builtin_bswap32(loopInfo->start);
+#else
                     synthState->samplePosInt = loopInfo->start;
+#endif
                 } else {
                     synthState->samplePosInt += nSamplesToProcess;
                 }

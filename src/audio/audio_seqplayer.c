@@ -1,6 +1,19 @@
 #include "sys.h"
 #include "sf64audio.h"
 
+#ifdef TARGET_PSP
+static f32 AudioSeq_PspSwapFloat(f32 value) {
+    union {
+        f32 f;
+        u32 u;
+    } bits;
+
+    bits.f = value;
+    bits.u = __builtin_bswap32(bits.u);
+    return bits.f;
+}
+#endif
+
 static const char devstr00[] = "Audio:Track:Warning: No Free Notetrack\n";
 static const char devstr01[] = "SUBTRACK DIM\n";
 static const char devstr02[] = "Audio:Track: Warning :SUBTRACK had been stolen by other Group.\n";
@@ -618,7 +631,11 @@ void AudioSeq_SeqLayerProcessScript(SequenceLayer* layer) {
                     layer->pan = drum->pan;
                 }
                 layer->tunedSample = &drum->tunedSample;
+#ifdef TARGET_PSP
+                layer->freqMod = AudioSeq_PspSwapFloat(layer->tunedSample->tuning);
+#else
                 layer->freqMod = layer->tunedSample->tuning;
+#endif
             } else {
                 cmd += seqPlayer->transposition + channel->transposition + layer->transposition;
                 if (cmd >= 0x80) {
@@ -641,7 +658,11 @@ void AudioSeq_SeqLayerProcessScript(SequenceLayer* layer) {
                             sample = AudioPlayback_GetInstrumentTunedSample(instrument, temp2);
                             sp40 = (sample == layer->tunedSample);
                             layer->tunedSample = sample;
+#ifdef TARGET_PSP
+                            tuning = AudioSeq_PspSwapFloat(sample->tuning);
+#else
                             tuning = sample->tuning;
+#endif
                         } else {
                             tuning = 1.0f;
                             layer->tunedSample = NULL;
@@ -689,7 +710,11 @@ void AudioSeq_SeqLayerProcessScript(SequenceLayer* layer) {
                         sample = AudioPlayback_GetInstrumentTunedSample(instrument, cmd);
                         sp40 = (sample == layer->tunedSample);
                         layer->tunedSample = sample;
+#ifdef TARGET_PSP
+                        layer->freqMod = gPitchFrequencies[cmd] * AudioSeq_PspSwapFloat(sample->tuning);
+#else
                         layer->freqMod = gPitchFrequencies[cmd] * sample->tuning;
+#endif
                     } else {
                         layer->tunedSample = NULL;
                         layer->freqMod = gPitchFrequencies[cmd];
@@ -913,6 +938,9 @@ void AudioSeq_SequenceChannelProcessScript(SequenceChannel* channel) {
                     case 0xEB: // Load channel bank and set instruments
                         cmd = AudioSeq_ScriptReadU8(state);
                         sp52 = ((u16*) gSeqFontTable)[seqPlayer->seqId];
+#ifdef TARGET_PSP
+                        sp52 = __builtin_bswap16(sp52);
+#endif
                         loBits = gSeqFontTable[sp52];
                         cmd = gSeqFontTable[sp52 + loBits - cmd];
                         if (AudioHeap_SearchCaches(FONT_TABLE, CACHE_EITHER, cmd) != NULL) {
@@ -1019,6 +1047,9 @@ void AudioSeq_SequenceChannelProcessScript(SequenceChannel* channel) {
                     case 0xC6: // set bank
                         cmd = AudioSeq_ScriptReadU8(state);
                         sp52 = ((u16*) gSeqFontTable)[seqPlayer->seqId]; // get offset for bank info for seq
+#ifdef TARGET_PSP
+                        sp52 = __builtin_bswap16(sp52);
+#endif
                         loBits = gSeqFontTable[sp52];                    // read number of banks
                         cmd = gSeqFontTable[sp52 + loBits - cmd];        // get bank id from inverse?
 

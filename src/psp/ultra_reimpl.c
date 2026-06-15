@@ -16,6 +16,7 @@
 #include "PR/os_vi.h"
 #include "PR/sptask.h"
 #include "macros.h"
+#include "src/psp/audio_output.h"
 #include "src/psp/platform.h"
 
 #include <pspdebug.h>
@@ -583,6 +584,14 @@ OSPiHandle* osCartRomInit(void) {
 
 OSPiHandle* osDriveRomInit(void) {
     return osCartRomInit();
+}
+
+u32 osAiGetLength(void) {
+    return PspAudioOutput_GetQueuedBytes();
+}
+
+s32 osAiSetNextBuffer(void* bufPtr, u32 size) {
+    return PspAudioOutput_Submit(bufPtr, size);
 }
 
 s32 osPiStartDma(OSIoMesg* mb, s32 pri, s32 direction, u32 devAddr, void* dramAddr, u32 size, OSMesgQueue* mq) {

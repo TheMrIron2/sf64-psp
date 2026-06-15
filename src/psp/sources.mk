@@ -11,6 +11,25 @@ PSP_RENDERER_C_FILES := \
     src/psp/gfx/gfx_pspgl.c \
     src/psp/renderer_pspgl.c
 
+PSP_AUDIO_C_FILES := \
+    src/audio/audio_context.c \
+    src/audio/audio_effects.c \
+    src/audio/audio_general.c \
+    src/audio/audio_heap.c \
+    src/audio/audio_load.c \
+    src/audio/audio_playback.c \
+    src/audio/audio_seqplayer.c \
+    src/audio/audio_synthesis.c \
+    src/audio/audio_tables.c \
+    src/audio/audio_thread.c \
+    src/audio/note_data.c \
+    src/audio/wave_samples.c \
+    src/psp/audio_mixer.c \
+    src/psp/audio_output.c
+
+PSP_GAME_S_FILES := \
+    src/psp/audio_assets.S
+
 PSP_GAME_C_FILES := \
     src/buffers.c \
     src/dmatable.c \
@@ -152,6 +171,7 @@ PSP_GAME_C_FILES := \
     src/psp/main.c \
     src/psp/platform.c \
     src/psp/ultra_reimpl.c \
+    $(PSP_AUDIO_C_FILES) \
     $(PSP_RENDERER_C_FILES) \
     src/sys/sys_fault.c \
     src/sys/sys_joybus.c \
