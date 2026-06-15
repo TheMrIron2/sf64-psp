@@ -10,22 +10,6 @@ s32 D_80146D80;
 s32 PAD_80146D88[2];
 AudioSlowLoadBuffer gSlowLoads;
 
-#ifdef TARGET_PSP
-__attribute__((noinline, noclone)) static u8 AudioLoad_PspReadByte(const volatile u8* address) {
-    return *address;
-}
-
-__attribute__((noinline, noclone)) static void AudioLoad_PspStoreZero(volatile u8* address) {
-    *address = 0;
-}
-
-__attribute__((noinline, noclone)) static void AudioLoad_PspClearBytes(volatile u8* address, size_t size) {
-    while (size-- != 0) {
-        *address++ = 0;
-    }
-}
-#endif
-
 // Original name: Nas_WaveDmaFrameWork
 void AudioLoad_DecreaseSampleDmaTtls(void) {
     u32 i;
@@ -934,42 +918,15 @@ void AudioLoad_Init(void) {
     s32 dwordsLeft;
     u64* clearContext;
 #endif
-#ifdef TARGET_PSP
-    volatile u8* pspAudioHeap;
-    volatile u8 pspAudioProbe;
-#endif
 
     void* ramAddr;
 
 #ifdef TARGET_PSP
     PspPlatform_LogLine("[psp-audio] driver initialization begin");
-
-    pspAudioHeap = (volatile u8*) gAudioHeap;
-
-    PspPlatform_LogValue("audio heap runtime address",
-                         (u32) (uintptr_t) pspAudioHeap);
-
-    PspPlatform_LogLine("[psp-audio] heap read begin");
-    pspAudioProbe = AudioLoad_PspReadByte(pspAudioHeap);
-    PspPlatform_LogLine("[psp-audio] heap read complete");
-
-    PspPlatform_LogLine("[psp-audio] heap write begin");
-    AudioLoad_PspStoreZero(pspAudioHeap);
-    PspPlatform_LogLine("[psp-audio] heap write complete");
-
-    PspPlatform_LogValue("audio heap address",
-                         (u32) (uintptr_t) pspAudioHeap);
-    PspPlatform_LogValue("audio heap first byte",
-                         (u32) pspAudioProbe);
-
-    PspPlatform_LogLine("[psp-audio] reset timer write begin");
 #endif
 
     gAudioResetTimer = 0;
 
-#ifdef TARGET_PSP
-    PspPlatform_LogLine("[psp-audio] reset timer write complete");
-#endif
 #ifdef TARGET_PSP
     PspPlatform_LogValue("audio heap size", (u32) gAudioHeapSize);
 
@@ -977,19 +934,11 @@ void AudioLoad_Init(void) {
         PspPlatform_LogLine("[psp-audio] invalid audio heap size");
         return;
     }
+#endif
 
-    PspPlatform_LogLine("[psp-audio] pointer-helper last-byte write begin");
-    AudioLoad_PspStoreZero(pspAudioHeap + gAudioHeapSize - 1);
-    PspPlatform_LogLine("[psp-audio] pointer-helper last-byte write complete");
-
-    PspPlatform_LogLine("[psp-audio] pointer-helper heap clear begin");
-    AudioLoad_PspClearBytes(pspAudioHeap, (size_t) gAudioHeapSize);
-    PspPlatform_LogLine("[psp-audio] pointer-helper heap clear complete");
-#else
     for (i = 0; i < gAudioHeapSize / 8; i++) {
         *((u64*) gAudioHeap + i) = 0;
     }
-#endif
 
 #ifdef TARGET_PSP
     PspPlatform_LogLine("[psp-audio] heap clear complete");
