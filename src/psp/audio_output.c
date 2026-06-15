@@ -130,7 +130,7 @@ int PspAudioOutput_Submit(const void* samples, unsigned int size) {
     sceKernelSignalSema(sReady, 1);
 #if PSP_LOG_ENABLED
     if (sSubmittedBlocks == 1) {
-        PspPlatform_LogFrame("audio first PCM block frames", frames);
+        PspPlatform_LogValue("audio first PCM block frames", frames);
     }
 #endif
     return 0;

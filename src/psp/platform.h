@@ -11,6 +11,7 @@ void PspPlatform_RunAudioTask(SPTask* task);
 void PspPlatform_DebugFrame(void);
 void PspPlatform_LogLine(const char* line);
 void PspPlatform_LogFrame(const char* phase, u32 frame);
+void PspPlatform_LogValue(const char* label, u32 value);
 
 void PspPlatform_SetEventMesg(OSEvent event, OSMesgQueue* mq, OSMesg msg);
 void PspPlatform_SetViEvent(OSMesgQueue* mq, OSMesg msg, u32 retraceCount);

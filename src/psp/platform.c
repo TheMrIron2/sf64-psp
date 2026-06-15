@@ -376,6 +376,19 @@ void PspPlatform_DebugFrame(void) {
 #endif
 }
 
+void PspPlatform_LogValue(const char* label, u32 value) {
+    char line[96];
+    char* out = line;
+
+    out = psp_append_text(out, "[psp] ");
+    out = psp_append_text(out, label);
+    out = psp_append_text(out, ": ");
+    out = psp_append_u32(out, value);
+    *out = '\0';
+
+    PspPlatform_LogLine(line);
+}
+
 
 
 void Mio0_Decompress(void* header, u8* dst) {
