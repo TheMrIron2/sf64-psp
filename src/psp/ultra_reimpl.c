@@ -365,7 +365,7 @@ void osStartThread(OSThread* thread) {
             sThreads[i].active = 1;
             sThreads[i].threadId = sceKernelCreateThread("n64_thread", psp_thread_entry,
                                                          psp_thread_priority_from_os(thread->priority),
-                                                         PSP_N64_THREAD_STACK_SIZE, 0, NULL);
+                                                         PSP_N64_THREAD_STACK_SIZE, PSP_THREAD_ATTR_USER | PSP_THREAD_ATTR_VFPU, NULL);
             if (sThreads[i].threadId >= 0) {
                 PspThread* threadArg = &sThreads[i];
                 pspDebugScreenPrintf("[psp] start thread %ld\n", thread->id);
