@@ -543,6 +543,9 @@ void Main_ThreadEntry(void* arg0) {
 
         switch (mesg) {
             case EVENT_MESG_VI:
+            #ifdef TARGET_PSP
+                PspPlatform_AcknowledgeViEvent();
+            #endif
                 osSendMesg(&gAudioVImesgQueue, (OSMesg) EVENT_MESG_VI, OS_MESG_NOBLOCK);
                 osSendMesg(&gGfxVImesgQueue, (OSMesg) EVENT_MESG_VI, OS_MESG_NOBLOCK);
                 Main_GetNewTasks();

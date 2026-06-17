@@ -14,14 +14,18 @@ typedef int SceUID;
 typedef unsigned int SceSize;
 typedef unsigned int SceMode;
 
+
 int sceDisplayWaitVblankStart(void);
 SceUID sceKernelCreateThread(const char* name, int (*entry)(SceSize, void*), int initPriority, int stackSize,
                              int attr, void* option);
 int sceKernelStartThread(SceUID thid, SceSize arglen, void* argp);
+
 SceUID sceKernelCreateSema(const char* name, int attr, int initVal, int maxVal, void* option);
 int sceKernelWaitSema(SceUID semaid, int signal, unsigned int* timeout);
 int sceKernelSignalSema(SceUID semaid, int signal);
 void sceKernelExitGame(void);
+int sceKernelCpuSuspendIntr(void);
+void sceKernelCpuResumeIntr(int flags);
 SceUID sceIoOpen(const char* file, int flags, SceMode mode);
 int sceIoWrite(SceUID fd, const void* data, SceSize size);
 int sceIoClose(SceUID fd);
@@ -56,10 +60,12 @@ static SceUID sViThreadId = -1;
 #if PSP_LOG_ENABLED
 static SceUID sLogSemaId = -1;
 #endif
+static volatile int sViEventPending;
 static volatile int sExitRequested;
 static u32 sGfxTaskCount;
 static u32 sAudioTaskCount;
 static u32 sViCount;
+
 
 u32 osMemSize = 24 * 1024 * 1024;
 s32 osTvType = OS_TV_NTSC;
@@ -264,6 +270,7 @@ void PspPlatform_Init(void) {
     int audioResult;
 
     sExitRequested = 0;
+    sViEventPending = 0;
 #if PSP_LOG_ENABLED
     if (sLogSemaId < 0) {
         sLogSemaId = sceKernelCreateSema("sf64_log", 0, 1, 1, NULL);
@@ -304,17 +311,58 @@ void PspPlatform_SetEventMesg(OSEvent event, OSMesgQueue* mq, OSMesg msg) {
 }
 
 void PspPlatform_SetViEvent(OSMesgQueue* mq, OSMesg msg, u32 retraceCount) {
+    int intrState;
+
+    intrState = sceKernelCpuSuspendIntr();
     sViMq = mq;
     sViMsg = msg;
     sViRetraceCount = retraceCount == 0 ? 1 : retraceCount;
+    sViEventPending = 0;
+    sceKernelCpuResumeIntr(intrState);
 }
 
 void PspPlatform_PostViEvent(void) {
+    int intrState;
+    int shouldPost;
+    s32 result;
+
+    shouldPost = 0;
     sViCount++;
+
     if ((sViMq != NULL) && ((sViCount % sViRetraceCount) == 0)) {
-        osSendMesg(sViMq, sViMsg, OS_MESG_NOBLOCK);
+        intrState = sceKernelCpuSuspendIntr();
+
+        if (!sViEventPending) {
+            sViEventPending = 1;
+            shouldPost = 1;
+        }
+
+        sceKernelCpuResumeIntr(intrState);
+
+        if (shouldPost) {
+            result = osSendMesg(sViMq, sViMsg, OS_MESG_NOBLOCK);
+
+            if (result != 0) {
+                intrState = sceKernelCpuSuspendIntr();
+                sViEventPending = 0;
+                sceKernelCpuResumeIntr(intrState);
+
+#if PSP_LOG_ENABLED
+                PspPlatform_LogLine("[psp-vi] VI enqueue failed");
+#endif
+            }
+        }
     }
+
     PspPlatform_DebugFrame();
+}
+
+void PspPlatform_AcknowledgeViEvent(void) {
+    int intrState;
+
+    intrState = sceKernelCpuSuspendIntr();
+    sViEventPending = 0;
+    sceKernelCpuResumeIntr(intrState);
 }
 
 void PspPlatform_PollInput(OSContPad* pads) {
@@ -325,6 +373,8 @@ void PspPlatform_PollInput(OSContPad* pads) {
 }
 
 void PspPlatform_RunGfxTask(SPTask* task) {
+    s32 result;
+
     sGfxTaskCount++;
 
     PspRenderer_RenderGfxTask(task, sGfxTaskCount);
@@ -334,11 +384,27 @@ void PspPlatform_RunGfxTask(SPTask* task) {
         PspPlatform_LogFrame("gfx task complete", sGfxTaskCount);
     }
 #endif
+
     if (sEvents[OS_EVENT_SP].mq != NULL) {
-        osSendMesg(sEvents[OS_EVENT_SP].mq, sEvents[OS_EVENT_SP].msg, OS_MESG_NOBLOCK);
+        result = osSendMesg(sEvents[OS_EVENT_SP].mq,
+                            sEvents[OS_EVENT_SP].msg,
+                            OS_MESG_NOBLOCK);
+#if PSP_LOG_ENABLED
+        if (result != 0) {
+            PspPlatform_LogLine("[psp-gfx] SP event enqueue failed");
+        }
+#endif
     }
+
     if (sEvents[OS_EVENT_DP].mq != NULL) {
-        osSendMesg(sEvents[OS_EVENT_DP].mq, sEvents[OS_EVENT_DP].msg, OS_MESG_NOBLOCK);
+        result = osSendMesg(sEvents[OS_EVENT_DP].mq,
+                            sEvents[OS_EVENT_DP].msg,
+                            OS_MESG_NOBLOCK);
+#if PSP_LOG_ENABLED
+        if (result != 0) {
+            PspPlatform_LogLine("[psp-gfx] DP event enqueue failed");
+        }
+#endif
     }
 }
 

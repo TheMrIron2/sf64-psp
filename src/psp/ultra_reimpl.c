@@ -23,6 +23,7 @@
 #include <pspintrman.h>
 #include <pspkernel.h>
 #include <psprtc.h>
+#include <stdio.h>
 
 #define PSP_N64_TICKS_PER_SECOND 46875000ULL
 #define PSP_TIMER_POOL_SIZE 32
@@ -99,14 +100,6 @@ static u32 ticks_to_usecs(OSTime ticks) {
     return (u32) ((ticks * 1000000ULL) / PSP_N64_TICKS_PER_SECOND);
 }
 
-static u32 psp_mq_lock(void) {
-    return sceKernelCpuSuspendIntr();
-}
-
-static void psp_mq_unlock(u32 state) {
-    sceKernelCpuResumeIntr(state);
-}
-
 static s32 psp_thread_priority_from_os(OSPri pri) {
     const s32 pspLowest = 0x70;
     const s32 pspHighest = 0x10;
@@ -121,20 +114,190 @@ static s32 psp_thread_priority_from_os(OSPri pri) {
     return pspLowest - ((pri * (pspLowest - pspHighest)) / OS_PRIORITY_MAX);
 }
 
+#if !USE_N64PSP_QUEUES
+typedef struct PspQueueTraceMeta {
+    OSMesgQueue* queue;
+    OSMesg* msgBuf;
+    u32 createSeq;
+    void* createRa;
+    s32 count;
+    s32 active;
+} PspQueueTraceMeta;
+
+#define PSP_QUEUE_TRACE_MAX 64
+
+static PspQueueTraceMeta sQueueTraceMeta[PSP_QUEUE_TRACE_MAX];
+static u32 sQueueTraceSeq;
+
+static u32 psp_queue_trace_next_seq(void) {
+    return (u32) __sync_add_and_fetch(&sQueueTraceSeq, 1);
+}
+
+static void psp_queue_trace_thread(char* name, u32 nameSize, SceUID* outThreadId) {
+    SceKernelThreadInfo info;
+    SceUID threadId;
+
+    threadId = sceKernelGetThreadId();
+    *outThreadId = threadId;
+    if (nameSize != 0) {
+        name[0] = '\0';
+    }
+    psp_memzero(&info, sizeof(info));
+    info.size = sizeof(info);
+    if ((threadId >= 0) && (sceKernelReferThreadStatus(threadId, &info) >= 0)) {
+        snprintf(name, nameSize, "%s", info.name);
+    } else {
+        snprintf(name, nameSize, "?");
+    }
+}
+
+static PspQueueTraceMeta* psp_queue_trace_find(OSMesgQueue* mq) {
+    s32 i;
+
+    for (i = 0; i < PSP_QUEUE_TRACE_MAX; i++) {
+        if (sQueueTraceMeta[i].active && (sQueueTraceMeta[i].queue == mq)) {
+            return &sQueueTraceMeta[i];
+        }
+    }
+    return NULL;
+}
+
+static PspQueueTraceMeta* psp_queue_trace_alloc(OSMesgQueue* mq) {
+    PspQueueTraceMeta* freeSlot;
+    s32 i;
+
+    freeSlot = NULL;
+    for (i = 0; i < PSP_QUEUE_TRACE_MAX; i++) {
+        if (sQueueTraceMeta[i].active && (sQueueTraceMeta[i].queue == mq)) {
+            return &sQueueTraceMeta[i];
+        }
+        if (!sQueueTraceMeta[i].active && (freeSlot == NULL)) {
+            freeSlot = &sQueueTraceMeta[i];
+        }
+    }
+    return freeSlot;
+}
+
+static void psp_queue_trace_log(const char* op, OSMesgQueue* mq, OSMesg msg, s32 flag, PspQueueTraceMeta* meta,
+                                void* currentRa, s32 beforeValid, s32 beforeCount, s32 afterValid, s32 afterCount,
+                                s32 blocks, s32 wakes, s32 result) {
+#if PSP_LOG_ENABLED
+    char line[384];
+    char threadName[64];
+    SceUID threadId;
+    u32 seq;
+
+    seq = psp_queue_trace_next_seq();
+    psp_queue_trace_thread(threadName, sizeof(threadName), &threadId);
+    snprintf(line, sizeof(line),
+             "queue_trace seq=%lu op=%s q=%p msg=%p flag=%ld thread=0x%08X/%s metadata_found=%d create_seq=%lu "
+             "create_ra=%p current_ra=%p before=%ld/%ld after=%ld/%ld blocks=%ld wakes=%ld result=%ld",
+             (unsigned long) seq, op, (void*) mq, msg, (long) flag, (unsigned) threadId, threadName,
+             meta != NULL, (unsigned long) (meta != NULL ? meta->createSeq : 0),
+             meta != NULL ? meta->createRa : NULL, currentRa, (long) beforeValid, (long) beforeCount,
+             (long) afterValid, (long) afterCount, (long) blocks, (long) wakes, (long) result);
+    PspPlatform_LogLine(line);
+#else
+    (void) op;
+    (void) mq;
+    (void) msg;
+    (void) flag;
+    (void) meta;
+    (void) currentRa;
+    (void) beforeValid;
+    (void) beforeCount;
+    (void) afterValid;
+    (void) afterCount;
+    (void) blocks;
+    (void) wakes;
+    (void) result;
+#endif
+}
+
+static void psp_queue_trace_waiting(const char* op, OSMesgQueue* mq, OSMesg msg, s32 flag, PspQueueTraceMeta* meta,
+                                    void* currentRa, s32 waitedMs) {
+#if PSP_LOG_ENABLED
+    char line[384];
+    char threadName[64];
+    SceUID threadId;
+    u32 seq;
+
+    seq = psp_queue_trace_next_seq();
+    psp_queue_trace_thread(threadName, sizeof(threadName), &threadId);
+    snprintf(line, sizeof(line),
+             "queue_trace seq=%lu op=%s still waiting q=%p msg=%p flag=%ld thread=0x%08X/%s metadata_found=%d "
+             "create_seq=%lu create_ra=%p current_ra=%p waited_ms=%ld",
+             (unsigned long) seq, op, (void*) mq, msg, (long) flag, (unsigned) threadId, threadName, meta != NULL,
+             (unsigned long) (meta != NULL ? meta->createSeq : 0), meta != NULL ? meta->createRa : NULL, currentRa,
+             (long) waitedMs);
+    PspPlatform_LogLine(line);
+#else
+    (void) op;
+    (void) mq;
+    (void) msg;
+    (void) flag;
+    (void) meta;
+    (void) currentRa;
+    (void) waitedMs;
+#endif
+}
+
+static u32 psp_mq_lock(void) {
+    return sceKernelCpuSuspendIntr();
+}
+
+static void psp_mq_unlock(u32 state) {
+    sceKernelCpuResumeIntr(state);
+}
+
 void osCreateMesgQueue(OSMesgQueue* mq, OSMesg* msgBuf, s32 count) {
+    PspQueueTraceMeta* meta;
+    void* currentRa;
+    s32 beforeValid;
+    s32 beforeCount;
+
+    currentRa = __builtin_return_address(0);
+    beforeValid = mq != NULL ? mq->validCount : -1;
+    beforeCount = mq != NULL ? mq->msgCount : -1;
     mq->mtqueue = NULL;
     mq->fullqueue = NULL;
     mq->validCount = 0;
     mq->first = 0;
     mq->msgCount = count;
     mq->msg = msgBuf;
+    meta = psp_queue_trace_alloc(mq);
+    if (meta != NULL) {
+        meta->queue = mq;
+        meta->msgBuf = msgBuf;
+        meta->count = count;
+        meta->createSeq = psp_queue_trace_next_seq();
+        meta->createRa = currentRa;
+        meta->active = true;
+    }
+    psp_queue_trace_log("osCreateMesgQueue", mq, (OSMesg) msgBuf, count, meta, currentRa, beforeValid, beforeCount,
+                        mq->validCount, mq->msgCount, false, false, 0);
 }
 
 s32 osSendMesg(OSMesgQueue* mq, OSMesg msg, s32 flag) {
     s32 index;
     u32 intrState;
+    void* currentRa;
+    PspQueueTraceMeta* meta;
+    s32 beforeValid;
+    s32 beforeCount;
+    s32 blocks;
+    s32 waitedUs;
+
+    currentRa = __builtin_return_address(0);
+    meta = psp_queue_trace_find(mq);
+    beforeValid = mq != NULL ? mq->validCount : -1;
+    beforeCount = mq != NULL ? mq->msgCount : -1;
+    blocks = false;
+    waitedUs = 0;
 
     if (mq == NULL) {
+        psp_queue_trace_log("osSendMesg", mq, msg, flag, meta, currentRa, beforeValid, beforeCount, -1, -1, blocks,
+                            false, -1);
         return -1;
     }
 
@@ -145,22 +308,46 @@ s32 osSendMesg(OSMesgQueue* mq, OSMesg msg, s32 flag) {
             mq->msg[index] = msg;
             mq->validCount++;
             psp_mq_unlock(intrState);
+            psp_queue_trace_log("osSendMesg", mq, msg, flag, meta, currentRa, beforeValid, beforeCount, mq->validCount,
+                                mq->msgCount, blocks, true, 0);
             return 0;
         }
         psp_mq_unlock(intrState);
 
         if (flag != OS_MESG_BLOCK) {
+            psp_queue_trace_log("osSendMesg", mq, msg, flag, meta, currentRa, beforeValid, beforeCount, mq->validCount,
+                                mq->msgCount, blocks, false, -1);
             return -1;
         }
+        blocks = true;
         sceKernelDelayThread(1000);
+        waitedUs += 1000;
+        if ((waitedUs % 1000000) == 0) {
+            psp_queue_trace_waiting("osSendMesg", mq, msg, flag, meta, currentRa, waitedUs / 1000);
+        }
     }
 }
 
 s32 osJamMesg(OSMesgQueue* mq, OSMesg msg, s32 flag) {
     s32 i;
     u32 intrState;
+    void* currentRa;
+    PspQueueTraceMeta* meta;
+    s32 beforeValid;
+    s32 beforeCount;
+    s32 blocks;
+    s32 waitedUs;
+
+    currentRa = __builtin_return_address(0);
+    meta = psp_queue_trace_find(mq);
+    beforeValid = mq != NULL ? mq->validCount : -1;
+    beforeCount = mq != NULL ? mq->msgCount : -1;
+    blocks = false;
+    waitedUs = 0;
 
     if (mq == NULL) {
+        psp_queue_trace_log("osJamMesg", mq, msg, flag, meta, currentRa, beforeValid, beforeCount, -1, -1, blocks,
+                            false, -1);
         return -1;
     }
 
@@ -177,14 +364,23 @@ s32 osJamMesg(OSMesgQueue* mq, OSMesg msg, s32 flag) {
             mq->msg[mq->first] = msg;
             mq->validCount++;
             psp_mq_unlock(intrState);
+            psp_queue_trace_log("osJamMesg", mq, msg, flag, meta, currentRa, beforeValid, beforeCount, mq->validCount,
+                                mq->msgCount, blocks, true, 0);
             return 0;
         }
         psp_mq_unlock(intrState);
 
         if (flag != OS_MESG_BLOCK) {
+            psp_queue_trace_log("osJamMesg", mq, msg, flag, meta, currentRa, beforeValid, beforeCount, mq->validCount,
+                                mq->msgCount, blocks, false, -1);
             return -1;
         }
+        blocks = true;
         sceKernelDelayThread(1000);
+        waitedUs += 1000;
+        if ((waitedUs % 1000000) == 0) {
+            psp_queue_trace_waiting("osJamMesg", mq, msg, flag, meta, currentRa, waitedUs / 1000);
+        }
     }
 }
 
@@ -197,31 +393,59 @@ s32 osSendMesgNoBlock(OSMesgQueue* mq, OSMesg msg) {
 
 s32 osRecvMesg(OSMesgQueue* mq, OSMesg* msg, s32 flag) {
     u32 intrState;
+    void* currentRa;
+    PspQueueTraceMeta* meta;
+    OSMesg value;
+    s32 beforeValid;
+    s32 beforeCount;
+    s32 blocks;
+    s32 waitedUs;
+
+    currentRa = __builtin_return_address(0);
+    meta = psp_queue_trace_find(mq);
+    value = NULL;
+    beforeValid = mq != NULL ? mq->validCount : -1;
+    beforeCount = mq != NULL ? mq->msgCount : -1;
+    blocks = false;
+    waitedUs = 0;
 
     if (mq == NULL) {
+        psp_queue_trace_log("osRecvMesg", mq, value, flag, meta, currentRa, beforeValid, beforeCount, -1, -1, blocks,
+                            false, -1);
         return -1;
     }
 
     while (true) {
         intrState = psp_mq_lock();
         if (mq->validCount != 0) {
+            value = mq->msg[mq->first];
             if (msg != NULL) {
-                *msg = mq->msg[mq->first];
+                *msg = value;
             }
 
             mq->first = (mq->first + 1) % mq->msgCount;
             mq->validCount--;
             psp_mq_unlock(intrState);
+            psp_queue_trace_log("osRecvMesg", mq, value, flag, meta, currentRa, beforeValid, beforeCount,
+                                mq->validCount, mq->msgCount, blocks, true, 0);
             return 0;
         }
         psp_mq_unlock(intrState);
 
         if (flag != OS_MESG_BLOCK) {
+            psp_queue_trace_log("osRecvMesg", mq, value, flag, meta, currentRa, beforeValid, beforeCount,
+                                mq->validCount, mq->msgCount, blocks, false, -1);
             return -1;
         }
+        blocks = true;
         sceKernelDelayThread(1000);
+        waitedUs += 1000;
+        if ((waitedUs % 1000000) == 0) {
+            psp_queue_trace_waiting("osRecvMesg", mq, value, flag, meta, currentRa, waitedUs / 1000);
+        }
     }
 }
+#endif
 
 static int psp_timer_thread(SceSize args, void* argp) {
     PspTimer* timer;
