@@ -91,9 +91,6 @@ int main(int argc, char* argv[]) {
     pspDebugScreenPrintf("[psp] bootproc enter\n");
     bootproc();
     pspDebugScreenPrintf("[psp] bootproc returned\n");
-#if USE_N64PSP_QUEUES
-    PspN64psp_Shutdown();
-#endif
 
     while (1) {
         sceDisplayWaitVblankStart();
