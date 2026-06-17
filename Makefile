@@ -22,6 +22,7 @@ PROFILE_PSP ?= 0
 PSP_LOG ?= 1
 USE_N64PSP_QUEUES ?= 1
 N64PSP_QUEUE_SELFTEST ?= 0
+N64PSP_QUEUE_TRACE ?= 0
 COLOR ?= 1
 VERBOSE ?= 0
 N_THREADS ?= $(shell nproc 2>/dev/null || echo 1)
@@ -68,6 +69,9 @@ PSP_SFO := $(BUILD_DIR)/PARAM.SFO
 PSP_ELF := $(BUILD_DIR)/$(TARGET).psp.elf
 PSP_PRX := $(BUILD_DIR)/$(TARGET).psp.prx
 PSP_MAP := $(BUILD_DIR)/$(TARGET).psp.map
+QUEUE_TRACE_LOG ?= sf64_psp.log
+QUEUE_TRACE_QUEUES ?= 0x9917470 0x9974c14 0x9974ca4 0x9974c84
+PSP_LOAD_BASE ?= 0x08804000
 
 PSP_LIBS ?= -lm -lpspdebug -lpspdisplay -lpspgu -lpspge -lpspctrl -lpspaudio -lpspnet -lpspnet_apctl
 
@@ -132,6 +136,9 @@ CFLAGS += -DUSE_N64PSP_QUEUES=1
 endif
 ifeq ($(N64PSP_QUEUE_SELFTEST),1)
 CFLAGS += -DN64PSP_QUEUE_SELFTEST=1
+endif
+ifeq ($(N64PSP_QUEUE_TRACE),1)
+CFLAGS += -DN64PSP_QUEUE_TRACE=1
 endif
 PSPGL_CONFIG_PATH := $(shell command -v $(PSPGL_CONFIG) 2>/dev/null)
 ifneq ($(PSPGL_CONFIG_PATH),)
@@ -285,6 +292,7 @@ $(N64PSP_PSP_ARCHIVES):
 		PSP_CONFIG=$(PSP_CONFIG) \
 		PSP_CC=$(CC) \
 		PSP_AR=psp-ar \
+		N64PSP_QUEUE_TRACE=$(N64PSP_QUEUE_TRACE) \
 		build-psp/libn64psp_runtime.a \
 		build-psp/libn64psp_platform_psp.a \
 		build-psp/libn64psp_trace_backend.a
@@ -316,6 +324,13 @@ print-%:
 	$(info $* is a $(flavor $*) variable set to [$($*)])
 	@true
 
+resolve-queue-trace:
+	$(PYTHON) tools/psp_resolve_queue_trace.py \
+		--log $(QUEUE_TRACE_LOG) \
+		--elf $(PSP_ELF) \
+		--load-base $(PSP_LOAD_BASE) \
+		$(foreach q,$(QUEUE_TRACE_QUEUES),--queue $(q))
+
 -include $(DEP_FILES)
 
-.PHONY: tools-init toolchain torch init decompress extract assets clean-generated FORCE
+.PHONY: tools-init toolchain torch init decompress extract assets clean-generated resolve-queue-trace FORCE
