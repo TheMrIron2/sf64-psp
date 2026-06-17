@@ -99,14 +99,6 @@ static u32 ticks_to_usecs(OSTime ticks) {
     return (u32) ((ticks * 1000000ULL) / PSP_N64_TICKS_PER_SECOND);
 }
 
-static u32 psp_mq_lock(void) {
-    return sceKernelCpuSuspendIntr();
-}
-
-static void psp_mq_unlock(u32 state) {
-    sceKernelCpuResumeIntr(state);
-}
-
 static s32 psp_thread_priority_from_os(OSPri pri) {
     const s32 pspLowest = 0x70;
     const s32 pspHighest = 0x10;
@@ -119,6 +111,15 @@ static s32 psp_thread_priority_from_os(OSPri pri) {
     }
 
     return pspLowest - ((pri * (pspLowest - pspHighest)) / OS_PRIORITY_MAX);
+}
+
+#if !USE_N64PSP_QUEUES
+static u32 psp_mq_lock(void) {
+    return sceKernelCpuSuspendIntr();
+}
+
+static void psp_mq_unlock(u32 state) {
+    sceKernelCpuResumeIntr(state);
 }
 
 void osCreateMesgQueue(OSMesgQueue* mq, OSMesg* msgBuf, s32 count) {
@@ -222,6 +223,7 @@ s32 osRecvMesg(OSMesgQueue* mq, OSMesg* msg, s32 flag) {
         sceKernelDelayThread(1000);
     }
 }
+#endif
 
 static int psp_timer_thread(SceSize args, void* argp) {
     PspTimer* timer;

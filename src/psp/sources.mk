@@ -5,6 +5,18 @@
 
 PSP_BOOTSTRAP_C_FILES := src/psp/main.c
 
+PSP_N64PSP_C_FILES :=
+
+ifeq ($(USE_N64PSP_QUEUES),1)
+PSP_N64PSP_C_FILES += \
+    src/psp/n64psp_integration.c
+endif
+ifeq ($(N64PSP_QUEUE_SELFTEST),1)
+PSP_N64PSP_C_FILES += \
+    src/psp/n64psp_platform_selftest.c \
+    src/psp/n64psp_queue_selftest.c
+endif
+
 PSP_RENDERER_C_FILES := \
     src/psp/gfx/gfx_psp.c \
     src/psp/gfx/gfx_psp_dl.c \
@@ -169,6 +181,7 @@ PSP_GAME_C_FILES := \
     src/overlays/ovl_unused/fox_unused.c \
     src/psp/input.c \
     src/psp/main.c \
+    $(PSP_N64PSP_C_FILES) \
     src/psp/platform.c \
     src/psp/ultra_reimpl.c \
     $(PSP_AUDIO_C_FILES) \

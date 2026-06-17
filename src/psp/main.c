@@ -4,6 +4,7 @@
 #include <pspctrl.h>
 
 #ifdef PSP_FULL
+#include "src/psp/n64psp_integration.h"
 #include "src/psp/platform.h"
 
 void bootproc(void);
@@ -62,11 +63,37 @@ int main(int argc, char* argv[]) {
     pspDebugScreenPrintf("Booting native game loop...\n\n");
     pspDebugScreenPrintf("Select+Start exits\n");
 
+#if USE_N64PSP_QUEUES
+    if (!PspN64psp_Init()) {
+        pspDebugScreenPrintf("[psp] n64psp init failed; boot aborted\n");
+        while (1) {
+            sceDisplayWaitVblankStart();
+        }
+    }
+#if N64PSP_QUEUE_SELFTEST
+    if (!PspN64psp_RunPlatformSelfTest()) {
+        pspDebugScreenPrintf("[psp] n64psp platform self-test failed; boot aborted\n");
+        while (1) {
+            sceDisplayWaitVblankStart();
+        }
+    }
+    if (!PspN64psp_RunQueueSelfTest()) {
+        pspDebugScreenPrintf("[psp] n64psp queue self-test failed; boot aborted\n");
+        while (1) {
+            sceDisplayWaitVblankStart();
+        }
+    }
+#endif
+#endif
+
     pspDebugScreenPrintf("[psp] platform init\n");
     PspPlatform_Init();
     pspDebugScreenPrintf("[psp] bootproc enter\n");
     bootproc();
     pspDebugScreenPrintf("[psp] bootproc returned\n");
+#if USE_N64PSP_QUEUES
+    PspN64psp_Shutdown();
+#endif
 
     while (1) {
         sceDisplayWaitVblankStart();

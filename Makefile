@@ -12,6 +12,7 @@
 -include .make_options
 
 MAKEFLAGS += --no-builtin-rules --no-print-directory
+.DEFAULT_GOAL := psp
 
 TARGET := starfox64
 VERSION ?= us
@@ -19,6 +20,8 @@ REV ?= rev1
 PSP_FULL ?= 1
 PROFILE_PSP ?= 0
 PSP_LOG ?= 1
+USE_N64PSP_QUEUES ?= 1
+N64PSP_QUEUE_SELFTEST ?= 0
 COLOR ?= 1
 VERBOSE ?= 0
 N_THREADS ?= $(shell nproc 2>/dev/null || echo 1)
@@ -93,6 +96,9 @@ PORT_DEFINES += -DNON_MATCHING -DAVOID_UB -DCOMPILER_GCC
 IINC := -Iinclude -Ibin/$(VERSION).$(REV) -I.
 IINC += -Ilib/ultralib/include -Ilib/ultralib/include/PR -Ilib/ultralib/include/ido
 IINC += -I$(PSPDEV)/psp/include -I$(PSPSDK)/include
+ifeq ($(USE_N64PSP_QUEUES),1)
+IINC += -Ilib/n64psp/include
+endif
 
 PSP_WARNINGS := -Wall -Wextra -Wimplicit-fallthrough -Wno-unknown-pragmas -Wno-missing-braces
 PSP_WARNINGS += -Wno-sign-compare -Wno-uninitialized
@@ -121,6 +127,12 @@ endif
 ifeq ($(PSP_RENDERER_DIAGNOSTICS),1)
 CFLAGS += -DPSP_RENDERER_DIAGNOSTICS=1
 endif
+ifeq ($(USE_N64PSP_QUEUES),1)
+CFLAGS += -DUSE_N64PSP_QUEUES=1
+endif
+ifeq ($(N64PSP_QUEUE_SELFTEST),1)
+CFLAGS += -DN64PSP_QUEUE_SELFTEST=1
+endif
 PSPGL_CONFIG_PATH := $(shell command -v $(PSPGL_CONFIG) 2>/dev/null)
 ifneq ($(PSPGL_CONFIG_PATH),)
 PSPGL_CFLAGS := $(shell $(PSPGL_CONFIG) --cflags)
@@ -139,6 +151,12 @@ PSPGL_LIBS := -lGL -lpspvfpu
 endif
 CFLAGS += $(PSPGL_CFLAGS)
 PSP_LIBS := $(PSPGL_LIBS) $(PSP_LIBS)
+
+N64PSP_DIR := lib/n64psp
+N64PSP_PSP_ARCHIVES := \
+	$(N64PSP_DIR)/build-psp/libn64psp_runtime.a \
+	$(N64PSP_DIR)/build-psp/libn64psp_trace_backend.a \
+	$(N64PSP_DIR)/build-psp/libn64psp_platform_psp.a
 
 LDFLAGS := -L$(PSPDEV)/psp/lib -L$(PSPSDK)/lib
 LDFLAGS += -Wl,-Map,$(PSP_MAP) -Wl,-zmax-page-size=128
@@ -163,7 +181,10 @@ O_FILES := $(patsubst %.c,$(BUILD_DIR)/%.o,$(C_FILES))
 ifeq ($(PSP_FULL),1)
 O_FILES += $(patsubst %.S,$(BUILD_DIR)/%.o,$(PSP_GAME_S_FILES))
 endif
-DEP_FILES := $(O_FILES:.o=.d)
+ifeq ($(USE_N64PSP_QUEUES),1)
+O_FILES += $(N64PSP_PSP_ARCHIVES)
+endif
+DEP_FILES := $(patsubst %.o,%.d,$(filter %.o,$(O_FILES)))
 ASSET_C_FILES := $(filter src/assets/%,$(PSP_GAME_C_FILES))
 ASSET_PREFLIGHT_STAMP := $(BUILD_DIR)/asset-preflight.stamp
 COMPILE_FLAGS_STAMP := $(BUILD_DIR)/compile-flags.stamp
@@ -259,6 +280,15 @@ ifneq ($(PROFILE_PSP),1)
 	$(V)$(PSP_FIXUP_IMPORTS) $@
 endif
 
+$(N64PSP_PSP_ARCHIVES):
+	$(MAKE) -C $(N64PSP_DIR) \
+		PSP_CONFIG=$(PSP_CONFIG) \
+		PSP_CC=$(CC) \
+		PSP_AR=psp-ar \
+		build-psp/libn64psp_runtime.a \
+		build-psp/libn64psp_platform_psp.a \
+		build-psp/libn64psp_trace_backend.a
+
 $(COMPILE_FLAGS_STAMP): FORCE
 	@mkdir -p $(dir $@)
 	@printf '%s\n' '$(CFLAGS)' > $@.tmp
@@ -278,6 +308,9 @@ $(BUILD_DIR)/%.o: %.S Makefile src/psp/sources.mk $(COMPILE_FLAGS_STAMP)
 
 clean:
 	$(RM) -r $(BUILD_DIR) build/psp-bootstrap
+ifneq ($(wildcard $(N64PSP_DIR)/Makefile),)
+	$(MAKE) -C $(N64PSP_DIR) clean
+endif
 
 print-%:
 	$(info $* is a $(flavor $*) variable set to [$($*)])
