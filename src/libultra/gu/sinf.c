@@ -108,7 +108,7 @@ float fsin(float x) {
     }
 
     if (x != x) {
-        return (__libm_qnan_f);
+        return x;
     }
 
     return zero.f;

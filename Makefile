@@ -73,7 +73,7 @@ QUEUE_TRACE_LOG ?= sf64_psp.log
 QUEUE_TRACE_QUEUES ?= 0x9917470 0x9974c14 0x9974ca4 0x9974c84
 PSP_LOAD_BASE ?= 0x08804000
 
-PSP_LIBS ?= -lm -lpspdebug -lpspdisplay -lpspgu -lpspge -lpspctrl -lpspaudio -lpspnet -lpspnet_apctl
+PSP_LIBS ?= -lm -lpspdebug -lpspdisplay -lpspgu -lpspge -lpspctrl -lpspaudio -lpsppower
 
 ifeq ($(COLOR),1)
 NO_COL := \033[0m
@@ -113,10 +113,15 @@ define source_warning_flags
 $(if $(filter src/psp/%,$<),$(PSP_WARNINGS),$(if $(filter 1,$(QUIET_DECOMP)),-w,$(PSP_WARNINGS)))
 endef
 
-CFLAGS := -std=gnu89 -G0 -DPSP -D__PSP__ -D_PSP_FW_VERSION=500
-CFLAGS += -O3 -Os -ffast-math -fno-unsafe-math-optimizations -fno-builtin -fno-common
-CFLAGS += -fno-merge-constants -fno-strict-aliasing -falign-functions=64 -flimit-function-alignment
-CFLAGS += -fno-rounding-math -ffp-contract=off -funsigned-char -MMD -MP
+PSP_OPTFLAGS ?= -O2 # -ffast-math
+
+CFLAGS := -std=gnu89 -G0 -DPSP -D__PSP__ -D_PSP_FW_VERSION=600 
+CFLAGS += $(PSP_OPTFLAGS) -g3
+CFLAGS += -fno-builtin -fno-common -fno-strict-aliasing
+CFLAGS += -fwrapv -funsigned-char
+CFLAGS += -ffunction-sections -fdata-sections
+CFLAGS += -fno-exceptions -fno-unwind-tables
+CFLAGS += -fno-asynchronous-unwind-tables -fno-ident
 CFLAGS += $(VERSION_DEFINES) $(COMMON_DEFINES) $(RELEASE_DEFINES)
 CFLAGS += $(GBI_DEFINES) $(PORT_DEFINES) $(IINC)
 ifeq ($(PSP_FULL),1)
@@ -167,13 +172,15 @@ N64PSP_PSP_ARCHIVES := \
 
 LDFLAGS := -L$(PSPDEV)/psp/lib -L$(PSPSDK)/lib
 LDFLAGS += -Wl,-Map,$(PSP_MAP) -Wl,-zmax-page-size=128
+
 ifeq ($(PROFILE_PSP),1)
 CFLAGS += -pg
 LDFLAGS += -pg
 else
-LDFLAGS += -specs=$(PSPSDK)/lib/prxspecs -Wl,-q,-T$(PSPSDK)/lib/linkfile.prx $(PSPSDK)/lib/prxexports.o
+LDFLAGS += -specs=$(PSPSDK)/lib/prxspecs \
+           -Wl,-q,-T$(PSPSDK)/lib/linkfile.prx \
+           $(PSPSDK)/lib/prxexports.o
 endif
-
 
 
 include src/psp/sources.mk

@@ -97,7 +97,7 @@ float fcos(float x) {
     }
 
     if (x != x) {
-        return (__libm_qnan_f);
+        x;
     }
 
     return zero.f;
@@ -158,7 +158,7 @@ float fcos(float x) {
         *__errnoaddr = EDOM;
 #endif
 
-        return (__libm_qnan_f);
+        return x;
     }
 
     /* just give up and return 0.0 */
