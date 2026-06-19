@@ -22,6 +22,7 @@ PROFILE_PSP ?= 0
 PSP_LOG ?= 0
 PSP_AUDIO_SYNTH ?= 0
 PSP_AUDIO_OUTPUT ?= 0
+PSP_FPS_OVERLAY ?= 1
 USE_N64PSP_QUEUES ?= 1
 N64PSP_QUEUE_SELFTEST ?= 0
 N64PSP_QUEUE_TRACE ?= 0
@@ -124,6 +125,7 @@ CFLAGS += -fwrapv -funsigned-char
 CFLAGS += -ffunction-sections -fdata-sections
 CFLAGS += -fno-exceptions -fno-unwind-tables
 CFLAGS += -fno-asynchronous-unwind-tables -fno-ident
+CFLAGS += -DPSP_FPS_OVERLAY=$(PSP_FPS_OVERLAY)
 CFLAGS += -DPSP_AUDIO_SYNTH=$(PSP_AUDIO_SYNTH)
 CFLAGS += -DPSP_AUDIO_OUTPUT=$(PSP_AUDIO_OUTPUT)
 CFLAGS += $(VERSION_DEFINES) $(COMMON_DEFINES) $(RELEASE_DEFINES)

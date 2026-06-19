@@ -420,11 +420,11 @@ u32 PspGfxPspgl_GetIa16Texture(const u16* pixels, u32 width, u32 height, u32* up
                                                uploadHeight);
 }
 
-void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u32 vertexCount, u32 textureId,
-                                      PspGfxPspglTextureEnv textureEnv, PspGfxPspglTextureWrap wrapS,
-                                      PspGfxPspglTextureWrap wrapT, int alphaTest, int blend, int premultiplied,
-                                      int depthTest, int depthWrite, int fog, const float* fogColor, float fogStart,
-                                      float fogEnd, const float* projectionMatrix, int pretransformed) {
+void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u32 vertexCount,
+    u32 textureId, PspGfxPspglTextureEnv textureEnv, PspGfxPspglTextureWrap wrapS, PspGfxPspglTextureWrap wrapT,
+    int alphaTest, int blend, int premultiplied, int depthTest, int depthWrite, int fog, const float* fogColor,
+    float fogStart, float fogEnd, const float* projectionMatrix, int pretransformed
+) {
     GLint glTextureEnv;
     GLint glWrapS;
     GLint glWrapT;
@@ -434,24 +434,55 @@ void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u3
     }
 
     glMatrixMode(GL_PROJECTION);
+
     if (pretransformed || (projectionMatrix == NULL)) {
         glLoadIdentity();
     } else {
         glLoadMatrixf(projectionMatrix);
     }
+
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
 
-    glEnableClientState(GL_VERTEX_ARRAY);
+    glEnableClientState(GL_TEXTURE_COORD_ARRAY);
     glEnableClientState(GL_COLOR_ARRAY);
+    glEnableClientState(GL_VERTEX_ARRAY);
+
+    glTexCoordPointer(
+        2,
+        GL_FLOAT,
+        sizeof(PspGfxPspglColorVertex),
+        &vertices[0].u
+    );
+
+    glColorPointer(
+        4,
+        GL_UNSIGNED_BYTE,
+        sizeof(PspGfxPspglColorVertex),
+        &vertices[0].color
+    );
+
+    glVertexPointer(
+        3,
+        GL_FLOAT,
+        sizeof(PspGfxPspglColorVertex),
+        &vertices[0].x
+    );
+
     if (depthTest) {
         glEnable(GL_DEPTH_TEST);
         glDepthFunc(GL_LEQUAL);
     } else {
         glDisable(GL_DEPTH_TEST);
     }
+
     glDepthMask(depthWrite ? GL_TRUE : GL_FALSE);
-    if (fog && !pretransformed && (fogColor != NULL) && (fogEnd > fogStart)) {
+
+    if (fog &&
+        !pretransformed &&
+        (fogColor != NULL) &&
+        (fogEnd > fogStart)) {
+
         glEnable(GL_FOG);
         glFogf(GL_FOG_MODE, GL_LINEAR);
         glFogfv(GL_FOG_COLOR, fogColor);
@@ -460,42 +491,60 @@ void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u3
     } else {
         glDisable(GL_FOG);
     }
+
+    // this controls GL_TEXTURE_2D, but does not disable GL_TEXTURE_COORD_ARRAY for untextured geometry
     if (textureId != 0) {
-        glEnableClientState(GL_TEXTURE_COORD_ARRAY);
         glEnable(GL_TEXTURE_2D);
+
         if (alphaTest) {
             glEnable(GL_ALPHA_TEST);
             glAlphaFunc(GL_GREATER, 0.0f);
         } else {
             glDisable(GL_ALPHA_TEST);
         }
+
         if (blend) {
             glEnable(GL_BLEND);
-            glBlendFunc(premultiplied ? GL_ONE : GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glBlendFunc(
+                premultiplied ? GL_ONE : GL_SRC_ALPHA,
+                GL_ONE_MINUS_SRC_ALPHA
+            );
         } else {
             glDisable(GL_BLEND);
         }
+
         glBindTexture(GL_TEXTURE_2D, textureId);
-        glWrapS = (wrapS == PSP_GFX_PSPGL_WRAP_CLAMP) ? GL_CLAMP_TO_EDGE : GL_REPEAT;
-        glWrapT = (wrapT == PSP_GFX_PSPGL_WRAP_CLAMP) ? GL_CLAMP_TO_EDGE : GL_REPEAT;
+
+        glWrapS =
+            (wrapS == PSP_GFX_PSPGL_WRAP_CLAMP)
+                ? GL_CLAMP_TO_EDGE
+                : GL_REPEAT;
+
+        glWrapT =
+            (wrapT == PSP_GFX_PSPGL_WRAP_CLAMP)
+                ? GL_CLAMP_TO_EDGE
+                : GL_REPEAT;
+
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, glWrapS);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, glWrapT);
-        glTexCoordPointer(2, GL_FLOAT, sizeof(PspGfxPspglColorVertex), &vertices[0].u);
+
         if (textureEnv == PSP_GFX_PSPGL_TEX_MODULATE) {
             glTextureEnv = GL_MODULATE;
         } else {
             glTextureEnv = GL_REPLACE;
         }
-        glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, glTextureEnv);
+
+        glTexEnvi(
+            GL_TEXTURE_ENV,
+            GL_TEXTURE_ENV_MODE,
+            glTextureEnv
+        );
     } else {
-        glDisableClientState(GL_TEXTURE_COORD_ARRAY);
         glDisable(GL_TEXTURE_2D);
         glDisable(GL_ALPHA_TEST);
         glDisable(GL_BLEND);
     }
 
-    glVertexPointer(3, GL_FLOAT, sizeof(PspGfxPspglColorVertex), &vertices[0].x);
-    glColorPointer(4, GL_FLOAT, sizeof(PspGfxPspglColorVertex), &vertices[0].r);
     glDrawArrays(GL_TRIANGLES, 0, vertexCount);
     glFlush();
 }

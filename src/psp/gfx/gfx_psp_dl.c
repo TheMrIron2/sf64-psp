@@ -116,7 +116,6 @@ typedef struct {
     u32 taskIndex;
     u32 segments[16];
     PspGfxDlVertex vertices[PSP_GFX_DL_MAX_VERTICES];
-    PspGfxPspglColorVertex batch[PSP_GFX_DL_BATCH_VERTICES];
     float modelview[4][4];
     float projection[4][4];
     float modelviewStack[PSP_GFX_DL_MTX_STACK_DEPTH][4][4];
@@ -219,6 +218,11 @@ typedef struct {
 } PspGfxDlContext;
 
 static PspGfxDlContext sPspGfxDlContext;
+
+static PspGfxPspglColorVertex
+    sPspGfxDlBatch[PSP_GFX_DL_BATCH_VERTICES]
+    __attribute__((aligned(16)));
+
 static u8 sLightingRemap[256];
 static int sLightingRemapInitialized;
 #if PSP_LOG_ENABLED || PSP_RENDERER_DIAGNOSTICS
@@ -252,6 +256,29 @@ static u8 psp_gfx_dl_remap_lighting(float value) {
     }
 
     return sLightingRemap[(u8) value];
+}
+
+static u8 psp_gfx_dl_float_to_u8(float value) {
+    if (value <= 0.0f) {
+        return 0;
+    }
+    if (value >= 1.0f) {
+        return 255;
+    }
+
+    return (u8) ((value * 255.0f) + 0.5f);
+}
+
+static u32 psp_gfx_dl_pack_rgba(float r, float g, float b, float a) {
+    u32 red = psp_gfx_dl_float_to_u8(r);
+    u32 green = psp_gfx_dl_float_to_u8(g);
+    u32 blue = psp_gfx_dl_float_to_u8(b);
+    u32 alpha = psp_gfx_dl_float_to_u8(a);
+
+    return red |
+           (green << 8) |
+           (blue << 16) |
+           (alpha << 24);
 }
 
 static float psp_gfx_dl_fog_distance(const float projection[4][4], float ndcZ) {
@@ -655,7 +682,7 @@ static void psp_gfx_dl_flush(PspGfxDlContext* ctx) {
     if (ctx->batchCount == 0) {
         return;
     }
-    PspGfxPspgl_DrawColoredTriangles(ctx->batch, ctx->batchCount, ctx->batchTextureId, ctx->batchTextureEnv,
+    PspGfxPspgl_DrawColoredTriangles(sPspGfxDlBatch, ctx->batchCount, ctx->batchTextureId, ctx->batchTextureEnv,
                                      ctx->batchWrapS, ctx->batchWrapT, ctx->batchAlphaTest, ctx->batchBlend,
                                      ctx->batchPremultiplied, ctx->batchDepthTest, ctx->batchDepthWrite, ctx->batchFog,
                                      ctx->batchFogColor, ctx->batchFogStart, ctx->batchFogEnd,
@@ -792,12 +819,17 @@ static void psp_gfx_dl_build_clip_vertex(PspGfxDlContext* ctx, const PspGfxDlVer
 
 static void psp_gfx_dl_emit_clip_vertex(PspGfxDlContext* ctx, const PspGfxDlClipVertex* src) {
     PspGfxPspglColorVertex* dst;
+    float r;
+    float g;
+    float b;
+    float a;
 
     if (ctx->batchCount >= PSP_GFX_DL_BATCH_VERTICES) {
         psp_gfx_dl_flush(ctx);
     }
 
-    dst = &ctx->batch[ctx->batchCount++];
+    dst = &sPspGfxDlBatch[ctx->batchCount++];
+
     if (ctx->batchPretransformed) {
         float inverseW = 1.0f / src->w;
 
@@ -809,15 +841,19 @@ static void psp_gfx_dl_emit_clip_vertex(PspGfxDlContext* ctx, const PspGfxDlClip
         dst->y = src->viewY;
         dst->z = src->viewZ;
     }
-    dst->r = src->r;
-    dst->g = src->g;
-    dst->b = src->b;
-    dst->a = src->a;
+
+    r = src->r;
+    g = src->g;
+    b = src->b;
+    a = src->a;
+
     if (ctx->batchPremultiplied) {
-        dst->r *= dst->a;
-        dst->g *= dst->a;
-        dst->b *= dst->a;
+        r *= a;
+        g *= a;
+        b *= a;
     }
+
+    dst->color = psp_gfx_dl_pack_rgba(r, g, b, a);
     dst->u = src->u;
     dst->v = src->v;
 }
@@ -1260,28 +1296,54 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
     }
 }
 
-static void psp_gfx_dl_emit_rect_vertex(PspGfxDlContext* ctx, float x, float y, float u, float v) {
+static void psp_gfx_dl_emit_rect_vertex(PspGfxDlContext* ctx,
+                                        float x,
+                                        float y,
+                                        float u,
+                                        float v) {
     PspGfxPspglColorVertex* dst;
+    u32 r;
+    u32 g;
+    u32 b;
+    u32 a;
 
     if (ctx->batchCount >= PSP_GFX_DL_BATCH_VERTICES) {
         psp_gfx_dl_flush(ctx);
     }
-    dst = &ctx->batch[ctx->batchCount++];
+
+    dst = &sPspGfxDlBatch[ctx->batchCount++];
+
+    dst->u = u / (float) ctx->textureUploadWidth;
+    dst->v = v / (float) ctx->textureUploadHeight;
+
+    r = ctx->primitiveR;
+    g = ctx->primitiveG;
+    b = ctx->primitiveB;
+    a = ctx->primitiveA;
+
+    if (ctx->batchPremultiplied) {
+        r = ((r * a) + 127U) / 255U;
+        g = ((g * a) + 127U) / 255U;
+        b = ((b * a) + 127U) / 255U;
+    }
+
+    /*
+     * In memory on PSP:
+     * byte 0 = red
+     * byte 1 = green
+     * byte 2 = blue
+     * byte 3 = alpha
+     */
+    dst->color = r |
+                 (g << 8) |
+                 (b << 16) |
+                 (a << 24);
+
     dst->x = (x / 160.0f) - 1.0f;
     dst->y = 1.0f - (y / 120.0f);
     dst->z = 0.0f;
-    dst->r = (float) ctx->primitiveR / 255.0f;
-    dst->g = (float) ctx->primitiveG / 255.0f;
-    dst->b = (float) ctx->primitiveB / 255.0f;
-    dst->a = (float) ctx->primitiveA / 255.0f;
-    if (ctx->batchPremultiplied) {
-        dst->r *= dst->a;
-        dst->g *= dst->a;
-        dst->b *= dst->a;
-    }
-    dst->u = u / (float) ctx->textureUploadWidth;
-    dst->v = v / (float) ctx->textureUploadHeight;
 }
+
 
 static void psp_gfx_dl_handle_texture_rectangle(PspGfxDlContext* ctx, const Gfx* cmd, const Gfx* half1,
                                                 const Gfx* half2, int flip) {

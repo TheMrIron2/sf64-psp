@@ -4,16 +4,18 @@
 #include "PR/ultratypes.h"
 
 typedef struct {
+    // native PSP GE vertex order
+    float u;
+    float v;
+    u32 color;
     float x;
     float y;
     float z;
-    float r;
-    float g;
-    float b;
-    float a;
-    float u;
-    float v;
 } PspGfxPspglColorVertex;
+
+typedef char PspGfxPspglColorVertexSizeCheck[
+    (sizeof(PspGfxPspglColorVertex) == 24) ? 1 : -1
+];
 
 typedef enum {
     PSP_GFX_PSPGL_TEX_REPLACE,
