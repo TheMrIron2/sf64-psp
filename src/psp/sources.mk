@@ -17,6 +17,13 @@ PSP_N64PSP_C_FILES += \
     src/psp/n64psp_queue_selftest.c
 endif
 
+# Active PSP renderer architecture:
+#   Star Fox 64 / Fast3D display-list frontend in gfx_psp_dl.c
+#       -> backend-neutral draw state and batches
+#       -> PSPGL backend in gfx_pspgl.c
+#       -> public PSP bridge in renderer_pspgl.c
+# This explicit list is authoritative. The retired direct-GU renderer
+# src/psp/renderer.c and its private helpers are legacy/reference code only.
 PSP_RENDERER_C_FILES := \
     src/psp/gfx/gfx_psp.c \
     src/psp/gfx/gfx_psp_dl.c \

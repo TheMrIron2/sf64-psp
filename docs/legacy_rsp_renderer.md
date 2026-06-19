@@ -55,6 +55,14 @@ The source files remain in-tree but are intentionally absent from
 `src/psp/sources.mk`. This keeps the experiment inspectable without allowing it
 to constrain gameplay code or the normal build.
 
+Inactive files confirmed during the PSPGL audit:
+
+* `src/psp/renderer.c`
+* `src/psp/renderer_diag.inc.c`
+* `src/psp/renderer_starfield.inc.c`
+* `src/psp/renderer_texture.c`
+* `src/psp/renderer_texture.h`
+
 ## Educational Value
 
 Retiring this implementation does not retire native PSP rendering as a project

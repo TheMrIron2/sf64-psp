@@ -1,3 +1,12 @@
+/*
+ * LEGACY RENDERER NOTICE
+ *
+ * This texture cache belongs to the retired direct-GU renderer and is not part
+ * of the current PSP build. The active renderer is the PSPGL path, and the
+ * authoritative PSP source list is src/psp/sources.mk. This file is retained
+ * only as legacy/reference code.
+ */
+
 #include "src/psp/renderer_texture.h"
 
 #include "PR/gbi.h"

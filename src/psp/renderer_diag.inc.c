@@ -1,3 +1,12 @@
+/*
+ * LEGACY RENDERER NOTICE
+ *
+ * This include file belongs to the retired direct-GU renderer and is not part
+ * of the current PSP build. The active renderer is the PSPGL path, and the
+ * authoritative PSP source list is src/psp/sources.mk. This file is retained
+ * only as legacy/reference code.
+ */
+
 #if PSP_RENDERER_DIAGNOSTICS
 static const char* psp_renderer_light_variant_name(void) {
 #if PSP_RENDERER_LIGHT_VARIANT == PSP_LIGHT_VARIANT_RAW

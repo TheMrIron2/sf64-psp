@@ -1,3 +1,17 @@
+/*
+ * LEGACY RENDERER NOTICE
+ *
+ * This direct-GU RSP/RDP renderer is not part of the current PSP build.
+ * The active renderer is the PSPGL path:
+ *   src/psp/renderer_pspgl.c
+ *   src/psp/gfx/gfx_psp.c
+ *   src/psp/gfx/gfx_psp_dl.c
+ *   src/psp/gfx/gfx_pspgl.c
+ *
+ * The authoritative PSP source list is src/psp/sources.mk. This file is
+ * retained only as legacy/reference code from the retired renderer.
+ */
+
 #include "PR/ultratypes.h"
 #include "libultra/ultra64.h"
 #include "sf64thread.h"

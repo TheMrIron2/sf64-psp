@@ -1,3 +1,12 @@
+/*
+ * LEGACY RENDERER NOTICE
+ *
+ * This include file belongs to the retired direct-GU renderer and is not part
+ * of the current PSP build. The active renderer is the PSPGL path, and the
+ * authoritative PSP source list is src/psp/sources.mk. This file is retained
+ * only as legacy/reference code.
+ */
+
 static void psp_renderer_draw_starfield_batch(void) {
     PspVertex2DColor* vertices;
     u32 i;

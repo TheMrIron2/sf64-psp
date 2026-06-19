@@ -6,7 +6,7 @@
 #include "src/psp/platform.h"
 #include "src/psp/renderer.h"
 
-#define PSPGL_STARFIELD_CAP 800
+#define PSPGL_STARFIELD_CAP 512
 #define PSPGL_STARFIELD_VERTICES_PER_STAR 6
 
 typedef struct {
