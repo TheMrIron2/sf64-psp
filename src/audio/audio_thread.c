@@ -110,7 +110,17 @@ SPTask* AudioThread_CreateTask(void) {
     while (MQ_GET_MESG(gThreadCmdProcQueue, &msg)) {
         AudioThread_ProcessCmds(msg);
     }
-    gCurAbiCmdBuffer = AudioSynth_Update(gCurAbiCmdBuffer, &abiCmdCount, aiBuffer, gAiBuffLengths[aiBuffIndex]);
+    #if defined(TARGET_PSP) && defined(PSP_AUDIO_SYNTH) && (PSP_AUDIO_SYNTH == 0)
+        
+        // preserve audio behaviour, but skip software synthesis
+        memset(aiBuffer, 0, gAiBuffLengths[aiBuffIndex] * 4);
+        abiCmdCount = 0;
+    #else
+        gCurAbiCmdBuffer =
+            AudioSynth_Update(gCurAbiCmdBuffer, &abiCmdCount,
+                            aiBuffer, gAiBuffLengths[aiBuffIndex]);
+    #endif
+    
     gAudioRandom = osGetCount() * (gAudioRandom + gAudioTaskCountQ);
     gAudioRandom = gAiBuffers[aiBuffIndex][gAudioTaskCountQ & 0xFF] + gAudioRandom;
 

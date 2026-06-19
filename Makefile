@@ -19,7 +19,9 @@ VERSION ?= us
 REV ?= rev1
 PSP_FULL ?= 1
 PROFILE_PSP ?= 0
-PSP_LOG ?= 1
+PSP_LOG ?= 0
+PSP_AUDIO_SYNTH ?= 1
+PSP_AUDIO_OUTPUT ?= 1
 USE_N64PSP_QUEUES ?= 1
 N64PSP_QUEUE_SELFTEST ?= 0
 N64PSP_QUEUE_TRACE ?= 0
@@ -122,8 +124,11 @@ CFLAGS += -fwrapv -funsigned-char
 CFLAGS += -ffunction-sections -fdata-sections
 CFLAGS += -fno-exceptions -fno-unwind-tables
 CFLAGS += -fno-asynchronous-unwind-tables -fno-ident
+CFLAGS += -DPSP_AUDIO_SYNTH=$(PSP_AUDIO_SYNTH)
+CFLAGS += -DPSP_AUDIO_OUTPUT=$(PSP_AUDIO_OUTPUT)
 CFLAGS += $(VERSION_DEFINES) $(COMMON_DEFINES) $(RELEASE_DEFINES)
 CFLAGS += $(GBI_DEFINES) $(PORT_DEFINES) $(IINC)
+
 ifeq ($(PSP_FULL),1)
 CFLAGS += -DPSP_FULL=1
 endif
