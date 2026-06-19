@@ -94,9 +94,10 @@ typedef struct {
     u8 r;
     u8 g;
     u8 b;
-    s8 x;
-    s8 y;
-    s8 z;
+
+    float x;
+    float y;
+    float z;
 } PspGfxDlLight;
 
 typedef enum {
@@ -570,6 +571,45 @@ static void psp_gfx_dl_handle_pop_mtx(PspGfxDlContext* ctx) {
     ctx->stats.mtxPopCount++;
 }
 
+static void psp_gfx_dl_load_directional_light(PspGfxDlLight* dst, const Light* src) {
+    float x;
+    float y;
+    float z;
+    float lengthSquared;
+
+    dst->r = src->l.col[0];
+    dst->g = src->l.col[1];
+    dst->b = src->l.col[2];
+
+    x = (float) (s8) src->l.dir[0];
+    y = (float) (s8) src->l.dir[1];
+    z = (float) (s8) src->l.dir[2];
+
+    lengthSquared = (x * x) + (y * y) + (z * z);
+
+    if (lengthSquared > 0.000001f) {
+        float inverseLength = 1.0f / sqrtf(lengthSquared);
+
+        x *= inverseLength;
+        y *= inverseLength;
+        z *= inverseLength;
+    } else {
+        x = 0.0f;
+        y = 0.0f;
+        z = 0.0f;
+    }
+
+    dst->x = x;
+    dst->y = y;
+    dst->z = z;
+}
+
+static void psp_gfx_dl_load_ambient_light(PspGfxDlContext* ctx, const Light* src) {
+    ctx->ambientR = src->l.col[0];
+    ctx->ambientG = src->l.col[1];
+    ctx->ambientB = src->l.col[2];
+}
+
 static void psp_gfx_dl_handle_movemem(PspGfxDlContext* ctx, const Gfx* gfx) {
     u32 index = (gfx->words.w0 >> 16) & 0xFF;
     const Vp* viewport;
@@ -598,18 +638,16 @@ static void psp_gfx_dl_handle_movemem(PspGfxDlContext* ctx, const Gfx* gfx) {
     if (light == NULL) {
         return;
     }
+
     lightSlot = (index - G_MV_L0) >> 1;
+
     if (lightSlot < ctx->lightCount) {
-        ctx->lights[lightSlot].r = light->l.col[0];
-        ctx->lights[lightSlot].g = light->l.col[1];
-        ctx->lights[lightSlot].b = light->l.col[2];
-        ctx->lights[lightSlot].x = light->l.dir[0];
-        ctx->lights[lightSlot].y = light->l.dir[1];
-        ctx->lights[lightSlot].z = light->l.dir[2];
+        psp_gfx_dl_load_directional_light(
+            &ctx->lights[lightSlot],
+            light
+        );
     } else if (lightSlot == ctx->lightCount) {
-        ctx->ambientR = light->l.col[0];
-        ctx->ambientG = light->l.col[1];
-        ctx->ambientB = light->l.col[2];
+        psp_gfx_dl_load_ambient_light(ctx, light);
     }
 }
 
@@ -1454,7 +1492,6 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
             float nx = (float) (s8) in->v.cn[0];
             float ny = (float) (s8) in->v.cn[1];
             float nz = (float) (s8) in->v.cn[2];
-            float length;
             float r = ctx->ambientR;
             float g = ctx->ambientG;
             float b = ctx->ambientB;
@@ -1472,26 +1509,26 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
                 ny = transformedY;
                 nz = transformedZ;
             }
-            length = sqrtf((nx * nx) + (ny * ny) + (nz * nz));
-            if (length > 0.001f) {
-                nx /= length;
-                ny /= length;
-                nz /= length;
+{
+                float lengthSquared = (nx * nx) + (ny * ny) + (nz * nz);
+
+                if (lengthSquared > 0.000001f) {
+                    float inverseLength = 1.0f / sqrtf(lengthSquared);
+
+                    nx *= inverseLength;
+                    ny *= inverseLength;
+                    nz *= inverseLength;
+                }
             }
+
             for (lightIndex = 0; lightIndex < ctx->lightCount; lightIndex++) {
                 const PspGfxDlLight* light = &ctx->lights[lightIndex];
-                float lx = (float) light->x;
-                float ly = (float) light->y;
-                float lz = (float) light->z;
-                float lightLength = sqrtf((lx * lx) + (ly * ly) + (lz * lz));
                 float dot;
 
-                if (lightLength > 0.001f) {
-                    lx /= lightLength;
-                    ly /= lightLength;
-                    lz /= lightLength;
-                }
-                dot = (nx * lx) + (ny * ly) + (nz * lz);
+                dot = (nx * light->x) +
+                    (ny * light->y) +
+                    (nz * light->z);
+
                 if (dot > 0.0f) {
                     r += (float) light->r * dot;
                     g += (float) light->g * dot;
