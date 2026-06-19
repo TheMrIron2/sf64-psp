@@ -2,6 +2,7 @@
 #include <pspdebug.h>
 #include <pspdisplay.h>
 #include <pspctrl.h>
+#include <psppower.h>
 
 #ifdef PSP_FULL
 #include "src/psp/n64psp_integration.h"
@@ -57,6 +58,8 @@ int main(int argc, char* argv[]) {
     pspDebugScreenInit();
     sceCtrlSetSamplingCycle(0);
     sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
+    
+    scePowerSetClockFrequency(333, 333, 166);
 
 #ifdef PSP_FULL
     pspDebugScreenPrintf("Star Fox 64 PSP\n");
