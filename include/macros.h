@@ -24,7 +24,7 @@
 #define RAND_FLOAT_CENTERED_SEEDED(width) ((Rand_ZeroOneSeeded()-0.5f)*(width))
 
 #ifdef TARGET_PSP
-#define PSP_IS_NATIVE_PTR(ptr) (((uintptr_t)(ptr) >= 0x08000000U) && ((uintptr_t)(ptr) < 0x0A000000U))
+#define PSP_IS_NATIVE_PTR(ptr) ((u32) ((uintptr_t) (ptr) - 0x08000000U) < 0x04000000U)
 #define SEGMENTED_TO_VIRTUAL(segment)                                                                                    \
     ((void*) (PSP_IS_NATIVE_PTR(segment)                                                                                 \
                   ? (uintptr_t) (segment)                                                                                \

@@ -301,7 +301,7 @@ static u8 psp_gfx_dl_opcode(const Gfx* gfx) {
 }
 
 static int psp_gfx_dl_is_native_ptr(uintptr_t ptr) {
-    return (ptr >= 0x08000000U) && (ptr < 0x0A000000U);
+    return PSP_IS_NATIVE_PTR(ptr);
 }
 
 static const void* psp_gfx_dl_resolve_ptr(const PspGfxDlContext* ctx, u32 raw) {
