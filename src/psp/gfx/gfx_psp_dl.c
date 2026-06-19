@@ -10,9 +10,22 @@
 #include <stddef.h>
 #include <stdio.h>
 
+#ifndef USE_N64PSP_MATH
+#define USE_N64PSP_MATH 0
+#endif
+
+#ifndef PSP_VALIDATE_N64PSP_MATH
+#define PSP_VALIDATE_N64PSP_MATH 0
+#endif
+
+#if (USE_N64PSP_MATH + 0)
+#include <n64psp/math.h>
+#endif
+
 #ifndef PSP_LOG_ENABLED
 #define PSP_LOG_ENABLED 0
 #endif
+
 #ifndef PSP_RENDERER_DIAGNOSTICS
 #define PSP_RENDERER_DIAGNOSTICS 0
 #endif
@@ -461,7 +474,7 @@ static void psp_gfx_dl_mtx_copy(float out[4][4], const float in[4][4]) {
     }
 }
 
-static void psp_gfx_dl_mtx_mul(float out[4][4], float a[4][4], float b[4][4]) {
+static void psp_gfx_dl_mtx_mul_scalar(float out[4][4], const float a[4][4], const float b[4][4]) {
     float result[4][4];
     u32 row;
     u32 col;
@@ -476,6 +489,76 @@ static void psp_gfx_dl_mtx_mul(float out[4][4], float a[4][4], float b[4][4]) {
         }
     }
     psp_gfx_dl_mtx_copy(out, result);
+}
+
+static void psp_gfx_dl_mtx_mul(
+    float out[4][4],
+    const float a[4][4],
+    const float b[4][4]
+) {
+#if USE_N64PSP_MATH
+    n64psp_mat4f alignedA;
+    n64psp_mat4f alignedB;
+    n64psp_mat4f alignedResult;
+
+#if PSP_VALIDATE_N64PSP_MATH
+    float scalarResult[4][4];
+    u32 column;
+    u32 row;
+    int mismatch = 0;
+#endif
+
+    psp_gfx_dl_mtx_copy(alignedA.m, a);
+    psp_gfx_dl_mtx_copy(alignedB.m, b);
+
+    /*
+     * SF64's old psp_gfx_dl_mtx_mul(a, b) composes b after a.
+     *
+     * n64psp_mat4f_mul(x, p, q) composes p after q.
+     *
+     * Reverse the wrapper arguments to preserve SF64 behaviour:
+     *
+     *     old(a, b) == n64psp(b, a)
+     */
+    n64psp_mat4f_mul(
+        &alignedResult,
+        &alignedB,
+        &alignedA
+    );
+
+#if PSP_VALIDATE_N64PSP_MATH
+    psp_gfx_dl_mtx_mul_scalar(scalarResult, a, b);
+
+    for (column = 0; column < 4; column++) {
+        for (row = 0; row < 4; row++) {
+            float difference =
+                scalarResult[column][row] -
+                alignedResult.m[column][row];
+
+            if (difference < 0.0f) {
+                difference = -difference;
+            }
+
+            if (difference > 0.0001f) {
+                mismatch = 1;
+            }
+        }
+    }
+
+    if (mismatch) {
+        /*
+         * Preserve rendering if validation ever fails.
+         * Add first-mismatch logging separately when PSP_LOG=1.
+         */
+        psp_gfx_dl_mtx_copy(out, scalarResult);
+        return;
+    }
+#endif
+
+    psp_gfx_dl_mtx_copy(out, alignedResult.m);
+#else
+    psp_gfx_dl_mtx_mul_scalar(out, a, b);
+#endif
 }
 
 static void psp_gfx_dl_transform(float mtx[4][4], float inX, float inY, float inZ, float* outX, float* outY,

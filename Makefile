@@ -23,6 +23,9 @@ PSP_LOG ?= 0
 PSP_AUDIO_SYNTH ?= 0
 PSP_AUDIO_OUTPUT ?= 0
 PSP_FPS_OVERLAY ?= 1
+USE_N64PSP_MATH ?= 1
+N64PSP_USE_VFPU ?= 1
+PSP_VALIDATE_N64PSP_MATH ?= 0
 USE_N64PSP_QUEUES ?= 1
 N64PSP_QUEUE_SELFTEST ?= 0
 N64PSP_QUEUE_TRACE ?= 0
@@ -103,7 +106,7 @@ PORT_DEFINES += -DNON_MATCHING -DAVOID_UB -DCOMPILER_GCC
 IINC := -Iinclude -Ibin/$(VERSION).$(REV) -I.
 IINC += -Ilib/ultralib/include -Ilib/ultralib/include/PR -Ilib/ultralib/include/ido
 IINC += -I$(PSPDEV)/psp/include -I$(PSPSDK)/include
-ifeq ($(USE_N64PSP_QUEUES),1)
+ifneq ($(filter 1,$(USE_N64PSP_QUEUES) $(USE_N64PSP_MATH)),)
 IINC += -Ilib/n64psp/include
 endif
 
@@ -125,9 +128,12 @@ CFLAGS += -fwrapv -funsigned-char
 CFLAGS += -ffunction-sections -fdata-sections
 CFLAGS += -fno-exceptions -fno-unwind-tables
 CFLAGS += -fno-asynchronous-unwind-tables -fno-ident
+CFLAGS += -DUSE_N64PSP_MATH=$(if $(filter 1,$(USE_N64PSP_MATH)),1,0)
+CFLAGS += -DN64PSP_USE_VFPU=$(if $(filter 1,$(N64PSP_USE_VFPU)),1,0)
 CFLAGS += -DPSP_FPS_OVERLAY=$(PSP_FPS_OVERLAY)
 CFLAGS += -DPSP_AUDIO_SYNTH=$(PSP_AUDIO_SYNTH)
 CFLAGS += -DPSP_AUDIO_OUTPUT=$(PSP_AUDIO_OUTPUT)
+CFLAGS += -DPSP_VALIDATE_N64PSP_MATH=$(PSP_VALIDATE_N64PSP_MATH)
 CFLAGS += $(VERSION_DEFINES) $(COMMON_DEFINES) $(RELEASE_DEFINES)
 CFLAGS += $(GBI_DEFINES) $(PORT_DEFINES) $(IINC)
 
@@ -172,10 +178,30 @@ CFLAGS += $(PSPGL_CFLAGS)
 PSP_LIBS := $(PSPGL_LIBS) $(PSP_LIBS)
 
 N64PSP_DIR := lib/n64psp
-N64PSP_PSP_ARCHIVES := \
+
+N64PSP_PSP_ARCHIVES :=
+N64PSP_BUILD_TARGETS :=
+N64PSP_BUILD_STAMP := $(N64PSP_DIR)/build-psp/.sf64-n64psp-build.stamp
+
+ifeq ($(USE_N64PSP_QUEUES),1)
+N64PSP_PSP_ARCHIVES += \
 	$(N64PSP_DIR)/build-psp/libn64psp_runtime.a \
 	$(N64PSP_DIR)/build-psp/libn64psp_trace_backend.a \
 	$(N64PSP_DIR)/build-psp/libn64psp_platform_psp.a
+
+N64PSP_BUILD_TARGETS += \
+	build-psp/libn64psp_runtime.a \
+	build-psp/libn64psp_trace_backend.a \
+	build-psp/libn64psp_platform_psp.a
+endif
+
+ifeq ($(USE_N64PSP_MATH),1)
+N64PSP_PSP_ARCHIVES += \
+	$(N64PSP_DIR)/build-psp/libn64psp_math.a
+
+N64PSP_BUILD_TARGETS += \
+	build-psp/libn64psp_math.a
+endif
 
 LDFLAGS := -L$(PSPDEV)/psp/lib -L$(PSPSDK)/lib
 LDFLAGS += -Wl,-Map,$(PSP_MAP) -Wl,-zmax-page-size=128
@@ -202,7 +228,7 @@ O_FILES := $(patsubst %.c,$(BUILD_DIR)/%.o,$(C_FILES))
 ifeq ($(PSP_FULL),1)
 O_FILES += $(patsubst %.S,$(BUILD_DIR)/%.o,$(PSP_GAME_S_FILES))
 endif
-ifeq ($(USE_N64PSP_QUEUES),1)
+ifneq ($(strip $(N64PSP_PSP_ARCHIVES)),)
 O_FILES += $(N64PSP_PSP_ARCHIVES)
 endif
 DEP_FILES := $(patsubst %.o,%.d,$(filter %.o,$(O_FILES)))
@@ -301,15 +327,17 @@ ifneq ($(PROFILE_PSP),1)
 	$(V)$(PSP_FIXUP_IMPORTS) $@
 endif
 
-$(N64PSP_PSP_ARCHIVES):
+$(N64PSP_BUILD_STAMP): FORCE
 	$(MAKE) -C $(N64PSP_DIR) \
 		PSP_CONFIG=$(PSP_CONFIG) \
 		PSP_CC=$(CC) \
 		PSP_AR=psp-ar \
 		N64PSP_QUEUE_TRACE=$(N64PSP_QUEUE_TRACE) \
-		build-psp/libn64psp_runtime.a \
-		build-psp/libn64psp_platform_psp.a \
-		build-psp/libn64psp_trace_backend.a
+		N64PSP_USE_VFPU=$(N64PSP_USE_VFPU) \
+		$(N64PSP_BUILD_TARGETS)
+	@touch $@
+
+$(N64PSP_PSP_ARCHIVES): $(N64PSP_BUILD_STAMP)
 
 $(COMPILE_FLAGS_STAMP): FORCE
 	@mkdir -p $(dir $@)
