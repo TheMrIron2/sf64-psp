@@ -186,7 +186,7 @@ float fsin(float x) {
         *__errnoaddr = EDOM;
 #endif
 
-        return (__libm_qnan_f);
+        return x;
     }
 
     /* just give up and return 0.0 */
