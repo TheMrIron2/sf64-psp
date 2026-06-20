@@ -30,6 +30,7 @@ typedef enum {
 
 void PspGfxPspgl_Init(void);
 void PspGfxPspgl_BeginFrame(void);
+void PspGfxPspgl_Flush(void);
 u32 PspGfxPspgl_GetCi8Texture(const u8* indices, const u16* palette, u32 width, u32 height, u32* uploadWidth,
                               u32* uploadHeight);
 u32 PspGfxPspgl_GetCi4Texture(const u8* indices, const u16* palette, u32 width, u32 height, u32* uploadWidth,
