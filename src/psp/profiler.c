@@ -107,6 +107,7 @@ static u32 sStatusSlot;
 static u32 sNextSlot;
 static u32 sPreviousButtons;
 static int sCaptureActive;
+static int sCaptureStarted;
 static int sCaptureDumped;
 static int sInitialized;
 
@@ -445,8 +446,10 @@ void PspProfiler_StartCapture(void) {
         PspProfiler_StopCapture();
         PspProfiler_DumpCapture();
     }
+    sCaptureStarted = 0;
     sCaptureDumped = 0;
 #if SF64_PSP_GPROF
+    sCapturePath[0] = '\0';
     if (!psp_profiler_open_unique("gmon", "out", sCapturePath, sizeof(sCapturePath), &slot)) {
         psp_profiler_set_status(PSP_PROF_STATUS_ERROR, sStatusSlot);
         return;
@@ -475,6 +478,7 @@ void PspProfiler_StartCapture(void) {
 #if !SF64_PSP_GPROF && !SF64_PSP_PROFILE_PHASES
     (void) slot;
 #endif
+    sCaptureStarted = 1;
     sCaptureActive = 1;
     psp_profiler_set_status(PSP_PROF_STATUS_REC, slot);
 }
@@ -518,7 +522,7 @@ void PspProfiler_StopCapture(void) {
 }
 
 void PspProfiler_DumpCapture(void) {
-    if (sCaptureDumped) {
+    if (!sCaptureStarted || sCaptureDumped) {
         return;
     }
 #if SF64_PSP_GPROF
@@ -575,6 +579,11 @@ int PspProfiler_ExitRequested(void) {
 }
 
 #if SF64_PSP_PROFILE_PHASES
+/*
+ * Renderer counters are single-writer data owned by the PSP graphics task
+ * thread. Phase-time aggregation remains locked because phases can be opened
+ * by audio, main, and graphics threads.
+ */
 void PspProfiler_PhaseBegin(PspProfilePhase phase) {
     PspProfileThreadState* state;
 
@@ -632,32 +641,21 @@ void PspProfiler_OnGfxTaskComplete(void) {
 }
 
 void PspProfiler_CountDisplayListTask(void) {
-    int lockState;
-
     if (sCaptureActive) {
-        lockState = psp_profiler_lock();
         sCounters.displayListTasks++;
-        psp_profiler_unlock(lockState);
     }
 }
 
 void PspProfiler_CountOpcode(u8 opcode) {
-    int lockState;
-
     if (sCaptureActive) {
-        lockState = psp_profiler_lock();
         sCounters.opcodeCounts[opcode]++;
-        psp_profiler_unlock(lockState);
     }
 }
 
 void PspProfiler_CountGvtx(u32 count, u32 lit) {
-    int lockState;
-
     if (!sCaptureActive) {
         return;
     }
-    lockState = psp_profiler_lock();
     sCounters.gvtxCommands++;
     sCounters.verticesLoaded += count;
     sCounters.gvtxHistogram[(count <= 64) ? count : 64]++;
@@ -667,16 +665,12 @@ void PspProfiler_CountGvtx(u32 count, u32 lit) {
         sCounters.unlitVertices += count;
     }
     sPhase[PSP_PROFILE_PHASE_G_VTX].items += count;
-    psp_profiler_unlock(lockState);
 }
 
 void PspProfiler_CountMatrixCommand(u32 projection, u32 composed) {
-    int lockState;
-
     if (!sCaptureActive) {
         return;
     }
-    lockState = psp_profiler_lock();
     if (projection) {
         sCounters.projectionMatrixCommands++;
     } else {
@@ -685,114 +679,81 @@ void PspProfiler_CountMatrixCommand(u32 projection, u32 composed) {
     if (composed) {
         sCounters.matrixCompositions++;
     }
-    psp_profiler_unlock(lockState);
 }
 
 void PspProfiler_CountTriangleCommand(u32 triCount, u32 tri1, u32 tri2) {
-    int lockState;
-
     if (!sCaptureActive) {
         return;
     }
-    lockState = psp_profiler_lock();
     sCounters.inputTriangles += triCount;
     sCounters.tri1Commands += tri1;
     sCounters.tri2Commands += tri2;
     sPhase[PSP_PROFILE_PHASE_TRIANGLE].items += triCount;
-    psp_profiler_unlock(lockState);
 }
 
 void PspProfiler_CountTriangleResult(u32 accepted, u32 rejected, u32 clipped, u32 generatedVertices,
                                      u32 outputTriangles) {
-    int lockState;
-
     if (!sCaptureActive) {
         return;
     }
-    lockState = psp_profiler_lock();
     sCounters.triviallyAcceptedTriangles += accepted;
     sCounters.triviallyRejectedTriangles += rejected;
     sCounters.partiallyClippedTriangles += clipped;
     sCounters.generatedClippingVertices += generatedVertices;
     sCounters.outputTriangles += outputTriangles;
-    psp_profiler_unlock(lockState);
 }
 
 void PspProfiler_CountTransformWork(u32 vertices, u32 normals, u32 normalizes, u32 lighting, u32 clipCodes,
                                     u32 divides) {
-    int lockState;
-
     if (!sCaptureActive) {
         return;
     }
-    lockState = psp_profiler_lock();
     sCounters.normalTransforms += normals;
     sCounters.normalisations += normalizes;
     sCounters.lightingEvaluations += lighting;
     sCounters.clipCodeCalculations += clipCodes;
     sCounters.perspectiveDivides += divides;
-    psp_profiler_unlock(lockState);
     (void) vertices;
 }
 
 void PspProfiler_CountTextureEvent(u32 hit, u32 miss, u32 decode, u32 upload, u32 bytesUploaded) {
-    int lockState;
-
     if (!sCaptureActive) {
         return;
     }
-    lockState = psp_profiler_lock();
     sCounters.textureCacheHits += hit;
     sCounters.textureCacheMisses += miss;
     sCounters.textureDecodes += decode;
     sCounters.textureUploads += upload;
     sCounters.textureBytesUploaded += bytesUploaded;
-    psp_profiler_unlock(lockState);
 }
 
 void PspProfiler_CountBatchFlush(PspProfileFlushReason reason, u32 submittedVertices) {
-    int lockState;
-
     if (!sCaptureActive) {
         return;
     }
-    lockState = psp_profiler_lock();
     sCounters.batchFlushes++;
     if (reason < PSP_PROFILE_FLUSH_COUNT) {
         sCounters.flushReasons[reason]++;
     }
     sCounters.verticesSubmitted += submittedVertices;
-    psp_profiler_unlock(lockState);
 }
 
 void PspProfiler_CountDrawCall(u32 vertices) {
-    int lockState;
-
     if (sCaptureActive) {
-        lockState = psp_profiler_lock();
         sCounters.drawCalls++;
         sPhase[PSP_PROFILE_PHASE_PSPGL_SUBMIT].items += vertices;
-        psp_profiler_unlock(lockState);
     }
 }
 
 void PspProfiler_CountGlFlush(void) {
-    int lockState;
-
     if (sCaptureActive) {
-        lockState = psp_profiler_lock();
         sCounters.glFlushCalls++;
-        psp_profiler_unlock(lockState);
     }
 }
 
 void PspProfiler_CountSync(void) {
-    int lockState;
-
     if (sCaptureActive) {
-        lockState = psp_profiler_lock();
         sCounters.syncCalls++;
-        psp_profiler_unlock(lockState);
     }
 }
 #endif

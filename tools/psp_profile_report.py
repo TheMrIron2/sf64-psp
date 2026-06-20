@@ -114,13 +114,21 @@ def main() -> int:
 
     elf_sha = sha256(elf)
     gmon_sha = sha256(gmon)
-    metadata = read_metadata(elf.parent / "profile_build_metadata.txt")
-    if args.build_id and metadata.get("build_id") and metadata["build_id"] != args.build_id:
-        print(
-            f"error: build id mismatch: expected {args.build_id}, ELF metadata has {metadata['build_id']}",
-            file=sys.stderr,
-        )
-        return 2
+    metadata_path = elf.parent / "profile_build_metadata.txt"
+    metadata = read_metadata(metadata_path)
+    if args.build_id:
+        if not metadata_path.is_file():
+            print(f"error: --build-id requires metadata file: {metadata_path}", file=sys.stderr)
+            return 2
+        if "build_id" not in metadata:
+            print(f"error: --build-id requires build_id in metadata file: {metadata_path}", file=sys.stderr)
+            return 2
+        if metadata["build_id"] != args.build_id:
+            print(
+                f"error: build id mismatch: expected {args.build_id}, ELF metadata has {metadata['build_id']}",
+                file=sys.stderr,
+            )
+            return 2
 
     known_sums = parse_sha256sums(elf.parent / "SHA256SUMS")
     expected_elf_sha = known_sums.get(elf.name)
