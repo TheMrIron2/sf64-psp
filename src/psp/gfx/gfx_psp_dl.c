@@ -4,6 +4,7 @@
 #include "sf64thread.h"
 #include "src/psp/gfx/gfx_pspgl.h"
 #include "src/psp/platform.h"
+#include "src/psp/profiler.h"
 
 #include <stdint.h>
 #include <math.h>
@@ -238,20 +239,6 @@ static PspGfxPspglColorVertex
 
 static u8 sLightingRemap[256];
 static int sLightingRemapInitialized;
-
-#if (USE_N64PSP_BATCH_TRANSFORM + 0)
-static n64psp_vec4f
-    sPspGfxDlTransformInput[PSP_GFX_DL_MAX_VERTICES];
-
-static n64psp_vec4f_pair
-    sPspGfxDlTransformOutput[PSP_GFX_DL_MAX_VERTICES];
-#endif
-
-#if (USE_N64PSP_BATCH_TRANSFORM + 0) && \
-    (PSP_VALIDATE_N64PSP_BATCH_TRANSFORM + 0)
-static int sLoggedN64PspBatchTransformMismatch;
-#endif
-
 #if PSP_LOG_ENABLED || PSP_RENDERER_DIAGNOSTICS
 static int sLoggedFirstDrawableTask;
 static int sLoggedFirstLightingTask;
@@ -575,119 +562,6 @@ static void psp_gfx_dl_mtx_mul(
 #endif
 }
 
-#if (USE_N64PSP_BATCH_TRANSFORM + 0)
-static void psp_gfx_dl_prepare_batch_matrices(
-    const PspGfxDlContext* ctx,
-    n64psp_mat4f* modelview,
-    n64psp_mat4f* projectionModelview
-) {
-    n64psp_mat4f projection;
-
-    if (ctx->hasModelview) {
-        psp_gfx_dl_mtx_copy(
-            modelview->m,
-            ctx->modelview
-        );
-    } else {
-        psp_gfx_dl_identity(modelview->m);
-    }
-
-    if (ctx->hasProjection) {
-        psp_gfx_dl_mtx_copy(
-            projection.m,
-            ctx->projection
-        );
-
-        /*
-         * projectionModelview(input)
-         *     = projection(modelview(input))
-         */
-        n64psp_mat4f_mul(
-            projectionModelview,
-            &projection,
-            modelview
-        );
-    } else {
-        /*
-         * The second batch output is unused without projection,
-         * but the API still requires a valid second matrix.
-         */
-        *projectionModelview = *modelview;
-    }
-}
-#endif
-
-#if (USE_N64PSP_BATCH_TRANSFORM + 0)
-static int psp_gfx_dl_store_transformed_vertex(
-    PspGfxDlContext* ctx,
-    PspGfxDlVertex* out,
-    const n64psp_vec4f* view,
-    const n64psp_vec4f* clip
-) {
-    out->viewX = view->x;
-    out->viewY = view->y;
-    out->viewZ = view->z;
-    out->viewW = view->w;
-
-    if (!ctx->hasProjection) {
-        out->x = view->x / 320.0f;
-        out->y = -view->y / 240.0f;
-        out->z = view->z / 4096.0f;
-
-        out->clipX = out->x;
-        out->clipY = out->y;
-        out->clipZ = out->z;
-        out->clipW = 1.0f;
-
-        out->clipCode =
-            psp_gfx_dl_clip_code(
-                out->x,
-                out->y,
-                out->z,
-                out->clipW
-            );
-
-        out->projectionSerial = 0;
-        return 1;
-    }
-
-    psp_gfx_dl_mtx_copy(
-        out->projection,
-        ctx->projection
-    );
-
-    out->projectionSerial = ctx->projectionSerial;
-
-    if ((clip->w > -0.001f) && (clip->w < 0.001f)) {
-        ctx->stats.nearZeroWCount++;
-        return 0;
-    }
-
-    out->x = clip->x / clip->w;
-    out->y = clip->y / clip->w;
-    out->z = clip->z / clip->w;
-
-    out->clipX = clip->x;
-    out->clipY = clip->y;
-    out->clipZ = clip->z;
-    out->clipW = clip->w;
-
-    out->clipCode =
-        psp_gfx_dl_clip_code(
-            clip->x,
-            clip->y,
-            clip->z,
-            clip->w
-        );
-
-    if (clip->w < 0.0f) {
-        ctx->stats.behindEyeVertexCount++;
-    }
-
-    return 1;
-}
-#endif
-
 static void psp_gfx_dl_transform(float mtx[4][4], float inX, float inY, float inZ, float* outX, float* outY,
                                  float* outZ, float* outW) {
     *outX = (mtx[0][0] * inX) + (mtx[1][0] * inY) + (mtx[2][0] * inZ) + mtx[3][0];
@@ -748,379 +622,6 @@ static int psp_gfx_dl_transform_vertex(PspGfxDlContext* ctx, const Vtx* in, PspG
     return 1;
 }
 
-#if (USE_N64PSP_BATCH_TRANSFORM + 0) && \
-    (PSP_VALIDATE_N64PSP_BATCH_TRANSFORM + 0)
-static void psp_gfx_dl_reference_position_pair(
-    const PspGfxDlContext* ctx,
-    const Vtx* in,
-    n64psp_vec4f_pair* reference
-) {
-    float x = (float) in->v.ob[0];
-    float y = (float) in->v.ob[1];
-    float z = (float) in->v.ob[2];
-    float w = 1.0f;
-
-    if (ctx->hasModelview) {
-        psp_gfx_dl_transform(
-            ctx->modelview,
-            x,
-            y,
-            z,
-            &x,
-            &y,
-            &z,
-            &w
-        );
-    }
-
-    reference->first.x = x;
-    reference->first.y = y;
-    reference->first.z = z;
-    reference->first.w = w;
-
-    if (ctx->hasProjection) {
-        psp_gfx_dl_transform(
-            ctx->projection,
-            x,
-            y,
-            z,
-            &reference->second.x,
-            &reference->second.y,
-            &reference->second.z,
-            &reference->second.w
-        );
-    } else {
-        reference->second = reference->first;
-    }
-}
-#endif
-
-#if (USE_N64PSP_BATCH_TRANSFORM + 0) && \
-    (PSP_VALIDATE_N64PSP_BATCH_TRANSFORM + 0)
-static int psp_gfx_dl_float_matches(
-    float oldValue,
-    float newValue,
-    float absoluteTolerance,
-    float relativeTolerance
-) {
-    float difference = fabsf(oldValue - newValue);
-    float magnitude =
-        fmaxf(fabsf(oldValue), fabsf(newValue));
-
-    return difference <=
-        (absoluteTolerance +
-         (relativeTolerance * magnitude));
-}
-#endif
-
-#if (USE_N64PSP_BATCH_TRANSFORM + 0) && \
-    (PSP_VALIDATE_N64PSP_BATCH_TRANSFORM + 0)
-
-static int psp_gfx_dl_validate_vec4(
-    const PspGfxDlContext* ctx,
-    const Gfx* gfx,
-    u32 batchVertexIndex,
-    const char* outputName,
-    const n64psp_vec4f* reference,
-    const n64psp_vec4f* actual,
-    float absoluteTolerance,
-    float relativeTolerance
-) {
-    const float referenceValues[4] = {
-        reference->x,
-        reference->y,
-        reference->z,
-        reference->w
-    };
-
-    const float actualValues[4] = {
-        actual->x,
-        actual->y,
-        actual->z,
-        actual->w
-    };
-
-    static const char* componentNames[4] = {
-        "x", "y", "z", "w"
-    };
-
-    u32 component;
-
-    for (component = 0; component < 4; component++) {
-        float difference;
-
-        if (psp_gfx_dl_float_matches(
-                referenceValues[component],
-                actualValues[component],
-                absoluteTolerance,
-                relativeTolerance)) {
-            continue;
-        }
-
-        difference =
-            fabsf(referenceValues[component] -
-                   actualValues[component]);
-
-        if (!sLoggedN64PspBatchTransformMismatch) {
-            char line[256];
-
-            snprintf(
-                line,
-                sizeof(line),
-                "[n64psp-batch] mismatch "
-                "task=%lu gfx=%p w0=%08lx w1=%08lx "
-                "vertex=%lu output=%s component=%s "
-                "old=%g new=%g diff=%g "
-                "modelview=%d projection=%d projectionSerial=%lu",
-                (unsigned long) ctx->taskIndex,
-                (const void*) gfx,
-                (unsigned long) gfx->words.w0,
-                (unsigned long) gfx->words.w1,
-                (unsigned long) batchVertexIndex,
-                outputName,
-                componentNames[component],
-                (double) referenceValues[component],
-                (double) actualValues[component],
-                (double) difference,
-                ctx->hasModelview,
-                ctx->hasProjection,
-                (unsigned long) ctx->projectionSerial
-            );
-
-            PspPlatform_LogLine(line);
-            sLoggedN64PspBatchTransformMismatch = 1;
-        }
-
-        return 0;
-    }
-
-    return 1;
-}
-
-static int psp_gfx_dl_validate_projection_semantics(
-    const PspGfxDlContext* ctx,
-    const Gfx* gfx,
-    u32 batchVertexIndex,
-    const n64psp_vec4f* reference,
-    const n64psp_vec4f* actual
-) {
-    int referenceNearZeroW;
-    int actualNearZeroW;
-    int referenceBehindEye;
-    int actualBehindEye;
-    u8 referenceClipCode;
-    u8 actualClipCode;
-    n64psp_vec4f referenceNdc;
-    n64psp_vec4f actualNdc;
-
-    referenceNearZeroW =
-        (reference->w > -0.001f) &&
-        (reference->w < 0.001f);
-
-    actualNearZeroW =
-        (actual->w > -0.001f) &&
-        (actual->w < 0.001f);
-
-    if (referenceNearZeroW != actualNearZeroW) {
-        if (!sLoggedN64PspBatchTransformMismatch) {
-            char line[192];
-
-            snprintf(
-                line,
-                sizeof(line),
-                "[n64psp-batch] semantic mismatch "
-                "task=%lu gfx=%p vertex=%lu "
-                "near-zero-w old=%d new=%d "
-                "old-w=%g new-w=%g",
-                (unsigned long) ctx->taskIndex,
-                (const void*) gfx,
-                (unsigned long) batchVertexIndex,
-                referenceNearZeroW,
-                actualNearZeroW,
-                (double) reference->w,
-                (double) actual->w
-            );
-
-            PspPlatform_LogLine(line);
-            sLoggedN64PspBatchTransformMismatch = 1;
-        }
-
-        return 0;
-    }
-
-    if (referenceNearZeroW) {
-        return 1;
-    }
-
-    referenceBehindEye = reference->w < 0.0f;
-    actualBehindEye = actual->w < 0.0f;
-
-    if (referenceBehindEye != actualBehindEye) {
-        if (!sLoggedN64PspBatchTransformMismatch) {
-            PspPlatform_LogLine(
-                "[n64psp-batch] semantic mismatch: "
-                "behind-eye classification"
-            );
-            sLoggedN64PspBatchTransformMismatch = 1;
-        }
-
-        return 0;
-    }
-
-    referenceClipCode =
-        psp_gfx_dl_clip_code(
-            reference->x,
-            reference->y,
-            reference->z,
-            reference->w
-        );
-
-    actualClipCode =
-        psp_gfx_dl_clip_code(
-            actual->x,
-            actual->y,
-            actual->z,
-            actual->w
-        );
-
-    if (referenceClipCode != actualClipCode) {
-        if (!sLoggedN64PspBatchTransformMismatch) {
-            char line[192];
-
-            snprintf(
-                line,
-                sizeof(line),
-                "[n64psp-batch] semantic mismatch "
-                "task=%lu gfx=%p vertex=%lu "
-                "clip-code old=%02x new=%02x",
-                (unsigned long) ctx->taskIndex,
-                (const void*) gfx,
-                (unsigned long) batchVertexIndex,
-                referenceClipCode,
-                actualClipCode
-            );
-
-            PspPlatform_LogLine(line);
-            sLoggedN64PspBatchTransformMismatch = 1;
-        }
-
-        return 0;
-    }
-
-    referenceNdc.x = reference->x / reference->w;
-    referenceNdc.y = reference->y / reference->w;
-    referenceNdc.z = reference->z / reference->w;
-    referenceNdc.w = 1.0f;
-
-    actualNdc.x = actual->x / actual->w;
-    actualNdc.y = actual->y / actual->w;
-    actualNdc.z = actual->z / actual->w;
-    actualNdc.w = 1.0f;
-
-    return psp_gfx_dl_validate_vec4(
-        ctx,
-        gfx,
-        batchVertexIndex,
-        "ndc",
-        &referenceNdc,
-        &actualNdc,
-        0.0005f,
-        0.0005f
-    );
-}
-
-static void psp_gfx_dl_validate_position_pair(
-    const PspGfxDlContext* ctx,
-    const Gfx* gfx,
-    const Vtx* input,
-    u32 batchVertexIndex,
-    const n64psp_vec4f_pair* actual
-) {
-    n64psp_vec4f_pair reference;
-
-    psp_gfx_dl_reference_position_pair(
-        ctx,
-        input,
-        &reference
-    );
-
-    if (!psp_gfx_dl_validate_vec4(
-            ctx,
-            gfx,
-            batchVertexIndex,
-            "modelview",
-            &reference.first,
-            &actual->first,
-            0.0001f,
-            0.00001f)) {
-        return;
-    }
-
-    psp_gfx_dl_validate_vec4(
-        ctx,
-        gfx,
-        batchVertexIndex,
-        "projection-modelview",
-        &reference.second,
-        &actual->second,
-        0.0005f,
-        0.001f
-    );
-
-    if (ctx->hasProjection) {
-        psp_gfx_dl_validate_projection_semantics(
-            ctx,
-            gfx,
-            batchVertexIndex,
-            &reference.second,
-            &actual->second
-        );
-}
-
-    if (ctx->hasProjection) {
-    int oldNearZeroW =
-        (reference.second.w > -0.001f) &&
-        (reference.second.w < 0.001f);
-
-    int newNearZeroW =
-        (actual->second.w > -0.001f) &&
-        (actual->second.w < 0.001f);
-
-    if (oldNearZeroW != newNearZeroW) {
-        PspPlatform_LogLine(
-            "[n64psp-batch] near-zero W classification mismatch"
-        );
-        return;
-    }
-
-    if (!oldNearZeroW) {    
-        u8 oldClipCode =
-            psp_gfx_dl_clip_code(
-                reference.second.x,
-                reference.second.y,
-                reference.second.z,
-                reference.second.w
-            );
-
-        u8 newClipCode =
-            psp_gfx_dl_clip_code(
-                actual->second.x,
-                actual->second.y,
-                actual->second.z,
-                actual->second.w
-            );
-
-        if (oldClipCode != newClipCode) {
-            PspPlatform_LogLine(
-                "[n64psp-batch] clip-code mismatch"
-            );
-        }
-    }
-}
-}
-
-#endif
-
 static void psp_gfx_dl_handle_mtx(PspGfxDlContext* ctx, const Gfx* gfx) {
     const Mtx* src = (const Mtx*) psp_gfx_dl_resolve_ptr(ctx, gfx->words.w1);
     u32 flags = (gfx->words.w0 >> 16) & 0xFF;
@@ -1151,6 +652,8 @@ static void psp_gfx_dl_handle_mtx(PspGfxDlContext* ctx, const Gfx* gfx) {
             }
         }
     }
+    PspProfiler_CountMatrixCommand((flags & G_MTX_PROJECTION) != 0,
+                                   ((flags & G_MTX_LOAD) == 0) && *hasTarget);
 
     psp_gfx_dl_mtx_l2f(loaded, src);
     if ((flags & G_MTX_LOAD) != 0) {
@@ -1261,15 +764,19 @@ static void psp_gfx_dl_handle_movemem(PspGfxDlContext* ctx, const Gfx* gfx) {
     }
 }
 
-static void psp_gfx_dl_flush(PspGfxDlContext* ctx) {
+static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason reason) {
     if (ctx->batchCount == 0) {
         return;
     }
+    (void) reason;
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_BATCH_FLUSH);
     PspGfxPspgl_DrawColoredTriangles(sPspGfxDlBatch, ctx->batchCount, ctx->batchTextureId, ctx->batchTextureEnv,
                                      ctx->batchWrapS, ctx->batchWrapT, ctx->batchAlphaTest, ctx->batchBlend,
                                      ctx->batchPremultiplied, ctx->batchDepthTest, ctx->batchDepthWrite, ctx->batchFog,
                                      ctx->batchFogColor, ctx->batchFogStart, ctx->batchFogEnd,
                                      &ctx->batchProjection[0][0], ctx->batchPretransformed);
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_BATCH_FLUSH);
+    PspProfiler_CountBatchFlush(reason, ctx->batchCount);
     ctx->stats.drawVertexCount += ctx->batchCount;
     ctx->batchCount = 0;
 }
@@ -1281,7 +788,12 @@ static void psp_gfx_dl_set_batch_texture(PspGfxDlContext* ctx, u32 textureId, Ps
         ((ctx->batchTextureId != textureId) || (ctx->batchTextureEnv != textureEnv) ||
          (ctx->batchWrapS != wrapS) || (ctx->batchWrapT != wrapT) || (ctx->batchAlphaTest != alphaTest) ||
          (ctx->batchBlend != blend) || (ctx->batchPremultiplied != premultiplied))) {
-        psp_gfx_dl_flush(ctx);
+        if ((ctx->batchTextureId != textureId) || (ctx->batchTextureEnv != textureEnv) ||
+            (ctx->batchWrapS != wrapS) || (ctx->batchWrapT != wrapT)) {
+            psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_TEXTURE_CHANGE);
+        } else {
+            psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+        }
     }
     ctx->batchTextureId = textureId;
     ctx->batchTextureEnv = textureEnv;
@@ -1295,7 +807,7 @@ static void psp_gfx_dl_set_batch_texture(PspGfxDlContext* ctx, u32 textureId, Ps
 static void psp_gfx_dl_set_batch_depth(PspGfxDlContext* ctx, int depthTest, int depthWrite) {
     if ((ctx->batchCount != 0) &&
         ((ctx->batchDepthTest != depthTest) || (ctx->batchDepthWrite != depthWrite))) {
-        psp_gfx_dl_flush(ctx);
+        psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
     }
     ctx->batchDepthTest = depthTest;
     ctx->batchDepthWrite = depthWrite;
@@ -1326,7 +838,7 @@ static void psp_gfx_dl_set_batch_fog(PspGfxDlContext* ctx, int fog, const float 
          (ctx->batchFogColor[1] != color[1]) || (ctx->batchFogColor[2] != color[2]) ||
          (ctx->batchFogColor[3] != color[3]) || (ctx->batchFogStart != start) ||
          (ctx->batchFogEnd != end))) {
-        psp_gfx_dl_flush(ctx);
+        psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
     }
     ctx->batchFog = fog;
     ctx->batchFogColor[0] = color[0];
@@ -1342,7 +854,7 @@ static void psp_gfx_dl_set_batch_transform(PspGfxDlContext* ctx, int pretransfor
     if ((ctx->batchCount != 0) &&
         ((ctx->batchPretransformed != pretransformed) ||
          (!pretransformed && (ctx->batchProjectionSerial != projectionSerial)))) {
-        psp_gfx_dl_flush(ctx);
+        psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_TRANSFORM_CHANGE);
     }
     if (!ctx->batchTransformSet || (ctx->batchPretransformed != pretransformed) ||
         (!pretransformed && (ctx->batchProjectionSerial != projectionSerial))) {
@@ -1408,7 +920,7 @@ static void psp_gfx_dl_emit_clip_vertex(PspGfxDlContext* ctx, const PspGfxDlClip
     float a;
 
     if (ctx->batchCount >= PSP_GFX_DL_BATCH_VERTICES) {
-        psp_gfx_dl_flush(ctx);
+        psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_BUFFER_FULL);
     }
 
     dst = &sPspGfxDlBatch[ctx->batchCount++];
@@ -1613,12 +1125,14 @@ static u32 psp_gfx_dl_emit_clipped_triangle(PspGfxDlContext* ctx, const PspGfxDl
     u32 plane;
     u32 i;
 
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_CLIPPING);
     psp_gfx_dl_build_clip_vertex(ctx, a, &input[0]);
     psp_gfx_dl_build_clip_vertex(ctx, b, &input[1]);
     psp_gfx_dl_build_clip_vertex(ctx, c, &input[2]);
     for (plane = 0; plane < PSP_GFX_DL_CLIP_PLANES; plane++) {
         vertexCount = psp_gfx_dl_clip_polygon_plane(input, vertexCount, output, plane);
         if (vertexCount < 3) {
+            PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_CLIPPING);
             return 0;
         }
         swap = input;
@@ -1731,6 +1245,7 @@ static u32 psp_gfx_dl_emit_clipped_triangle(PspGfxDlContext* ctx, const PspGfxDl
             psp_gfx_dl_emit_clip_vertex(ctx, &input[i + 1]);
         }
     }
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_CLIPPING);
     return vertexCount - 2;
 }
 
@@ -1748,9 +1263,12 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
     int needsWrapT;
     int pretransformed;
 
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_BATCH_CONSTRUCTION);
     if (!psp_gfx_dl_vertex_is_valid(ctx, a) || !psp_gfx_dl_vertex_is_valid(ctx, b) ||
         !psp_gfx_dl_vertex_is_valid(ctx, c)) {
         ctx->stats.invalidTriangleCount++;
+        PspProfiler_CountTriangleResult(0, 1, 0, 0, 0);
+        PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_BATCH_CONSTRUCTION);
         return;
     }
 
@@ -1836,7 +1354,10 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
     if (sharedClipCode != 0) {
         emittedTriangles = 0;
         ctx->stats.clipRejectedTriangleCount++;
+        PspProfiler_CountTriangleResult(0, 1, 0, 0, 0);
     } else if (combinedClipCode != 0) {
+        u32 oldGeneratedVertices = ctx->stats.clipGeneratedVertexCount;
+        (void) oldGeneratedVertices;
         ctx->stats.clippedTriangleCount++;
         if (textureId != 0) {
             ctx->stats.texturedClippedTriangleCount++;
@@ -1849,8 +1370,11 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
         emittedTriangles = psp_gfx_dl_emit_clipped_triangle(ctx, va, vb, vc, textureId != 0);
         if (emittedTriangles == 0) {
             ctx->stats.clipRejectedTriangleCount++;
+            PspProfiler_CountTriangleResult(0, 1, 1, ctx->stats.clipGeneratedVertexCount - oldGeneratedVertices, 0);
         } else {
             ctx->stats.clipGeneratedTriangleCount += emittedTriangles;
+            PspProfiler_CountTriangleResult(0, 0, 1, ctx->stats.clipGeneratedVertexCount - oldGeneratedVertices,
+                                            emittedTriangles);
         }
     } else {
         PspGfxDlClipVertex vertices[3];
@@ -1866,6 +1390,7 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
             psp_gfx_dl_emit_clip_vertex(ctx, &vertices[2]);
         }
         emittedTriangles = 1;
+        PspProfiler_CountTriangleResult(1, 0, 0, 0, 1);
     }
     ctx->stats.triangleCount++;
     if ((textureId != 0) && (emittedTriangles != 0)) {
@@ -1877,6 +1402,7 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
             ctx->stats.blendTriangleCount++;
         }
     }
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_BATCH_CONSTRUCTION);
 }
 
 static void psp_gfx_dl_emit_rect_vertex(PspGfxDlContext* ctx,
@@ -1891,7 +1417,7 @@ static void psp_gfx_dl_emit_rect_vertex(PspGfxDlContext* ctx,
     u32 a;
 
     if (ctx->batchCount >= PSP_GFX_DL_BATCH_VERTICES) {
-        psp_gfx_dl_flush(ctx);
+        psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_BUFFER_FULL);
     }
 
     dst = &sPspGfxDlBatch[ctx->batchCount++];
@@ -2000,7 +1526,7 @@ static void psp_gfx_dl_handle_set_primitive_color(PspGfxDlContext* ctx, const Gf
 
 static void psp_gfx_dl_handle_set_fog_color(PspGfxDlContext* ctx, const Gfx* gfx) {
     if (ctx->batchCount != 0) {
-        psp_gfx_dl_flush(ctx);
+        psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
     }
     ctx->fogR = (u8) (gfx->words.w1 >> 24);
     ctx->fogG = (u8) (gfx->words.w1 >> 16);
@@ -2095,6 +1621,10 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
         return;
     }
 
+<<<<<<< Updated upstream
+=======
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_G_VTX);
+    PspProfiler_CountGvtx(count, (ctx->geometryMode & G_LIGHTING) != 0);
 #if (USE_N64PSP_BATCH_TRANSFORM + 0)
     {
         n64psp_mat4f modelview;
@@ -2131,37 +1661,12 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
     }
 #endif
 
+>>>>>>> Stashed changes
     for (i = 0; i < count; i++) {
         const Vtx* in = &src[i];
         PspGfxDlVertex* out = &ctx->vertices[v0 + i];
 
-    #if (USE_N64PSP_BATCH_TRANSFORM + 0)
-
-    #if (PSP_VALIDATE_N64PSP_BATCH_TRANSFORM + 0)
-            psp_gfx_dl_validate_position_pair(
-                ctx,
-                gfx,
-                in,
-                i,
-                &sPspGfxDlTransformOutput[i]
-            );
-    #endif
-
-            out->valid =
-                psp_gfx_dl_store_transformed_vertex(
-                    ctx,
-                    out,
-                    &sPspGfxDlTransformOutput[i].first,
-                    &sPspGfxDlTransformOutput[i].second
-                );
-    #else
-            out->valid =
-                psp_gfx_dl_transform_vertex(
-                    ctx,
-                    in,
-                    out
-                );
-    #endif
+        out->valid = psp_gfx_dl_transform_vertex(ctx, in, out);
         if (!out->valid) {
             ctx->stats.invalidVertexCount++;
         } else {
@@ -2282,6 +1787,13 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
     }
 
     ctx->stats.vertexCount += count;
+    PspProfiler_CountTransformWork(count,
+                                   (ctx->geometryMode & G_LIGHTING) != 0 ? count : 0,
+                                   (ctx->geometryMode & G_LIGHTING) != 0 ? count : 0,
+                                   (ctx->geometryMode & G_LIGHTING) != 0 ? count : 0,
+                                   count,
+                                   ctx->hasProjection ? count : 0);
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_G_VTX);
 }
 
 static void psp_gfx_dl_handle_move_word(PspGfxDlContext* ctx, const Gfx* gfx) {
@@ -2299,7 +1811,7 @@ static void psp_gfx_dl_handle_move_word(PspGfxDlContext* ctx, const Gfx* gfx) {
     }
     if ((index == G_MW_FOG) && (offset == G_MWO_FOG)) {
         if (ctx->batchCount != 0) {
-            psp_gfx_dl_flush(ctx);
+            psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
         }
         ctx->fogMul = (s16) (gfx->words.w1 >> 16);
         ctx->fogOffset = (s16) gfx->words.w1;
@@ -2329,7 +1841,7 @@ static void psp_gfx_dl_handle_other_mode_l(PspGfxDlContext* ctx, const Gfx* gfx)
     if ((ctx->batchCount != 0) &&
         (((ctx->otherModeL ^ gfx->words.w1) & mask &
           (0xC0000000U | 3U | CVG_X_ALPHA | FORCE_BL | Z_UPD)) != 0)) {
-        psp_gfx_dl_flush(ctx);
+        psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
     }
     ctx->otherModeL = (ctx->otherModeL & ~mask) | (gfx->words.w1 & mask);
 }
@@ -2349,13 +1861,13 @@ static void psp_gfx_dl_handle_texture(PspGfxDlContext* ctx, const Gfx* gfx) {
     int enabled = (gfx->words.w0 & 0xFF) != G_OFF;
 
     if ((ctx->batchCount != 0) && (ctx->textureEnabled != enabled)) {
-        psp_gfx_dl_flush(ctx);
+        psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_TEXTURE_CHANGE);
     }
     ctx->textureEnabled = enabled;
 }
 
 static void psp_gfx_dl_handle_set_texture_image(PspGfxDlContext* ctx, const Gfx* gfx) {
-    psp_gfx_dl_flush(ctx);
+    psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_TEXTURE_CHANGE);
     ctx->textureFormat = (gfx->words.w0 >> 21) & 0x7;
     ctx->textureSize = (gfx->words.w0 >> 19) & 0x3;
     ctx->textureImage = psp_gfx_dl_resolve_ptr(ctx, gfx->words.w1);
@@ -2391,6 +1903,8 @@ static void psp_gfx_dl_handle_set_tile(PspGfxDlContext* ctx, const Gfx* gfx) {
 }
 
 static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int premultiply) {
+    int result;
+
     if ((ctx->textureId != 0) || ctx->textureUploadAttempted || (ctx->textureImage == NULL) ||
         (ctx->textureWidth == 0) || (ctx->textureHeight == 0)) {
         return ctx->textureId != 0;
@@ -2400,6 +1914,7 @@ static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int pr
     }
 
     ctx->textureUploadAttempted = 1;
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TEXTURE_PREPARE);
     if ((ctx->textureFormat == G_IM_FMT_CI) && (ctx->textureSize == G_IM_SIZ_8b)) {
         ctx->textureId =
             PspGfxPspgl_GetCi8Texture((const u8*) ctx->textureImage, ctx->texturePalette, ctx->textureWidth,
@@ -2422,6 +1937,7 @@ static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int pr
             PspGfxPspgl_GetIa16Texture((const u16*) ctx->textureImage, ctx->textureWidth, ctx->textureHeight,
                                       &ctx->textureUploadWidth, &ctx->textureUploadHeight);
     } else {
+        PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TEXTURE_PREPARE);
         return 0;
     }
 
@@ -2439,10 +1955,13 @@ static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int pr
         } else if ((ctx->textureFormat == G_IM_FMT_IA) && (ctx->textureSize == G_IM_SIZ_16b)) {
             ctx->stats.ia16TextureCount++;
         }
-        return 1;
+        result = 1;
+    } else {
+        ctx->stats.textureRejected++;
+        result = 0;
     }
-    ctx->stats.textureRejected++;
-    return 0;
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TEXTURE_PREPARE);
+    return result;
 }
 
 static void psp_gfx_dl_handle_set_tile_size(PspGfxDlContext* ctx, const Gfx* gfx) {
@@ -2481,6 +2000,7 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
         u8 opcode = psp_gfx_dl_opcode(cmd);
 
         ctx->stats.commandCount++;
+        PspProfiler_CountOpcode(opcode);
 
         if (psp_gfx_dl_is_end(opcode)) {
             return 1;
@@ -2615,9 +2135,12 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
 
         if (opcode == PSP_GFX_OP_F3D_TRI1) {
             u32 w1 = cmd->words.w1;
+            PspProfiler_CountTriangleCommand(1, 1, 0);
+            PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TRIANGLE);
             psp_gfx_dl_emit_tri(ctx, psp_gfx_dl_decode_tri_index((w1 >> 16) & 0xFF),
                                 psp_gfx_dl_decode_tri_index((w1 >> 8) & 0xFF),
                                 psp_gfx_dl_decode_tri_index(w1 & 0xFF));
+            PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TRIANGLE);
             continue;
         }
 
@@ -2625,12 +2148,15 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
             u32 w0 = cmd->words.w0;
             u32 w1 = cmd->words.w1;
 
+            PspProfiler_CountTriangleCommand(2, 0, 1);
+            PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TRIANGLE);
             psp_gfx_dl_emit_tri(ctx, psp_gfx_dl_decode_tri_index((w0 >> 16) & 0xFF),
                                 psp_gfx_dl_decode_tri_index((w0 >> 8) & 0xFF),
                                 psp_gfx_dl_decode_tri_index(w0 & 0xFF));
             psp_gfx_dl_emit_tri(ctx, psp_gfx_dl_decode_tri_index((w1 >> 16) & 0xFF),
                                 psp_gfx_dl_decode_tri_index((w1 >> 8) & 0xFF),
                                 psp_gfx_dl_decode_tri_index(w1 & 0xFF));
+            PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TRIANGLE);
             continue;
         }
 
@@ -2669,8 +2195,11 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
     psp_gfx_dl_init_lighting_remap();
     psp_gfx_dl_reset_context(ctx);
     ctx->taskIndex = taskIndex;
+    PspProfiler_CountDisplayListTask();
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_DL_TRAVERSAL);
     psp_gfx_dl_run_internal(ctx, dl, 0);
-    psp_gfx_dl_flush(ctx);
+    psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_END_OF_TASK);
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_DL_TRAVERSAL);
 
     if (outStats != NULL) {
         *outStats = ctx->stats;

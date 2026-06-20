@@ -1,5 +1,6 @@
 #include "src/psp/gfx/gfx_psp.h"
 #include "src/psp/gfx/gfx_pspgl.h"
+#include "src/psp/profiler.h"
 
 #include <GLES/gl.h>
 #include <stddef.h>
@@ -155,10 +156,13 @@ static u32 psp_gfx_pspgl_get_converted_texture(const void* pixels, const u16* pa
             (entry->height == height) && (entry->format == format)) {
             *uploadWidth = entry->uploadWidth;
             *uploadHeight = entry->uploadHeight;
+            PspProfiler_CountTextureEvent(1, 0, 0, 0, 0);
             return entry->texture;
         }
     }
 
+    PspProfiler_CountTextureEvent(0, 1, 0, 0, 0);
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TEXTURE_DECODE);
     for (y = 0; y < finalHeight; y++) {
         u32 srcY = (y < height) ? y : (height - 1);
 
@@ -193,6 +197,7 @@ static u32 psp_gfx_pspgl_get_converted_texture(const void* pixels, const u16* pa
             }
         }
     }
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TEXTURE_DECODE);
 
     if (sConvertedTextureCacheCount < PSP_GFX_PSPGL_TEXTURE_CACHE_SIZE) {
         entry = &sConvertedTextureCache[sConvertedTextureCacheCount++];
@@ -208,6 +213,7 @@ static u32 psp_gfx_pspgl_get_converted_texture(const void* pixels, const u16* pa
     entry->uploadWidth = finalWidth;
     entry->uploadHeight = finalHeight;
     entry->format = format;
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TEXTURE_UPLOAD);
     glGenTextures(1, &entry->texture);
     glBindTexture(GL_TEXTURE_2D, entry->texture);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -215,6 +221,8 @@ static u32 psp_gfx_pspgl_get_converted_texture(const void* pixels, const u16* pa
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, finalWidth, finalHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, sTextureUpload);
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TEXTURE_UPLOAD);
+    PspProfiler_CountTextureEvent(0, 0, 1, 1, finalPixelCount * 4);
     *uploadWidth = finalWidth;
     *uploadHeight = finalHeight;
     return entry->texture;
@@ -283,9 +291,12 @@ u32 PspGfxPspgl_GetCi8Texture(const u8* indices, const u16* palette, u32 width, 
             (entry->height == height)) {
             *uploadWidth = entry->uploadWidth;
             *uploadHeight = entry->uploadHeight;
+            PspProfiler_CountTextureEvent(1, 0, 0, 0, 0);
             return entry->texture;
         }
     }
+    PspProfiler_CountTextureEvent(0, 1, 0, 0, 0);
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TEXTURE_DECODE);
     for (y = 0; y < finalHeight; y++) {
         u32 srcY = (y < height) ? y : (height - 1);
 
@@ -297,6 +308,7 @@ u32 PspGfxPspgl_GetCi8Texture(const u8* indices, const u16* palette, u32 width, 
             psp_gfx_pspgl_rgba16_to_rgba8(psp_gfx_pspgl_read_u16(palette, indices[srcIndex]), &sTextureUpload[dstIndex * 4]);
         }
     }
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TEXTURE_DECODE);
 
     if (sTextureCacheCount < PSP_GFX_PSPGL_TEXTURE_CACHE_SIZE) {
         entry = &sTextureCache[sTextureCacheCount++];
@@ -311,6 +323,7 @@ u32 PspGfxPspgl_GetCi8Texture(const u8* indices, const u16* palette, u32 width, 
     entry->height = height;
     entry->uploadWidth = finalWidth;
     entry->uploadHeight = finalHeight;
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TEXTURE_UPLOAD);
     glGenTextures(1, &entry->texture);
     glBindTexture(GL_TEXTURE_2D, entry->texture);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -318,6 +331,8 @@ u32 PspGfxPspgl_GetCi8Texture(const u8* indices, const u16* palette, u32 width, 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, finalWidth, finalHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, sTextureUpload);
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TEXTURE_UPLOAD);
+    PspProfiler_CountTextureEvent(0, 0, 1, 1, finalPixelCount * 4);
     *uploadWidth = finalWidth;
     *uploadHeight = finalHeight;
     return entry->texture;
@@ -357,9 +372,12 @@ u32 PspGfxPspgl_GetRgba16Texture(const u16* pixels, u32 width, u32 height, int p
             (entry->premultiplied == premultiply)) {
             *uploadWidth = entry->uploadWidth;
             *uploadHeight = entry->uploadHeight;
+            PspProfiler_CountTextureEvent(1, 0, 0, 0, 0);
             return entry->texture;
         }
     }
+    PspProfiler_CountTextureEvent(0, 1, 0, 0, 0);
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TEXTURE_DECODE);
     for (y = 0; y < finalHeight; y++) {
         u32 srcY = (y < height) ? y : (height - 1);
 
@@ -384,6 +402,7 @@ u32 PspGfxPspgl_GetRgba16Texture(const u16* pixels, u32 width, u32 height, int p
             }
         }
     }
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TEXTURE_DECODE);
 
     if (sRgba16TextureCacheCount < PSP_GFX_PSPGL_TEXTURE_CACHE_SIZE) {
         entry = &sRgba16TextureCache[sRgba16TextureCacheCount++];
@@ -398,6 +417,7 @@ u32 PspGfxPspgl_GetRgba16Texture(const u16* pixels, u32 width, u32 height, int p
     entry->uploadWidth = finalWidth;
     entry->uploadHeight = finalHeight;
     entry->premultiplied = premultiply;
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TEXTURE_UPLOAD);
     glGenTextures(1, &entry->texture);
     glBindTexture(GL_TEXTURE_2D, entry->texture);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -405,6 +425,8 @@ u32 PspGfxPspgl_GetRgba16Texture(const u16* pixels, u32 width, u32 height, int p
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, finalWidth, finalHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, sTextureUpload);
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TEXTURE_UPLOAD);
+    PspProfiler_CountTextureEvent(0, 0, 1, 1, finalPixelCount * 4);
     *uploadWidth = finalWidth;
     *uploadHeight = finalHeight;
     return entry->texture;
@@ -545,6 +567,12 @@ void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u3
         glDisable(GL_BLEND);
     }
 
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_SUBMIT);
     glDrawArrays(GL_TRIANGLES, 0, vertexCount);
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_SUBMIT);
+    PspProfiler_CountDrawCall(vertexCount);
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_GL_FLUSH);
     glFlush();
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_GL_FLUSH);
+    PspProfiler_CountGlFlush();
 }

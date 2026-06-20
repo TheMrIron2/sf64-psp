@@ -19,6 +19,8 @@ VERSION ?= us
 REV ?= rev1
 PSP_FULL ?= 1
 PROFILE_PSP ?= 0
+SF64_PSP_PROFILE_PHASES ?= 0
+SF64_PSP_PROFILE_CAPTURE_FRAMES ?= 300
 PSP_LOG ?= 0
 PSP_AUDIO_SYNTH ?= 0
 PSP_AUDIO_OUTPUT ?= 0
@@ -55,6 +57,7 @@ MKSFOEX ?= mksfoex
 PACK_PBP ?= pack-pbp
 PSP_STRIP ?= psp-strip
 PSPGL_CONFIG ?= pspgl-config
+PSP_NM ?= psp-nm
 
 PSPSDK ?= $(shell $(PSP_CONFIG) --pspsdk-path 2>/dev/null)
 PSPDEV ?= $(shell $(PSP_CONFIG) --psp-prefix 2>/dev/null | sed 's,/psp$$,,')
@@ -122,6 +125,10 @@ $(if $(filter src/psp/%,$<),$(PSP_WARNINGS),$(if $(filter 1,$(QUIET_DECOMP)),-w,
 endef
 
 PSP_OPTFLAGS ?= -O2 # -ffast-math
+SF64_GIT_SHA := $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
+N64PSP_GIT_SHA := $(shell git -C lib/n64psp rev-parse HEAD 2>/dev/null || echo unknown)
+PERFECT_DARK_PSP_SHA := 0871c907aea105cd2e7002219d047c733011f668
+PSP_COMPILER_VERSION := $(shell $(CC) --version 2>/dev/null | sed -n '1p' | sed 's/"/\\"/g; s/[[:space:]]\+/_/g')
 
 CFLAGS := -std=gnu89 -G0 -DPSP -D__PSP__ -D_PSP_FW_VERSION=600 
 CFLAGS += $(PSP_OPTFLAGS) -g3
@@ -135,6 +142,14 @@ CFLAGS += -DN64PSP_USE_VFPU=$(if $(filter 1,$(N64PSP_USE_VFPU)),1,0)
 CFLAGS += -DPSP_FPS_OVERLAY=$(PSP_FPS_OVERLAY)
 CFLAGS += -DPSP_AUDIO_SYNTH=$(PSP_AUDIO_SYNTH)
 CFLAGS += -DPSP_AUDIO_OUTPUT=$(PSP_AUDIO_OUTPUT)
+CFLAGS += -DSF64_PSP_GPROF=$(if $(filter 1,$(PROFILE_PSP)),1,0)
+CFLAGS += -DSF64_PSP_PROFILE_PHASES=$(if $(filter 1,$(SF64_PSP_PROFILE_PHASES)),1,0)
+CFLAGS += -DSF64_PSP_PROFILE_CAPTURE_FRAMES=$(SF64_PSP_PROFILE_CAPTURE_FRAMES)
+CFLAGS += '-DSF64_GIT_SHA="$(SF64_GIT_SHA)"'
+CFLAGS += '-DN64PSP_GIT_SHA="$(N64PSP_GIT_SHA)"'
+CFLAGS += '-DPERFECT_DARK_PSP_SHA="$(PERFECT_DARK_PSP_SHA)"'
+CFLAGS += '-DSF64_PSP_COMPILER="$(PSP_COMPILER_VERSION)"'
+CFLAGS += '-DSF64_PSP_OPT_FLAGS="$(PSP_OPTFLAGS)"'
 CFLAGS += -DPSP_VALIDATE_N64PSP_MATH=$(PSP_VALIDATE_N64PSP_MATH)
 CFLAGS += -DUSE_N64PSP_BATCH_TRANSFORM=$(if $(filter 1,$(USE_N64PSP_BATCH_TRANSFORM)),1,0)
 CFLAGS += -DPSP_VALIDATE_N64PSP_BATCH_TRANSFORM=$(if $(filter 1,$(PSP_VALIDATE_N64PSP_BATCH_TRANSFORM)),1,0)
@@ -216,8 +231,8 @@ LDFLAGS := -L$(PSPDEV)/psp/lib -L$(PSPSDK)/lib
 LDFLAGS += -Wl,-Map,$(PSP_MAP) -Wl,-zmax-page-size=128
 
 ifeq ($(PROFILE_PSP),1)
-CFLAGS += -pg
-LDFLAGS += -pg
+CFLAGS += -pg -g -fno-omit-frame-pointer -fno-optimize-sibling-calls
+LDFLAGS += -pg -g
 else
 LDFLAGS += -specs=$(PSPSDK)/lib/prxspecs \
            -Wl,-q,-T$(PSPSDK)/lib/linkfile.prx \
@@ -294,6 +309,20 @@ psp: $(PSP_EBOOT)
 
 bootstrap:
 	$(MAKE) PSP_FULL=0 BUILD_DIR=build/psp-bootstrap psp
+
+psp-profile-gprof:
+	$(MAKE) PROFILE_PSP=1 BUILD_DIR=build/psp-profile-gprof psp
+
+psp-profile-phases:
+	$(MAKE) SF64_PSP_PROFILE_PHASES=1 BUILD_DIR=build/psp-profile-phases psp
+
+psp-profile-combined:
+	$(MAKE) PROFILE_PSP=1 SF64_PSP_PROFILE_PHASES=1 BUILD_DIR=build/psp-profile-combined psp
+
+psp-profile-builds: psp-profile-gprof psp-profile-phases
+
+psp-profile-report:
+	$(PYTHON) tools/psp_profile_report.py "$(ELF)" "$(GMON)" "$(OUT)"
 
 preflight:
 ifeq ($(PSP_FULL),1)
@@ -384,4 +413,4 @@ resolve-queue-trace:
 
 -include $(DEP_FILES)
 
-.PHONY: tools-init toolchain torch init decompress extract assets clean-generated resolve-queue-trace FORCE
+.PHONY: tools-init toolchain torch init decompress extract assets clean-generated resolve-queue-trace psp-profile-gprof psp-profile-phases psp-profile-combined psp-profile-builds psp-profile-report FORCE

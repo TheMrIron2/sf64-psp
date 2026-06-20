@@ -3,6 +3,7 @@
 #include "mods.h"
 #ifdef TARGET_PSP
 #include "src/psp/platform.h"
+#include "src/psp/profiler.h"
 #endif
 
 #if defined(TARGET_PSP) && !defined(PSP_TRACE_ENABLED)
@@ -326,7 +327,13 @@ void Graphics_ThreadEntry(void* arg0) {
             if ((gSysFrameCount <= 4) || ((gSysFrameCount % 30) == 0)) {
                 PSP_TRACE_FRAME("game update begin", gSysFrameCount);
             }
+#ifdef TARGET_PSP
+            PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_GAME_UPDATE);
+#endif
             Game_Update();
+#ifdef TARGET_PSP
+            PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_GAME_UPDATE);
+#endif
             if ((gSysFrameCount <= 4) || ((gSysFrameCount % 30) == 0)) {
                 PSP_TRACE_FRAME("game update done", gSysFrameCount);
             }
@@ -357,9 +364,15 @@ void Graphics_ThreadEntry(void* arg0) {
 
         visPerFrame = MIN(gVIsPerFrame, 4);
         validVIsPerFrame = MAX(visPerFrame, gGfxVImesgQueue.validCount + 1);
+#ifdef TARGET_PSP
+        PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_VBLANK_WAIT);
+#endif
         for (i = 0; i < validVIsPerFrame; i += 1) { // Can't be ++
             MQ_WAIT_FOR_MESG(&gGfxVImesgQueue, NULL);
         }
+#ifdef TARGET_PSP
+        PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_VBLANK_WAIT);
+#endif
         if ((gSysFrameCount <= 4) || ((gSysFrameCount % 30) == 0)) {
             PSP_TRACE_FRAME("vi wait done", gSysFrameCount);
         }

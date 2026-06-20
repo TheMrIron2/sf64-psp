@@ -1,6 +1,7 @@
 #include "src/psp/gfx/gfx_psp.h"
 
 #include "src/psp/platform.h"
+#include "src/psp/profiler.h"
 
 #include <GLES/egl.h>
 
@@ -81,7 +82,10 @@ void PspGfx_BeginFrame(void) {
 
 void PspGfx_EndFrame(void) {
     if (sReady && sDisplay != EGL_NO_DISPLAY && sSurface != EGL_NO_SURFACE) {
+        PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_FINISH_SYNC);
         eglSwapBuffers(sDisplay, sSurface);
+        PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_FINISH_SYNC);
+        PspProfiler_CountSync();
     }
 }
 

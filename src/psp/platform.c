@@ -8,6 +8,7 @@
 #include "src/psp/audio_output.h"
 #include "src/psp/input.h"
 #include "src/psp/platform.h"
+#include "src/psp/profiler.h"
 #include "src/psp/renderer.h"
 
 typedef int SceUID;
@@ -279,6 +280,7 @@ void PspPlatform_Init(void) {
     PspPlatform_LogLine("[psp] log start");
 #endif
     PspInput_Init();
+    PspProfiler_Init();
     audioResult = PspAudioOutput_Init();
 #if PSP_LOG_ENABLED
     if (audioResult < 0) {
@@ -366,8 +368,9 @@ void PspPlatform_AcknowledgeViEvent(void) {
 }
 
 void PspPlatform_PollInput(OSContPad* pads) {
-    if (PspInput_Poll(pads)) {
+    if (PspProfiler_ExitRequested() || PspInput_Poll(pads)) {
         PspPlatform_RequestExit();
+        PspProfiler_Shutdown();
         sceKernelExitGame();
     }
 }
@@ -377,7 +380,10 @@ void PspPlatform_RunGfxTask(SPTask* task) {
 
     sGfxTaskCount++;
 
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_GFX_TASK);
     PspRenderer_RenderGfxTask(task, sGfxTaskCount);
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_GFX_TASK);
+    PspProfiler_OnGfxTaskComplete();
 
 #if PSP_LOG_ENABLED
     if ((sGfxTaskCount <= 4) || ((sGfxTaskCount % 30) == 0)) {
@@ -410,7 +416,9 @@ void PspPlatform_RunGfxTask(SPTask* task) {
 
 void PspPlatform_RunAudioTask(SPTask* task) {
     sAudioTaskCount++;
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_AUDIO_TASK);
     (void) task;
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_AUDIO_TASK);
     if (sEvents[OS_EVENT_SP].mq != NULL) {
         osSendMesg(sEvents[OS_EVENT_SP].mq, sEvents[OS_EVENT_SP].msg, OS_MESG_NOBLOCK);
     }
@@ -440,6 +448,7 @@ void PspPlatform_DebugFrame(void) {
 #endif
     }
 #endif
+    PspProfiler_DrawStatus();
 }
 
 void PspPlatform_LogValue(const char* label, u32 value) {

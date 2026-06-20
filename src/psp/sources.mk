@@ -190,6 +190,7 @@ PSP_GAME_C_FILES := \
     src/psp/main.c \
     $(PSP_N64PSP_C_FILES) \
     src/psp/platform.c \
+    src/psp/profiler.c \
     src/psp/ultra_reimpl.c \
     $(PSP_AUDIO_C_FILES) \
     $(PSP_RENDERER_C_FILES) \
