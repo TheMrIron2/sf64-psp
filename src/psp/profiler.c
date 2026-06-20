@@ -38,6 +38,8 @@
 
 #define PSP_PROFILE_DIR "ms0:/PSP/GAME/SF64PROFILE"
 #define PSP_PROFILE_MAX_SLOT 999
+#define PSP_PROFILE_MAX_THREADS 8
+#define PSP_PROFILE_TIMER_SAMPLES 128
 
 #define PSP_PROFILE_ATTR __attribute__((no_instrument_function, no_profile_instrument_function))
 
@@ -53,9 +55,13 @@ typedef struct {
     u64 calls;
     u64 totalUs;
     u64 items;
-    u64 startUs;
-    u32 active;
 } PspProfilePhaseState;
+
+typedef struct {
+    SceUID threadId;
+    u64 startUs[PSP_PROFILE_PHASE_COUNT];
+    u8 active[PSP_PROFILE_PHASE_COUNT];
+} PspProfileThreadState;
 
 typedef struct {
     u64 displayListTasks;
@@ -110,11 +116,13 @@ static char sCapturePath[96];
 
 #if SF64_PSP_PROFILE_PHASES
 static PspProfilePhaseState sPhase[PSP_PROFILE_PHASE_COUNT];
+static PspProfileThreadState sThreadPhase[PSP_PROFILE_MAX_THREADS];
 static PspProfileCounters sCounters;
 static u32 sCaptureFrames;
+static u32 sForcedActivePhaseEnds;
 static u64 sCaptureStartUs;
 static u64 sCaptureEndUs;
-static u64 sTimerOverheadUs;
+static u64 sTimerReadPairOverheadUs;
 #endif
 
 #if SF64_PSP_PROFILE_PHASES
@@ -129,6 +137,63 @@ PSP_PROFILE_ATTR static u32 psp_profiler_strlen(const char* text) {
 
 PSP_PROFILE_ATTR static u64 psp_profiler_now_us(void) {
     return (u64) sceKernelGetSystemTimeWide();
+}
+
+PSP_PROFILE_ATTR static int psp_profiler_lock(void) {
+    return sceKernelCpuSuspendIntr();
+}
+
+PSP_PROFILE_ATTR static void psp_profiler_unlock(int state) {
+    sceKernelCpuResumeIntr(state);
+}
+
+PSP_PROFILE_ATTR static u64 psp_profiler_measure_timer_overhead(void) {
+    u32 i;
+    u64 best = 0;
+    u64 a;
+    u64 b;
+    u64 delta;
+
+    for (i = 0; i < PSP_PROFILE_TIMER_SAMPLES; i++) {
+        a = psp_profiler_now_us();
+        b = psp_profiler_now_us();
+        delta = (b >= a) ? (b - a) : 0;
+
+        if ((i == 0) || (delta < best)) {
+            best = delta;
+        }
+    }
+    return best;
+}
+
+PSP_PROFILE_ATTR static PspProfileThreadState* psp_profiler_get_thread_state_locked(SceUID threadId) {
+    u32 i;
+    PspProfileThreadState* empty = NULL;
+
+    for (i = 0; i < PSP_PROFILE_MAX_THREADS; i++) {
+        if (sThreadPhase[i].threadId == threadId) {
+            return &sThreadPhase[i];
+        }
+        if ((empty == NULL) && (sThreadPhase[i].threadId < 0)) {
+            empty = &sThreadPhase[i];
+        }
+    }
+    if (empty != NULL) {
+        empty->threadId = threadId;
+    }
+    return empty;
+}
+
+PSP_PROFILE_ATTR static PspProfileThreadState* psp_profiler_get_thread_state(void) {
+    int lockState;
+    SceUID threadId;
+    PspProfileThreadState* state;
+
+    threadId = sceKernelGetThreadId();
+    lockState = psp_profiler_lock();
+    state = psp_profiler_get_thread_state_locked(threadId);
+    psp_profiler_unlock(lockState);
+    return state;
 }
 #endif
 
@@ -181,21 +246,25 @@ PSP_PROFILE_ATTR static void psp_profiler_set_status(PspProfilerStatus status, u
 PSP_PROFILE_ATTR static void psp_profiler_reset_phase_capture(void) {
     u8* bytes;
     u32 i;
-    u64 a;
-    u64 b;
 
     bytes = (u8*) sPhase;
     for (i = 0; i < sizeof(sPhase); i++) {
         bytes[i] = 0;
+    }
+    bytes = (u8*) sThreadPhase;
+    for (i = 0; i < sizeof(sThreadPhase); i++) {
+        bytes[i] = 0;
+    }
+    for (i = 0; i < PSP_PROFILE_MAX_THREADS; i++) {
+        sThreadPhase[i].threadId = -1;
     }
     bytes = (u8*) &sCounters;
     for (i = 0; i < sizeof(sCounters); i++) {
         bytes[i] = 0;
     }
     sCaptureFrames = 0;
-    a = psp_profiler_now_us();
-    b = psp_profiler_now_us();
-    sTimerOverheadUs = (b > a) ? (b - a) : 0;
+    sForcedActivePhaseEnds = 0;
+    sTimerReadPairOverheadUs = psp_profiler_measure_timer_overhead();
     sCaptureStartUs = psp_profiler_now_us();
     sCaptureEndUs = sCaptureStartUs;
 }
@@ -215,8 +284,11 @@ static const char* psp_profiler_phase_name(PspProfilePhase phase) {
         "PSPGL draw submission",
         "glFlush queue flush",
         "graphics finish/synchronisation",
-        "audio task CPU work",
+        "audio task dispatch",
+        "audio synthesis task creation",
+        "audio update work",
         "game/update work",
+        "graphics task completion/backpressure wait",
         "vblank or idle wait"
     };
 
@@ -241,15 +313,17 @@ static const char* psp_profiler_flush_name(PspProfileFlushReason reason) {
 static void psp_profiler_write_csv_row(SceUID fd, PspProfilePhase phase) {
     char line[192];
     const PspProfilePhaseState* p = &sPhase[phase];
-    u64 perFrame = (sCaptureFrames != 0) ? (p->totalUs / sCaptureFrames) : 0;
-    u64 perCall = (p->calls != 0) ? (p->totalUs / p->calls) : 0;
+    u64 overheadUs = p->calls * sTimerReadPairOverheadUs;
+    u64 adjustedUs = (p->totalUs > overheadUs) ? (p->totalUs - overheadUs) : 0;
+    u64 perFrame = (sCaptureFrames != 0) ? (adjustedUs / sCaptureFrames) : 0;
+    u64 perCall = (p->calls != 0) ? (adjustedUs / p->calls) : 0;
     u64 perItem = (p->items != 0) ? (p->totalUs / p->items) : 0;
     u64 captureUs = (sCaptureEndUs > sCaptureStartUs) ? (sCaptureEndUs - sCaptureStartUs) : 0;
-    u64 percent100 = (captureUs != 0) ? ((p->totalUs * 10000ULL) / captureUs) : 0;
+    u64 percent100 = (captureUs != 0) ? ((adjustedUs * 10000ULL) / captureUs) : 0;
 
-    snprintf(line, sizeof(line), "%s,inclusive,%llu,%llu,%llu,%llu,%llu.%02llu,%llu,%llu\n",
-             psp_profiler_phase_name(phase), p->calls, p->totalUs, perFrame, perCall, percent100 / 100,
-             percent100 % 100, p->items, perItem);
+    snprintf(line, sizeof(line), "%s,inclusive,%llu,%llu,%llu,%llu,%llu,%llu.%02llu,%llu,%llu\n",
+             psp_profiler_phase_name(phase), p->calls, p->totalUs, adjustedUs, perFrame, perCall,
+             percent100 / 100, percent100 % 100, p->items, perItem);
     psp_profiler_write_all(fd, line);
 }
 
@@ -265,7 +339,8 @@ static void psp_profiler_write_phase_files(u32 slot) {
         psp_profiler_set_status(PSP_PROF_STATUS_ERROR, slot);
         return;
     }
-    psp_profiler_write_all(fd, "phase,inclusive_or_exclusive,calls,total_us,us_per_frame,us_per_call,percent_of_capture,items,us_per_item\n");
+    psp_profiler_write_all(fd,
+                           "phase,inclusive_or_exclusive,calls,total_us_raw,total_us_adjusted,us_per_frame_adjusted,us_per_call_adjusted,percent_of_capture_adjusted,items,us_per_item_raw\n");
     for (i = 0; i < PSP_PROFILE_PHASE_COUNT; i++) {
         psp_profiler_write_csv_row(fd, (PspProfilePhase) i);
     }
@@ -283,7 +358,11 @@ static void psp_profiler_write_phase_files(u32 slot) {
              SF64_GIT_SHA, N64PSP_GIT_SHA, PERFECT_DARK_PSP_SHA, SF64_PSP_COMPILER, SF64_PSP_OPT_FLAGS,
              SF64_PSP_GPROF, SF64_PSP_PROFILE_PHASES, (unsigned long) scePowerGetCpuClockFrequency(),
              (unsigned long) scePowerGetBusClockFrequency(), (unsigned long) slot, SF64_PSP_PROFILE_CAPTURE_FRAMES,
-             (unsigned long) sCaptureFrames, sTimerOverheadUs);
+             (unsigned long) sCaptureFrames, sTimerReadPairOverheadUs);
+    psp_profiler_write_all(fd, line);
+    snprintf(line, sizeof(line),
+             "timer overhead samples: %d\nphase totals: inclusive raw and timer-adjusted; nested time is not subtracted\nforced active phase ends on stop: %lu\n\n",
+             PSP_PROFILE_TIMER_SAMPLES, (unsigned long) sForcedActivePhaseEnds);
     psp_profiler_write_all(fd, line);
 
     psp_profiler_write_all(fd, "[opcode counts]\nopcode,count\n");
@@ -401,6 +480,13 @@ void PspProfiler_StartCapture(void) {
 }
 
 void PspProfiler_StopCapture(void) {
+#if SF64_PSP_PROFILE_PHASES
+    u64 now;
+    int lockState;
+    u32 thread;
+    u32 phase;
+#endif
+
     if (!sCaptureActive) {
         return;
     }
@@ -408,7 +494,25 @@ void PspProfiler_StopCapture(void) {
     gprof_stop(NULL, 0);
 #endif
 #if SF64_PSP_PROFILE_PHASES
-    sCaptureEndUs = psp_profiler_now_us();
+    now = psp_profiler_now_us();
+    lockState = psp_profiler_lock();
+    for (thread = 0; thread < PSP_PROFILE_MAX_THREADS; thread++) {
+        if (sThreadPhase[thread].threadId < 0) {
+            continue;
+        }
+        for (phase = 0; phase < PSP_PROFILE_PHASE_COUNT; phase++) {
+            if (sThreadPhase[thread].active[phase]) {
+                if (now >= sThreadPhase[thread].startUs[phase]) {
+                    sPhase[phase].totalUs += now - sThreadPhase[thread].startUs[phase];
+                }
+                sPhase[phase].calls++;
+                sThreadPhase[thread].active[phase] = 0;
+                sForcedActivePhaseEnds++;
+            }
+        }
+    }
+    sCaptureEndUs = now;
+    psp_profiler_unlock(lockState);
 #endif
     sCaptureActive = 0;
 }
@@ -472,59 +576,88 @@ int PspProfiler_ExitRequested(void) {
 
 #if SF64_PSP_PROFILE_PHASES
 void PspProfiler_PhaseBegin(PspProfilePhase phase) {
-    if (!sCaptureActive || (phase >= PSP_PROFILE_PHASE_COUNT) || sPhase[phase].active) {
-        return;
-    }
-    sPhase[phase].startUs = psp_profiler_now_us();
-    sPhase[phase].active = 1;
-}
-
-void PspProfiler_PhaseEnd(PspProfilePhase phase) {
-    u64 now;
-    PspProfilePhaseState* p;
+    PspProfileThreadState* state;
 
     if (!sCaptureActive || (phase >= PSP_PROFILE_PHASE_COUNT)) {
         return;
     }
-    p = &sPhase[phase];
-    if (!p->active) {
+    state = psp_profiler_get_thread_state();
+    if ((state == NULL) || state->active[phase]) {
+        return;
+    }
+    state->startUs[phase] = psp_profiler_now_us();
+    state->active[phase] = 1;
+}
+
+void PspProfiler_PhaseEnd(PspProfilePhase phase) {
+    u64 now;
+    u64 delta;
+    int lockState;
+    PspProfilePhaseState* p;
+    PspProfileThreadState* state;
+
+    if (!sCaptureActive || (phase >= PSP_PROFILE_PHASE_COUNT)) {
+        return;
+    }
+    state = psp_profiler_get_thread_state();
+    if ((state == NULL) || !state->active[phase]) {
         return;
     }
     now = psp_profiler_now_us();
-    if (now >= p->startUs) {
-        p->totalUs += now - p->startUs;
-    }
+    delta = (now >= state->startUs[phase]) ? (now - state->startUs[phase]) : 0;
+    state->active[phase] = 0;
+
+    lockState = psp_profiler_lock();
+    p = &sPhase[phase];
+    p->totalUs += delta;
     p->calls++;
-    p->active = 0;
+    psp_profiler_unlock(lockState);
 }
 
 void PspProfiler_OnGfxTaskComplete(void) {
+    int lockState;
+    u32 frames;
+
     if (!sCaptureActive) {
         return;
     }
+    lockState = psp_profiler_lock();
     sCaptureFrames++;
-    if (sCaptureFrames >= SF64_PSP_PROFILE_CAPTURE_FRAMES) {
+    frames = sCaptureFrames;
+    psp_profiler_unlock(lockState);
+    if (frames >= SF64_PSP_PROFILE_CAPTURE_FRAMES) {
         PspProfiler_StopCapture();
         PspProfiler_DumpCapture();
     }
 }
 
 void PspProfiler_CountDisplayListTask(void) {
+    int lockState;
+
     if (sCaptureActive) {
+        lockState = psp_profiler_lock();
         sCounters.displayListTasks++;
+        psp_profiler_unlock(lockState);
     }
 }
 
 void PspProfiler_CountOpcode(u8 opcode) {
+    int lockState;
+
     if (sCaptureActive) {
+        lockState = psp_profiler_lock();
         sCounters.opcodeCounts[opcode]++;
+        psp_profiler_unlock(lockState);
     }
 }
 
 void PspProfiler_CountGvtx(u32 count, u32 lit) {
+    int lockState;
+
     if (!sCaptureActive) {
         return;
     }
+    lockState = psp_profiler_lock();
     sCounters.gvtxCommands++;
     sCounters.verticesLoaded += count;
     sCounters.gvtxHistogram[(count <= 64) ? count : 64]++;
@@ -534,12 +667,16 @@ void PspProfiler_CountGvtx(u32 count, u32 lit) {
         sCounters.unlitVertices += count;
     }
     sPhase[PSP_PROFILE_PHASE_G_VTX].items += count;
+    psp_profiler_unlock(lockState);
 }
 
 void PspProfiler_CountMatrixCommand(u32 projection, u32 composed) {
+    int lockState;
+
     if (!sCaptureActive) {
         return;
     }
+    lockState = psp_profiler_lock();
     if (projection) {
         sCounters.projectionMatrixCommands++;
     } else {
@@ -548,81 +685,114 @@ void PspProfiler_CountMatrixCommand(u32 projection, u32 composed) {
     if (composed) {
         sCounters.matrixCompositions++;
     }
+    psp_profiler_unlock(lockState);
 }
 
 void PspProfiler_CountTriangleCommand(u32 triCount, u32 tri1, u32 tri2) {
+    int lockState;
+
     if (!sCaptureActive) {
         return;
     }
+    lockState = psp_profiler_lock();
     sCounters.inputTriangles += triCount;
     sCounters.tri1Commands += tri1;
     sCounters.tri2Commands += tri2;
     sPhase[PSP_PROFILE_PHASE_TRIANGLE].items += triCount;
+    psp_profiler_unlock(lockState);
 }
 
 void PspProfiler_CountTriangleResult(u32 accepted, u32 rejected, u32 clipped, u32 generatedVertices,
                                      u32 outputTriangles) {
+    int lockState;
+
     if (!sCaptureActive) {
         return;
     }
+    lockState = psp_profiler_lock();
     sCounters.triviallyAcceptedTriangles += accepted;
     sCounters.triviallyRejectedTriangles += rejected;
     sCounters.partiallyClippedTriangles += clipped;
     sCounters.generatedClippingVertices += generatedVertices;
     sCounters.outputTriangles += outputTriangles;
+    psp_profiler_unlock(lockState);
 }
 
 void PspProfiler_CountTransformWork(u32 vertices, u32 normals, u32 normalizes, u32 lighting, u32 clipCodes,
                                     u32 divides) {
+    int lockState;
+
     if (!sCaptureActive) {
         return;
     }
+    lockState = psp_profiler_lock();
     sCounters.normalTransforms += normals;
     sCounters.normalisations += normalizes;
     sCounters.lightingEvaluations += lighting;
     sCounters.clipCodeCalculations += clipCodes;
     sCounters.perspectiveDivides += divides;
+    psp_profiler_unlock(lockState);
     (void) vertices;
 }
 
 void PspProfiler_CountTextureEvent(u32 hit, u32 miss, u32 decode, u32 upload, u32 bytesUploaded) {
+    int lockState;
+
     if (!sCaptureActive) {
         return;
     }
+    lockState = psp_profiler_lock();
     sCounters.textureCacheHits += hit;
     sCounters.textureCacheMisses += miss;
     sCounters.textureDecodes += decode;
     sCounters.textureUploads += upload;
     sCounters.textureBytesUploaded += bytesUploaded;
+    psp_profiler_unlock(lockState);
 }
 
 void PspProfiler_CountBatchFlush(PspProfileFlushReason reason, u32 submittedVertices) {
+    int lockState;
+
     if (!sCaptureActive) {
         return;
     }
+    lockState = psp_profiler_lock();
     sCounters.batchFlushes++;
     if (reason < PSP_PROFILE_FLUSH_COUNT) {
         sCounters.flushReasons[reason]++;
     }
     sCounters.verticesSubmitted += submittedVertices;
+    psp_profiler_unlock(lockState);
 }
 
 void PspProfiler_CountDrawCall(u32 vertices) {
+    int lockState;
+
     if (sCaptureActive) {
+        lockState = psp_profiler_lock();
         sCounters.drawCalls++;
         sPhase[PSP_PROFILE_PHASE_PSPGL_SUBMIT].items += vertices;
+        psp_profiler_unlock(lockState);
     }
 }
 
 void PspProfiler_CountGlFlush(void) {
+    int lockState;
+
     if (sCaptureActive) {
+        lockState = psp_profiler_lock();
         sCounters.glFlushCalls++;
+        psp_profiler_unlock(lockState);
     }
 }
 
 void PspProfiler_CountSync(void) {
+    int lockState;
+
     if (sCaptureActive) {
+        lockState = psp_profiler_lock();
         sCounters.syncCalls++;
+        psp_profiler_unlock(lockState);
     }
 }
 #endif

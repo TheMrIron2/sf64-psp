@@ -10,11 +10,18 @@ make psp-profile-gprof           # build/psp-profile-gprof
 make psp-profile-phases          # build/psp-profile-phases
 make psp-profile-combined        # optional combined diagnostic build
 make psp-profile-builds          # gprof + phases
+make psp-profile-artifacts       # timestamped complete build bundle
 ```
 
 `PROFILE_PSP=1` enables `-pg -g -fno-omit-frame-pointer -fno-optimize-sibling-calls` while keeping the normal `-O2` optimisation level. It defines `SF64_PSP_GPROF=1` and packages the stripped ELF into `EBOOT.PBP` while retaining the exact unstripped `starfox64.psp.elf` and map in the build directory.
 
 `SF64_PSP_PROFILE_PHASES=1` enables the low-overhead phase profiler. It does not reference gprof symbols and can be built independently.
+
+Authoritative measurements should use the separate gprof and phase EBOOTs. `psp-profile-combined` remains available as a diagnostic build, but gprof instrumentation and phase timers perturb each other.
+
+Profile targets default `PSP_FPS_OVERLAY=0`, `PSP_LOG=0`, `PSP_TRACE=0`, `PSP_RENDERER_DIAGNOSTICS=0`, validation off, and queue tracing off. Pass an explicit make variable to override one of these for a diagnostic run.
+
+Each profile variant builds n64psp into an isolated directory, such as `lib/n64psp/build-psp-gprof` or `lib/n64psp/build-psp-phases`. Gprof builds also pass `N64PSP_PROFILE_PSP=1`, so n64psp PSP objects are compiled with call-arc friendly flags instead of only receiving samples at exported symbols.
 
 ## Controls
 
@@ -81,8 +88,11 @@ batch flush total
 PSPGL draw submission
 glFlush queue flush
 graphics finish/synchronisation
-audio task CPU work
+audio task dispatch
+audio synthesis task creation
+audio update work
 game/update work
+graphics task completion/backpressure wait
 vblank or idle wait
 ```
 
@@ -130,8 +140,8 @@ all profile-NNN.csv files
 all profile-NNN.txt files
 matching unstripped starfox64.psp.elf files
 matching starfox64.psp.map files
-artifacts/PROFILE_BUILD_COMMANDS.txt
-artifacts/SHA256SUMS
+PROFILE_BUILD_COMMANDS.txt
+SHA256SUMS
 ```
 
 Generate gprof reports on the host with:
@@ -142,6 +152,10 @@ make psp-profile-report \
     GMON=/path/to/gmon-000.out \
     OUT=/path/to/gprof-000.txt
 ```
+
+The generated report records the gprof executable and version, ELF SHA-256, gmon SHA-256, and build ID when available. It fails if the capture appears empty, contains no samples, or appears mostly unresolved.
+
+Use `make psp-profile-artifacts` before hardware testing to copy complete gprof and phase builds into `artifacts/psp-profile-YYYYMMDDTHHMMSSZ/`. Raw Memory Stick captures should be copied into that bundle's `raw/` directory; generated reports belong in `reports/`.
 
 ## Interpretation
 

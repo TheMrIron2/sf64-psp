@@ -416,11 +416,11 @@ void PspPlatform_RunGfxTask(SPTask* task) {
 
 void PspPlatform_RunAudioTask(SPTask* task) {
     sAudioTaskCount++;
-    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_AUDIO_TASK);
     (void) task;
-    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_AUDIO_TASK);
     if (sEvents[OS_EVENT_SP].mq != NULL) {
+        PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_AUDIO_TASK_DISPATCH);
         osSendMesg(sEvents[OS_EVENT_SP].mq, sEvents[OS_EVENT_SP].msg, OS_MESG_NOBLOCK);
+        PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_AUDIO_TASK_DISPATCH);
     }
 }
 

@@ -138,7 +138,13 @@ void Audio_ThreadEntry(void* arg0) {
 #endif
     PSP_TRACE("audio ready");
 
+#ifdef TARGET_PSP
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_AUDIO_SYNTHESIS);
+#endif
     task = AudioThread_CreateTask();
+#ifdef TARGET_PSP
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_AUDIO_SYNTHESIS);
+#endif
 #ifdef TARGET_PSP
     PspPlatform_LogLine("[psp-audio] first synthesis complete");
 #endif
@@ -150,7 +156,13 @@ void Audio_ThreadEntry(void* arg0) {
     }
 
     while (true) {
+#ifdef TARGET_PSP
+        PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_AUDIO_SYNTHESIS);
+#endif
         task = AudioThread_CreateTask();
+#ifdef TARGET_PSP
+        PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_AUDIO_SYNTHESIS);
+#endif
         if (task != NULL) {
             task->mesgQueue = &gAudioTaskMesgQueue;
             task->msg = (OSMesg) TASK_MESG_1;
@@ -346,7 +358,13 @@ void Graphics_ThreadEntry(void* arg0) {
             gDPFullSync(gMasterDisp++);
             gSPEndDisplayList(gMasterDisp++);
         }
+#ifdef TARGET_PSP
+        PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_GFX_TASK_BACKPRESSURE);
+#endif
         MQ_WAIT_FOR_MESG(&gGfxTaskMesgQueue, NULL);
+#ifdef TARGET_PSP
+        PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_GFX_TASK_BACKPRESSURE);
+#endif
         if ((gSysFrameCount <= 4) || ((gSysFrameCount % 30) == 0)) {
             PSP_TRACE_FRAME("gfx task ack", gSysFrameCount);
         }
@@ -377,7 +395,13 @@ void Graphics_ThreadEntry(void* arg0) {
             PSP_TRACE_FRAME("vi wait done", gSysFrameCount);
         }
 
+#ifdef TARGET_PSP
+        PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_AUDIO_UPDATE);
+#endif
         Audio_Update();
+#ifdef TARGET_PSP
+        PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_AUDIO_UPDATE);
+#endif
     }
 }
 

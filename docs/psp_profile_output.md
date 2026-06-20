@@ -26,16 +26,19 @@ make psp-profile-report \
 ```
 
 The report contains gprof's flat profile, call graph and function index.
+The header also records the gprof executable and version, ELF SHA-256, gmon SHA-256, and build ID when the matching build metadata is present.
 
 ## Phase CSV
 
 `profile-NNN.csv` has one row per timed phase:
 
 ```text
-phase,inclusive_or_exclusive,calls,total_us,us_per_frame,us_per_call,percent_of_capture,items,us_per_item
+phase,inclusive_or_exclusive,calls,total_us_raw,total_us_adjusted,us_per_frame_adjusted,us_per_call_adjusted,percent_of_capture_adjusted,items,us_per_item_raw
 ```
 
 All times are wall-clock microseconds from `sceKernelGetSystemTimeWide()`. Rows are inclusive. Nested rows, such as display-list traversal inside graphics task total, must not be summed as independent frame time.
+
+Adjusted columns subtract the measured minimum timer read-pair overhead once per completed phase call. They do not subtract nested phase time. Use raw columns when validating profiler overhead; use adjusted columns for first-pass phase comparisons.
 
 `items` is populated only where a natural denominator exists, such as vertices or triangles. Otherwise it is zero.
 
@@ -57,6 +60,9 @@ capture slot
 requested frame count
 actual frame count
 timer overhead us
+timer overhead samples
+phase totals note
+forced active phase ends on stop
 ```
 
 Machine-readable sections follow:
