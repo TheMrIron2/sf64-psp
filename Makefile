@@ -262,12 +262,11 @@ LDFLAGS += -Wl,-Map,$(PSP_MAP) -Wl,-zmax-page-size=128
 ifeq ($(PROFILE_PSP),1)
 CFLAGS += -pg -g -fno-omit-frame-pointer -fno-optimize-sibling-calls
 LDFLAGS += -pg -g
-else
+endif
+
 LDFLAGS += -specs=$(PSPSDK)/lib/prxspecs \
            -Wl,-q,-T$(PSPSDK)/lib/linkfile.prx \
            $(PSPSDK)/lib/prxexports.o
-endif
-
 
 include src/psp/sources.mk
 
@@ -390,14 +389,8 @@ $(MIO0):
 
 $(PSP_EBOOT): $(PSP_ELF) $(PSP_SFO)
 	$(call print,Packaging PSP EBOOT:,$<,$@)
-ifeq ($(PROFILE_PSP),1)
-	$(V)$(PSP_STRIP) $(PSP_ELF) -o $(BUILD_DIR)/$(TARGET).psp.strip.elf
-	$(V)$(PACK_PBP) $@ $(PSP_SFO) $(PSP_EBOOT_ICON) $(PSP_EBOOT_ICON1) NULL $(PSP_EBOOT_PIC0) $(PSP_EBOOT_SND0) $(BUILD_DIR)/$(TARGET).psp.strip.elf $(PSP_EBOOT_PSAR)
-	$(V)$(RM) -f $(BUILD_DIR)/$(TARGET).psp.strip.elf
-else
 	$(V)$(PSP_PRXGEN) $(PSP_ELF) $(PSP_PRX)
 	$(V)$(PACK_PBP) $@ $(PSP_SFO) $(PSP_EBOOT_ICON) $(PSP_EBOOT_ICON1) NULL $(PSP_EBOOT_PIC0) $(PSP_EBOOT_SND0) $(PSP_PRX) $(PSP_EBOOT_PSAR)
-endif
 
 $(PROFILE_METADATA): $(PSP_EBOOT) $(PSP_ELF) $(PSP_MAP) Makefile
 	@mkdir -p $(dir $@)
@@ -455,9 +448,10 @@ $(PSP_ELF): $(O_FILES)
 	@mkdir -p $(dir $@)
 	$(call print,Linking PSP ELF:,$<,$@)
 	$(V)$(CC) $(O_FILES) $(LDFLAGS) $(PSP_LIBS) -o $@
-ifneq ($(PROFILE_PSP),1)
 	$(V)$(PSP_FIXUP_IMPORTS) $@
-endif
+
+$(PSP_MAP): $(PSP_ELF)
+	@test -f $@
 
 $(N64PSP_BUILD_STAMP): FORCE
 	$(MAKE) -C $(N64PSP_DIR) \
