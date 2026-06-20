@@ -1621,47 +1621,9 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
         return;
     }
 
-<<<<<<< Updated upstream
-=======
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_G_VTX);
     PspProfiler_CountGvtx(count, (ctx->geometryMode & G_LIGHTING) != 0);
-#if (USE_N64PSP_BATCH_TRANSFORM + 0)
-    {
-        n64psp_mat4f modelview;
-        n64psp_mat4f projectionModelview;
 
-        for (i = 0; i < count; i++) {
-            const Vtx* in = &src[i];
-
-            sPspGfxDlTransformInput[i].x =
-                (float) in->v.ob[0];
-
-            sPspGfxDlTransformInput[i].y =
-                (float) in->v.ob[1];
-
-            sPspGfxDlTransformInput[i].z =
-                (float) in->v.ob[2];
-
-            sPspGfxDlTransformInput[i].w = 1.0f;
-        }
-
-        psp_gfx_dl_prepare_batch_matrices(
-            ctx,
-            &modelview,
-            &projectionModelview
-        );
-
-        n64psp_mat4f_transform_vec4_2mat_batch(
-            sPspGfxDlTransformOutput,
-            &modelview,
-            &projectionModelview,
-            sPspGfxDlTransformInput,
-            count
-        );
-    }
-#endif
-
->>>>>>> Stashed changes
     for (i = 0; i < count; i++) {
         const Vtx* in = &src[i];
         PspGfxDlVertex* out = &ctx->vertices[v0 + i];
