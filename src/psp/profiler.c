@@ -331,6 +331,7 @@ static const char* psp_profiler_texture_flush_source_name(PspProfileTextureFlush
     static const char* names[PSP_PROFILE_TEXTURE_FLUSH_COUNT] = {
         "material_key",
         "texture_enable",
+        "cache_miss_upload",
         "set_texture_image"
     };
 

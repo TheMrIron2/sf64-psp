@@ -2393,7 +2393,6 @@ static void psp_gfx_dl_handle_texture(PspGfxDlContext* ctx, const Gfx* gfx) {
 }
 
 static void psp_gfx_dl_handle_set_texture_image(PspGfxDlContext* ctx, const Gfx* gfx) {
-    psp_gfx_dl_flush_texture_change(ctx, PSP_PROFILE_TEXTURE_FLUSH_SET_TEXTURE_IMAGE);
     ctx->textureFormat = (gfx->words.w0 >> 21) & 0x7;
     ctx->textureSize = (gfx->words.w0 >> 19) & 0x3;
     ctx->textureImage = psp_gfx_dl_resolve_ptr(ctx, gfx->words.w1);
@@ -2430,6 +2429,9 @@ static void psp_gfx_dl_handle_set_tile(PspGfxDlContext* ctx, const Gfx* gfx) {
 
 static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int premultiply) {
     int result;
+    int hit = 0;
+    int supported = 1;
+    const u16* palette;
 
     if ((ctx->textureId != 0) || ctx->textureUploadAttempted || (ctx->textureImage == NULL) ||
         (ctx->textureWidth == 0) || (ctx->textureHeight == 0)) {
@@ -2442,32 +2444,59 @@ static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int pr
     ctx->textureUploadAttempted = 1;
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TEXTURE_PREPARE);
     if ((ctx->textureFormat == G_IM_FMT_CI) && (ctx->textureSize == G_IM_SIZ_8b)) {
-        ctx->textureId =
-            PspGfxPspgl_GetCi8Texture((const u8*) ctx->textureImage, ctx->texturePalette, ctx->textureWidth,
-                                     ctx->textureHeight, &ctx->textureUploadWidth, &ctx->textureUploadHeight);
+        hit = PspGfxPspgl_FindCi8Texture((const u8*) ctx->textureImage, ctx->texturePalette, ctx->textureWidth,
+                                         ctx->textureHeight, &ctx->textureId, &ctx->textureUploadWidth,
+                                         &ctx->textureUploadHeight);
+        if (!hit) {
+            psp_gfx_dl_flush_texture_change(ctx, PSP_PROFILE_TEXTURE_FLUSH_CACHE_MISS_UPLOAD);
+            ctx->textureId =
+                PspGfxPspgl_CreateCi8Texture((const u8*) ctx->textureImage, ctx->texturePalette, ctx->textureWidth,
+                                             ctx->textureHeight, &ctx->textureUploadWidth, &ctx->textureUploadHeight);
+        }
     } else if ((ctx->textureFormat == G_IM_FMT_CI) && (ctx->textureSize == G_IM_SIZ_4b)) {
-        ctx->textureId =
-            PspGfxPspgl_GetCi4Texture((const u8*) ctx->textureImage,
-                                     ctx->texturePalette + (ctx->texturePaletteIndex * 16), ctx->textureWidth,
-                                     ctx->textureHeight, &ctx->textureUploadWidth, &ctx->textureUploadHeight);
+        palette = ctx->texturePalette + (ctx->texturePaletteIndex * 16);
+        hit = PspGfxPspgl_FindCi4Texture((const u8*) ctx->textureImage, palette, ctx->textureWidth,
+                                         ctx->textureHeight, &ctx->textureId, &ctx->textureUploadWidth,
+                                         &ctx->textureUploadHeight);
+        if (!hit) {
+            psp_gfx_dl_flush_texture_change(ctx, PSP_PROFILE_TEXTURE_FLUSH_CACHE_MISS_UPLOAD);
+            ctx->textureId = PspGfxPspgl_CreateCi4Texture((const u8*) ctx->textureImage, palette, ctx->textureWidth,
+                                                          ctx->textureHeight, &ctx->textureUploadWidth,
+                                                          &ctx->textureUploadHeight);
+        }
     } else if ((ctx->textureFormat == G_IM_FMT_RGBA) && (ctx->textureSize == G_IM_SIZ_16b)) {
-        ctx->textureId =
-            PspGfxPspgl_GetRgba16Texture((const u16*) ctx->textureImage, ctx->textureWidth, ctx->textureHeight,
-                                        premultiply, &ctx->textureUploadWidth, &ctx->textureUploadHeight);
+        hit = PspGfxPspgl_FindRgba16Texture((const u16*) ctx->textureImage, ctx->textureWidth, ctx->textureHeight,
+                                            premultiply, &ctx->textureId, &ctx->textureUploadWidth,
+                                            &ctx->textureUploadHeight);
+        if (!hit) {
+            psp_gfx_dl_flush_texture_change(ctx, PSP_PROFILE_TEXTURE_FLUSH_CACHE_MISS_UPLOAD);
+            ctx->textureId = PspGfxPspgl_CreateRgba16Texture((const u16*) ctx->textureImage, ctx->textureWidth,
+                                                             ctx->textureHeight, premultiply,
+                                                             &ctx->textureUploadWidth, &ctx->textureUploadHeight);
+        }
     } else if ((ctx->textureFormat == G_IM_FMT_IA) && (ctx->textureSize == G_IM_SIZ_8b)) {
-        ctx->textureId =
-            PspGfxPspgl_GetIa8Texture((const u8*) ctx->textureImage, ctx->textureWidth, ctx->textureHeight,
-                                     &ctx->textureUploadWidth, &ctx->textureUploadHeight);
+        hit = PspGfxPspgl_FindIa8Texture((const u8*) ctx->textureImage, ctx->textureWidth, ctx->textureHeight,
+                                         &ctx->textureId, &ctx->textureUploadWidth, &ctx->textureUploadHeight);
+        if (!hit) {
+            psp_gfx_dl_flush_texture_change(ctx, PSP_PROFILE_TEXTURE_FLUSH_CACHE_MISS_UPLOAD);
+            ctx->textureId = PspGfxPspgl_CreateIa8Texture((const u8*) ctx->textureImage, ctx->textureWidth,
+                                                          ctx->textureHeight, &ctx->textureUploadWidth,
+                                                          &ctx->textureUploadHeight);
+        }
     } else if ((ctx->textureFormat == G_IM_FMT_IA) && (ctx->textureSize == G_IM_SIZ_16b)) {
-        ctx->textureId =
-            PspGfxPspgl_GetIa16Texture((const u16*) ctx->textureImage, ctx->textureWidth, ctx->textureHeight,
-                                      &ctx->textureUploadWidth, &ctx->textureUploadHeight);
+        hit = PspGfxPspgl_FindIa16Texture((const u16*) ctx->textureImage, ctx->textureWidth, ctx->textureHeight,
+                                          &ctx->textureId, &ctx->textureUploadWidth, &ctx->textureUploadHeight);
+        if (!hit) {
+            psp_gfx_dl_flush_texture_change(ctx, PSP_PROFILE_TEXTURE_FLUSH_CACHE_MISS_UPLOAD);
+            ctx->textureId = PspGfxPspgl_CreateIa16Texture((const u16*) ctx->textureImage, ctx->textureWidth,
+                                                           ctx->textureHeight, &ctx->textureUploadWidth,
+                                                           &ctx->textureUploadHeight);
+        }
     } else {
-        PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TEXTURE_PREPARE);
-        return 0;
+        supported = 0;
     }
 
-    if (ctx->textureId != 0) {
+    if (supported && (ctx->textureId != 0)) {
         ctx->stats.textureCount++;
         if (deferred) {
             ctx->stats.deferredTextureCount++;
@@ -2483,7 +2512,9 @@ static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int pr
         }
         result = 1;
     } else {
-        ctx->stats.textureRejected++;
+        if (supported) {
+            ctx->stats.textureRejected++;
+        }
         result = 0;
     }
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TEXTURE_PREPARE);
