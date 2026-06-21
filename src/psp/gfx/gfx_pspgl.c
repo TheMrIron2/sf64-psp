@@ -7,6 +7,7 @@
 #include <string.h>
 
 #define PSP_GFX_PSPGL_TEXTURE_CACHE_SIZE 64
+#define PSP_GFX_PSPGL_RGBA16_TEXTURE_CACHE_SIZE 96
 #define PSP_GFX_PSPGL_MAX_TEXTURE_PIXELS (256 * 32)
 #define PSP_GFX_PSPGL_MIN_TEXTURE_DIMENSION 8
 #define PSP_GFX_PSPGL_VERTEX_STREAM_SETS 2
@@ -74,7 +75,7 @@ typedef struct {
 #endif
 
 static PspGfxTextureCacheEntry sTextureCache[PSP_GFX_PSPGL_TEXTURE_CACHE_SIZE];
-static PspGfxRgba16TextureCacheEntry sRgba16TextureCache[PSP_GFX_PSPGL_TEXTURE_CACHE_SIZE];
+static PspGfxRgba16TextureCacheEntry sRgba16TextureCache[PSP_GFX_PSPGL_RGBA16_TEXTURE_CACHE_SIZE];
 static PspGfxConvertedTextureCacheEntry sConvertedTextureCache[PSP_GFX_PSPGL_TEXTURE_CACHE_SIZE];
 #if SF64_PSP_PSPGL_VBO_STREAM
 static PspGfxVertexStreamPage sVertexStreamSmallPages[PSP_GFX_PSPGL_VERTEX_STREAM_SMALL_PAGE_COUNT];
@@ -698,7 +699,7 @@ int PspGfxPspgl_FindRgba16Texture(const u16* pixels, u32 width, u32 height, int 
             *uploadHeight = entry->uploadHeight;
 #if SF64_PSP_PROFILE_PHASES
             PspProfiler_RecordTextureCacheLookup(PSP_PROFILE_TEXTURE_CACHE_RGBA16,
-                                                 PSP_GFX_PSPGL_TEXTURE_CACHE_SIZE, sRgba16TextureCacheCount,
+                                                 PSP_GFX_PSPGL_RGBA16_TEXTURE_CACHE_SIZE, sRgba16TextureCacheCount,
                                                  keyHash, baseHash, 1);
 #endif
             PspProfiler_CountTextureEvent(1, 0, 0, 0, 0);
@@ -706,7 +707,7 @@ int PspGfxPspgl_FindRgba16Texture(const u16* pixels, u32 width, u32 height, int 
         }
     }
 #if SF64_PSP_PROFILE_PHASES
-    PspProfiler_RecordTextureCacheLookup(PSP_PROFILE_TEXTURE_CACHE_RGBA16, PSP_GFX_PSPGL_TEXTURE_CACHE_SIZE,
+    PspProfiler_RecordTextureCacheLookup(PSP_PROFILE_TEXTURE_CACHE_RGBA16, PSP_GFX_PSPGL_RGBA16_TEXTURE_CACHE_SIZE,
                                          sRgba16TextureCacheCount, keyHash, baseHash, 0);
 #endif
     return 0;
@@ -769,11 +770,11 @@ u32 PspGfxPspgl_CreateRgba16Texture(const u16* pixels, u32 width, u32 height, in
     }
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TEXTURE_DECODE);
 
-    if (sRgba16TextureCacheCount < PSP_GFX_PSPGL_TEXTURE_CACHE_SIZE) {
+    if (sRgba16TextureCacheCount < PSP_GFX_PSPGL_RGBA16_TEXTURE_CACHE_SIZE) {
         entry = &sRgba16TextureCache[sRgba16TextureCacheCount++];
     } else {
         entry = &sRgba16TextureCache[sRgba16TextureCacheReplaceIndex++];
-        sRgba16TextureCacheReplaceIndex %= PSP_GFX_PSPGL_TEXTURE_CACHE_SIZE;
+        sRgba16TextureCacheReplaceIndex %= PSP_GFX_PSPGL_RGBA16_TEXTURE_CACHE_SIZE;
 #if SF64_PSP_PROFILE_PHASES
         PspProfiler_RecordTextureCacheEviction(
             PSP_PROFILE_TEXTURE_CACHE_RGBA16,
@@ -789,7 +790,7 @@ u32 PspGfxPspgl_CreateRgba16Texture(const u16* pixels, u32 width, u32 height, in
     entry->premultiplied = premultiply;
 #if SF64_PSP_PROFILE_PHASES
     PspProfiler_RecordTextureCacheInsertion(PSP_PROFILE_TEXTURE_CACHE_RGBA16,
-                                            PSP_GFX_PSPGL_TEXTURE_CACHE_SIZE, sRgba16TextureCacheCount, keyHash,
+                                            PSP_GFX_PSPGL_RGBA16_TEXTURE_CACHE_SIZE, sRgba16TextureCacheCount, keyHash,
                                             baseHash);
 #endif
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TEXTURE_UPLOAD);
