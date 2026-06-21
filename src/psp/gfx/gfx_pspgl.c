@@ -10,14 +10,21 @@
 #define PSP_GFX_PSPGL_MAX_TEXTURE_PIXELS (256 * 32)
 #define PSP_GFX_PSPGL_MIN_TEXTURE_DIMENSION 8
 #define PSP_GFX_PSPGL_VERTEX_STREAM_SETS 2
-#define PSP_GFX_PSPGL_VERTEX_STREAM_PAGES_PER_SET 256
-#define PSP_GFX_PSPGL_VERTEX_STREAM_PAGE_VERTICES 256
-#define PSP_GFX_PSPGL_VERTEX_STREAM_PAGE_COUNT \
-    (PSP_GFX_PSPGL_VERTEX_STREAM_SETS * PSP_GFX_PSPGL_VERTEX_STREAM_PAGES_PER_SET)
-#define PSP_GFX_PSPGL_VERTEX_STREAM_PAGE_BYTES \
-    (PSP_GFX_PSPGL_VERTEX_STREAM_PAGE_VERTICES * sizeof(PspGfxPspglColorVertex))
+#define PSP_GFX_PSPGL_VERTEX_STREAM_SMALL_PAGES_PER_SET 256
+#define PSP_GFX_PSPGL_VERTEX_STREAM_SMALL_PAGE_VERTICES 256
+#define PSP_GFX_PSPGL_VERTEX_STREAM_LARGE_PAGES_PER_SET 32
+#define PSP_GFX_PSPGL_VERTEX_STREAM_LARGE_PAGE_VERTICES 3072
+#define PSP_GFX_PSPGL_VERTEX_STREAM_SMALL_PAGE_COUNT \
+    (PSP_GFX_PSPGL_VERTEX_STREAM_SETS * PSP_GFX_PSPGL_VERTEX_STREAM_SMALL_PAGES_PER_SET)
+#define PSP_GFX_PSPGL_VERTEX_STREAM_LARGE_PAGE_COUNT \
+    (PSP_GFX_PSPGL_VERTEX_STREAM_SETS * PSP_GFX_PSPGL_VERTEX_STREAM_LARGE_PAGES_PER_SET)
+#define PSP_GFX_PSPGL_VERTEX_STREAM_SMALL_PAGE_BYTES \
+    (PSP_GFX_PSPGL_VERTEX_STREAM_SMALL_PAGE_VERTICES * sizeof(PspGfxPspglColorVertex))
+#define PSP_GFX_PSPGL_VERTEX_STREAM_LARGE_PAGE_BYTES \
+    (PSP_GFX_PSPGL_VERTEX_STREAM_LARGE_PAGE_VERTICES * sizeof(PspGfxPspglColorVertex))
 #define PSP_GFX_PSPGL_VERTEX_STREAM_SET_BYTES \
-    (PSP_GFX_PSPGL_VERTEX_STREAM_PAGES_PER_SET * PSP_GFX_PSPGL_VERTEX_STREAM_PAGE_BYTES)
+    ((PSP_GFX_PSPGL_VERTEX_STREAM_SMALL_PAGES_PER_SET * PSP_GFX_PSPGL_VERTEX_STREAM_SMALL_PAGE_BYTES) + \
+     (PSP_GFX_PSPGL_VERTEX_STREAM_LARGE_PAGES_PER_SET * PSP_GFX_PSPGL_VERTEX_STREAM_LARGE_PAGE_BYTES))
 
 #ifndef SF64_PSP_PSPGL_VBO_STREAM
 #define SF64_PSP_PSPGL_VBO_STREAM 1
@@ -70,7 +77,8 @@ static PspGfxTextureCacheEntry sTextureCache[PSP_GFX_PSPGL_TEXTURE_CACHE_SIZE];
 static PspGfxRgba16TextureCacheEntry sRgba16TextureCache[PSP_GFX_PSPGL_TEXTURE_CACHE_SIZE];
 static PspGfxConvertedTextureCacheEntry sConvertedTextureCache[PSP_GFX_PSPGL_TEXTURE_CACHE_SIZE];
 #if SF64_PSP_PSPGL_VBO_STREAM
-static PspGfxVertexStreamPage sVertexStreamPages[PSP_GFX_PSPGL_VERTEX_STREAM_PAGE_COUNT];
+static PspGfxVertexStreamPage sVertexStreamSmallPages[PSP_GFX_PSPGL_VERTEX_STREAM_SMALL_PAGE_COUNT];
+static PspGfxVertexStreamPage sVertexStreamLargePages[PSP_GFX_PSPGL_VERTEX_STREAM_LARGE_PAGE_COUNT];
 #endif
 static u8 sTextureUpload[PSP_GFX_PSPGL_MAX_TEXTURE_PIXELS * 4];
 static u32 sTextureCacheCount;
@@ -80,7 +88,8 @@ static u32 sRgba16TextureCacheReplaceIndex;
 static u32 sConvertedTextureCacheCount;
 static u32 sConvertedTextureCacheReplaceIndex;
 static u32 sVertexStreamSetIndex;
-static u32 sVertexStreamPageIndex;
+static u32 sVertexStreamSmallPageIndex;
+static u32 sVertexStreamLargePageIndex;
 static int sVertexStreamInitialized;
 static int sVertexStreamAvailable;
 
@@ -190,21 +199,36 @@ static void psp_gfx_pspgl_init_vertex_stream(void) {
     sVertexStreamInitialized = 1;
 #if SF64_PSP_PSPGL_VBO_STREAM
     sVertexStreamAvailable = 1;
-    glGenBuffers(PSP_GFX_PSPGL_VERTEX_STREAM_PAGE_COUNT, &sVertexStreamPages[0].buffer);
-    for (i = 0; i < PSP_GFX_PSPGL_VERTEX_STREAM_PAGE_COUNT; i++) {
-        if (sVertexStreamPages[i].buffer == 0) {
+    glGenBuffers(PSP_GFX_PSPGL_VERTEX_STREAM_SMALL_PAGE_COUNT, &sVertexStreamSmallPages[0].buffer);
+    for (i = 0; i < PSP_GFX_PSPGL_VERTEX_STREAM_SMALL_PAGE_COUNT; i++) {
+        if (sVertexStreamSmallPages[i].buffer == 0) {
             sVertexStreamAvailable = 0;
             break;
         }
-        glBindBuffer(GL_ARRAY_BUFFER, sVertexStreamPages[i].buffer);
-        glBufferData(GL_ARRAY_BUFFER, PSP_GFX_PSPGL_VERTEX_STREAM_PAGE_BYTES, NULL, GL_DYNAMIC_DRAW);
+        glBindBuffer(GL_ARRAY_BUFFER, sVertexStreamSmallPages[i].buffer);
+        glBufferData(GL_ARRAY_BUFFER, PSP_GFX_PSPGL_VERTEX_STREAM_SMALL_PAGE_BYTES, NULL, GL_DYNAMIC_DRAW);
+    }
+    glGenBuffers(PSP_GFX_PSPGL_VERTEX_STREAM_LARGE_PAGE_COUNT, &sVertexStreamLargePages[0].buffer);
+    for (i = 0; i < PSP_GFX_PSPGL_VERTEX_STREAM_LARGE_PAGE_COUNT; i++) {
+        if (sVertexStreamLargePages[i].buffer == 0) {
+            sVertexStreamAvailable = 0;
+            break;
+        }
+        glBindBuffer(GL_ARRAY_BUFFER, sVertexStreamLargePages[i].buffer);
+        glBufferData(GL_ARRAY_BUFFER, PSP_GFX_PSPGL_VERTEX_STREAM_LARGE_PAGE_BYTES, NULL, GL_DYNAMIC_DRAW);
     }
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     if (!sVertexStreamAvailable) {
-        for (i = 0; i < PSP_GFX_PSPGL_VERTEX_STREAM_PAGE_COUNT; i++) {
-            if (sVertexStreamPages[i].buffer != 0) {
-                glDeleteBuffers(1, &sVertexStreamPages[i].buffer);
-                sVertexStreamPages[i].buffer = 0;
+        for (i = 0; i < PSP_GFX_PSPGL_VERTEX_STREAM_SMALL_PAGE_COUNT; i++) {
+            if (sVertexStreamSmallPages[i].buffer != 0) {
+                glDeleteBuffers(1, &sVertexStreamSmallPages[i].buffer);
+                sVertexStreamSmallPages[i].buffer = 0;
+            }
+        }
+        for (i = 0; i < PSP_GFX_PSPGL_VERTEX_STREAM_LARGE_PAGE_COUNT; i++) {
+            if (sVertexStreamLargePages[i].buffer != 0) {
+                glDeleteBuffers(1, &sVertexStreamLargePages[i].buffer);
+                sVertexStreamLargePages[i].buffer = 0;
             }
         }
     }
@@ -219,7 +243,8 @@ static void psp_gfx_pspgl_reset_vertex_stream(void) {
         return;
     }
     sVertexStreamSetIndex = (sVertexStreamSetIndex + 1) % PSP_GFX_PSPGL_VERTEX_STREAM_SETS;
-    sVertexStreamPageIndex = 0;
+    sVertexStreamSmallPageIndex = 0;
+    sVertexStreamLargePageIndex = 0;
 }
 
 static int psp_gfx_pspgl_find_converted_texture(const void* pixels, const u16* palette, u32 width, u32 height,
@@ -659,8 +684,11 @@ static void psp_gfx_pspgl_draw_client_arrays(const PspGfxPspglColorVertex* verti
     glDrawArrays(GL_TRIANGLES, 0, vertexCount);
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_SUBMIT);
     PspProfiler_CountDrawCall(vertexCount);
-    PspProfiler_CountVertexStream(0, 0, 0, 0, 1, vertexCount, 0, PSP_GFX_PSPGL_VERTEX_STREAM_SET_BYTES,
-                                  sVertexStreamPageIndex * PSP_GFX_PSPGL_VERTEX_STREAM_PAGE_BYTES);
+    PspProfiler_CountVertexStream(
+        0, 0, 0, 0, 1, vertexCount, 0, PSP_GFX_PSPGL_VERTEX_STREAM_SET_BYTES,
+        (sVertexStreamSmallPageIndex * PSP_GFX_PSPGL_VERTEX_STREAM_SMALL_PAGE_BYTES) +
+            (sVertexStreamLargePageIndex * PSP_GFX_PSPGL_VERTEX_STREAM_LARGE_PAGE_BYTES),
+        0, 0, 0, 0);
 }
 
 static int psp_gfx_pspgl_draw_vbo_stream(const PspGfxPspglColorVertex* vertices, u32 vertexCount) {
@@ -671,17 +699,40 @@ static int psp_gfx_pspgl_draw_vbo_stream(const PspGfxPspglColorVertex* vertices,
     u32 bytes;
     u32 highWater;
     u32 pageSwitch;
+    u32 smallDraw;
+    u32 largeDraw;
 
-    if (!sVertexStreamAvailable || (vertexCount > PSP_GFX_PSPGL_VERTEX_STREAM_PAGE_VERTICES) ||
-        (sVertexStreamPageIndex >= PSP_GFX_PSPGL_VERTEX_STREAM_PAGES_PER_SET)) {
+    if (!sVertexStreamAvailable) {
         return 0;
     }
 
-    pageIndex = (sVertexStreamSetIndex * PSP_GFX_PSPGL_VERTEX_STREAM_PAGES_PER_SET) + sVertexStreamPageIndex;
-    page = &sVertexStreamPages[pageIndex];
+    smallDraw = vertexCount <= PSP_GFX_PSPGL_VERTEX_STREAM_SMALL_PAGE_VERTICES;
+    largeDraw = !smallDraw && (vertexCount <= PSP_GFX_PSPGL_VERTEX_STREAM_LARGE_PAGE_VERTICES);
+    if (smallDraw) {
+        if (sVertexStreamSmallPageIndex >= PSP_GFX_PSPGL_VERTEX_STREAM_SMALL_PAGES_PER_SET) {
+            return 0;
+        }
+        pageIndex = (sVertexStreamSetIndex * PSP_GFX_PSPGL_VERTEX_STREAM_SMALL_PAGES_PER_SET) +
+                    sVertexStreamSmallPageIndex;
+        page = &sVertexStreamSmallPages[pageIndex];
+        pageSwitch = (sVertexStreamSmallPageIndex != 0) || (sVertexStreamLargePageIndex != 0);
+        highWater = ((sVertexStreamSmallPageIndex + 1) * PSP_GFX_PSPGL_VERTEX_STREAM_SMALL_PAGE_BYTES) +
+                    (sVertexStreamLargePageIndex * PSP_GFX_PSPGL_VERTEX_STREAM_LARGE_PAGE_BYTES);
+    } else if (largeDraw) {
+        if (sVertexStreamLargePageIndex >= PSP_GFX_PSPGL_VERTEX_STREAM_LARGE_PAGES_PER_SET) {
+            return 0;
+        }
+        pageIndex = (sVertexStreamSetIndex * PSP_GFX_PSPGL_VERTEX_STREAM_LARGE_PAGES_PER_SET) +
+                    sVertexStreamLargePageIndex;
+        page = &sVertexStreamLargePages[pageIndex];
+        pageSwitch = (sVertexStreamSmallPageIndex != 0) || (sVertexStreamLargePageIndex != 0);
+        highWater = (sVertexStreamSmallPageIndex * PSP_GFX_PSPGL_VERTEX_STREAM_SMALL_PAGE_BYTES) +
+                    ((sVertexStreamLargePageIndex + 1) * PSP_GFX_PSPGL_VERTEX_STREAM_LARGE_PAGE_BYTES);
+    } else {
+        return 0;
+    }
+
     bytes = vertexCount * sizeof(PspGfxPspglColorVertex);
-    pageSwitch = (sVertexStreamPageIndex != 0);
-    highWater = (sVertexStreamPageIndex + 1) * PSP_GFX_PSPGL_VERTEX_STREAM_PAGE_BYTES;
     (void) pageSwitch;
     (void) highWater;
 
@@ -698,16 +749,21 @@ static int psp_gfx_pspgl_draw_vbo_stream(const PspGfxPspglColorVertex* vertices,
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD);
 
     psp_gfx_pspgl_bind_vbo_arrays(page->buffer);
-    sVertexStreamPageIndex++;
+    if (smallDraw) {
+        sVertexStreamSmallPageIndex++;
+    } else {
+        sVertexStreamLargePageIndex++;
+    }
     PspProfiler_CountVertexStream(0, 0, 1, bytes, 0, 0, pageSwitch, PSP_GFX_PSPGL_VERTEX_STREAM_SET_BYTES,
-                                  highWater);
+                                  highWater, 0, 0, 0, 0);
 
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_SUBMIT);
     glDrawArrays(GL_TRIANGLES, 0, vertexCount);
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_SUBMIT);
     PspProfiler_CountDrawCall(vertexCount);
     PspProfiler_CountVertexStream(1, vertexCount, 0, 0, 0, 0, 0, PSP_GFX_PSPGL_VERTEX_STREAM_SET_BYTES,
-                                  highWater);
+                                  highWater, smallDraw, largeDraw, smallDraw ? vertexCount : 0,
+                                  largeDraw ? vertexCount : 0);
     return 1;
 #else
     (void) vertices;

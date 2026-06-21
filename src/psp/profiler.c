@@ -98,6 +98,10 @@ typedef struct {
     u64 drawCalls;
     u64 vboDrawCalls;
     u64 vboVertices;
+    u64 smallVboDrawCalls;
+    u64 largeVboDrawCalls;
+    u64 smallVboVertices;
+    u64 largeVboVertices;
     u64 vertexStreamUploadCalls;
     u64 vertexStreamUploadBytes;
     u64 clientArrayFallbackDraws;
@@ -446,9 +450,10 @@ static void psp_profiler_write_phase_files(u32 slot) {
              sCounters.textureUploads, sCounters.textureBytesUploaded);
     psp_profiler_write_all(fd, line);
     snprintf(line, sizeof(line),
-             "\n[PSPGL vertex stream]\nenabled,%d\nvbo_draw_calls,%llu\nvbo_vertices,%llu\nupload_calls,%llu\nupload_bytes,%llu\nclient_array_fallback_draws,%llu\nclient_array_fallback_vertices,%llu\npage_switches,%llu\ncapacity_bytes,%llu\nhigh_water_bytes,%llu\n",
+             "\n[PSPGL vertex stream]\nenabled,%d\nvbo_draw_calls,%llu\nvbo_vertices,%llu\nsmall_vbo_draws,%llu\nlarge_vbo_draws,%llu\nsmall_vbo_vertices,%llu\nlarge_vbo_vertices,%llu\nupload_calls,%llu\nupload_bytes,%llu\nclient_array_fallback_draws,%llu\nclient_array_fallback_vertices,%llu\npage_switches,%llu\ncapacity_bytes,%llu\nhigh_water_bytes,%llu\n",
              SF64_PSP_PSPGL_VBO_STREAM, sCounters.vboDrawCalls, sCounters.vboVertices,
-             sCounters.vertexStreamUploadCalls, sCounters.vertexStreamUploadBytes,
+             sCounters.smallVboDrawCalls, sCounters.largeVboDrawCalls, sCounters.smallVboVertices,
+             sCounters.largeVboVertices, sCounters.vertexStreamUploadCalls, sCounters.vertexStreamUploadBytes,
              sCounters.clientArrayFallbackDraws, sCounters.clientArrayFallbackVertices,
              sCounters.vertexStreamPageSwitches, sCounters.vertexStreamCapacityBytes,
              sCounters.vertexStreamHighWaterBytes);
@@ -846,12 +851,18 @@ void PspProfiler_CountDrawCall(u32 vertices) {
 }
 
 void PspProfiler_CountVertexStream(u32 vboDraw, u32 vertices, u32 upload, u32 uploadBytes, u32 fallbackDraw,
-                                   u32 fallbackVertices, u32 pageSwitch, u32 capacityBytes, u32 highWaterBytes) {
+                                   u32 fallbackVertices, u32 pageSwitch, u32 capacityBytes, u32 highWaterBytes,
+                                   u32 smallVboDraw, u32 largeVboDraw, u32 smallVboVertices,
+                                   u32 largeVboVertices) {
     if (!sCaptureActive) {
         return;
     }
     sCounters.vboDrawCalls += vboDraw;
     sCounters.vboVertices += vertices;
+    sCounters.smallVboDrawCalls += smallVboDraw;
+    sCounters.largeVboDrawCalls += largeVboDraw;
+    sCounters.smallVboVertices += smallVboVertices;
+    sCounters.largeVboVertices += largeVboVertices;
     sCounters.vertexStreamUploadCalls += upload;
     sCounters.vertexStreamUploadBytes += uploadBytes;
     sPhase[PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD].items += uploadBytes;

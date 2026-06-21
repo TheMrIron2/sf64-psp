@@ -90,7 +90,8 @@ void PspProfiler_CountBatchStateTransitions(int textureIdChanged, int textureEnv
 void PspProfiler_CountTextureFlushSource(PspProfileTextureFlushSource source);
 void PspProfiler_CountDrawCall(u32 vertices);
 void PspProfiler_CountVertexStream(u32 vboDraw, u32 vertices, u32 upload, u32 uploadBytes, u32 fallbackDraw,
-                                   u32 fallbackVertices, u32 pageSwitch, u32 capacityBytes, u32 highWaterBytes);
+                                   u32 fallbackVertices, u32 pageSwitch, u32 capacityBytes, u32 highWaterBytes,
+                                   u32 smallVboDraw, u32 largeVboDraw, u32 smallVboVertices, u32 largeVboVertices);
 void PspProfiler_CountGlFlush(void);
 void PspProfiler_CountSync(void);
 #else
@@ -111,8 +112,9 @@ void PspProfiler_CountSync(void);
     ((void) 0)
 #define PspProfiler_CountTextureFlushSource(source) ((void) 0)
 #define PspProfiler_CountDrawCall(vertices) ((void) 0)
-#define PspProfiler_CountVertexStream(vboDraw, vertices, upload, uploadBytes, fallbackDraw, fallbackVertices, \
-                                      pageSwitch, capacityBytes, highWaterBytes)                             \
+#define PspProfiler_CountVertexStream(vboDraw, vertices, upload, uploadBytes, fallbackDraw, fallbackVertices,      \
+                                      pageSwitch, capacityBytes, highWaterBytes, smallVboDraw, largeVboDraw,      \
+                                      smallVboVertices, largeVboVertices)                                         \
     ((void) 0)
 #define PspProfiler_CountGlFlush() ((void) 0)
 #define PspProfiler_CountSync() ((void) 0)
