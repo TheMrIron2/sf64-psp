@@ -192,6 +192,7 @@ typedef struct {
     u32 modelviewSerial;
     u32 cachedModelviewSerial;
     u32 cachedProjectionSerial;
+    int alignedMatricesValid;
 #endif
     u32 matrixFlagsSeen;
     s16 viewportScaleX;
@@ -701,7 +702,8 @@ static void psp_gfx_dl_bump_serial(u32* serial) {
 static void psp_gfx_dl_prepare_batch_matrices(PspGfxDlContext* ctx) {
     n64psp_mat4f projection;
     int modelviewChanged =
-        ctx->cachedModelviewSerial != ctx->modelviewSerial;
+        !ctx->alignedMatricesValid ||
+        (ctx->cachedModelviewSerial != ctx->modelviewSerial);
 
     if (modelviewChanged) {
         if (ctx->hasModelview) {
@@ -712,34 +714,30 @@ static void psp_gfx_dl_prepare_batch_matrices(PspGfxDlContext* ctx) {
         } else {
             psp_gfx_dl_identity(ctx->alignedModelview.m);
         }
+
         ctx->cachedModelviewSerial = ctx->modelviewSerial;
     }
 
-    if (!modelviewChanged &&
+    if (ctx->alignedMatricesValid &&
+        !modelviewChanged &&
         (ctx->cachedProjectionSerial == ctx->projectionSerial)) {
         return;
     }
 
     if (ctx->hasProjection) {
         psp_gfx_dl_mtx_copy(projection.m, ctx->projection);
-        /*
-         * projectionModelview(input)
-         *     = projection(modelview(input))
-         */
+
         n64psp_mat4f_mul(
             &ctx->alignedProjectionModelview,
             &projection,
             &ctx->alignedModelview
         );
     } else {
-        /*
-         * The second batch output is unused without projection,
-         * but the API still requires a valid second matrix.
-         */
         ctx->alignedProjectionModelview = ctx->alignedModelview;
     }
 
     ctx->cachedProjectionSerial = ctx->projectionSerial;
+    ctx->alignedMatricesValid = 1;
 }
 #endif
 
@@ -3267,6 +3265,9 @@ static void psp_gfx_dl_reset_context(PspGfxDlContext* ctx) {
     (USE_N64PSP_BATCH_LIGHTING + 0)
     ctx->modelviewSerial = 1;
     ctx->projectionSerial = 1;
+    ctx->cachedModelviewSerial = 0;
+    ctx->cachedModelviewSerial = 0;
+    ctx->cachedProjectionSerial = 0;
 #endif
 }
 
