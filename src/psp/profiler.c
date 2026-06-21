@@ -23,6 +23,9 @@
 #ifndef SF64_PSP_DIRECT_TRI_FASTPATH
 #define SF64_PSP_DIRECT_TRI_FASTPATH 1
 #endif
+#ifndef SF64_PSP_BATCH_STATE_CACHE
+#define SF64_PSP_BATCH_STATE_CACHE 1
+#endif
 #ifndef SF64_GIT_SHA
 #define SF64_GIT_SHA "unknown"
 #endif
@@ -135,6 +138,11 @@ typedef struct {
     u64 perspectivePathTriangles;
     u64 clippedPathTriangles;
     u64 directVerticesWritten;
+    u64 effectiveStateResolves;
+    u64 effectiveStateReuses;
+    u64 materialStateResolves;
+    u64 depthStateResolves;
+    u64 fogStateResolves;
     u64 batchFlushes;
     u64 flushReasons[PSP_PROFILE_FLUSH_COUNT];
     u64 batchStateTransitions[PSP_PROFILE_BATCH_STATE_COUNT];
@@ -349,11 +357,6 @@ static const char* psp_profiler_phase_name(PspProfilePhase phase) {
         "texture decode/conversion",
         "texture upload",
         "batch construction",
-        "triangle state preparation",
-        "triangle clip classification",
-        "direct vertex packing",
-        "general clip-vertex construction",
-        "perspective subdivision",
         "batch flush total",
         "PSPGL vertex stream upload",
         "PSPGL draw submission",
@@ -574,9 +577,10 @@ static void psp_profiler_write_phase_files(u32 slot) {
     }
 
     snprintf(line, sizeof(line),
-             "SF64 git SHA: %s\nn64psp submodule SHA: %s\nPerfect Dark reference SHA: %s\ncompiler: %s\noptimisation flags: %s\nPROFILE_PSP: %d\nSF64_PSP_PROFILE_PHASES: %d\nSF64_PSP_PSPGL_VBO_STREAM: %d\nSF64_PSP_DIRECT_TRI_FASTPATH: %d\nCPU clock: %lu\nbus clock: %lu\ncapture slot: %lu\nrequested frame count: %d\nactual frame count: %lu\ntimer overhead us: %llu\n\n",
+             "SF64 git SHA: %s\nn64psp submodule SHA: %s\nPerfect Dark reference SHA: %s\ncompiler: %s\noptimisation flags: %s\nPROFILE_PSP: %d\nSF64_PSP_PROFILE_PHASES: %d\nSF64_PSP_PSPGL_VBO_STREAM: %d\nSF64_PSP_DIRECT_TRI_FASTPATH: %d\nSF64_PSP_BATCH_STATE_CACHE: %d\nCPU clock: %lu\nbus clock: %lu\ncapture slot: %lu\nrequested frame count: %d\nactual frame count: %lu\ntimer overhead us: %llu\n\n",
              SF64_GIT_SHA, N64PSP_GIT_SHA, PERFECT_DARK_PSP_SHA, SF64_PSP_COMPILER, SF64_PSP_OPT_FLAGS,
              SF64_PSP_GPROF, SF64_PSP_PROFILE_PHASES, SF64_PSP_PSPGL_VBO_STREAM, SF64_PSP_DIRECT_TRI_FASTPATH,
+             SF64_PSP_BATCH_STATE_CACHE,
              (unsigned long) scePowerGetCpuClockFrequency(),
              (unsigned long) scePowerGetBusClockFrequency(), (unsigned long) slot, SF64_PSP_PROFILE_CAPTURE_FRAMES,
              (unsigned long) sCaptureFrames, sTimerReadPairOverheadUs);
@@ -668,6 +672,11 @@ static void psp_profiler_write_phase_files(u32 slot) {
              "\n[triangle path statistics]\ndirect_fastpath_triangles,%llu\ngeneral_path_triangles,%llu\nperspective_path_triangles,%llu\nclipped_path_triangles,%llu\ndirect_vertices_written,%llu\n",
              sCounters.directFastpathTriangles, sCounters.generalPathTriangles,
              sCounters.perspectivePathTriangles, sCounters.clippedPathTriangles, sCounters.directVerticesWritten);
+    psp_profiler_write_all(fd, line);
+    snprintf(line, sizeof(line),
+             "\n[effective state cache]\neffective_state_resolves,%llu\neffective_state_reuses,%llu\nmaterial_state_resolves,%llu\ndepth_state_resolves,%llu\nfog_state_resolves,%llu\n",
+             sCounters.effectiveStateResolves, sCounters.effectiveStateReuses,
+             sCounters.materialStateResolves, sCounters.depthStateResolves, sCounters.fogStateResolves);
     psp_profiler_write_all(fd, line);
     snprintf(line, sizeof(line),
              "\n[TnL statistics]\ndisplay_list_tasks,%llu\ngvtx_commands,%llu\nvertices_loaded,%llu\nmodelview_matrix_commands,%llu\nprojection_matrix_commands,%llu\nmatrix_compositions,%llu\nlit_vertices,%llu\nunlit_vertices,%llu\nnormal_transforms,%llu\nnormalisations,%llu\nlighting_evaluations,%llu\nclip_code_calculations,%llu\nperspective_divides,%llu\ntri1_commands,%llu\ntri2_commands,%llu\nbatch_flushes,%llu\nvertices_submitted,%llu\ndraw_calls,%llu\nglFlush_calls,%llu\nsync_calls,%llu\n",
@@ -1143,6 +1152,18 @@ void PspProfiler_CountTrianglePath(u32 directFastpathTriangles, u32 generalPathT
     sCounters.perspectivePathTriangles += perspectivePathTriangles;
     sCounters.clippedPathTriangles += clippedPathTriangles;
     sCounters.directVerticesWritten += directVerticesWritten;
+}
+
+void PspProfiler_CountEffectiveState(u32 resolves, u32 reuses, u32 materialResolves, u32 depthResolves,
+                                     u32 fogResolves) {
+    if (!sCaptureActive) {
+        return;
+    }
+    sCounters.effectiveStateResolves += resolves;
+    sCounters.effectiveStateReuses += reuses;
+    sCounters.materialStateResolves += materialResolves;
+    sCounters.depthStateResolves += depthResolves;
+    sCounters.fogStateResolves += fogResolves;
 }
 
 void PspProfiler_CountDrawCall(u32 vertices) {
