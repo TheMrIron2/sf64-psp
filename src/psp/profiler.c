@@ -43,6 +43,8 @@
 #define PSP_PROFILE_MAX_SLOT 999
 #define PSP_PROFILE_MAX_THREADS 8
 #define PSP_PROFILE_TIMER_SAMPLES 128
+#define PSP_PROFILE_TEXTURE_CACHE_TRACKED_KEYS 512
+#define PSP_PROFILE_TEXTURE_CACHE_REUSE_BINS 8
 
 #define PSP_PROFILE_ATTR __attribute__((no_instrument_function, no_profile_instrument_function))
 
@@ -65,6 +67,41 @@ typedef struct {
     u64 startUs[PSP_PROFILE_PHASE_COUNT];
     u8 active[PSP_PROFILE_PHASE_COUNT];
 } PspProfileThreadState;
+
+typedef struct {
+    u64 keyHash;
+    u64 baseHash;
+    u64 lastSeenSeq;
+    u64 evictionSeq;
+    u8 used;
+    u8 resident;
+    u8 evicted;
+} PspProfileTextureCacheKey;
+
+typedef struct {
+    u64 baseHash;
+    u64 variants;
+    u8 used;
+} PspProfileTextureCacheBaseKey;
+
+typedef struct {
+    u64 lookups;
+    u64 hits;
+    u64 misses;
+    u64 insertions;
+    u64 evictions;
+    u64 uniqueKeys;
+    u64 uniqueKeyOverflow;
+    u64 uniqueBaseKeys;
+    u64 uniqueBaseKeyOverflow;
+    u64 maxVariantsPerBaseKey;
+    u64 reuseAfterEviction;
+    u64 maxReuseDistance;
+    u64 reuseDistanceBins[PSP_PROFILE_TEXTURE_CACHE_REUSE_BINS];
+    u32 capacity;
+    u32 currentEntries;
+    u32 peakEntries;
+} PspProfileTextureCacheState;
 
 typedef struct {
     u64 displayListTasks;
@@ -116,6 +153,11 @@ typedef struct {
     u64 textureDecodes;
     u64 textureUploads;
     u64 textureBytesUploaded;
+    PspProfileTextureCacheState textureCache[PSP_PROFILE_TEXTURE_CACHE_COUNT];
+    PspProfileTextureCacheKey textureCacheKeys[PSP_PROFILE_TEXTURE_CACHE_COUNT][PSP_PROFILE_TEXTURE_CACHE_TRACKED_KEYS];
+    PspProfileTextureCacheBaseKey
+        textureCacheBaseKeys[PSP_PROFILE_TEXTURE_CACHE_COUNT][PSP_PROFILE_TEXTURE_CACHE_TRACKED_KEYS];
+    u64 textureCacheLookupSeq;
 } PspProfileCounters;
 #endif
 
@@ -355,6 +397,126 @@ static const char* psp_profiler_texture_flush_source_name(PspProfileTextureFlush
     return names[source];
 }
 
+static const char* psp_profiler_texture_cache_name(PspProfileTextureCacheClass cache) {
+    static const char* names[PSP_PROFILE_TEXTURE_CACHE_COUNT] = {
+        "ci8",
+        "rgba16",
+        "converted"
+    };
+
+    return names[cache];
+}
+
+static PspProfileTextureCacheKey* psp_profiler_find_texture_cache_key(PspProfileTextureCacheClass cache,
+                                                                      u64 keyHash) {
+    u32 i;
+
+    for (i = 0; i < PSP_PROFILE_TEXTURE_CACHE_TRACKED_KEYS; i++) {
+        PspProfileTextureCacheKey* key = &sCounters.textureCacheKeys[cache][i];
+
+        if (key->used && (key->keyHash == keyHash)) {
+            return key;
+        }
+    }
+    return NULL;
+}
+
+static PspProfileTextureCacheKey* psp_profiler_track_texture_cache_key(PspProfileTextureCacheClass cache,
+                                                                       u64 keyHash, u64 baseHash) {
+    PspProfileTextureCacheState* state = &sCounters.textureCache[cache];
+    u32 i;
+
+    for (i = 0; i < PSP_PROFILE_TEXTURE_CACHE_TRACKED_KEYS; i++) {
+        PspProfileTextureCacheKey* key = &sCounters.textureCacheKeys[cache][i];
+
+        if (key->used && (key->keyHash == keyHash)) {
+            return key;
+        }
+    }
+    for (i = 0; i < PSP_PROFILE_TEXTURE_CACHE_TRACKED_KEYS; i++) {
+        PspProfileTextureCacheKey* key = &sCounters.textureCacheKeys[cache][i];
+
+        if (!key->used) {
+            key->used = 1;
+            key->keyHash = keyHash;
+            key->baseHash = baseHash;
+            state->uniqueKeys++;
+            return key;
+        }
+    }
+    state->uniqueKeyOverflow++;
+    return NULL;
+}
+
+static u64 psp_profiler_popcount64(u64 value) {
+    u64 count = 0;
+
+    while (value != 0) {
+        count += value & 1ULL;
+        value >>= 1;
+    }
+    return count;
+}
+
+static void psp_profiler_track_texture_cache_base_key(PspProfileTextureCacheClass cache, u64 baseHash,
+                                                      u64 keyHash) {
+    PspProfileTextureCacheState* state = &sCounters.textureCache[cache];
+    PspProfileTextureCacheBaseKey* empty = NULL;
+    u32 i;
+
+    for (i = 0; i < PSP_PROFILE_TEXTURE_CACHE_TRACKED_KEYS; i++) {
+        PspProfileTextureCacheBaseKey* base = &sCounters.textureCacheBaseKeys[cache][i];
+
+        if (!base->used) {
+            if (empty == NULL) {
+                empty = base;
+            }
+            continue;
+        }
+        if (base->baseHash == baseHash) {
+            u64 variantMask = 1ULL << (keyHash & 63ULL);
+
+            if ((base->variants & variantMask) == 0) {
+                base->variants |= variantMask;
+                {
+                    u64 variants = psp_profiler_popcount64(base->variants);
+
+                    if (variants > state->maxVariantsPerBaseKey) {
+                        state->maxVariantsPerBaseKey = variants;
+                    }
+                }
+            }
+            return;
+        }
+    }
+    if (empty != NULL) {
+        empty->used = 1;
+        empty->baseHash = baseHash;
+        empty->variants = 1ULL << (keyHash & 63ULL);
+        state->uniqueBaseKeys++;
+        if (state->maxVariantsPerBaseKey == 0) {
+            state->maxVariantsPerBaseKey = 1;
+        }
+    } else {
+        state->uniqueBaseKeyOverflow++;
+    }
+}
+
+static void psp_profiler_count_texture_cache_reuse_distance(PspProfileTextureCacheState* state, u64 distance) {
+    static const u64 limits[PSP_PROFILE_TEXTURE_CACHE_REUSE_BINS - 1] = {
+        1, 4, 8, 16, 32, 64, 128
+    };
+    u32 bin;
+
+    for (bin = 0; bin < PSP_PROFILE_TEXTURE_CACHE_REUSE_BINS - 1; bin++) {
+        if (distance <= limits[bin]) {
+            state->reuseDistanceBins[bin]++;
+            return;
+        }
+    }
+    state->reuseDistanceBins[PSP_PROFILE_TEXTURE_CACHE_REUSE_BINS - 1]++;
+}
+
 static void psp_profiler_write_csv_row(SceUID fd, PspProfilePhase phase) {
     char line[192];
     const PspProfilePhaseState* p = &sPhase[phase];
@@ -449,6 +611,32 @@ static void psp_profiler_write_phase_files(u32 slot) {
              sCounters.textureCacheHits, sCounters.textureCacheMisses, sCounters.textureDecodes,
              sCounters.textureUploads, sCounters.textureBytesUploaded);
     psp_profiler_write_all(fd, line);
+    psp_profiler_write_all(fd,
+                           "\n[texture cache behaviour]\ncache,capacity,current_entries,peak_entries,unique_keys,unique_base_keys,max_variants_per_base,lookups,hits,misses,insertions,evictions,reuse_after_eviction,max_reuse_distance,unique_key_overflow,unique_base_overflow\n");
+    for (i = 0; i < PSP_PROFILE_TEXTURE_CACHE_COUNT; i++) {
+        const PspProfileTextureCacheState* cache = &sCounters.textureCache[i];
+
+        snprintf(line, sizeof(line),
+                 "%s,%lu,%lu,%lu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu\n",
+                 psp_profiler_texture_cache_name((PspProfileTextureCacheClass) i),
+                 (unsigned long) cache->capacity, (unsigned long) cache->currentEntries,
+                 (unsigned long) cache->peakEntries, cache->uniqueKeys, cache->uniqueBaseKeys,
+                 cache->maxVariantsPerBaseKey, cache->lookups, cache->hits, cache->misses, cache->insertions,
+                 cache->evictions, cache->reuseAfterEviction, cache->maxReuseDistance,
+                 cache->uniqueKeyOverflow, cache->uniqueBaseKeyOverflow);
+        psp_profiler_write_all(fd, line);
+    }
+    psp_profiler_write_all(fd, "\n[texture cache eviction reuse distance]\ncache,1,2-4,5-8,9-16,17-32,33-64,65-128,129+\n");
+    for (i = 0; i < PSP_PROFILE_TEXTURE_CACHE_COUNT; i++) {
+        const PspProfileTextureCacheState* cache = &sCounters.textureCache[i];
+
+        snprintf(line, sizeof(line), "%s,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu\n",
+                 psp_profiler_texture_cache_name((PspProfileTextureCacheClass) i),
+                 cache->reuseDistanceBins[0], cache->reuseDistanceBins[1], cache->reuseDistanceBins[2],
+                 cache->reuseDistanceBins[3], cache->reuseDistanceBins[4], cache->reuseDistanceBins[5],
+                 cache->reuseDistanceBins[6], cache->reuseDistanceBins[7]);
+        psp_profiler_write_all(fd, line);
+    }
     snprintf(line, sizeof(line),
              "\n[PSPGL vertex stream]\nenabled,%d\nvbo_draw_calls,%llu\nvbo_vertices,%llu\nsmall_vbo_draws,%llu\nlarge_vbo_draws,%llu\nsmall_vbo_vertices,%llu\nlarge_vbo_vertices,%llu\nupload_calls,%llu\nupload_bytes,%llu\nclient_array_fallback_draws,%llu\nclient_array_fallback_vertices,%llu\npage_switches,%llu\ncapacity_bytes,%llu\nhigh_water_bytes,%llu\n",
              SF64_PSP_PSPGL_VBO_STREAM, sCounters.vboDrawCalls, sCounters.vboVertices,
@@ -792,6 +980,89 @@ void PspProfiler_CountTextureEvent(u32 hit, u32 miss, u32 decode, u32 upload, u3
     sCounters.textureDecodes += decode;
     sCounters.textureUploads += upload;
     sCounters.textureBytesUploaded += bytesUploaded;
+}
+
+void PspProfiler_RecordTextureCacheLookup(PspProfileTextureCacheClass cache, u32 capacity, u32 occupied,
+                                          u64 keyHash, u64 baseHash, int hit) {
+    PspProfileTextureCacheState* state;
+    PspProfileTextureCacheKey* key;
+
+    if (!sCaptureActive || (cache >= PSP_PROFILE_TEXTURE_CACHE_COUNT)) {
+        return;
+    }
+    state = &sCounters.textureCache[cache];
+    state->capacity = capacity;
+    state->currentEntries = occupied;
+    if (occupied > state->peakEntries) {
+        state->peakEntries = occupied;
+    }
+    state->lookups++;
+    sCounters.textureCacheLookupSeq++;
+
+    key = psp_profiler_track_texture_cache_key(cache, keyHash, baseHash);
+    psp_profiler_track_texture_cache_base_key(cache, baseHash, keyHash);
+    if (key != NULL) {
+        if (!hit && key->evicted && !key->resident) {
+            u64 distance = (sCounters.textureCacheLookupSeq >= key->evictionSeq)
+                               ? (sCounters.textureCacheLookupSeq - key->evictionSeq)
+                               : 0;
+
+            state->reuseAfterEviction++;
+            if (distance > state->maxReuseDistance) {
+                state->maxReuseDistance = distance;
+            }
+            psp_profiler_count_texture_cache_reuse_distance(state, distance);
+            key->evicted = 0;
+        }
+        key->lastSeenSeq = sCounters.textureCacheLookupSeq;
+        key->resident = hit ? 1 : key->resident;
+    }
+    if (hit) {
+        state->hits++;
+    } else {
+        state->misses++;
+    }
+}
+
+void PspProfiler_RecordTextureCacheInsertion(PspProfileTextureCacheClass cache, u32 capacity, u32 occupied,
+                                             u64 keyHash, u64 baseHash) {
+    PspProfileTextureCacheState* state;
+    PspProfileTextureCacheKey* key;
+
+    if (!sCaptureActive || (cache >= PSP_PROFILE_TEXTURE_CACHE_COUNT)) {
+        return;
+    }
+    state = &sCounters.textureCache[cache];
+    state->capacity = capacity;
+    state->currentEntries = occupied;
+    if (occupied > state->peakEntries) {
+        state->peakEntries = occupied;
+    }
+    state->insertions++;
+    key = psp_profiler_track_texture_cache_key(cache, keyHash, baseHash);
+    psp_profiler_track_texture_cache_base_key(cache, baseHash, keyHash);
+    if (key != NULL) {
+        key->resident = 1;
+        key->evicted = 0;
+        key->baseHash = baseHash;
+    }
+}
+
+void PspProfiler_RecordTextureCacheEviction(PspProfileTextureCacheClass cache, u64 keyHash) {
+    PspProfileTextureCacheState* state;
+    PspProfileTextureCacheKey* key;
+
+    if (!sCaptureActive || (cache >= PSP_PROFILE_TEXTURE_CACHE_COUNT)) {
+        return;
+    }
+    state = &sCounters.textureCache[cache];
+    state->evictions++;
+    key = psp_profiler_find_texture_cache_key(cache, keyHash);
+    if (key != NULL) {
+        key->resident = 0;
+        key->evicted = 1;
+        key->evictionSeq = sCounters.textureCacheLookupSeq;
+    }
 }
 
 void PspProfiler_CountBatchFlush(PspProfileFlushReason reason, u32 submittedVertices) {

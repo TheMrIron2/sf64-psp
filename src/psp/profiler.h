@@ -58,6 +58,13 @@ typedef enum {
     PSP_PROFILE_TEXTURE_FLUSH_COUNT
 } PspProfileTextureFlushSource;
 
+typedef enum {
+    PSP_PROFILE_TEXTURE_CACHE_CI8,
+    PSP_PROFILE_TEXTURE_CACHE_RGBA16,
+    PSP_PROFILE_TEXTURE_CACHE_CONVERTED,
+    PSP_PROFILE_TEXTURE_CACHE_COUNT
+} PspProfileTextureCacheClass;
+
 void PspProfiler_Init(void);
 int PspProfiler_PollControls(u32 rawButtons);
 void PspProfiler_StartCapture(void);
@@ -83,6 +90,11 @@ void PspProfiler_CountTriangleResult(u32 accepted, u32 rejected, u32 clipped, u3
 void PspProfiler_CountTransformWork(u32 vertices, u32 normals, u32 normalizes, u32 lighting, u32 clipCodes,
                                     u32 divides);
 void PspProfiler_CountTextureEvent(u32 hit, u32 miss, u32 decode, u32 upload, u32 bytesUploaded);
+void PspProfiler_RecordTextureCacheLookup(PspProfileTextureCacheClass cache, u32 capacity, u32 occupied,
+                                          u64 keyHash, u64 baseHash, int hit);
+void PspProfiler_RecordTextureCacheInsertion(PspProfileTextureCacheClass cache, u32 capacity, u32 occupied,
+                                             u64 keyHash, u64 baseHash);
+void PspProfiler_RecordTextureCacheEviction(PspProfileTextureCacheClass cache, u64 keyHash);
 void PspProfiler_CountBatchFlush(PspProfileFlushReason reason, u32 submittedVertices);
 void PspProfiler_CountBatchStateTransitions(int textureIdChanged, int textureEnvChanged, int wrapSChanged,
                                            int wrapTChanged, int alphaTestChanged, int blendChanged,
@@ -106,6 +118,9 @@ void PspProfiler_CountSync(void);
 #define PspProfiler_CountTriangleResult(accepted, rejected, clipped, generatedVertices, outputTriangles) ((void) 0)
 #define PspProfiler_CountTransformWork(vertices, normals, normalizes, lighting, clipCodes, divides) ((void) 0)
 #define PspProfiler_CountTextureEvent(hit, miss, decode, upload, bytesUploaded) ((void) 0)
+#define PspProfiler_RecordTextureCacheLookup(cache, capacity, occupied, keyHash, baseHash, hit) ((void) 0)
+#define PspProfiler_RecordTextureCacheInsertion(cache, capacity, occupied, keyHash, baseHash) ((void) 0)
+#define PspProfiler_RecordTextureCacheEviction(cache, keyHash) ((void) 0)
 #define PspProfiler_CountBatchFlush(reason, submittedVertices) ((void) 0)
 #define PspProfiler_CountBatchStateTransitions(textureIdChanged, textureEnvChanged, wrapSChanged, wrapTChanged, \
                                                alphaTestChanged, blendChanged, premultipliedChanged)            \
