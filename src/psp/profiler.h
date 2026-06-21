@@ -13,6 +13,11 @@ typedef enum {
     PSP_PROFILE_PHASE_TEXTURE_DECODE,
     PSP_PROFILE_PHASE_TEXTURE_UPLOAD,
     PSP_PROFILE_PHASE_BATCH_CONSTRUCTION,
+    PSP_PROFILE_PHASE_TRIANGLE_STATE_PREPARE,
+    PSP_PROFILE_PHASE_TRIANGLE_CLIP_CLASSIFY,
+    PSP_PROFILE_PHASE_DIRECT_VERTEX_PACKING,
+    PSP_PROFILE_PHASE_GENERAL_CLIP_VERTEX_CONSTRUCTION,
+    PSP_PROFILE_PHASE_PERSPECTIVE_SUBDIVISION,
     PSP_PROFILE_PHASE_BATCH_FLUSH,
     PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD,
     PSP_PROFILE_PHASE_PSPGL_SUBMIT,
@@ -100,6 +105,9 @@ void PspProfiler_CountBatchStateTransitions(int textureIdChanged, int textureEnv
                                            int wrapTChanged, int alphaTestChanged, int blendChanged,
                                            int premultipliedChanged);
 void PspProfiler_CountTextureFlushSource(PspProfileTextureFlushSource source);
+void PspProfiler_CountTrianglePath(u32 directFastpathTriangles, u32 generalPathTriangles,
+                                   u32 perspectivePathTriangles, u32 clippedPathTriangles,
+                                   u32 directVerticesWritten);
 void PspProfiler_CountDrawCall(u32 vertices);
 void PspProfiler_CountVertexStream(u32 vboDraw, u32 vertices, u32 upload, u32 uploadBytes, u32 fallbackDraw,
                                    u32 fallbackVertices, u32 pageSwitch, u32 capacityBytes, u32 highWaterBytes,
@@ -126,6 +134,9 @@ void PspProfiler_CountSync(void);
                                                alphaTestChanged, blendChanged, premultipliedChanged)            \
     ((void) 0)
 #define PspProfiler_CountTextureFlushSource(source) ((void) 0)
+#define PspProfiler_CountTrianglePath(directFastpathTriangles, generalPathTriangles, perspectivePathTriangles, \
+                                      clippedPathTriangles, directVerticesWritten)                            \
+    ((void) 0)
 #define PspProfiler_CountDrawCall(vertices) ((void) 0)
 #define PspProfiler_CountVertexStream(vboDraw, vertices, upload, uploadBytes, fallbackDraw, fallbackVertices,      \
                                       pageSwitch, capacityBytes, highWaterBytes, smallVboDraw, largeVboDraw,      \
