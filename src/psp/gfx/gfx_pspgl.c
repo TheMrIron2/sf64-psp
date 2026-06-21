@@ -4,10 +4,24 @@
 
 #include <GLES/gl.h>
 #include <stddef.h>
+#include <string.h>
 
 #define PSP_GFX_PSPGL_TEXTURE_CACHE_SIZE 64
 #define PSP_GFX_PSPGL_MAX_TEXTURE_PIXELS (256 * 32)
 #define PSP_GFX_PSPGL_MIN_TEXTURE_DIMENSION 8
+#define PSP_GFX_PSPGL_VERTEX_STREAM_SETS 2
+#define PSP_GFX_PSPGL_VERTEX_STREAM_PAGES_PER_SET 256
+#define PSP_GFX_PSPGL_VERTEX_STREAM_PAGE_VERTICES 256
+#define PSP_GFX_PSPGL_VERTEX_STREAM_PAGE_COUNT \
+    (PSP_GFX_PSPGL_VERTEX_STREAM_SETS * PSP_GFX_PSPGL_VERTEX_STREAM_PAGES_PER_SET)
+#define PSP_GFX_PSPGL_VERTEX_STREAM_PAGE_BYTES \
+    (PSP_GFX_PSPGL_VERTEX_STREAM_PAGE_VERTICES * sizeof(PspGfxPspglColorVertex))
+#define PSP_GFX_PSPGL_VERTEX_STREAM_SET_BYTES \
+    (PSP_GFX_PSPGL_VERTEX_STREAM_PAGES_PER_SET * PSP_GFX_PSPGL_VERTEX_STREAM_PAGE_BYTES)
+
+#ifndef SF64_PSP_PSPGL_VBO_STREAM
+#define SF64_PSP_PSPGL_VBO_STREAM 1
+#endif
 
 typedef struct {
     const u8* indices;
@@ -46,9 +60,18 @@ typedef struct {
     GLuint texture;
 } PspGfxConvertedTextureCacheEntry;
 
+#if SF64_PSP_PSPGL_VBO_STREAM
+typedef struct {
+    GLuint buffer;
+} PspGfxVertexStreamPage;
+#endif
+
 static PspGfxTextureCacheEntry sTextureCache[PSP_GFX_PSPGL_TEXTURE_CACHE_SIZE];
 static PspGfxRgba16TextureCacheEntry sRgba16TextureCache[PSP_GFX_PSPGL_TEXTURE_CACHE_SIZE];
 static PspGfxConvertedTextureCacheEntry sConvertedTextureCache[PSP_GFX_PSPGL_TEXTURE_CACHE_SIZE];
+#if SF64_PSP_PSPGL_VBO_STREAM
+static PspGfxVertexStreamPage sVertexStreamPages[PSP_GFX_PSPGL_VERTEX_STREAM_PAGE_COUNT];
+#endif
 static u8 sTextureUpload[PSP_GFX_PSPGL_MAX_TEXTURE_PIXELS * 4];
 static u32 sTextureCacheCount;
 static u32 sRgba16TextureCacheCount;
@@ -56,6 +79,10 @@ static u32 sTextureCacheReplaceIndex;
 static u32 sRgba16TextureCacheReplaceIndex;
 static u32 sConvertedTextureCacheCount;
 static u32 sConvertedTextureCacheReplaceIndex;
+static u32 sVertexStreamSetIndex;
+static u32 sVertexStreamPageIndex;
+static int sVertexStreamInitialized;
+static int sVertexStreamAvailable;
 
 static void psp_gfx_pspgl_rgba16_to_rgba8(u16 color, u8* out) {
     out[0] = (u8) (((color >> 11) & 0x1F) * 255 / 31);
@@ -127,6 +154,72 @@ static u32 psp_gfx_pspgl_next_power_of_two(u32 value) {
         result <<= 1;
     }
     return result;
+}
+
+#if SF64_PSP_PSPGL_VBO_STREAM
+static const GLvoid* psp_gfx_pspgl_vertex_offset(u32 offset) {
+    return (const GLvoid*) offset;
+}
+#endif
+
+static void psp_gfx_pspgl_bind_client_arrays(const PspGfxPspglColorVertex* vertices) {
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glTexCoordPointer(2, GL_FLOAT, sizeof(PspGfxPspglColorVertex), &vertices[0].u);
+    glColorPointer(4, GL_UNSIGNED_BYTE, sizeof(PspGfxPspglColorVertex), &vertices[0].color);
+    glVertexPointer(3, GL_FLOAT, sizeof(PspGfxPspglColorVertex), &vertices[0].x);
+}
+
+#if SF64_PSP_PSPGL_VBO_STREAM
+static void psp_gfx_pspgl_bind_vbo_arrays(GLuint buffer) {
+    glBindBuffer(GL_ARRAY_BUFFER, buffer);
+    glTexCoordPointer(2, GL_FLOAT, sizeof(PspGfxPspglColorVertex),
+                      psp_gfx_pspgl_vertex_offset(offsetof(PspGfxPspglColorVertex, u)));
+    glColorPointer(4, GL_UNSIGNED_BYTE, sizeof(PspGfxPspglColorVertex),
+                   psp_gfx_pspgl_vertex_offset(offsetof(PspGfxPspglColorVertex, color)));
+    glVertexPointer(3, GL_FLOAT, sizeof(PspGfxPspglColorVertex),
+                    psp_gfx_pspgl_vertex_offset(offsetof(PspGfxPspglColorVertex, x)));
+}
+#endif
+
+static void psp_gfx_pspgl_init_vertex_stream(void) {
+    u32 i;
+
+    if (sVertexStreamInitialized) {
+        return;
+    }
+    sVertexStreamInitialized = 1;
+#if SF64_PSP_PSPGL_VBO_STREAM
+    sVertexStreamAvailable = 1;
+    glGenBuffers(PSP_GFX_PSPGL_VERTEX_STREAM_PAGE_COUNT, &sVertexStreamPages[0].buffer);
+    for (i = 0; i < PSP_GFX_PSPGL_VERTEX_STREAM_PAGE_COUNT; i++) {
+        if (sVertexStreamPages[i].buffer == 0) {
+            sVertexStreamAvailable = 0;
+            break;
+        }
+        glBindBuffer(GL_ARRAY_BUFFER, sVertexStreamPages[i].buffer);
+        glBufferData(GL_ARRAY_BUFFER, PSP_GFX_PSPGL_VERTEX_STREAM_PAGE_BYTES, NULL, GL_DYNAMIC_DRAW);
+    }
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    if (!sVertexStreamAvailable) {
+        for (i = 0; i < PSP_GFX_PSPGL_VERTEX_STREAM_PAGE_COUNT; i++) {
+            if (sVertexStreamPages[i].buffer != 0) {
+                glDeleteBuffers(1, &sVertexStreamPages[i].buffer);
+                sVertexStreamPages[i].buffer = 0;
+            }
+        }
+    }
+#else
+    (void) i;
+    sVertexStreamAvailable = 0;
+#endif
+}
+
+static void psp_gfx_pspgl_reset_vertex_stream(void) {
+    if (!sVertexStreamAvailable) {
+        return;
+    }
+    sVertexStreamSetIndex = (sVertexStreamSetIndex + 1) % PSP_GFX_PSPGL_VERTEX_STREAM_SETS;
+    sVertexStreamPageIndex = 0;
 }
 
 static int psp_gfx_pspgl_find_converted_texture(const void* pixels, const u16* palette, u32 width, u32 height,
@@ -270,6 +363,7 @@ void PspGfxPspgl_Init(void) {
 
     glEnableClientState(GL_VERTEX_ARRAY);
     glEnableClientState(GL_COLOR_ARRAY);
+    psp_gfx_pspgl_init_vertex_stream();
 }
 
 void PspGfxPspgl_BeginFrame(void) {
@@ -288,6 +382,7 @@ void PspGfxPspgl_BeginFrame(void) {
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glDepthMask(GL_FALSE);
+    psp_gfx_pspgl_reset_vertex_stream();
 }
 
 void PspGfxPspgl_Flush(void) {
@@ -558,6 +653,69 @@ u32 PspGfxPspgl_GetIa16Texture(const u16* pixels, u32 width, u32 height, u32* up
                                                uploadHeight);
 }
 
+static void psp_gfx_pspgl_draw_client_arrays(const PspGfxPspglColorVertex* vertices, u32 vertexCount) {
+    psp_gfx_pspgl_bind_client_arrays(vertices);
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_SUBMIT);
+    glDrawArrays(GL_TRIANGLES, 0, vertexCount);
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_SUBMIT);
+    PspProfiler_CountDrawCall(vertexCount);
+    PspProfiler_CountVertexStream(0, 0, 0, 0, 1, vertexCount, 0, PSP_GFX_PSPGL_VERTEX_STREAM_SET_BYTES,
+                                  sVertexStreamPageIndex * PSP_GFX_PSPGL_VERTEX_STREAM_PAGE_BYTES);
+}
+
+static int psp_gfx_pspgl_draw_vbo_stream(const PspGfxPspglColorVertex* vertices, u32 vertexCount) {
+#if SF64_PSP_PSPGL_VBO_STREAM
+    PspGfxVertexStreamPage* page;
+    void* mapped;
+    u32 pageIndex;
+    u32 bytes;
+    u32 highWater;
+    u32 pageSwitch;
+
+    if (!sVertexStreamAvailable || (vertexCount > PSP_GFX_PSPGL_VERTEX_STREAM_PAGE_VERTICES) ||
+        (sVertexStreamPageIndex >= PSP_GFX_PSPGL_VERTEX_STREAM_PAGES_PER_SET)) {
+        return 0;
+    }
+
+    pageIndex = (sVertexStreamSetIndex * PSP_GFX_PSPGL_VERTEX_STREAM_PAGES_PER_SET) + sVertexStreamPageIndex;
+    page = &sVertexStreamPages[pageIndex];
+    bytes = vertexCount * sizeof(PspGfxPspglColorVertex);
+    pageSwitch = (sVertexStreamPageIndex != 0);
+    highWater = (sVertexStreamPageIndex + 1) * PSP_GFX_PSPGL_VERTEX_STREAM_PAGE_BYTES;
+    (void) pageSwitch;
+    (void) highWater;
+
+    glBindBuffer(GL_ARRAY_BUFFER, page->buffer);
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD);
+    mapped = glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
+    if (mapped == NULL) {
+        PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        return 0;
+    }
+    memcpy(mapped, vertices, bytes);
+    glUnmapBuffer(GL_ARRAY_BUFFER);
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD);
+
+    psp_gfx_pspgl_bind_vbo_arrays(page->buffer);
+    sVertexStreamPageIndex++;
+    PspProfiler_CountVertexStream(0, 0, 1, bytes, 0, 0, pageSwitch, PSP_GFX_PSPGL_VERTEX_STREAM_SET_BYTES,
+                                  highWater);
+
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_SUBMIT);
+    glDrawArrays(GL_TRIANGLES, 0, vertexCount);
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_SUBMIT);
+    PspProfiler_CountDrawCall(vertexCount);
+    PspProfiler_CountVertexStream(1, vertexCount, 0, 0, 0, 0, 0, PSP_GFX_PSPGL_VERTEX_STREAM_SET_BYTES,
+                                  highWater);
+    return 1;
+#else
+    (void) vertices;
+    (void) vertexCount;
+    return 0;
+#endif
+}
+
 void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u32 vertexCount,
     u32 textureId, PspGfxPspglTextureEnv textureEnv, PspGfxPspglTextureWrap wrapS, PspGfxPspglTextureWrap wrapT,
     int alphaTest, int blend, int premultiplied, int depthTest, int depthWrite, int fog, const float* fogColor,
@@ -585,27 +743,6 @@ void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u3
     glEnableClientState(GL_TEXTURE_COORD_ARRAY);
     glEnableClientState(GL_COLOR_ARRAY);
     glEnableClientState(GL_VERTEX_ARRAY);
-
-    glTexCoordPointer(
-        2,
-        GL_FLOAT,
-        sizeof(PspGfxPspglColorVertex),
-        &vertices[0].u
-    );
-
-    glColorPointer(
-        4,
-        GL_UNSIGNED_BYTE,
-        sizeof(PspGfxPspglColorVertex),
-        &vertices[0].color
-    );
-
-    glVertexPointer(
-        3,
-        GL_FLOAT,
-        sizeof(PspGfxPspglColorVertex),
-        &vertices[0].x
-    );
 
     if (depthTest) {
         glEnable(GL_DEPTH_TEST);
@@ -683,8 +820,7 @@ void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u3
         glDisable(GL_BLEND);
     }
 
-    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_SUBMIT);
-    glDrawArrays(GL_TRIANGLES, 0, vertexCount);
-    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_SUBMIT);
-    PspProfiler_CountDrawCall(vertexCount);
+    if (!psp_gfx_pspgl_draw_vbo_stream(vertices, vertexCount)) {
+        psp_gfx_pspgl_draw_client_arrays(vertices, vertexCount);
+    }
 }

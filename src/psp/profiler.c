@@ -17,6 +17,9 @@
 #ifndef SF64_PSP_PROFILE_PHASES
 #define SF64_PSP_PROFILE_PHASES 0
 #endif
+#ifndef SF64_PSP_PSPGL_VBO_STREAM
+#define SF64_PSP_PSPGL_VBO_STREAM 1
+#endif
 #ifndef SF64_GIT_SHA
 #define SF64_GIT_SHA "unknown"
 #endif
@@ -93,6 +96,15 @@ typedef struct {
     u64 textureFlushSources[PSP_PROFILE_TEXTURE_FLUSH_COUNT];
     u64 verticesSubmitted;
     u64 drawCalls;
+    u64 vboDrawCalls;
+    u64 vboVertices;
+    u64 vertexStreamUploadCalls;
+    u64 vertexStreamUploadBytes;
+    u64 clientArrayFallbackDraws;
+    u64 clientArrayFallbackVertices;
+    u64 vertexStreamPageSwitches;
+    u64 vertexStreamCapacityBytes;
+    u64 vertexStreamHighWaterBytes;
     u64 glFlushCalls;
     u64 syncCalls;
     u64 textureCacheHits;
@@ -284,6 +296,7 @@ static const char* psp_profiler_phase_name(PspProfilePhase phase) {
         "texture upload",
         "batch construction",
         "batch flush total",
+        "PSPGL vertex stream upload",
         "PSPGL draw submission",
         "glFlush queue flush",
         "graphics finish/synchronisation",
@@ -382,9 +395,10 @@ static void psp_profiler_write_phase_files(u32 slot) {
     }
 
     snprintf(line, sizeof(line),
-             "SF64 git SHA: %s\nn64psp submodule SHA: %s\nPerfect Dark reference SHA: %s\ncompiler: %s\noptimisation flags: %s\nPROFILE_PSP: %d\nSF64_PSP_PROFILE_PHASES: %d\nCPU clock: %lu\nbus clock: %lu\ncapture slot: %lu\nrequested frame count: %d\nactual frame count: %lu\ntimer overhead us: %llu\n\n",
+             "SF64 git SHA: %s\nn64psp submodule SHA: %s\nPerfect Dark reference SHA: %s\ncompiler: %s\noptimisation flags: %s\nPROFILE_PSP: %d\nSF64_PSP_PROFILE_PHASES: %d\nSF64_PSP_PSPGL_VBO_STREAM: %d\nCPU clock: %lu\nbus clock: %lu\ncapture slot: %lu\nrequested frame count: %d\nactual frame count: %lu\ntimer overhead us: %llu\n\n",
              SF64_GIT_SHA, N64PSP_GIT_SHA, PERFECT_DARK_PSP_SHA, SF64_PSP_COMPILER, SF64_PSP_OPT_FLAGS,
-             SF64_PSP_GPROF, SF64_PSP_PROFILE_PHASES, (unsigned long) scePowerGetCpuClockFrequency(),
+             SF64_PSP_GPROF, SF64_PSP_PROFILE_PHASES, SF64_PSP_PSPGL_VBO_STREAM,
+             (unsigned long) scePowerGetCpuClockFrequency(),
              (unsigned long) scePowerGetBusClockFrequency(), (unsigned long) slot, SF64_PSP_PROFILE_CAPTURE_FRAMES,
              (unsigned long) sCaptureFrames, sTimerReadPairOverheadUs);
     psp_profiler_write_all(fd, line);
@@ -430,6 +444,14 @@ static void psp_profiler_write_phase_files(u32 slot) {
              "\n[texture statistics]\ncache_hits,%llu\ncache_misses,%llu\ndecodes_or_conversions,%llu\nuploads,%llu\nbytes_uploaded,%llu\n",
              sCounters.textureCacheHits, sCounters.textureCacheMisses, sCounters.textureDecodes,
              sCounters.textureUploads, sCounters.textureBytesUploaded);
+    psp_profiler_write_all(fd, line);
+    snprintf(line, sizeof(line),
+             "\n[PSPGL vertex stream]\nenabled,%d\nvbo_draw_calls,%llu\nvbo_vertices,%llu\nupload_calls,%llu\nupload_bytes,%llu\nclient_array_fallback_draws,%llu\nclient_array_fallback_vertices,%llu\npage_switches,%llu\ncapacity_bytes,%llu\nhigh_water_bytes,%llu\n",
+             SF64_PSP_PSPGL_VBO_STREAM, sCounters.vboDrawCalls, sCounters.vboVertices,
+             sCounters.vertexStreamUploadCalls, sCounters.vertexStreamUploadBytes,
+             sCounters.clientArrayFallbackDraws, sCounters.clientArrayFallbackVertices,
+             sCounters.vertexStreamPageSwitches, sCounters.vertexStreamCapacityBytes,
+             sCounters.vertexStreamHighWaterBytes);
     psp_profiler_write_all(fd, line);
     snprintf(line, sizeof(line),
              "\n[clipping statistics]\ninput_triangles,%llu\ntrivially_accepted,%llu\ntrivially_rejected,%llu\npartially_clipped,%llu\ngenerated_vertices,%llu\noutput_triangles,%llu\n",
@@ -820,6 +842,27 @@ void PspProfiler_CountDrawCall(u32 vertices) {
     if (sCaptureActive) {
         sCounters.drawCalls++;
         sPhase[PSP_PROFILE_PHASE_PSPGL_SUBMIT].items += vertices;
+    }
+}
+
+void PspProfiler_CountVertexStream(u32 vboDraw, u32 vertices, u32 upload, u32 uploadBytes, u32 fallbackDraw,
+                                   u32 fallbackVertices, u32 pageSwitch, u32 capacityBytes, u32 highWaterBytes) {
+    if (!sCaptureActive) {
+        return;
+    }
+    sCounters.vboDrawCalls += vboDraw;
+    sCounters.vboVertices += vertices;
+    sCounters.vertexStreamUploadCalls += upload;
+    sCounters.vertexStreamUploadBytes += uploadBytes;
+    sPhase[PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD].items += uploadBytes;
+    sCounters.clientArrayFallbackDraws += fallbackDraw;
+    sCounters.clientArrayFallbackVertices += fallbackVertices;
+    sCounters.vertexStreamPageSwitches += pageSwitch;
+    if (capacityBytes > sCounters.vertexStreamCapacityBytes) {
+        sCounters.vertexStreamCapacityBytes = capacityBytes;
+    }
+    if (highWaterBytes > sCounters.vertexStreamHighWaterBytes) {
+        sCounters.vertexStreamHighWaterBytes = highWaterBytes;
     }
 }
 

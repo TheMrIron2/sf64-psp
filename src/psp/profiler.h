@@ -14,6 +14,7 @@ typedef enum {
     PSP_PROFILE_PHASE_TEXTURE_UPLOAD,
     PSP_PROFILE_PHASE_BATCH_CONSTRUCTION,
     PSP_PROFILE_PHASE_BATCH_FLUSH,
+    PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD,
     PSP_PROFILE_PHASE_PSPGL_SUBMIT,
     PSP_PROFILE_PHASE_GL_FLUSH,
     PSP_PROFILE_PHASE_FINISH_SYNC,
@@ -88,6 +89,8 @@ void PspProfiler_CountBatchStateTransitions(int textureIdChanged, int textureEnv
                                            int premultipliedChanged);
 void PspProfiler_CountTextureFlushSource(PspProfileTextureFlushSource source);
 void PspProfiler_CountDrawCall(u32 vertices);
+void PspProfiler_CountVertexStream(u32 vboDraw, u32 vertices, u32 upload, u32 uploadBytes, u32 fallbackDraw,
+                                   u32 fallbackVertices, u32 pageSwitch, u32 capacityBytes, u32 highWaterBytes);
 void PspProfiler_CountGlFlush(void);
 void PspProfiler_CountSync(void);
 #else
@@ -108,6 +111,9 @@ void PspProfiler_CountSync(void);
     ((void) 0)
 #define PspProfiler_CountTextureFlushSource(source) ((void) 0)
 #define PspProfiler_CountDrawCall(vertices) ((void) 0)
+#define PspProfiler_CountVertexStream(vboDraw, vertices, upload, uploadBytes, fallbackDraw, fallbackVertices, \
+                                      pageSwitch, capacityBytes, highWaterBytes)                             \
+    ((void) 0)
 #define PspProfiler_CountGlFlush() ((void) 0)
 #define PspProfiler_CountSync() ((void) 0)
 #endif
