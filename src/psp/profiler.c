@@ -90,6 +90,7 @@ typedef struct {
     u64 batchFlushes;
     u64 flushReasons[PSP_PROFILE_FLUSH_COUNT];
     u64 batchStateTransitions[PSP_PROFILE_BATCH_STATE_COUNT];
+    u64 textureFlushSources[PSP_PROFILE_TEXTURE_FLUSH_COUNT];
     u64 verticesSubmitted;
     u64 drawCalls;
     u64 glFlushCalls;
@@ -326,6 +327,16 @@ static const char* psp_profiler_batch_state_name(PspProfileBatchStateField field
     return names[field];
 }
 
+static const char* psp_profiler_texture_flush_source_name(PspProfileTextureFlushSource source) {
+    static const char* names[PSP_PROFILE_TEXTURE_FLUSH_COUNT] = {
+        "material_key",
+        "texture_enable",
+        "set_texture_image"
+    };
+
+    return names[source];
+}
+
 static void psp_profiler_write_csv_row(SceUID fd, PspProfilePhase phase) {
     char line[192];
     const PspProfilePhaseState* p = &sPhase[phase];
@@ -405,6 +416,13 @@ static void psp_profiler_write_phase_files(u32 slot) {
     for (i = 0; i < PSP_PROFILE_BATCH_STATE_COUNT; i++) {
         snprintf(line, sizeof(line), "%s,%llu\n", psp_profiler_batch_state_name((PspProfileBatchStateField) i),
                  sCounters.batchStateTransitions[i]);
+        psp_profiler_write_all(fd, line);
+    }
+    psp_profiler_write_all(fd, "\n[texture flush sources]\nsource,count\n");
+    for (i = 0; i < PSP_PROFILE_TEXTURE_FLUSH_COUNT; i++) {
+        snprintf(line, sizeof(line), "%s,%llu\n",
+                 psp_profiler_texture_flush_source_name((PspProfileTextureFlushSource) i),
+                 sCounters.textureFlushSources[i]);
         psp_profiler_write_all(fd, line);
     }
     snprintf(line, sizeof(line),
@@ -759,12 +777,41 @@ void PspProfiler_CountBatchFlush(PspProfileFlushReason reason, u32 submittedVert
     sCounters.verticesSubmitted += submittedVertices;
 }
 
-void PspProfiler_CountBatchStateTransition(PspProfileBatchStateField field) {
+void PspProfiler_CountBatchStateTransitions(int textureIdChanged, int textureEnvChanged, int wrapSChanged,
+                                           int wrapTChanged, int alphaTestChanged, int blendChanged,
+                                           int premultipliedChanged) {
     if (!sCaptureActive) {
         return;
     }
-    if (field < PSP_PROFILE_BATCH_STATE_COUNT) {
-        sCounters.batchStateTransitions[field]++;
+    if (textureIdChanged) {
+        sCounters.batchStateTransitions[PSP_PROFILE_BATCH_STATE_TEXTURE_ID]++;
+    }
+    if (textureEnvChanged) {
+        sCounters.batchStateTransitions[PSP_PROFILE_BATCH_STATE_TEXTURE_ENV]++;
+    }
+    if (wrapSChanged) {
+        sCounters.batchStateTransitions[PSP_PROFILE_BATCH_STATE_WRAP_S]++;
+    }
+    if (wrapTChanged) {
+        sCounters.batchStateTransitions[PSP_PROFILE_BATCH_STATE_WRAP_T]++;
+    }
+    if (alphaTestChanged) {
+        sCounters.batchStateTransitions[PSP_PROFILE_BATCH_STATE_ALPHA_TEST]++;
+    }
+    if (blendChanged) {
+        sCounters.batchStateTransitions[PSP_PROFILE_BATCH_STATE_BLEND]++;
+    }
+    if (premultipliedChanged) {
+        sCounters.batchStateTransitions[PSP_PROFILE_BATCH_STATE_PREMULTIPLIED]++;
+    }
+}
+
+void PspProfiler_CountTextureFlushSource(PspProfileTextureFlushSource source) {
+    if (!sCaptureActive) {
+        return;
+    }
+    if (source < PSP_PROFILE_TEXTURE_FLUSH_COUNT) {
+        sCounters.textureFlushSources[source]++;
     }
 }
 

@@ -1275,37 +1275,32 @@ static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason 
     ctx->batchCount = 0;
 }
 
+static void psp_gfx_dl_flush_texture_change(PspGfxDlContext* ctx, PspProfileTextureFlushSource source) {
+    (void) source;
+    if (ctx->batchCount != 0) {
+        PspProfiler_CountTextureFlushSource(source);
+    }
+    psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_TEXTURE_CHANGE);
+}
+
 static void psp_gfx_dl_set_batch_texture(PspGfxDlContext* ctx, u32 textureId, PspGfxPspglTextureEnv textureEnv,
                                          PspGfxPspglTextureWrap wrapS, PspGfxPspglTextureWrap wrapT, int alphaTest,
                                          int blend, int premultiplied) {
+    int textureIdChanged = ctx->batchTextureId != textureId;
+    int textureEnvChanged = ctx->batchTextureEnv != textureEnv;
+    int wrapSChanged = ctx->batchWrapS != wrapS;
+    int wrapTChanged = ctx->batchWrapT != wrapT;
+    int alphaTestChanged = ctx->batchAlphaTest != alphaTest;
+    int blendChanged = ctx->batchBlend != blend;
+    int premultipliedChanged = ctx->batchPremultiplied != premultiplied;
+
     if ((ctx->batchCount != 0) &&
-        ((ctx->batchTextureId != textureId) || (ctx->batchTextureEnv != textureEnv) ||
-         (ctx->batchWrapS != wrapS) || (ctx->batchWrapT != wrapT) || (ctx->batchAlphaTest != alphaTest) ||
-         (ctx->batchBlend != blend) || (ctx->batchPremultiplied != premultiplied))) {
-        if (ctx->batchTextureId != textureId) {
-            PspProfiler_CountBatchStateTransition(PSP_PROFILE_BATCH_STATE_TEXTURE_ID);
-        }
-        if (ctx->batchTextureEnv != textureEnv) {
-            PspProfiler_CountBatchStateTransition(PSP_PROFILE_BATCH_STATE_TEXTURE_ENV);
-        }
-        if (ctx->batchWrapS != wrapS) {
-            PspProfiler_CountBatchStateTransition(PSP_PROFILE_BATCH_STATE_WRAP_S);
-        }
-        if (ctx->batchWrapT != wrapT) {
-            PspProfiler_CountBatchStateTransition(PSP_PROFILE_BATCH_STATE_WRAP_T);
-        }
-        if (ctx->batchAlphaTest != alphaTest) {
-            PspProfiler_CountBatchStateTransition(PSP_PROFILE_BATCH_STATE_ALPHA_TEST);
-        }
-        if (ctx->batchBlend != blend) {
-            PspProfiler_CountBatchStateTransition(PSP_PROFILE_BATCH_STATE_BLEND);
-        }
-        if (ctx->batchPremultiplied != premultiplied) {
-            PspProfiler_CountBatchStateTransition(PSP_PROFILE_BATCH_STATE_PREMULTIPLIED);
-        }
-        if ((ctx->batchTextureId != textureId) || (ctx->batchTextureEnv != textureEnv) ||
-            (ctx->batchWrapS != wrapS) || (ctx->batchWrapT != wrapT)) {
-            psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_TEXTURE_CHANGE);
+        (textureIdChanged || textureEnvChanged || wrapSChanged || wrapTChanged || alphaTestChanged || blendChanged ||
+         premultipliedChanged)) {
+        PspProfiler_CountBatchStateTransitions(textureIdChanged, textureEnvChanged, wrapSChanged, wrapTChanged,
+                                               alphaTestChanged, blendChanged, premultipliedChanged);
+        if (textureIdChanged || textureEnvChanged || wrapSChanged || wrapTChanged) {
+            psp_gfx_dl_flush_texture_change(ctx, PSP_PROFILE_TEXTURE_FLUSH_MATERIAL_KEY);
         } else {
             psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
         }
@@ -2392,13 +2387,13 @@ static void psp_gfx_dl_handle_texture(PspGfxDlContext* ctx, const Gfx* gfx) {
     int enabled = (gfx->words.w0 & 0xFF) != G_OFF;
 
     if ((ctx->batchCount != 0) && (ctx->textureEnabled != enabled)) {
-        psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_TEXTURE_CHANGE);
+        psp_gfx_dl_flush_texture_change(ctx, PSP_PROFILE_TEXTURE_FLUSH_TEXTURE_ENABLE);
     }
     ctx->textureEnabled = enabled;
 }
 
 static void psp_gfx_dl_handle_set_texture_image(PspGfxDlContext* ctx, const Gfx* gfx) {
-    psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_TEXTURE_CHANGE);
+    psp_gfx_dl_flush_texture_change(ctx, PSP_PROFILE_TEXTURE_FLUSH_SET_TEXTURE_IMAGE);
     ctx->textureFormat = (gfx->words.w0 >> 21) & 0x7;
     ctx->textureSize = (gfx->words.w0 >> 19) & 0x3;
     ctx->textureImage = psp_gfx_dl_resolve_ptr(ctx, gfx->words.w1);

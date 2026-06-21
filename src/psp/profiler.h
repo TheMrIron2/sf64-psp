@@ -49,6 +49,13 @@ typedef enum {
     PSP_PROFILE_BATCH_STATE_COUNT
 } PspProfileBatchStateField;
 
+typedef enum {
+    PSP_PROFILE_TEXTURE_FLUSH_MATERIAL_KEY,
+    PSP_PROFILE_TEXTURE_FLUSH_TEXTURE_ENABLE,
+    PSP_PROFILE_TEXTURE_FLUSH_SET_TEXTURE_IMAGE,
+    PSP_PROFILE_TEXTURE_FLUSH_COUNT
+} PspProfileTextureFlushSource;
+
 void PspProfiler_Init(void);
 int PspProfiler_PollControls(u32 rawButtons);
 void PspProfiler_StartCapture(void);
@@ -75,7 +82,10 @@ void PspProfiler_CountTransformWork(u32 vertices, u32 normals, u32 normalizes, u
                                     u32 divides);
 void PspProfiler_CountTextureEvent(u32 hit, u32 miss, u32 decode, u32 upload, u32 bytesUploaded);
 void PspProfiler_CountBatchFlush(PspProfileFlushReason reason, u32 submittedVertices);
-void PspProfiler_CountBatchStateTransition(PspProfileBatchStateField field);
+void PspProfiler_CountBatchStateTransitions(int textureIdChanged, int textureEnvChanged, int wrapSChanged,
+                                           int wrapTChanged, int alphaTestChanged, int blendChanged,
+                                           int premultipliedChanged);
+void PspProfiler_CountTextureFlushSource(PspProfileTextureFlushSource source);
 void PspProfiler_CountDrawCall(u32 vertices);
 void PspProfiler_CountGlFlush(void);
 void PspProfiler_CountSync(void);
@@ -92,7 +102,10 @@ void PspProfiler_CountSync(void);
 #define PspProfiler_CountTransformWork(vertices, normals, normalizes, lighting, clipCodes, divides) ((void) 0)
 #define PspProfiler_CountTextureEvent(hit, miss, decode, upload, bytesUploaded) ((void) 0)
 #define PspProfiler_CountBatchFlush(reason, submittedVertices) ((void) 0)
-#define PspProfiler_CountBatchStateTransition(field) ((void) 0)
+#define PspProfiler_CountBatchStateTransitions(textureIdChanged, textureEnvChanged, wrapSChanged, wrapTChanged, \
+                                               alphaTestChanged, blendChanged, premultipliedChanged)            \
+    ((void) 0)
+#define PspProfiler_CountTextureFlushSource(source) ((void) 0)
 #define PspProfiler_CountDrawCall(vertices) ((void) 0)
 #define PspProfiler_CountGlFlush() ((void) 0)
 #define PspProfiler_CountSync() ((void) 0)
