@@ -19,8 +19,17 @@
 #define PSP_VALIDATE_N64PSP_MATH 0
 #endif
 
+#ifndef USE_N64PSP_BATCH_LIGHTING
+#define USE_N64PSP_BATCH_LIGHTING 0
+#endif
+
+#ifndef PSP_VALIDATE_N64PSP_BATCH_LIGHTING
+#define PSP_VALIDATE_N64PSP_BATCH_LIGHTING 0
+#endif
+
 #if (USE_N64PSP_MATH + 0)
 #include <n64psp/math.h>
+#include <n64psp/lighting.h>
 #endif
 
 #ifndef PSP_LOG_ENABLED
@@ -176,6 +185,14 @@ typedef struct {
     u32 modelviewStackDepth;
     u32 projectionSerial;
     u32 batchProjectionSerial;
+#if (USE_N64PSP_BATCH_TRANSFORM + 0) || \
+    (USE_N64PSP_BATCH_LIGHTING + 0)
+    n64psp_mat4f alignedModelview;
+    n64psp_mat4f alignedProjectionModelview;
+    u32 modelviewSerial;
+    u32 cachedModelviewSerial;
+    u32 cachedProjectionSerial;
+#endif
     u32 matrixFlagsSeen;
     s16 viewportScaleX;
     s16 viewportScaleY;
@@ -270,6 +287,13 @@ typedef struct {
     PspGfxDlEffectiveMaterialState effectiveMaterial;
     PspGfxDlEffectiveDepthState effectiveDepth;
     PspGfxDlEffectiveFogState effectiveFog;
+#if PSP_RENDERER_DIAGNOSTICS
+    u32 vtxCommandCount;
+    u32 vtxBatchSizeHistogram[PSP_GFX_DL_MAX_VERTICES + 1];
+    u32 vtxLightCountHistogram[8];
+    u32 litVertexCount;
+    u32 unlitVertexCount;
+#endif
 } PspGfxDlContext;
 
 static PspGfxDlContext sPspGfxDlContext;
@@ -292,6 +316,33 @@ static n64psp_vec4f_pair
 #if (USE_N64PSP_BATCH_TRANSFORM + 0) && \
     (PSP_VALIDATE_N64PSP_BATCH_TRANSFORM + 0)
 static int sLoggedN64PspBatchTransformMismatch;
+#endif
+
+#if (USE_N64PSP_BATCH_LIGHTING + 0)
+static n64psp_snorm8x4
+    sPspGfxDlLightingNormals[PSP_GFX_DL_MAX_VERTICES]
+    __attribute__((aligned(16)));
+
+static n64psp_vec4f
+    sPspGfxDlLightingOutput[PSP_GFX_DL_MAX_VERTICES]
+    __attribute__((aligned(16)));
+
+static n64psp_vec4f
+    sPspGfxDlLightingAmbient
+    __attribute__((aligned(16)));
+
+static n64psp_directional_lightf
+    sPspGfxDlLightingLights[7]
+    __attribute__((aligned(16)));
+#endif
+
+#if (USE_N64PSP_BATCH_LIGHTING + 0) && \
+    (PSP_VALIDATE_N64PSP_BATCH_LIGHTING + 0)
+static n64psp_vec4f
+    sPspGfxDlLightingReference[PSP_GFX_DL_MAX_VERTICES]
+    __attribute__((aligned(16)));
+
+static int sLoggedN64PspBatchLightingMismatch;
 #endif
 
 static void psp_gfx_dl_mark_effective_material_dirty(PspGfxDlContext* ctx) {
@@ -638,45 +689,57 @@ static void psp_gfx_dl_mtx_mul(
 #endif
 }
 
-#if (USE_N64PSP_BATCH_TRANSFORM + 0)
-static void psp_gfx_dl_prepare_batch_matrices(
-    const PspGfxDlContext* ctx,
-    n64psp_mat4f* modelview,
-    n64psp_mat4f* projectionModelview
-) {
-    n64psp_mat4f projection;
+#if (USE_N64PSP_BATCH_TRANSFORM + 0) || \
+    (USE_N64PSP_BATCH_LIGHTING + 0)
+static void psp_gfx_dl_bump_serial(u32* serial) {
+    (*serial)++;
+    if (*serial == 0) {
+        *serial = 1;
+    }
+}
 
-    if (ctx->hasModelview) {
-        psp_gfx_dl_mtx_copy(
-            modelview->m,
-            ctx->modelview
-        );
-    } else {
-        psp_gfx_dl_identity(modelview->m);
+static void psp_gfx_dl_prepare_batch_matrices(PspGfxDlContext* ctx) {
+    n64psp_mat4f projection;
+    int modelviewChanged =
+        ctx->cachedModelviewSerial != ctx->modelviewSerial;
+
+    if (modelviewChanged) {
+        if (ctx->hasModelview) {
+            psp_gfx_dl_mtx_copy(
+                ctx->alignedModelview.m,
+                ctx->modelview
+            );
+        } else {
+            psp_gfx_dl_identity(ctx->alignedModelview.m);
+        }
+        ctx->cachedModelviewSerial = ctx->modelviewSerial;
+    }
+
+    if (!modelviewChanged &&
+        (ctx->cachedProjectionSerial == ctx->projectionSerial)) {
+        return;
     }
 
     if (ctx->hasProjection) {
-        psp_gfx_dl_mtx_copy(
-            projection.m,
-            ctx->projection
-        );
-
+        psp_gfx_dl_mtx_copy(projection.m, ctx->projection);
         /*
          * projectionModelview(input)
          *     = projection(modelview(input))
          */
         n64psp_mat4f_mul(
-            projectionModelview,
+            &ctx->alignedProjectionModelview,
             &projection,
-            modelview
+            &ctx->alignedModelview
         );
     } else {
         /*
          * The second batch output is unused without projection,
          * but the API still requires a valid second matrix.
          */
-        *projectionModelview = *modelview;
+        ctx->alignedProjectionModelview = ctx->alignedModelview;
     }
+
+    ctx->cachedProjectionSerial = ctx->projectionSerial;
 }
 #endif
 
@@ -858,8 +921,10 @@ static void psp_gfx_dl_reference_position_pair(
 }
 #endif
 
-#if (USE_N64PSP_BATCH_TRANSFORM + 0) && \
-    (PSP_VALIDATE_N64PSP_BATCH_TRANSFORM + 0)
+#if ((USE_N64PSP_BATCH_TRANSFORM + 0) && \
+     (PSP_VALIDATE_N64PSP_BATCH_TRANSFORM + 0)) || \
+    ((USE_N64PSP_BATCH_LIGHTING + 0) && \
+     (PSP_VALIDATE_N64PSP_BATCH_LIGHTING + 0))
 static int psp_gfx_dl_float_matches(
     float oldValue,
     float newValue,
@@ -1227,11 +1292,21 @@ static void psp_gfx_dl_handle_mtx(PspGfxDlContext* ctx, const Gfx* gfx) {
     }
     *hasTarget = 1;
     if ((flags & G_MTX_PROJECTION) != 0) {
+#if (USE_N64PSP_BATCH_TRANSFORM + 0) || \
+    (USE_N64PSP_BATCH_LIGHTING + 0)
+        psp_gfx_dl_bump_serial(&ctx->projectionSerial);
+#else
         ctx->projectionSerial++;
         if (ctx->projectionSerial == 0) {
             ctx->projectionSerial = 1;
         }
+#endif
         psp_gfx_dl_mark_effective_fog_dirty(ctx);
+#if (USE_N64PSP_BATCH_TRANSFORM + 0) || \
+    (USE_N64PSP_BATCH_LIGHTING + 0)
+    } else {
+        psp_gfx_dl_bump_serial(&ctx->modelviewSerial);
+#endif
     }
 }
 
@@ -1245,6 +1320,10 @@ static void psp_gfx_dl_handle_pop_mtx(PspGfxDlContext* ctx) {
     psp_gfx_dl_mtx_copy(ctx->modelview, ctx->modelviewStack[ctx->modelviewStackDepth]);
     ctx->hasModelview = 1;
     ctx->stats.mtxPopCount++;
+#if (USE_N64PSP_BATCH_TRANSFORM + 0) || \
+    (USE_N64PSP_BATCH_LIGHTING + 0)
+    psp_gfx_dl_bump_serial(&ctx->modelviewSerial);
+#endif
 }
 
 static void psp_gfx_dl_load_directional_light(PspGfxDlLight* dst, const Light* src) {
@@ -1279,6 +1358,180 @@ static void psp_gfx_dl_load_directional_light(PspGfxDlLight* dst, const Light* s
     dst->y = y;
     dst->z = z;
 }
+
+static void psp_gfx_dl_light_vertex_scalar(
+    const PspGfxDlContext* ctx,
+    const Vtx* input,
+    float* outR,
+    float* outG,
+    float* outB
+) {
+    float nx = (float) (s8) input->v.cn[0];
+    float ny = (float) (s8) input->v.cn[1];
+    float nz = (float) (s8) input->v.cn[2];
+    float r = ctx->ambientR;
+    float g = ctx->ambientG;
+    float b = ctx->ambientB;
+    u32 lightIndex;
+
+    if (ctx->hasModelview) {
+        float transformedX = (ctx->modelview[0][0] * nx) + (ctx->modelview[1][0] * ny) +
+                             (ctx->modelview[2][0] * nz);
+        float transformedY = (ctx->modelview[0][1] * nx) + (ctx->modelview[1][1] * ny) +
+                             (ctx->modelview[2][1] * nz);
+        float transformedZ = (ctx->modelview[0][2] * nx) + (ctx->modelview[1][2] * ny) +
+                             (ctx->modelview[2][2] * nz);
+
+        nx = transformedX;
+        ny = transformedY;
+        nz = transformedZ;
+    }
+{
+        float lengthSquared = (nx * nx) + (ny * ny) + (nz * nz);
+
+        if (lengthSquared > 0.000001f) {
+            float inverseLength = 1.0f / sqrtf(lengthSquared);
+
+            nx *= inverseLength;
+            ny *= inverseLength;
+            nz *= inverseLength;
+        }
+    }
+
+    for (lightIndex = 0; lightIndex < ctx->lightCount; lightIndex++) {
+        const PspGfxDlLight* light = &ctx->lights[lightIndex];
+        float dot;
+
+        dot = (nx * light->x) +
+            (ny * light->y) +
+            (nz * light->z);
+
+        if (dot > 0.0f) {
+            r += (float) light->r * dot;
+            g += (float) light->g * dot;
+            b += (float) light->b * dot;
+        }
+    }
+
+    *outR = r;
+    *outG = g;
+    *outB = b;
+}
+
+#if (USE_N64PSP_BATCH_LIGHTING + 0)
+static void psp_gfx_dl_stage_lighting_batch(
+    PspGfxDlContext* ctx,
+    const Vtx* src,
+    u32 count
+) {
+    u32 i;
+
+    for (i = 0; i < count; i++) {
+        sPspGfxDlLightingNormals[i].x = (int8_t) src[i].v.cn[0];
+        sPspGfxDlLightingNormals[i].y = (int8_t) src[i].v.cn[1];
+        sPspGfxDlLightingNormals[i].z = (int8_t) src[i].v.cn[2];
+        sPspGfxDlLightingNormals[i].w = 0;
+    }
+
+    sPspGfxDlLightingAmbient.x = (float) ctx->ambientR;
+    sPspGfxDlLightingAmbient.y = (float) ctx->ambientG;
+    sPspGfxDlLightingAmbient.z = (float) ctx->ambientB;
+    sPspGfxDlLightingAmbient.w = 0.0f;
+
+    for (i = 0; i < ctx->lightCount; i++) {
+        sPspGfxDlLightingLights[i].direction.x = ctx->lights[i].x;
+        sPspGfxDlLightingLights[i].direction.y = ctx->lights[i].y;
+        sPspGfxDlLightingLights[i].direction.z = ctx->lights[i].z;
+        sPspGfxDlLightingLights[i].direction.w = 0.0f;
+        sPspGfxDlLightingLights[i].color.x = (float) ctx->lights[i].r;
+        sPspGfxDlLightingLights[i].color.y = (float) ctx->lights[i].g;
+        sPspGfxDlLightingLights[i].color.z = (float) ctx->lights[i].b;
+        sPspGfxDlLightingLights[i].color.w = 0.0f;
+    }
+}
+#endif
+
+#if (USE_N64PSP_BATCH_LIGHTING + 0) && \
+    (PSP_VALIDATE_N64PSP_BATCH_LIGHTING + 0)
+static int psp_gfx_dl_validate_lighting_batch(
+    const PspGfxDlContext* ctx,
+    const Vtx* src,
+    u32 batchVertexIndex,
+    const n64psp_vec4f* actual
+) {
+    float scalarR;
+    float scalarG;
+    float scalarB;
+    u8 scalarMappedR;
+    u8 scalarMappedG;
+    u8 scalarMappedB;
+    u8 actualMappedR;
+    u8 actualMappedG;
+    u8 actualMappedB;
+
+    psp_gfx_dl_light_vertex_scalar(
+        ctx,
+        src,
+        &scalarR,
+        &scalarG,
+        &scalarB
+    );
+
+    sPspGfxDlLightingReference[batchVertexIndex].x = scalarR;
+    sPspGfxDlLightingReference[batchVertexIndex].y = scalarG;
+    sPspGfxDlLightingReference[batchVertexIndex].z = scalarB;
+    sPspGfxDlLightingReference[batchVertexIndex].w = 0.0f;
+
+    scalarMappedR = psp_gfx_dl_remap_lighting(scalarR);
+    scalarMappedG = psp_gfx_dl_remap_lighting(scalarG);
+    scalarMappedB = psp_gfx_dl_remap_lighting(scalarB);
+    actualMappedR = psp_gfx_dl_remap_lighting(actual->x);
+    actualMappedG = psp_gfx_dl_remap_lighting(actual->y);
+    actualMappedB = psp_gfx_dl_remap_lighting(actual->z);
+
+    if (psp_gfx_dl_float_matches(scalarR, actual->x, 0.0001f, 0.0001f) &&
+        psp_gfx_dl_float_matches(scalarG, actual->y, 0.0001f, 0.0001f) &&
+        psp_gfx_dl_float_matches(scalarB, actual->z, 0.0001f, 0.0001f) &&
+        (scalarMappedR == actualMappedR) &&
+        (scalarMappedG == actualMappedG) &&
+        (scalarMappedB == actualMappedB)) {
+        return 1;
+    }
+
+    if (!sLoggedN64PspBatchLightingMismatch) {
+        char line[512];
+
+        snprintf(
+            line,
+            sizeof(line),
+            "[n64psp-light] task=%lu vtx=%lu lights=%lu normal=%d,%d,%d "
+            "scalar=%.4f,%.4f,%.4f batch=%.4f,%.4f,%.4f mapped=%u,%u,%u/%u,%u,%u",
+            (unsigned long) ctx->taskIndex,
+            (unsigned long) batchVertexIndex,
+            (unsigned long) ctx->lightCount,
+            (int) (s8) src->v.cn[0],
+            (int) (s8) src->v.cn[1],
+            (int) (s8) src->v.cn[2],
+            scalarR,
+            scalarG,
+            scalarB,
+            actual->x,
+            actual->y,
+            actual->z,
+            scalarMappedR,
+            scalarMappedG,
+            scalarMappedB,
+            actualMappedR,
+            actualMappedG,
+            actualMappedB
+        );
+        PspPlatform_LogLine(line);
+        sLoggedN64PspBatchLightingMismatch = 1;
+    }
+
+    return 0;
+}
+#endif
 
 static void psp_gfx_dl_load_ambient_light(PspGfxDlContext* ctx, const Light* src) {
     ctx->ambientR = src->l.col[0];
@@ -2390,11 +2643,19 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
 PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_G_VTX);
 PspProfiler_CountGvtx(count, (ctx->geometryMode & G_LIGHTING) != 0);
 
+#if PSP_RENDERER_DIAGNOSTICS
+    ctx->vtxCommandCount++;
+    ctx->vtxBatchSizeHistogram[count]++;
+    ctx->vtxLightCountHistogram[ctx->lightCount <= 7 ? ctx->lightCount : 7]++;
+    if ((ctx->geometryMode & G_LIGHTING) != 0) {
+        ctx->litVertexCount += count;
+    } else {
+        ctx->unlitVertexCount += count;
+    }
+#endif
+
 #if (USE_N64PSP_BATCH_TRANSFORM + 0)
     {
-        n64psp_mat4f modelview;
-        n64psp_mat4f projectionModelview;
-
         for (i = 0; i < count; i++) {
             const Vtx* in = &src[i];
 
@@ -2410,17 +2671,29 @@ PspProfiler_CountGvtx(count, (ctx->geometryMode & G_LIGHTING) != 0);
             sPspGfxDlTransformInput[i].w = 1.0f;
         }
 
-        psp_gfx_dl_prepare_batch_matrices(
-            ctx,
-            &modelview,
-            &projectionModelview
-        );
+        psp_gfx_dl_prepare_batch_matrices(ctx);
 
         n64psp_mat4f_transform_vec4_2mat_batch(
             sPspGfxDlTransformOutput,
-            &modelview,
-            &projectionModelview,
+            &ctx->alignedModelview,
+            &ctx->alignedProjectionModelview,
             sPspGfxDlTransformInput,
+            count
+        );
+    }
+#endif
+
+#if (USE_N64PSP_BATCH_LIGHTING + 0)
+    if ((ctx->geometryMode & G_LIGHTING) != 0) {
+        psp_gfx_dl_stage_lighting_batch(ctx, src, count);
+        psp_gfx_dl_prepare_batch_matrices(ctx);
+        n64psp_directional_light_snorm8_batch(
+            sPspGfxDlLightingOutput,
+            &ctx->alignedModelview,
+            sPspGfxDlLightingNormals,
+            ctx->lightCount != 0 ? sPspGfxDlLightingLights : NULL,
+            &sPspGfxDlLightingAmbient,
+            ctx->lightCount,
             count
         );
     }
@@ -2491,52 +2764,28 @@ PspProfiler_CountGvtx(count, (ctx->geometryMode & G_LIGHTING) != 0);
             }
         }
         if ((ctx->geometryMode & G_LIGHTING) != 0) {
-            float nx = (float) (s8) in->v.cn[0];
-            float ny = (float) (s8) in->v.cn[1];
-            float nz = (float) (s8) in->v.cn[2];
-            float r = ctx->ambientR;
-            float g = ctx->ambientG;
-            float b = ctx->ambientB;
-            u32 lightIndex;
+            float r;
+            float g;
+            float b;
 
-            if (ctx->hasModelview) {
-                float transformedX = (ctx->modelview[0][0] * nx) + (ctx->modelview[1][0] * ny) +
-                                     (ctx->modelview[2][0] * nz);
-                float transformedY = (ctx->modelview[0][1] * nx) + (ctx->modelview[1][1] * ny) +
-                                     (ctx->modelview[2][1] * nz);
-                float transformedZ = (ctx->modelview[0][2] * nx) + (ctx->modelview[1][2] * ny) +
-                                     (ctx->modelview[2][2] * nz);
-
-                nx = transformedX;
-                ny = transformedY;
-                nz = transformedZ;
+#if (USE_N64PSP_BATCH_LIGHTING + 0)
+            r = sPspGfxDlLightingOutput[i].x;
+            g = sPspGfxDlLightingOutput[i].y;
+            b = sPspGfxDlLightingOutput[i].z;
+#if (PSP_VALIDATE_N64PSP_BATCH_LIGHTING + 0)
+            if (!psp_gfx_dl_validate_lighting_batch(
+                    ctx,
+                    in,
+                    i,
+                    &sPspGfxDlLightingOutput[i])) {
+                r = sPspGfxDlLightingReference[i].x;
+                g = sPspGfxDlLightingReference[i].y;
+                b = sPspGfxDlLightingReference[i].z;
             }
-{
-                float lengthSquared = (nx * nx) + (ny * ny) + (nz * nz);
-
-                if (lengthSquared > 0.000001f) {
-                    float inverseLength = 1.0f / sqrtf(lengthSquared);
-
-                    nx *= inverseLength;
-                    ny *= inverseLength;
-                    nz *= inverseLength;
-                }
-            }
-
-            for (lightIndex = 0; lightIndex < ctx->lightCount; lightIndex++) {
-                const PspGfxDlLight* light = &ctx->lights[lightIndex];
-                float dot;
-
-                dot = (nx * light->x) +
-                    (ny * light->y) +
-                    (nz * light->z);
-
-                if (dot > 0.0f) {
-                    r += (float) light->r * dot;
-                    g += (float) light->g * dot;
-                    b += (float) light->b * dot;
-                }
-            }
+#endif
+#else
+            psp_gfx_dl_light_vertex_scalar(ctx, in, &r, &g, &b);
+#endif
             out->r = psp_gfx_dl_remap_lighting(r);
             out->g = psp_gfx_dl_remap_lighting(g);
             out->b = psp_gfx_dl_remap_lighting(b);
@@ -3014,6 +3263,11 @@ static void psp_gfx_dl_reset_context(PspGfxDlContext* ctx) {
     ctx->primitiveA = 255;
     ctx->fogA = 255;
     ctx->combineUsesTextureAlpha = 1;
+#if (USE_N64PSP_BATCH_TRANSFORM + 0) || \
+    (USE_N64PSP_BATCH_LIGHTING + 0)
+    ctx->modelviewSerial = 1;
+    ctx->projectionSerial = 1;
+#endif
 }
 
 int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
@@ -3138,6 +3392,56 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
         PspPlatform_LogLine(line);
         sLoggedFirstLightingTask = 1;
     }
+
+#if PSP_RENDERER_DIAGNOSTICS
+    if ((taskIndex < 4) || ((taskIndex % 30) == 0) || (ctx->stats.commandLimitHit != 0) ||
+        (ctx->stats.depthLimitHit != 0)) {
+        u32 i;
+        u32 lineUsed;
+
+        snprintf(line, sizeof(line),
+                 "[pspgl-vtx-hist] task=%lu cmds=%lu lit=%lu unlit=%lu",
+                 (unsigned long) taskIndex,
+                 (unsigned long) ctx->vtxCommandCount,
+                 (unsigned long) ctx->litVertexCount,
+                 (unsigned long) ctx->unlitVertexCount);
+        PspPlatform_LogLine(line);
+
+        lineUsed = (u32) snprintf(line, sizeof(line),
+                                  "[pspgl-vtx-sizes] task=%lu",
+                                  (unsigned long) taskIndex);
+        for (i = 1; i <= PSP_GFX_DL_MAX_VERTICES; i++) {
+            if (ctx->vtxBatchSizeHistogram[i] == 0) {
+                continue;
+            }
+            if (lineUsed > 430) {
+                PspPlatform_LogLine(line);
+                lineUsed = (u32) snprintf(line, sizeof(line),
+                                          "[pspgl-vtx-sizes] task=%lu",
+                                          (unsigned long) taskIndex);
+            }
+            lineUsed += (u32) snprintf(line + lineUsed, sizeof(line) - lineUsed,
+                                       " %lu:%lu",
+                                       (unsigned long) i,
+                                       (unsigned long) ctx->vtxBatchSizeHistogram[i]);
+        }
+        PspPlatform_LogLine(line);
+
+        lineUsed = (u32) snprintf(line, sizeof(line),
+                                  "[pspgl-vtx-lights] task=%lu",
+                                  (unsigned long) taskIndex);
+        for (i = 0; i <= 7; i++) {
+            if (ctx->vtxLightCountHistogram[i] == 0) {
+                continue;
+            }
+            lineUsed += (u32) snprintf(line + lineUsed, sizeof(line) - lineUsed,
+                                       " %lu:%lu",
+                                       (unsigned long) i,
+                                       (unsigned long) ctx->vtxLightCountHistogram[i]);
+        }
+        PspPlatform_LogLine(line);
+    }
+#endif
 
     if (!sLoggedFirstDrawableTask && (ctx->stats.triangleCount != 0)) {
         snprintf(line, sizeof(line),
