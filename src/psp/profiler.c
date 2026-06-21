@@ -89,6 +89,7 @@ typedef struct {
     u64 outputTriangles;
     u64 batchFlushes;
     u64 flushReasons[PSP_PROFILE_FLUSH_COUNT];
+    u64 batchStateTransitions[PSP_PROFILE_BATCH_STATE_COUNT];
     u64 verticesSubmitted;
     u64 drawCalls;
     u64 glFlushCalls;
@@ -311,6 +312,20 @@ static const char* psp_profiler_flush_name(PspProfileFlushReason reason) {
     return names[reason];
 }
 
+static const char* psp_profiler_batch_state_name(PspProfileBatchStateField field) {
+    static const char* names[PSP_PROFILE_BATCH_STATE_COUNT] = {
+        "texture_id",
+        "texture_env",
+        "wrap_s",
+        "wrap_t",
+        "alpha_test",
+        "blend",
+        "premultiplied"
+    };
+
+    return names[field];
+}
+
 static void psp_profiler_write_csv_row(SceUID fd, PspProfilePhase phase) {
     char line[192];
     const PspProfilePhaseState* p = &sPhase[phase];
@@ -384,6 +399,12 @@ static void psp_profiler_write_phase_files(u32 slot) {
     for (i = 0; i < PSP_PROFILE_FLUSH_COUNT; i++) {
         snprintf(line, sizeof(line), "%s,%llu\n", psp_profiler_flush_name((PspProfileFlushReason) i),
                  sCounters.flushReasons[i]);
+        psp_profiler_write_all(fd, line);
+    }
+    psp_profiler_write_all(fd, "\n[batch state transitions]\nfield,count\n");
+    for (i = 0; i < PSP_PROFILE_BATCH_STATE_COUNT; i++) {
+        snprintf(line, sizeof(line), "%s,%llu\n", psp_profiler_batch_state_name((PspProfileBatchStateField) i),
+                 sCounters.batchStateTransitions[i]);
         psp_profiler_write_all(fd, line);
     }
     snprintf(line, sizeof(line),
@@ -736,6 +757,15 @@ void PspProfiler_CountBatchFlush(PspProfileFlushReason reason, u32 submittedVert
         sCounters.flushReasons[reason]++;
     }
     sCounters.verticesSubmitted += submittedVertices;
+}
+
+void PspProfiler_CountBatchStateTransition(PspProfileBatchStateField field) {
+    if (!sCaptureActive) {
+        return;
+    }
+    if (field < PSP_PROFILE_BATCH_STATE_COUNT) {
+        sCounters.batchStateTransitions[field]++;
+    }
 }
 
 void PspProfiler_CountDrawCall(u32 vertices) {

@@ -264,6 +264,18 @@ void PspGfxPspgl_BeginFrame(void) {
     glDepthMask(GL_FALSE);
 }
 
+void PspGfxPspgl_Flush(void) {
+    /*
+     * PSPGL records state and draws in order, copies client-array vertices
+     * before glDrawArrays returns, and submits internally when its GE list
+     * fills. Keep explicit submission at the frame/task boundary.
+     */
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_GL_FLUSH);
+    glFlush();
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_GL_FLUSH);
+    PspProfiler_CountGlFlush();
+}
+
 u32 PspGfxPspgl_GetCi8Texture(const u8* indices, const u16* palette, u32 width, u32 height, u32* uploadWidth,
                               u32* uploadHeight) {
     PspGfxTextureCacheEntry* entry;
@@ -571,8 +583,4 @@ void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u3
     glDrawArrays(GL_TRIANGLES, 0, vertexCount);
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_SUBMIT);
     PspProfiler_CountDrawCall(vertexCount);
-    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_GL_FLUSH);
-    glFlush();
-    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_GL_FLUSH);
-    PspProfiler_CountGlFlush();
 }

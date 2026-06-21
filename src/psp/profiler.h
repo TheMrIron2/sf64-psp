@@ -38,6 +38,17 @@ typedef enum {
     PSP_PROFILE_FLUSH_COUNT
 } PspProfileFlushReason;
 
+typedef enum {
+    PSP_PROFILE_BATCH_STATE_TEXTURE_ID,
+    PSP_PROFILE_BATCH_STATE_TEXTURE_ENV,
+    PSP_PROFILE_BATCH_STATE_WRAP_S,
+    PSP_PROFILE_BATCH_STATE_WRAP_T,
+    PSP_PROFILE_BATCH_STATE_ALPHA_TEST,
+    PSP_PROFILE_BATCH_STATE_BLEND,
+    PSP_PROFILE_BATCH_STATE_PREMULTIPLIED,
+    PSP_PROFILE_BATCH_STATE_COUNT
+} PspProfileBatchStateField;
+
 void PspProfiler_Init(void);
 int PspProfiler_PollControls(u32 rawButtons);
 void PspProfiler_StartCapture(void);
@@ -64,6 +75,7 @@ void PspProfiler_CountTransformWork(u32 vertices, u32 normals, u32 normalizes, u
                                     u32 divides);
 void PspProfiler_CountTextureEvent(u32 hit, u32 miss, u32 decode, u32 upload, u32 bytesUploaded);
 void PspProfiler_CountBatchFlush(PspProfileFlushReason reason, u32 submittedVertices);
+void PspProfiler_CountBatchStateTransition(PspProfileBatchStateField field);
 void PspProfiler_CountDrawCall(u32 vertices);
 void PspProfiler_CountGlFlush(void);
 void PspProfiler_CountSync(void);
@@ -80,6 +92,7 @@ void PspProfiler_CountSync(void);
 #define PspProfiler_CountTransformWork(vertices, normals, normalizes, lighting, clipCodes, divides) ((void) 0)
 #define PspProfiler_CountTextureEvent(hit, miss, decode, upload, bytesUploaded) ((void) 0)
 #define PspProfiler_CountBatchFlush(reason, submittedVertices) ((void) 0)
+#define PspProfiler_CountBatchStateTransition(field) ((void) 0)
 #define PspProfiler_CountDrawCall(vertices) ((void) 0)
 #define PspProfiler_CountGlFlush() ((void) 0)
 #define PspProfiler_CountSync() ((void) 0)

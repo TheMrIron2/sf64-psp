@@ -191,6 +191,7 @@ void PspRenderer_Init(void) {
     PspPlatform_LogLine("[pspgl] renderer init");
     PspGfx_BeginFrame();
     PspGfxPspgl_BeginFrame();
+    PspGfxPspgl_Flush();
     PspGfx_EndFrame();
 }
 
@@ -222,6 +223,8 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
             dl = (const Gfx*) task->task.t.data_ptr;
             PspGfxDl_Run(dl, taskIndex, NULL);
         }
+
+        PspGfxPspgl_Flush();
 
     #if PSP_FPS_OVERLAY
         renderEnd = sceKernelGetSystemTimeWide();

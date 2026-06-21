@@ -318,23 +318,17 @@ static float psp_gfx_dl_fog_distance(const float projection[4][4], float ndcZ) {
     return (projection[3][2] - (ndcZ * projection[3][3])) / denominator;
 }
 
-static int psp_gfx_dl_texture_axis_needs_wrap(s16 a, s16 b, s16 c, u32 uploadSize) {
-    float limit = (float) uploadSize * 32.0f;
-
-    return ((float) a < 0.0f) || ((float) b < 0.0f) || ((float) c < 0.0f) ||
-           ((float) a > limit) || ((float) b > limit) || ((float) c > limit);
-}
-
-static PspGfxPspglTextureWrap psp_gfx_dl_texture_wrap(u32 mode, u32 mask, int needsWrap) {
+static PspGfxPspglTextureWrap psp_gfx_dl_texture_wrap(u32 mode, u32 mask) {
     if ((mode & G_TX_CLAMP) != 0) {
         return PSP_GFX_PSPGL_WRAP_CLAMP;
     }
-    if ((mask == G_TX_NOMASK) || !needsWrap) {
+    if (mask == G_TX_NOMASK) {
         return PSP_GFX_PSPGL_WRAP_CLAMP;
     }
-    if ((mode & G_TX_MIRROR) != 0) {
-        return PSP_GFX_PSPGL_WRAP_MIRROR;
-    }
+    /*
+     * PSPGL submits mirror and repeat with the same effective GL_REPEAT
+     * backend state, so canonicalise non-clamped tiles to REPEAT.
+     */
     return PSP_GFX_PSPGL_WRAP_REPEAT;
 }
 
@@ -1288,6 +1282,27 @@ static void psp_gfx_dl_set_batch_texture(PspGfxDlContext* ctx, u32 textureId, Ps
         ((ctx->batchTextureId != textureId) || (ctx->batchTextureEnv != textureEnv) ||
          (ctx->batchWrapS != wrapS) || (ctx->batchWrapT != wrapT) || (ctx->batchAlphaTest != alphaTest) ||
          (ctx->batchBlend != blend) || (ctx->batchPremultiplied != premultiplied))) {
+        if (ctx->batchTextureId != textureId) {
+            PspProfiler_CountBatchStateTransition(PSP_PROFILE_BATCH_STATE_TEXTURE_ID);
+        }
+        if (ctx->batchTextureEnv != textureEnv) {
+            PspProfiler_CountBatchStateTransition(PSP_PROFILE_BATCH_STATE_TEXTURE_ENV);
+        }
+        if (ctx->batchWrapS != wrapS) {
+            PspProfiler_CountBatchStateTransition(PSP_PROFILE_BATCH_STATE_WRAP_S);
+        }
+        if (ctx->batchWrapT != wrapT) {
+            PspProfiler_CountBatchStateTransition(PSP_PROFILE_BATCH_STATE_WRAP_T);
+        }
+        if (ctx->batchAlphaTest != alphaTest) {
+            PspProfiler_CountBatchStateTransition(PSP_PROFILE_BATCH_STATE_ALPHA_TEST);
+        }
+        if (ctx->batchBlend != blend) {
+            PspProfiler_CountBatchStateTransition(PSP_PROFILE_BATCH_STATE_BLEND);
+        }
+        if (ctx->batchPremultiplied != premultiplied) {
+            PspProfiler_CountBatchStateTransition(PSP_PROFILE_BATCH_STATE_PREMULTIPLIED);
+        }
         if ((ctx->batchTextureId != textureId) || (ctx->batchTextureEnv != textureEnv) ||
             (ctx->batchWrapS != wrapS) || (ctx->batchWrapT != wrapT)) {
             psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_TEXTURE_CHANGE);
@@ -1759,8 +1774,6 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
     u32 emittedTriangles;
     u32 textureId;
     PspGfxPspglTextureEnv textureEnv = PSP_GFX_PSPGL_TEX_REPLACE;
-    int needsWrapS;
-    int needsWrapT;
     int pretransformed;
 
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_BATCH_CONSTRUCTION);
@@ -1809,11 +1822,9 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
         (ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_PRIM_ALPHA)) {
         textureEnv = PSP_GFX_PSPGL_TEX_MODULATE;
     }
-    needsWrapS = psp_gfx_dl_texture_axis_needs_wrap(va->s, vb->s, vc->s, ctx->textureUploadWidth);
-    needsWrapT = psp_gfx_dl_texture_axis_needs_wrap(va->t, vb->t, vc->t, ctx->textureUploadHeight);
     psp_gfx_dl_set_batch_texture(ctx, textureId, textureEnv,
-                                 psp_gfx_dl_texture_wrap(ctx->textureCms, ctx->textureMaskS, needsWrapS),
-                                 psp_gfx_dl_texture_wrap(ctx->textureCmt, ctx->textureMaskT, needsWrapT),
+                                 psp_gfx_dl_texture_wrap(ctx->textureCms, ctx->textureMaskS),
+                                 psp_gfx_dl_texture_wrap(ctx->textureCmt, ctx->textureMaskT),
                                  psp_gfx_dl_alpha_test_enabled(ctx), psp_gfx_dl_blend_enabled(ctx),
                                  psp_gfx_dl_premultiplied_blend_enabled(ctx));
     psp_gfx_dl_set_batch_depth(ctx, (ctx->geometryMode & G_ZBUFFER) != 0, (ctx->otherModeL & Z_UPD) != 0);
@@ -1987,12 +1998,8 @@ static void psp_gfx_dl_handle_texture_rectangle(PspGfxDlContext* ctx, const Gfx*
 
     psp_gfx_dl_set_batch_texture(
         ctx, ctx->textureId, PSP_GFX_PSPGL_TEX_MODULATE,
-        psp_gfx_dl_texture_wrap(ctx->textureCms, ctx->textureMaskS,
-                                (s0 < 0.0f) || (s1 < 0.0f) || (s0 > (float) ctx->textureUploadWidth) ||
-                                    (s1 > (float) ctx->textureUploadWidth)),
-        psp_gfx_dl_texture_wrap(ctx->textureCmt, ctx->textureMaskT,
-                                (t0 < 0.0f) || (t1 < 0.0f) || (t0 > (float) ctx->textureUploadHeight) ||
-                                    (t1 > (float) ctx->textureUploadHeight)),
+        psp_gfx_dl_texture_wrap(ctx->textureCms, ctx->textureMaskS),
+        psp_gfx_dl_texture_wrap(ctx->textureCmt, ctx->textureMaskT),
         psp_gfx_dl_alpha_test_enabled(ctx), psp_gfx_dl_blend_enabled(ctx),
         psp_gfx_dl_premultiplied_blend_enabled(ctx));
     psp_gfx_dl_set_batch_depth(ctx, 0, 0);
