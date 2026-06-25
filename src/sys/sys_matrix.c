@@ -1,5 +1,17 @@
 #include "sys.h"
 
+#if defined(TARGET_PSP) && (USE_N64PSP_SINCOS + 0)
+void n64psp_sincosf(float radians, float* out_sine, float* out_cosine);
+#define SF64_MATRIX_SINCOS(angle, outSn, outCs) \
+    n64psp_sincosf((angle), &(outSn), &(outCs))
+#else
+#define SF64_MATRIX_SINCOS(angle, outSn, outCs) \
+    do {                                        \
+        (outSn) = __sinf(angle);                \
+        (outCs) = __cosf(angle);                \
+    } while (0)
+#endif
+
 Mtx gIdentityMtx = { {
     {
         { 1, 0, 0, 0 },
@@ -158,8 +170,7 @@ void Matrix_RotateX(Matrix* mtx, f32 angle, u8 mode) {
     f32 rz;
     s32 i;
 
-    sn = __sinf(angle);
-    cs = __cosf(angle);
+    SF64_MATRIX_SINCOS(angle, sn, cs);
     if (mode == 1) {
         for (i = 0; i < 4; i++) {
             ry = mtx->m[1][i];
@@ -186,8 +197,7 @@ void Matrix_RotateY(Matrix* mtx, f32 angle, u8 mode) {
     f32 rz;
     s32 i;
 
-    sn = __sinf(angle);
-    cs = __cosf(angle);
+    SF64_MATRIX_SINCOS(angle, sn, cs);
     if (mode == 1) {
         for (i = 0; i < 4; i++) {
             rx = mtx->m[0][i];
@@ -214,8 +224,7 @@ void Matrix_RotateZ(Matrix* mtx, f32 angle, u8 mode) {
     f32 ry;
     s32 i;
 
-    sn = __sinf(angle);
-    cs = __cosf(angle);
+    SF64_MATRIX_SINCOS(angle, sn, cs);
     if (mode == 1) {
         for (i = 0; i < 4; i++) {
             rx = mtx->m[0][i];
@@ -264,8 +273,7 @@ void Matrix_RotateAxis(Matrix* mtx, f32 angle, f32 axisX, f32 axisY, f32 axisZ, 
         axisX /= norm;
         axisY /= norm;
         axisZ /= norm;
-        sinA = __sinf(angle);
-        cosA = __cosf(angle);
+        SF64_MATRIX_SINCOS(angle, sinA, cosA);
         xx = axisX * axisX;
         yy = axisY * axisY;
         zz = axisZ * axisZ;
