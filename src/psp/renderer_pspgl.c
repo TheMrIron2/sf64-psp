@@ -4,6 +4,7 @@
 #include "src/psp/gfx/gfx_psp.h"
 #include "src/psp/gfx/gfx_pspgl.h"
 #include "src/psp/platform.h"
+#include "src/psp/profiler.h"
 #include "src/psp/renderer.h"
 
 #include <pspkernel.h>
@@ -238,6 +239,8 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
 
         psp_renderer_draw_perf_overlay();
     #endif
+
+        PspProfiler_DrawStatus();
 }
 
 void PspRenderer_BeginStarfield(void) {

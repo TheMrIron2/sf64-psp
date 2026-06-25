@@ -23,6 +23,7 @@ src/assets/*
 srcjp/assets/*
 include/assets/*
 /build
+/artifacts/
 tools/mio0
 tools/ido-recomp
 debug/

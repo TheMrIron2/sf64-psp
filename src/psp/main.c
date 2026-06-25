@@ -7,6 +7,7 @@
 #ifdef PSP_FULL
 #include "src/psp/n64psp_integration.h"
 #include "src/psp/platform.h"
+#include "src/psp/profiler.h"
 
 void bootproc(void);
 #endif
@@ -20,7 +21,12 @@ int exit_callback(int arg1, int arg2, void* common) {
     (void) arg2;
     (void) common;
 
+#ifdef PSP_FULL
+    PspProfiler_RequestExit();
+    PspPlatform_RequestExit();
+#else
     sceKernelExitGame();
+#endif
     return 0;
 }
 
@@ -65,6 +71,7 @@ int main(int argc, char* argv[]) {
     pspDebugScreenPrintf("Star Fox 64 PSP\n");
     pspDebugScreenPrintf("Booting native game loop...\n\n");
     pspDebugScreenPrintf("Select+Start exits\n");
+    pspDebugScreenPrintf("Select+L starts profile, Select+R saves\n");
 
 #if USE_N64PSP_QUEUES
     if (!PspN64psp_Init()) {
@@ -94,9 +101,14 @@ int main(int argc, char* argv[]) {
     pspDebugScreenPrintf("[psp] bootproc enter\n");
     bootproc();
     pspDebugScreenPrintf("[psp] bootproc returned\n");
+    PspProfiler_Shutdown();
 
     while (1) {
         sceDisplayWaitVblankStart();
+        if (PspProfiler_ExitRequested()) {
+            PspProfiler_Shutdown();
+            sceKernelExitGame();
+        }
     }
 #else
     pspDebugScreenPrintf("Star Fox 64 PSP\n");
