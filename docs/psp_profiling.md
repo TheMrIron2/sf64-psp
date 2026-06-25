@@ -85,7 +85,13 @@ texture decode/conversion
 texture upload
 batch construction
 batch flush total
+PSPGL state/setup
+PSPGL vertex stream upload
+PSPGL vertex stream upload small draws
+PSPGL vertex stream upload large draws
 PSPGL draw submission
+PSPGL draw submission small draws
+PSPGL draw submission large draws
 glFlush queue flush
 graphics finish/synchronisation
 audio task dispatch
@@ -96,7 +102,7 @@ graphics task completion/backpressure wait
 vblank or idle wait
 ```
 
-Some categories are nested. For example, display-list traversal is inside graphics task total, and clipping is inside triangle processing. Do not add overlapping rows together.
+Some categories are nested. For example, display-list traversal is inside graphics task total, clipping is inside triangle processing, and the PSPGL small/large upload and submission rows are inside their aggregate PSPGL rows. Do not add overlapping rows together.
 
 Counters cover opcode counts, exact G_VTX batch sizes from 0 through 64, lit/unlit vertices, matrix changes, triangle acceptance/rejection/clipping, generated clipping vertices, texture cache/decode/upload events, batch flush reasons, draw calls, submitted vertices, `glFlush`, and swap/synchronisation calls.
 

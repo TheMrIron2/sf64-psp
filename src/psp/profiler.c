@@ -358,8 +358,13 @@ static const char* psp_profiler_phase_name(PspProfilePhase phase) {
         "texture upload",
         "batch construction",
         "batch flush total",
+        "PSPGL state/setup",
         "PSPGL vertex stream upload",
+        "PSPGL vertex stream upload small draws",
+        "PSPGL vertex stream upload large draws",
         "PSPGL draw submission",
+        "PSPGL draw submission small draws",
+        "PSPGL draw submission large draws",
         "glFlush queue flush",
         "graphics finish/synchronisation",
         "audio task dispatch",
@@ -1170,6 +1175,28 @@ void PspProfiler_CountDrawCall(u32 vertices) {
     if (sCaptureActive) {
         sCounters.drawCalls++;
         sPhase[PSP_PROFILE_PHASE_PSPGL_SUBMIT].items += vertices;
+    }
+}
+
+void PspProfiler_CountPspglSubmitSplit(u32 smallDraw, u32 largeDraw, u32 vertices) {
+    if (!sCaptureActive) {
+        return;
+    }
+    if (smallDraw) {
+        sPhase[PSP_PROFILE_PHASE_PSPGL_SUBMIT_SMALL].items += vertices;
+    } else if (largeDraw) {
+        sPhase[PSP_PROFILE_PHASE_PSPGL_SUBMIT_LARGE].items += vertices;
+    }
+}
+
+void PspProfiler_CountPspglVertexStreamUploadSplit(u32 smallDraw, u32 largeDraw, u32 uploadBytes) {
+    if (!sCaptureActive) {
+        return;
+    }
+    if (smallDraw) {
+        sPhase[PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD_SMALL].items += uploadBytes;
+    } else if (largeDraw) {
+        sPhase[PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD_LARGE].items += uploadBytes;
     }
 }
 

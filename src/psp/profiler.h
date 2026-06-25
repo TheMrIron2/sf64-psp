@@ -14,8 +14,13 @@ typedef enum {
     PSP_PROFILE_PHASE_TEXTURE_UPLOAD,
     PSP_PROFILE_PHASE_BATCH_CONSTRUCTION,
     PSP_PROFILE_PHASE_BATCH_FLUSH,
+    PSP_PROFILE_PHASE_PSPGL_STATE_SETUP,
     PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD,
+    PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD_SMALL,
+    PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD_LARGE,
     PSP_PROFILE_PHASE_PSPGL_SUBMIT,
+    PSP_PROFILE_PHASE_PSPGL_SUBMIT_SMALL,
+    PSP_PROFILE_PHASE_PSPGL_SUBMIT_LARGE,
     PSP_PROFILE_PHASE_GL_FLUSH,
     PSP_PROFILE_PHASE_FINISH_SYNC,
     PSP_PROFILE_PHASE_AUDIO_TASK_DISPATCH,
@@ -106,6 +111,8 @@ void PspProfiler_CountTrianglePath(u32 directFastpathTriangles, u32 generalPathT
 void PspProfiler_CountEffectiveState(u32 resolves, u32 reuses, u32 materialResolves, u32 depthResolves,
                                      u32 fogResolves);
 void PspProfiler_CountDrawCall(u32 vertices);
+void PspProfiler_CountPspglSubmitSplit(u32 smallDraw, u32 largeDraw, u32 vertices);
+void PspProfiler_CountPspglVertexStreamUploadSplit(u32 smallDraw, u32 largeDraw, u32 uploadBytes);
 void PspProfiler_CountVertexStream(u32 vboDraw, u32 vertices, u32 upload, u32 uploadBytes, u32 fallbackDraw,
                                    u32 fallbackVertices, u32 pageSwitch, u32 capacityBytes, u32 highWaterBytes,
                                    u32 smallVboDraw, u32 largeVboDraw, u32 smallVboVertices, u32 largeVboVertices);
@@ -136,6 +143,8 @@ void PspProfiler_CountSync(void);
     ((void) 0)
 #define PspProfiler_CountEffectiveState(resolves, reuses, materialResolves, depthResolves, fogResolves) ((void) 0)
 #define PspProfiler_CountDrawCall(vertices) ((void) 0)
+#define PspProfiler_CountPspglSubmitSplit(smallDraw, largeDraw, vertices) ((void) 0)
+#define PspProfiler_CountPspglVertexStreamUploadSplit(smallDraw, largeDraw, uploadBytes) ((void) 0)
 #define PspProfiler_CountVertexStream(vboDraw, vertices, upload, uploadBytes, fallbackDraw, fallbackVertices,      \
                                       pageSwitch, capacityBytes, highWaterBytes, smallVboDraw, largeVboDraw,      \
                                       smallVboVertices, largeVboVertices)                                         \

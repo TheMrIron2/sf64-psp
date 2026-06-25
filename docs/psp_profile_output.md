@@ -40,7 +40,7 @@ All times are wall-clock microseconds from `sceKernelGetSystemTimeWide()`. Rows 
 
 Adjusted columns subtract the measured minimum timer read-pair overhead once per completed phase call. They do not subtract nested phase time. Use raw columns when validating profiler overhead; use adjusted columns for first-pass phase comparisons.
 
-`items` is populated only where a natural denominator exists, such as vertices or triangles. Otherwise it is zero.
+`items` is populated only where a natural denominator exists, such as vertices, triangles, or upload bytes. PSPGL draw submission rows use submitted vertices; PSPGL vertex stream upload rows use uploaded bytes. Otherwise it is zero.
 
 ## Phase Text
 
