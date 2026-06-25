@@ -698,6 +698,8 @@ static void psp_profiler_write_phase_files(u32 slot) {
 #endif
 
 void PspProfiler_Init(void) {
+    u32 slot = 0;
+
     if (sInitialized) {
         return;
     }
@@ -705,6 +707,19 @@ void PspProfiler_Init(void) {
     sStatus = PSP_PROF_STATUS_OFF;
     sStatusSlot = 0;
     sNextSlot = 0;
+#if SF64_PSP_GPROF
+    sCapturePath[0] = '\0';
+    if (psp_profiler_open_unique("gmon", "out", sCapturePath, sizeof(sCapturePath), &slot)) {
+        sCaptureStarted = 1;
+        sCaptureActive = 1;
+        sCaptureDumped = 0;
+        sStatusSlot = slot;
+    } else {
+        psp_profiler_set_status(PSP_PROF_STATUS_ERROR, 0);
+    }
+#else
+    (void) slot;
+#endif
 }
 
 int PspProfiler_PollControls(u32 rawButtons) {
@@ -729,22 +744,26 @@ int PspProfiler_PollControls(u32 rawButtons) {
 void PspProfiler_StartCapture(void) {
     u32 slot = sNextSlot;
 
+#if SF64_PSP_GPROF
+    if (sCaptureDumped) {
+        psp_profiler_set_status(PSP_PROF_STATUS_SAVED, sStatusSlot);
+        return;
+    }
+    if (sCapturePath[0] == '\0') {
+        psp_profiler_set_status(PSP_PROF_STATUS_ERROR, sStatusSlot);
+        return;
+    }
+    sCaptureStarted = 1;
+    sCaptureActive = 1;
+    psp_profiler_set_status(PSP_PROF_STATUS_REC, sStatusSlot);
+#endif
+#if SF64_PSP_PROFILE_PHASES && !SF64_PSP_GPROF
     if (sCaptureActive) {
         PspProfiler_StopCapture();
         PspProfiler_DumpCapture();
     }
     sCaptureStarted = 0;
     sCaptureDumped = 0;
-#if SF64_PSP_GPROF
-    sCapturePath[0] = '\0';
-    if (!psp_profiler_open_unique("gmon", "out", sCapturePath, sizeof(sCapturePath), &slot)) {
-        psp_profiler_set_status(PSP_PROF_STATUS_ERROR, sStatusSlot);
-        return;
-    }
-    gprof_stop(NULL, 0);
-    gprof_start();
-#endif
-#if SF64_PSP_PROFILE_PHASES
 #if !SF64_PSP_GPROF
     psp_profiler_mkdir();
     while (slot <= PSP_PROFILE_MAX_SLOT) {
@@ -761,13 +780,12 @@ void PspProfiler_StartCapture(void) {
     sNextSlot = slot + 1;
 #endif
     psp_profiler_reset_phase_capture();
-#endif
-#if !SF64_PSP_GPROF && !SF64_PSP_PROFILE_PHASES
-    (void) slot;
-#endif
     sCaptureStarted = 1;
     sCaptureActive = 1;
     psp_profiler_set_status(PSP_PROF_STATUS_REC, slot);
+#else
+    (void) slot;
+#endif
 }
 
 void PspProfiler_StopCapture(void) {
@@ -781,9 +799,6 @@ void PspProfiler_StopCapture(void) {
     if (!sCaptureActive) {
         return;
     }
-#if SF64_PSP_GPROF
-    gprof_stop(NULL, 0);
-#endif
 #if SF64_PSP_PROFILE_PHASES
     now = psp_profiler_now_us();
     lockState = psp_profiler_lock();
@@ -812,6 +827,7 @@ void PspProfiler_DumpCapture(void) {
     if (!sCaptureStarted || sCaptureDumped) {
         return;
     }
+    sCaptureDumped = 1;
 #if SF64_PSP_GPROF
     if (sCapturePath[0] == '\0') {
         psp_profiler_set_status(PSP_PROF_STATUS_ERROR, sStatusSlot);
@@ -819,12 +835,12 @@ void PspProfiler_DumpCapture(void) {
     }
     gprof_stop(sCapturePath, 1);
     psp_profiler_set_status(PSP_PROF_STATUS_SAVED, sStatusSlot);
+    sCaptureActive = 0;
 #endif
 #if SF64_PSP_PROFILE_PHASES
     psp_profiler_mkdir();
     psp_profiler_write_phase_files(sStatusSlot);
 #endif
-    sCaptureDumped = 1;
 }
 
 int PspProfiler_IsCapturing(void) {

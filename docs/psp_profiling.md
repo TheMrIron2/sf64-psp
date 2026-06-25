@@ -28,12 +28,23 @@ Each profile variant builds n64psp into an isolated directory, such as `lib/n64p
 Reach the target scene first, then use:
 
 ```text
-SELECT + L       start or reset capture
+SELECT + L       mark/arm capture status
 SELECT + R       stop and dump capture
 SELECT + START   existing game exit
 ```
 
 The profiling chords are edge-triggered and consumed before PSP input is mapped to N64 controls.
+
+In gprof builds, PSPSDK starts profiling automatically at program startup through the first instrumented
+`__mcount()` call. `SELECT + L` does not restart gprof and does not discard existing samples; it only marks the
+already-running session as the one you intend to save. `SELECT + R` stops that session once and writes the reserved
+`gmon-NNN.out` path.
+
+The PSP host `main()` returns from `bootproc()` after the N64-style worker threads have been started. That return is
+not application exit in this port. Gprof continues across startup, menu navigation, and gameplay until `SELECT + R` or
+a real PSP exit path stops and dumps it. Only one gprof dump is supported per process.
+
+In phase builds, `SELECT + L` still starts or resets the explicit phase capture window.
 
 The status line is:
 
@@ -58,6 +69,10 @@ Gprof builds write:
 gmon-000.out
 gmon-001.out
 ```
+
+The gprof output path is reserved during profiler initialization. Startup and menu navigation before the target scene
+are therefore included in the same gprof session; dwell in the target scene long enough for its workload to dominate the
+profile before pressing `SELECT + R`.
 
 Phase builds write:
 
@@ -129,9 +144,9 @@ For the gprof EBOOT:
 1. Boot the gprof EBOOT.
 2. Reach the scene.
 3. Hold a repeatable menu, camera, or aircraft state.
-4. Press `SELECT + L`.
+4. Press `SELECT + L` to mark the current startup-time gprof session.
 5. Wait long enough to sample the scene.
-6. Press `SELECT + R`.
+6. Press `SELECT + R` to stop once and write `gmon-NNN.out`.
 7. Exit with `SELECT + START`.
 8. Copy `ms0:/PSP/GAME/SF64PROFILE/gmon-NNN.out`.
 9. Retain the matching `build/psp-profile-gprof/starfox64.psp.elf`, map, and SHA metadata.

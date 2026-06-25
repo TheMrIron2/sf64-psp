@@ -101,7 +101,9 @@ int main(int argc, char* argv[]) {
     pspDebugScreenPrintf("[psp] bootproc enter\n");
     bootproc();
     pspDebugScreenPrintf("[psp] bootproc returned\n");
+#if !SF64_PSP_GPROF
     PspProfiler_Shutdown();
+#endif
 
     while (1) {
         sceDisplayWaitVblankStart();
