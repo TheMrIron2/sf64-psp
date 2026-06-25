@@ -1,7 +1,8 @@
 #include "sys.h"
 
 #if defined(TARGET_PSP) && (USE_N64PSP_SINCOS + 0)
-void n64psp_sincosf(float radians, float* out_sine, float* out_cosine);
+#include <n64psp/math.h>
+
 #define SF64_MATRIX_SINCOS(angle, outSn, outCs) \
     n64psp_sincosf((angle), &(outSn), &(outCs))
 #else
