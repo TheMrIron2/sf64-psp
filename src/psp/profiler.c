@@ -17,6 +17,9 @@
 #ifndef SF64_PSP_PROFILE_PHASES
 #define SF64_PSP_PROFILE_PHASES 0
 #endif
+#ifndef SF64_PSP_PSPGL_PROFILE
+#define SF64_PSP_PSPGL_PROFILE 0
+#endif
 #ifndef SF64_PSP_PSPGL_VBO_STREAM
 #define SF64_PSP_PSPGL_VBO_STREAM 1
 #endif
@@ -35,6 +38,15 @@
 #ifndef N64PSP_GIT_SHA
 #define N64PSP_GIT_SHA "unknown"
 #endif
+#ifndef PSPGL_GIT_SHA
+#define PSPGL_GIT_SHA "unknown"
+#endif
+#ifndef PSPGL_GIT_DIRTY
+#define PSPGL_GIT_DIRTY "unknown"
+#endif
+#ifndef PSPGL_SOURCE_MODE
+#define PSPGL_SOURCE_MODE "system"
+#endif
 #ifndef PERFECT_DARK_PSP_SHA
 #define PERFECT_DARK_PSP_SHA "unknown"
 #endif
@@ -49,6 +61,10 @@
 #endif
 #ifndef USE_N64PSP_SINCOS
 #define USE_N64PSP_SINCOS 0
+#endif
+
+#if SF64_PSP_PROFILE_PHASES && SF64_PSP_PSPGL_PROFILE
+#include <pspgl_profile.h>
 #endif
 
 #define PSP_PROFILE_DIR "ms0:/PSP/GAME/SF64PROFILE"
@@ -214,6 +230,10 @@ static u32 sForcedActivePhaseEnds;
 static u64 sCaptureStartUs;
 static u64 sCaptureEndUs;
 static u64 sTimerReadPairOverheadUs;
+#if SF64_PSP_PSPGL_PROFILE
+static struct pspgl_profile_stats sPspglProfileStats;
+static int sPspglProfileCaptured;
+#endif
 #endif
 
 #if SF64_PSP_PROFILE_PHASES
@@ -353,6 +373,14 @@ PSP_PROFILE_ATTR static void psp_profiler_reset_phase_capture(void) {
     for (i = 0; i < sizeof(sCounters); i++) {
         bytes[i] = 0;
     }
+#if SF64_PSP_PSPGL_PROFILE
+    bytes = (u8*) &sPspglProfileStats;
+    for (i = 0; i < sizeof(sPspglProfileStats); i++) {
+        bytes[i] = 0;
+    }
+    sPspglProfileCaptured = 0;
+    pspgl_profile_reset();
+#endif
     sCaptureFrames = 0;
     sForcedActivePhaseEnds = 0;
     sTimerReadPairOverheadUs = psp_profiler_measure_timer_overhead();
@@ -569,6 +597,94 @@ static void psp_profiler_write_csv_row(SceUID fd, PspProfilePhase phase) {
     psp_profiler_write_all(fd, line);
 }
 
+#if SF64_PSP_PSPGL_PROFILE
+static void psp_profiler_write_pspgl_profile(SceUID fd) {
+    char line[160];
+    const struct pspgl_profile_stats* p;
+
+    if (!sPspglProfileCaptured) {
+        pspgl_profile_snapshot(&sPspglProfileStats);
+        sPspglProfileCaptured = 1;
+    }
+    p = &sPspglProfileStats;
+
+    psp_profiler_write_all(fd, "\npspgl_profile_begin\n");
+    snprintf(line, sizeof(line), "enabled=1\ncaptured=%d\n", sPspglProfileCaptured);
+    psp_profiler_write_all(fd, line);
+#define PSPGL_PROFILE_WRITE_FIELD(field) do { \
+        snprintf(line, sizeof(line), #field "=%llu\n", p->field); \
+        psp_profiler_write_all(fd, line); \
+    } while (0)
+    PSPGL_PROFILE_WRITE_FIELD(texture_bind_calls);
+    PSPGL_PROFILE_WRITE_FIELD(texture_bind_changes);
+    PSPGL_PROFILE_WRITE_FIELD(texture_bind_redundant);
+    PSPGL_PROFILE_WRITE_FIELD(texture_objects_created);
+    PSPGL_PROFILE_WRITE_FIELD(texture_cache_flush_requests);
+    PSPGL_PROFILE_WRITE_FIELD(texture_cache_flush_commands);
+    PSPGL_PROFILE_WRITE_FIELD(texture_cache_sync_requests);
+    PSPGL_PROFILE_WRITE_FIELD(texture_cache_sync_commands);
+    PSPGL_PROFILE_WRITE_FIELD(texture_image_uploads);
+    PSPGL_PROFILE_WRITE_FIELD(texture_compressed_image_uploads);
+    PSPGL_PROFILE_WRITE_FIELD(texture_sub_image_uploads);
+    PSPGL_PROFILE_WRITE_FIELD(texture_copy_image_uploads);
+    PSPGL_PROFILE_WRITE_FIELD(texture_color_table_uploads);
+    PSPGL_PROFILE_WRITE_FIELD(texture_mipmap_updates);
+    PSPGL_PROFILE_WRITE_FIELD(texture_memory_modifications);
+    PSPGL_PROFILE_WRITE_FIELD(texture_upload_bytes);
+    PSPGL_PROFILE_WRITE_FIELD(draw_calls);
+    PSPGL_PROFILE_WRITE_FIELD(draw_arrays_calls);
+    PSPGL_PROFILE_WRITE_FIELD(draw_elements_calls);
+    PSPGL_PROFILE_WRITE_FIELD(draw_range_elements_calls);
+    PSPGL_PROFILE_WRITE_FIELD(draw_zero_count_skips);
+    PSPGL_PROFILE_WRITE_FIELD(vertices_submitted);
+    PSPGL_PROFILE_WRITE_FIELD(indices_submitted);
+    PSPGL_PROFILE_WRITE_FIELD(array_locked_fast_paths);
+    PSPGL_PROFILE_WRITE_FIELD(array_convert_paths);
+    PSPGL_PROFILE_WRITE_FIELD(native_vertex_array_copies);
+    PSPGL_PROFILE_WRITE_FIELD(converted_vertex_array_copies);
+    PSPGL_PROFILE_WRITE_FIELD(native_vertex_array_vertices);
+    PSPGL_PROFILE_WRITE_FIELD(converted_vertex_array_vertices);
+    PSPGL_PROFILE_WRITE_FIELD(index_buffer_direct_paths);
+    PSPGL_PROFILE_WRITE_FIELD(index_convert_paths);
+    PSPGL_PROFILE_WRITE_FIELD(vertex_buffer_temp_allocations);
+    PSPGL_PROFILE_WRITE_FIELD(index_buffer_temp_allocations);
+    PSPGL_PROFILE_WRITE_FIELD(client_memory_draw_paths);
+    PSPGL_PROFILE_WRITE_FIELD(buffer_object_draw_paths);
+    PSPGL_PROFILE_WRITE_FIELD(render_setup_calls);
+    PSPGL_PROFILE_WRITE_FIELD(render_prim_calls);
+    PSPGL_PROFILE_WRITE_FIELD(ge_register_groups_considered);
+    PSPGL_PROFILE_WRITE_FIELD(ge_register_groups_nonempty);
+    PSPGL_PROFILE_WRITE_FIELD(ge_register_bit_iterations);
+    PSPGL_PROFILE_WRITE_FIELD(ge_dirty_registers);
+    PSPGL_PROFILE_WRITE_FIELD(ge_registers_emitted);
+    PSPGL_PROFILE_WRITE_FIELD(ge_dirty_registers_not_emitted);
+    PSPGL_PROFILE_WRITE_FIELD(ge_uncached_register_writes);
+    PSPGL_PROFILE_WRITE_FIELD(matrix_uploads);
+    PSPGL_PROFILE_WRITE_FIELD(matrix_words);
+    PSPGL_PROFILE_WRITE_FIELD(buffer_pin_requests);
+    PSPGL_PROFILE_WRITE_FIELD(buffer_pin_new);
+    PSPGL_PROFILE_WRITE_FIELD(buffer_pin_repeated);
+    PSPGL_PROFILE_WRITE_FIELD(buffer_unpins);
+    PSPGL_PROFILE_WRITE_FIELD(buffer_dlist_syncs);
+    PSPGL_PROFILE_WRITE_FIELD(buffer_dlist_sync_waits);
+    PSPGL_PROFILE_WRITE_FIELD(buffer_vidmem_wants);
+    PSPGL_PROFILE_WRITE_FIELD(command_words);
+    PSPGL_PROFILE_WRITE_FIELD(command_list_submissions);
+    PSPGL_PROFILE_WRITE_FIELD(command_list_rollovers);
+    PSPGL_PROFILE_WRITE_FIELD(command_list_high_water_words);
+    PSPGL_PROFILE_WRITE_FIELD(command_list_capacity_words);
+    PSPGL_PROFILE_WRITE_FIELD(command_list_insert_space_calls);
+    PSPGL_PROFILE_WRITE_FIELD(command_list_insert_space_words);
+    PSPGL_PROFILE_WRITE_FIELD(command_list_insert_space_rollovers);
+    PSPGL_PROFILE_WRITE_FIELD(explicit_flushes);
+    PSPGL_PROFILE_WRITE_FIELD(finishes);
+    PSPGL_PROFILE_WRITE_FIELD(await_completion_calls);
+    PSPGL_PROFILE_WRITE_FIELD(queue_waits);
+#undef PSPGL_PROFILE_WRITE_FIELD
+    psp_profiler_write_all(fd, "pspgl_profile_end\n");
+}
+#endif
+
 static void psp_profiler_write_phase_files(u32 slot) {
     char path[96];
     char line[1024];
@@ -596,9 +712,10 @@ static void psp_profiler_write_phase_files(u32 slot) {
     }
 
     snprintf(line, sizeof(line),
-             "SF64 git SHA: %s\nn64psp submodule SHA: %s\nPerfect Dark reference SHA: %s\ncompiler: %s\noptimisation flags: %s\nPROFILE_PSP: %d\nSF64_PSP_PROFILE_PHASES: %d\nSF64_PSP_PSPGL_VBO_STREAM: %d\nSF64_PSP_DIRECT_TRI_FASTPATH: %d\nSF64_PSP_BATCH_STATE_CACHE: %d\nSF64_PSP_TEXTURE_WRAP_CACHE: %d\nUSE_N64PSP_SINCOS: %d\nCPU clock: %lu\nbus clock: %lu\ncapture slot: %lu\nrequested frame count: %d\nactual frame count: %lu\ntimer overhead us: %llu\n\n",
-             SF64_GIT_SHA, N64PSP_GIT_SHA, PERFECT_DARK_PSP_SHA, SF64_PSP_COMPILER, SF64_PSP_OPT_FLAGS,
-             SF64_PSP_GPROF, SF64_PSP_PROFILE_PHASES, SF64_PSP_PSPGL_VBO_STREAM, SF64_PSP_DIRECT_TRI_FASTPATH,
+             "SF64 git SHA: %s\nn64psp submodule SHA: %s\nPSPGL source mode: %s\nPSPGL git SHA: %s\nPSPGL worktree: %s\nPerfect Dark reference SHA: %s\ncompiler: %s\noptimisation flags: %s\nPROFILE_PSP: %d\nSF64_PSP_PROFILE_PHASES: %d\nSF64_PSP_PSPGL_PROFILE: %d\nSF64_PSP_PSPGL_VBO_STREAM: %d\nSF64_PSP_DIRECT_TRI_FASTPATH: %d\nSF64_PSP_BATCH_STATE_CACHE: %d\nSF64_PSP_TEXTURE_WRAP_CACHE: %d\nUSE_N64PSP_SINCOS: %d\nCPU clock: %lu\nbus clock: %lu\ncapture slot: %lu\nrequested frame count: %d\nactual frame count: %lu\ntimer overhead us: %llu\n\n",
+             SF64_GIT_SHA, N64PSP_GIT_SHA, PSPGL_SOURCE_MODE, PSPGL_GIT_SHA, PSPGL_GIT_DIRTY,
+             PERFECT_DARK_PSP_SHA, SF64_PSP_COMPILER, SF64_PSP_OPT_FLAGS,
+             SF64_PSP_GPROF, SF64_PSP_PROFILE_PHASES, SF64_PSP_PSPGL_PROFILE, SF64_PSP_PSPGL_VBO_STREAM, SF64_PSP_DIRECT_TRI_FASTPATH,
              SF64_PSP_BATCH_STATE_CACHE, SF64_PSP_TEXTURE_WRAP_CACHE, USE_N64PSP_SINCOS,
              (unsigned long) scePowerGetCpuClockFrequency(),
              (unsigned long) scePowerGetBusClockFrequency(), (unsigned long) slot, SF64_PSP_PROFILE_CAPTURE_FRAMES,
@@ -713,6 +830,9 @@ static void psp_profiler_write_phase_files(u32 slot) {
              sCounters.tri1Commands, sCounters.tri2Commands, sCounters.batchFlushes, sCounters.verticesSubmitted,
              sCounters.drawCalls, sCounters.glFlushCalls, sCounters.syncCalls);
     psp_profiler_write_all(fd, line);
+#if SF64_PSP_PSPGL_PROFILE
+    psp_profiler_write_pspgl_profile(fd);
+#endif
     sceIoClose(fd);
     psp_profiler_set_status(PSP_PROF_STATUS_SAVED, slot);
 }
@@ -840,6 +960,10 @@ void PspProfiler_StopCapture(void) {
     }
     sCaptureEndUs = now;
     psp_profiler_unlock(lockState);
+#if SF64_PSP_PSPGL_PROFILE
+    pspgl_profile_snapshot(&sPspglProfileStats);
+    sPspglProfileCaptured = 1;
+#endif
 #endif
     sCaptureActive = 0;
 }
