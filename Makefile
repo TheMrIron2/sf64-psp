@@ -25,6 +25,7 @@ SF64_PSP_PSPGL_VBO_STREAM ?= 1
 SF64_PSP_DIRECT_TRI_FASTPATH ?= 1
 SF64_PSP_BATCH_STATE_CACHE ?= 1
 SF64_PSP_TEXTURE_WRAP_CACHE ?= 1
+USE_LOCAL_PSPGL ?= 0
 PSP_LOG ?= 0
 PSP_TRACE ?= 0
 PSP_RENDERER_DIAGNOSTICS ?= 0
@@ -101,6 +102,8 @@ PROFILE_ARTIFACT_ROOT ?= artifacts
 QUEUE_TRACE_LOG ?= sf64_psp.log
 QUEUE_TRACE_QUEUES ?= 0x9917470 0x9974c14 0x9974ca4 0x9974c84
 PSP_LOAD_BASE ?= 0x08804000
+PSPGL_DIR ?= lib/pspgl
+LOCAL_PSPGL_LIB := $(PSPGL_DIR)/libGL.a
 
 PSP_LIBS ?= -lm -lpspdebug -lpspdisplay -lpspgu -lpspge -lpspctrl -lpspaudio -lpsppower
 
@@ -128,6 +131,9 @@ PORT_DEFINES += -DNON_MATCHING -DAVOID_UB -DCOMPILER_GCC
 
 IINC := -Iinclude -Ibin/$(VERSION).$(REV) -I.
 IINC += -Ilib/ultralib/include -Ilib/ultralib/include/PR -Ilib/ultralib/include/ido
+ifeq ($(USE_LOCAL_PSPGL),1)
+IINC += -I$(PSPGL_DIR)
+endif
 IINC += -I$(PSPDEV)/psp/include -I$(PSPSDK)/include
 ifneq ($(filter 1,$(USE_N64PSP_QUEUES) $(USE_N64PSP_MATH)),)
 IINC += -Ilib/n64psp/include
@@ -145,8 +151,10 @@ endef
 PSP_OPTFLAGS ?= -O2 # -ffast-math
 SF64_GIT_SHA := $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 N64PSP_GIT_SHA := $(shell git -C lib/n64psp rev-parse HEAD 2>/dev/null || echo unknown)
+PSPGL_GIT_SHA := $(shell git -C $(PSPGL_DIR) rev-parse HEAD 2>/dev/null || echo unknown)
 SF64_GIT_DIRTY := $(shell test -z "$$(git status --porcelain 2>/dev/null)" && echo clean || echo dirty)
 N64PSP_GIT_DIRTY := $(shell test -z "$$(git -C lib/n64psp status --porcelain 2>/dev/null)" && echo clean || echo dirty)
+PSPGL_GIT_DIRTY := $(shell test -z "$$(git -C $(PSPGL_DIR) status --porcelain 2>/dev/null)" && echo clean || echo dirty)
 PERFECT_DARK_PSP_SHA := 0871c907aea105cd2e7002219d047c733011f668
 PSP_COMPILER_VERSION := $(shell $(CC) --version 2>/dev/null | sed -n '1p' | sed 's/"/\\"/g; s/[[:space:]]\+/_/g')
 
@@ -255,6 +263,15 @@ ifneq ($(USE_N64PSP_BATCH_LIGHTING),1)
 $(error PSP_VALIDATE_N64PSP_BATCH_LIGHTING=1 requires USE_N64PSP_BATCH_LIGHTING=1)
 endif
 endif
+ifeq ($(USE_LOCAL_PSPGL),1)
+PSPGL_HEADER := $(firstword $(wildcard $(PSPGL_DIR)/GLES/egl.h) $(wildcard $(PSPGL_DIR)/GL/gl.h))
+ifeq ($(PSPGL_HEADER),)
+$(error Local PSPGL headers not found under $(PSPGL_DIR). Update lib/pspgl or build without USE_LOCAL_PSPGL=1.)
+endif
+PSPGL_CFLAGS :=
+PSPGL_LIBS := $(LOCAL_PSPGL_LIB) -lpspvfpu
+PSPGL_BUILD_DEPS := $(LOCAL_PSPGL_LIB)
+else
 PSPGL_CONFIG_PATH := $(shell command -v $(PSPGL_CONFIG) 2>/dev/null)
 ifneq ($(PSPGL_CONFIG_PATH),)
 PSPGL_CFLAGS := $(shell $(PSPGL_CONFIG) --cflags)
@@ -300,6 +317,8 @@ endif
 endif
 PSPGL_CFLAGS :=
 PSPGL_LIBS := -lGL -lpspvfpu
+endif
+PSPGL_BUILD_DEPS :=
 endif
 CFLAGS += $(PSPGL_CFLAGS)
 PSP_LIBS := $(PSPGL_LIBS) $(PSP_LIBS)
@@ -479,6 +498,9 @@ $(PROFILE_METADATA): $(PSP_EBOOT) $(PSP_ELF) $(PSP_MAP) Makefile
 		printf 'sf64_worktree=%s\n' '$(SF64_GIT_DIRTY)'; \
 		printf 'n64psp_commit=%s\n' '$(N64PSP_GIT_SHA)'; \
 		printf 'n64psp_worktree=%s\n' '$(N64PSP_GIT_DIRTY)'; \
+		printf 'pspgl_source=%s\n' '$(if $(filter 1,$(USE_LOCAL_PSPGL)),local,system)'; \
+		printf 'pspgl_commit=%s\n' '$(if $(filter 1,$(USE_LOCAL_PSPGL)),$(PSPGL_GIT_SHA),system)'; \
+		printf 'pspgl_worktree=%s\n' '$(if $(filter 1,$(USE_LOCAL_PSPGL)),$(PSPGL_GIT_DIRTY),system)'; \
 		printf 'compiler=%s\n' '$(PSP_COMPILER_VERSION)'; \
 		printf 'cflags=%s\n' '$(CFLAGS)'; \
 		printf 'ldflags=%s\n' '$(LDFLAGS)'; \
@@ -488,6 +510,7 @@ $(PROFILE_METADATA): $(PSP_EBOOT) $(PSP_ELF) $(PSP_MAP) Makefile
 		printf 'SF64_PSP_PROFILE_PHASES=%s\n' '$(SF64_PSP_PROFILE_PHASES)'; \
 		printf 'SF64_PSP_PROFILE_CAPTURE_FRAMES=%s\n' '$(SF64_PSP_PROFILE_CAPTURE_FRAMES)'; \
 		printf 'SF64_PSP_PSPGL_VBO_STREAM=%s\n' '$(SF64_PSP_PSPGL_VBO_STREAM)'; \
+		printf 'USE_LOCAL_PSPGL=%s\n' '$(USE_LOCAL_PSPGL)'; \
 		printf 'SF64_PSP_DIRECT_TRI_FASTPATH=%s\n' '$(SF64_PSP_DIRECT_TRI_FASTPATH)'; \
 		printf 'SF64_PSP_BATCH_STATE_CACHE=%s\n' '$(SF64_PSP_BATCH_STATE_CACHE)'; \
 		printf 'SF64_PSP_TEXTURE_WRAP_CACHE=%s\n' '$(SF64_PSP_TEXTURE_WRAP_CACHE)'; \
@@ -504,7 +527,7 @@ $(PROFILE_METADATA): $(PSP_EBOOT) $(PSP_ELF) $(PSP_MAP) Makefile
 		printf 'N64PSP_QUEUE_TRACE=%s\n' '$(N64PSP_QUEUE_TRACE)'; \
 		printf 'cpu_clock_runtime=recorded in profile-NNN.txt on PSP\n'; \
 		printf 'bus_clock_runtime=recorded in profile-NNN.txt on PSP\n'; \
-		printf 'build_command=make %s BUILD_DIR=%s PROFILE_PSP=%s SF64_PSP_PROFILE_PHASES=%s SF64_PSP_PSPGL_VBO_STREAM=%s SF64_PSP_DIRECT_TRI_FASTPATH=%s SF64_PSP_BATCH_STATE_CACHE=%s SF64_PSP_TEXTURE_WRAP_CACHE=%s PSP_FPS_OVERLAY=%s PSP_LOG=%s PSP_TRACE=%s PSP_RENDERER_DIAGNOSTICS=%s PSP_VALIDATE_N64PSP_MATH=%s USE_N64PSP_SINCOS=%s PSP_VALIDATE_N64PSP_BATCH_TRANSFORM=%s USE_N64PSP_VERTEX_CHAIN2=%s N64PSP_VERTEX_CHAIN2_VALIDATE=%s N64PSP_VERTEX_BATCH_DIAGNOSTICS=%s N64PSP_QUEUE_TRACE=%s psp\n' '$(MAKECMDGOALS)' '$(BUILD_DIR)' '$(PROFILE_PSP)' '$(SF64_PSP_PROFILE_PHASES)' '$(SF64_PSP_PSPGL_VBO_STREAM)' '$(SF64_PSP_DIRECT_TRI_FASTPATH)' '$(SF64_PSP_BATCH_STATE_CACHE)' '$(SF64_PSP_TEXTURE_WRAP_CACHE)' '$(PSP_FPS_OVERLAY)' '$(PSP_LOG)' '$(PSP_TRACE)' '$(PSP_RENDERER_DIAGNOSTICS)' '$(PSP_VALIDATE_N64PSP_MATH)' '$(USE_N64PSP_SINCOS)' '$(PSP_VALIDATE_N64PSP_BATCH_TRANSFORM)' '$(USE_N64PSP_VERTEX_CHAIN2)' '$(N64PSP_VERTEX_CHAIN2_VALIDATE)' '$(N64PSP_VERTEX_BATCH_DIAGNOSTICS)' '$(N64PSP_QUEUE_TRACE)'; \
+		printf 'build_command=make %s BUILD_DIR=%s PROFILE_PSP=%s SF64_PSP_PROFILE_PHASES=%s SF64_PSP_PSPGL_VBO_STREAM=%s USE_LOCAL_PSPGL=%s SF64_PSP_DIRECT_TRI_FASTPATH=%s SF64_PSP_BATCH_STATE_CACHE=%s SF64_PSP_TEXTURE_WRAP_CACHE=%s PSP_FPS_OVERLAY=%s PSP_LOG=%s PSP_TRACE=%s PSP_RENDERER_DIAGNOSTICS=%s PSP_VALIDATE_N64PSP_MATH=%s USE_N64PSP_SINCOS=%s PSP_VALIDATE_N64PSP_BATCH_TRANSFORM=%s USE_N64PSP_VERTEX_CHAIN2=%s N64PSP_VERTEX_CHAIN2_VALIDATE=%s N64PSP_VERTEX_BATCH_DIAGNOSTICS=%s N64PSP_QUEUE_TRACE=%s psp\n' '$(MAKECMDGOALS)' '$(BUILD_DIR)' '$(PROFILE_PSP)' '$(SF64_PSP_PROFILE_PHASES)' '$(SF64_PSP_PSPGL_VBO_STREAM)' '$(USE_LOCAL_PSPGL)' '$(SF64_PSP_DIRECT_TRI_FASTPATH)' '$(SF64_PSP_BATCH_STATE_CACHE)' '$(SF64_PSP_TEXTURE_WRAP_CACHE)' '$(PSP_FPS_OVERLAY)' '$(PSP_LOG)' '$(PSP_TRACE)' '$(PSP_RENDERER_DIAGNOSTICS)' '$(PSP_VALIDATE_N64PSP_MATH)' '$(USE_N64PSP_SINCOS)' '$(PSP_VALIDATE_N64PSP_BATCH_TRANSFORM)' '$(USE_N64PSP_VERTEX_CHAIN2)' '$(N64PSP_VERTEX_CHAIN2_VALIDATE)' '$(N64PSP_VERTEX_BATCH_DIAGNOSTICS)' '$(N64PSP_QUEUE_TRACE)'; \
 	} > $@
 
 $(PROFILE_BUILD_COMMANDS): $(PROFILE_METADATA)
@@ -529,7 +552,7 @@ $(PSP_SFO):
 	$(call print,Generating PSP SFO:,$(PSP_TITLE),$@)
 	$(V)$(MKSFOEX) -d MEMSIZE=1 '$(PSP_TITLE)' $@
 
-$(PSP_ELF): $(O_FILES)
+$(PSP_ELF): $(O_FILES) $(PSPGL_BUILD_DEPS)
 	@mkdir -p $(dir $@)
 	$(call print,Linking PSP ELF:,$<,$@)
 	$(V)$(CC) $(O_FILES) $(LDFLAGS) $(PSP_LIBS) -o $@
@@ -551,6 +574,15 @@ $(N64PSP_BUILD_STAMP): FORCE
 	@touch $@
 
 $(N64PSP_PSP_ARCHIVES): $(N64PSP_BUILD_STAMP)
+
+$(LOCAL_PSPGL_LIB): FORCE
+	env -u MAKEFLAGS $(MAKE) -C $(PSPGL_DIR) .deps libGL.a \
+		PSPPATH=$(PSPDEV)/psp \
+		PSPSDK=$(PSPSDK) \
+		ARCH=psp- \
+		CC="$(CC) -std=gnu99" \
+		AR=psp-ar \
+		RANLIB=psp-ranlib
 
 $(COMPILE_FLAGS_STAMP): FORCE
 	@mkdir -p $(dir $@)
