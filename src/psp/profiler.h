@@ -116,6 +116,11 @@ void PspProfiler_CountPspglVertexStreamUploadSplit(u32 smallDraw, u32 largeDraw,
 void PspProfiler_CountVertexStream(u32 vboDraw, u32 vertices, u32 upload, u32 uploadBytes, u32 fallbackDraw,
                                    u32 fallbackVertices, u32 pageSwitch, u32 capacityBytes, u32 highWaterBytes,
                                    u32 smallVboDraw, u32 largeVboDraw, u32 smallVboVertices, u32 largeVboVertices);
+void PspProfiler_CountTextureWrapRequest(u32 requestS, u32 requestT);
+void PspProfiler_CountTextureWrapCall(u32 emittedS, u32 emittedT);
+void PspProfiler_CountTextureWrapSkip(u32 skippedS, u32 skippedT);
+void PspProfiler_CountTextureParameterCacheMiss(void);
+void PspProfiler_CountTextureParameterCacheReplacement(void);
 void PspProfiler_CountGlFlush(void);
 void PspProfiler_CountSync(void);
 #else
@@ -149,6 +154,11 @@ void PspProfiler_CountSync(void);
                                       pageSwitch, capacityBytes, highWaterBytes, smallVboDraw, largeVboDraw,      \
                                       smallVboVertices, largeVboVertices)                                         \
     ((void) 0)
+#define PspProfiler_CountTextureWrapRequest(requestS, requestT) ((void) 0)
+#define PspProfiler_CountTextureWrapCall(emittedS, emittedT) ((void) 0)
+#define PspProfiler_CountTextureWrapSkip(skippedS, skippedT) ((void) 0)
+#define PspProfiler_CountTextureParameterCacheMiss() ((void) 0)
+#define PspProfiler_CountTextureParameterCacheReplacement() ((void) 0)
 #define PspProfiler_CountGlFlush() ((void) 0)
 #define PspProfiler_CountSync() ((void) 0)
 #endif

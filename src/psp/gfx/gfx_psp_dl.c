@@ -168,6 +168,7 @@ typedef enum {
 
 typedef struct {
     u32 textureId;
+    PspGfxPspglTextureRef textureRef;
     PspGfxPspglTextureEnv textureEnv;
     PspGfxPspglTextureWrap wrapS;
     PspGfxPspglTextureWrap wrapT;
@@ -243,8 +244,10 @@ typedef struct {
     u32 textureMaskS;
     u32 textureMaskT;
     u32 textureId;
+    PspGfxPspglTextureRef textureRef;
     int textureUploadAttempted;
     u32 batchTextureId;
+    PspGfxPspglTextureRef batchTextureRef;
     u32 geometryMode;
     u32 lightCount;
     PspGfxDlLight lights[7];
@@ -1642,10 +1645,11 @@ static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason 
     }
     (void) reason;
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_BATCH_FLUSH);
-    PspGfxPspgl_DrawColoredTriangles(sPspGfxDlBatch, ctx->batchCount, ctx->batchTextureId, ctx->batchTextureEnv,
-                                     ctx->batchWrapS, ctx->batchWrapT, ctx->batchAlphaTest, ctx->batchBlend,
-                                     ctx->batchPremultiplied, ctx->batchDepthTest, ctx->batchDepthWrite, ctx->batchFog,
-                                     ctx->batchFogColor, ctx->batchFogStart, ctx->batchFogEnd,
+    PspGfxPspgl_DrawColoredTriangles(sPspGfxDlBatch, ctx->batchCount, ctx->batchTextureId, ctx->batchTextureRef,
+                                     ctx->batchTextureEnv, ctx->batchWrapS, ctx->batchWrapT, ctx->batchAlphaTest,
+                                     ctx->batchBlend, ctx->batchPremultiplied, ctx->batchDepthTest,
+                                     ctx->batchDepthWrite, ctx->batchFog, ctx->batchFogColor, ctx->batchFogStart,
+                                     ctx->batchFogEnd,
                                      &ctx->batchProjection[0][0], ctx->batchPretransformed);
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_BATCH_FLUSH);
     PspProfiler_CountBatchFlush(reason, ctx->batchCount);
@@ -1661,10 +1665,24 @@ static void psp_gfx_dl_flush_texture_change(PspGfxDlContext* ctx, PspProfileText
     psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_TEXTURE_CHANGE);
 }
 
-static void psp_gfx_dl_set_batch_texture(PspGfxDlContext* ctx, u32 textureId, PspGfxPspglTextureEnv textureEnv,
-                                         PspGfxPspglTextureWrap wrapS, PspGfxPspglTextureWrap wrapT, int alphaTest,
-                                         int blend, int premultiplied) {
-    int textureIdChanged = ctx->batchTextureId != textureId;
+static PspGfxPspglTextureRef psp_gfx_dl_null_texture_ref(void) {
+    PspGfxPspglTextureRef ref;
+
+    ref.state = NULL;
+    ref.texture = 0;
+    ref.generation = 0;
+    return ref;
+}
+
+static int psp_gfx_dl_texture_ref_equal(PspGfxPspglTextureRef a, PspGfxPspglTextureRef b) {
+    return (a.state == b.state) && (a.texture == b.texture) && (a.generation == b.generation);
+}
+
+static void psp_gfx_dl_set_batch_texture(PspGfxDlContext* ctx, u32 textureId, PspGfxPspglTextureRef textureRef,
+                                         PspGfxPspglTextureEnv textureEnv, PspGfxPspglTextureWrap wrapS,
+                                         PspGfxPspglTextureWrap wrapT, int alphaTest, int blend, int premultiplied) {
+    int textureIdChanged = (ctx->batchTextureId != textureId) ||
+                           !psp_gfx_dl_texture_ref_equal(ctx->batchTextureRef, textureRef);
     int textureEnvChanged = ctx->batchTextureEnv != textureEnv;
     int wrapSChanged = ctx->batchWrapS != wrapS;
     int wrapTChanged = ctx->batchWrapT != wrapT;
@@ -1684,6 +1702,7 @@ static void psp_gfx_dl_set_batch_texture(PspGfxDlContext* ctx, u32 textureId, Ps
         }
     }
     ctx->batchTextureId = textureId;
+    ctx->batchTextureRef = textureRef;
     ctx->batchTextureEnv = textureEnv;
     ctx->batchWrapS = wrapS;
     ctx->batchWrapT = wrapT;
@@ -1788,6 +1807,7 @@ static int psp_gfx_dl_resolve_effective_material_state(PspGfxDlContext* ctx) {
     }
 
     material->textureId = ctx->textureEnabled ? ctx->textureId : 0;
+    material->textureRef = ctx->textureEnabled ? ctx->textureRef : psp_gfx_dl_null_texture_ref();
     material->textureEnv = PSP_GFX_PSPGL_TEX_REPLACE;
     if ((ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_SHADE_DECAL_ALPHA) ||
         (ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_SHADE_ALPHA) ||
@@ -1854,7 +1874,8 @@ static u32 psp_gfx_dl_apply_effective_batch_state(PspGfxDlContext* ctx, const Ps
 
     psp_gfx_dl_resolve_effective_state(ctx, vertex, pretransformed, &materialResolved, &depthResolved, &fogResolved);
     psp_gfx_dl_set_batch_transform(ctx, pretransformed, vertex->projectionSerial, vertex->projection);
-    psp_gfx_dl_set_batch_texture(ctx, ctx->effectiveMaterial.textureId, ctx->effectiveMaterial.textureEnv,
+    psp_gfx_dl_set_batch_texture(ctx, ctx->effectiveMaterial.textureId, ctx->effectiveMaterial.textureRef,
+                                 ctx->effectiveMaterial.textureEnv,
                                  ctx->effectiveMaterial.wrapS, ctx->effectiveMaterial.wrapT,
                                  ctx->effectiveMaterial.alphaTest, ctx->effectiveMaterial.blend,
                                  ctx->effectiveMaterial.premultiplied);
@@ -2392,7 +2413,8 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
         (ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_PRIM_ALPHA)) {
         textureEnv = PSP_GFX_PSPGL_TEX_MODULATE;
     }
-    psp_gfx_dl_set_batch_texture(ctx, textureId, textureEnv,
+    psp_gfx_dl_set_batch_texture(ctx, textureId, ctx->textureEnabled ? ctx->textureRef : psp_gfx_dl_null_texture_ref(),
+                                 textureEnv,
                                  psp_gfx_dl_texture_wrap(ctx->textureCms, ctx->textureMaskS),
                                  psp_gfx_dl_texture_wrap(ctx->textureCmt, ctx->textureMaskT),
                                  psp_gfx_dl_alpha_test_enabled(ctx), psp_gfx_dl_blend_enabled(ctx),
@@ -2563,7 +2585,7 @@ static void psp_gfx_dl_handle_texture_rectangle(PspGfxDlContext* ctx, const Gfx*
     }
 
     psp_gfx_dl_set_batch_texture(
-        ctx, ctx->textureId, PSP_GFX_PSPGL_TEX_MODULATE,
+        ctx, ctx->textureId, ctx->textureRef, PSP_GFX_PSPGL_TEX_MODULATE,
         psp_gfx_dl_texture_wrap(ctx->textureCms, ctx->textureMaskS),
         psp_gfx_dl_texture_wrap(ctx->textureCmt, ctx->textureMaskT),
         psp_gfx_dl_alpha_test_enabled(ctx), psp_gfx_dl_blend_enabled(ctx),
@@ -3026,6 +3048,7 @@ static void psp_gfx_dl_handle_set_texture_image(PspGfxDlContext* ctx, const Gfx*
     ctx->textureSize = (gfx->words.w0 >> 19) & 0x3;
     ctx->textureImage = psp_gfx_dl_resolve_ptr(ctx, gfx->words.w1);
     ctx->textureId = 0;
+    ctx->textureRef = psp_gfx_dl_null_texture_ref();
     ctx->textureUploadWidth = 0;
     ctx->textureUploadHeight = 0;
     ctx->textureUploadAttempted = 0;
@@ -3077,52 +3100,56 @@ static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int pr
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TEXTURE_PREPARE);
     if ((ctx->textureFormat == G_IM_FMT_CI) && (ctx->textureSize == G_IM_SIZ_8b)) {
         hit = PspGfxPspgl_FindCi8Texture((const u8*) ctx->textureImage, ctx->texturePalette, ctx->textureWidth,
-                                         ctx->textureHeight, &ctx->textureId, &ctx->textureUploadWidth,
-                                         &ctx->textureUploadHeight);
+                                         ctx->textureHeight, &ctx->textureId, &ctx->textureRef,
+                                         &ctx->textureUploadWidth, &ctx->textureUploadHeight);
         if (!hit) {
             psp_gfx_dl_flush_texture_change(ctx, PSP_PROFILE_TEXTURE_FLUSH_CACHE_MISS_UPLOAD);
             ctx->textureId =
                 PspGfxPspgl_CreateCi8Texture((const u8*) ctx->textureImage, ctx->texturePalette, ctx->textureWidth,
-                                             ctx->textureHeight, &ctx->textureUploadWidth, &ctx->textureUploadHeight);
+                                             ctx->textureHeight, &ctx->textureUploadWidth, &ctx->textureUploadHeight,
+                                             &ctx->textureRef);
         }
     } else if ((ctx->textureFormat == G_IM_FMT_CI) && (ctx->textureSize == G_IM_SIZ_4b)) {
         palette = ctx->texturePalette + (ctx->texturePaletteIndex * 16);
         hit = PspGfxPspgl_FindCi4Texture((const u8*) ctx->textureImage, palette, ctx->textureWidth,
-                                         ctx->textureHeight, &ctx->textureId, &ctx->textureUploadWidth,
-                                         &ctx->textureUploadHeight);
+                                         ctx->textureHeight, &ctx->textureId, &ctx->textureRef,
+                                         &ctx->textureUploadWidth, &ctx->textureUploadHeight);
         if (!hit) {
             psp_gfx_dl_flush_texture_change(ctx, PSP_PROFILE_TEXTURE_FLUSH_CACHE_MISS_UPLOAD);
             ctx->textureId = PspGfxPspgl_CreateCi4Texture((const u8*) ctx->textureImage, palette, ctx->textureWidth,
                                                           ctx->textureHeight, &ctx->textureUploadWidth,
-                                                          &ctx->textureUploadHeight);
+                                                          &ctx->textureUploadHeight, &ctx->textureRef);
         }
     } else if ((ctx->textureFormat == G_IM_FMT_RGBA) && (ctx->textureSize == G_IM_SIZ_16b)) {
         hit = PspGfxPspgl_FindRgba16Texture((const u16*) ctx->textureImage, ctx->textureWidth, ctx->textureHeight,
-                                            premultiply, &ctx->textureId, &ctx->textureUploadWidth,
-                                            &ctx->textureUploadHeight);
+                                            premultiply, &ctx->textureId, &ctx->textureRef,
+                                            &ctx->textureUploadWidth, &ctx->textureUploadHeight);
         if (!hit) {
             psp_gfx_dl_flush_texture_change(ctx, PSP_PROFILE_TEXTURE_FLUSH_CACHE_MISS_UPLOAD);
             ctx->textureId = PspGfxPspgl_CreateRgba16Texture((const u16*) ctx->textureImage, ctx->textureWidth,
                                                              ctx->textureHeight, premultiply,
-                                                             &ctx->textureUploadWidth, &ctx->textureUploadHeight);
+                                                             &ctx->textureUploadWidth, &ctx->textureUploadHeight,
+                                                             &ctx->textureRef);
         }
     } else if ((ctx->textureFormat == G_IM_FMT_IA) && (ctx->textureSize == G_IM_SIZ_8b)) {
         hit = PspGfxPspgl_FindIa8Texture((const u8*) ctx->textureImage, ctx->textureWidth, ctx->textureHeight,
-                                         &ctx->textureId, &ctx->textureUploadWidth, &ctx->textureUploadHeight);
+                                         &ctx->textureId, &ctx->textureUploadWidth, &ctx->textureUploadHeight,
+                                         &ctx->textureRef);
         if (!hit) {
             psp_gfx_dl_flush_texture_change(ctx, PSP_PROFILE_TEXTURE_FLUSH_CACHE_MISS_UPLOAD);
             ctx->textureId = PspGfxPspgl_CreateIa8Texture((const u8*) ctx->textureImage, ctx->textureWidth,
                                                           ctx->textureHeight, &ctx->textureUploadWidth,
-                                                          &ctx->textureUploadHeight);
+                                                          &ctx->textureUploadHeight, &ctx->textureRef);
         }
     } else if ((ctx->textureFormat == G_IM_FMT_IA) && (ctx->textureSize == G_IM_SIZ_16b)) {
         hit = PspGfxPspgl_FindIa16Texture((const u16*) ctx->textureImage, ctx->textureWidth, ctx->textureHeight,
-                                          &ctx->textureId, &ctx->textureUploadWidth, &ctx->textureUploadHeight);
+                                          &ctx->textureId, &ctx->textureUploadWidth, &ctx->textureUploadHeight,
+                                          &ctx->textureRef);
         if (!hit) {
             psp_gfx_dl_flush_texture_change(ctx, PSP_PROFILE_TEXTURE_FLUSH_CACHE_MISS_UPLOAD);
             ctx->textureId = PspGfxPspgl_CreateIa16Texture((const u16*) ctx->textureImage, ctx->textureWidth,
                                                            ctx->textureHeight, &ctx->textureUploadWidth,
-                                                           &ctx->textureUploadHeight);
+                                                           &ctx->textureUploadHeight, &ctx->textureRef);
         }
     } else {
         supported = 0;

@@ -26,6 +26,9 @@
 #ifndef SF64_PSP_BATCH_STATE_CACHE
 #define SF64_PSP_BATCH_STATE_CACHE 1
 #endif
+#ifndef SF64_PSP_TEXTURE_WRAP_CACHE
+#define SF64_PSP_TEXTURE_WRAP_CACHE 1
+#endif
 #ifndef SF64_GIT_SHA
 #define SF64_GIT_SHA "unknown"
 #endif
@@ -172,6 +175,14 @@ typedef struct {
     u64 textureDecodes;
     u64 textureUploads;
     u64 textureBytesUploaded;
+    u64 textureWrapRequestsS;
+    u64 textureWrapRequestsT;
+    u64 textureWrapCallsEmittedS;
+    u64 textureWrapCallsEmittedT;
+    u64 textureWrapCallsSkippedS;
+    u64 textureWrapCallsSkippedT;
+    u64 textureParameterCacheMisses;
+    u64 textureParameterCacheReplacements;
     PspProfileTextureCacheState textureCache[PSP_PROFILE_TEXTURE_CACHE_COUNT];
     PspProfileTextureCacheKey textureCacheKeys[PSP_PROFILE_TEXTURE_CACHE_COUNT][PSP_PROFILE_TEXTURE_CACHE_TRACKED_KEYS];
     PspProfileTextureCacheBaseKey
@@ -560,7 +571,7 @@ static void psp_profiler_write_csv_row(SceUID fd, PspProfilePhase phase) {
 
 static void psp_profiler_write_phase_files(u32 slot) {
     char path[96];
-    char line[256];
+    char line[1024];
     SceUID fd;
     u32 i;
 
@@ -585,10 +596,10 @@ static void psp_profiler_write_phase_files(u32 slot) {
     }
 
     snprintf(line, sizeof(line),
-             "SF64 git SHA: %s\nn64psp submodule SHA: %s\nPerfect Dark reference SHA: %s\ncompiler: %s\noptimisation flags: %s\nPROFILE_PSP: %d\nSF64_PSP_PROFILE_PHASES: %d\nSF64_PSP_PSPGL_VBO_STREAM: %d\nSF64_PSP_DIRECT_TRI_FASTPATH: %d\nSF64_PSP_BATCH_STATE_CACHE: %d\nUSE_N64PSP_SINCOS: %d\nCPU clock: %lu\nbus clock: %lu\ncapture slot: %lu\nrequested frame count: %d\nactual frame count: %lu\ntimer overhead us: %llu\n\n",
+             "SF64 git SHA: %s\nn64psp submodule SHA: %s\nPerfect Dark reference SHA: %s\ncompiler: %s\noptimisation flags: %s\nPROFILE_PSP: %d\nSF64_PSP_PROFILE_PHASES: %d\nSF64_PSP_PSPGL_VBO_STREAM: %d\nSF64_PSP_DIRECT_TRI_FASTPATH: %d\nSF64_PSP_BATCH_STATE_CACHE: %d\nSF64_PSP_TEXTURE_WRAP_CACHE: %d\nUSE_N64PSP_SINCOS: %d\nCPU clock: %lu\nbus clock: %lu\ncapture slot: %lu\nrequested frame count: %d\nactual frame count: %lu\ntimer overhead us: %llu\n\n",
              SF64_GIT_SHA, N64PSP_GIT_SHA, PERFECT_DARK_PSP_SHA, SF64_PSP_COMPILER, SF64_PSP_OPT_FLAGS,
              SF64_PSP_GPROF, SF64_PSP_PROFILE_PHASES, SF64_PSP_PSPGL_VBO_STREAM, SF64_PSP_DIRECT_TRI_FASTPATH,
-             SF64_PSP_BATCH_STATE_CACHE, USE_N64PSP_SINCOS,
+             SF64_PSP_BATCH_STATE_CACHE, SF64_PSP_TEXTURE_WRAP_CACHE, USE_N64PSP_SINCOS,
              (unsigned long) scePowerGetCpuClockFrequency(),
              (unsigned long) scePowerGetBusClockFrequency(), (unsigned long) slot, SF64_PSP_PROFILE_CAPTURE_FRAMES,
              (unsigned long) sCaptureFrames, sTimerReadPairOverheadUs);
@@ -635,6 +646,13 @@ static void psp_profiler_write_phase_files(u32 slot) {
              "\n[texture statistics]\ncache_hits,%llu\ncache_misses,%llu\ndecodes_or_conversions,%llu\nuploads,%llu\nbytes_uploaded,%llu\n",
              sCounters.textureCacheHits, sCounters.textureCacheMisses, sCounters.textureDecodes,
              sCounters.textureUploads, sCounters.textureBytesUploaded);
+    psp_profiler_write_all(fd, line);
+    snprintf(line, sizeof(line),
+             "\n[texture parameter cache]\nwrap_requests_s,%llu\nwrap_requests_t,%llu\nwrap_calls_emitted_s,%llu\nwrap_calls_emitted_t,%llu\nwrap_calls_skipped_s,%llu\nwrap_calls_skipped_t,%llu\ncache_misses,%llu\nreplacements_or_collisions,%llu\n",
+             sCounters.textureWrapRequestsS, sCounters.textureWrapRequestsT, sCounters.textureWrapCallsEmittedS,
+             sCounters.textureWrapCallsEmittedT, sCounters.textureWrapCallsSkippedS,
+             sCounters.textureWrapCallsSkippedT, sCounters.textureParameterCacheMisses,
+             sCounters.textureParameterCacheReplacements);
     psp_profiler_write_all(fd, line);
     psp_profiler_write_all(fd,
                            "\n[texture cache behaviour]\ncache,capacity,current_entries,peak_entries,unique_keys,unique_base_keys,max_variants_per_base,lookups,hits,misses,insertions,evictions,reuse_after_eviction,max_reuse_distance,unique_key_overflow,unique_base_overflow\n");
@@ -1031,6 +1049,42 @@ void PspProfiler_CountTextureEvent(u32 hit, u32 miss, u32 decode, u32 upload, u3
     sCounters.textureDecodes += decode;
     sCounters.textureUploads += upload;
     sCounters.textureBytesUploaded += bytesUploaded;
+}
+
+void PspProfiler_CountTextureWrapRequest(u32 requestS, u32 requestT) {
+    if (!sCaptureActive) {
+        return;
+    }
+    sCounters.textureWrapRequestsS += requestS;
+    sCounters.textureWrapRequestsT += requestT;
+}
+
+void PspProfiler_CountTextureWrapCall(u32 emittedS, u32 emittedT) {
+    if (!sCaptureActive) {
+        return;
+    }
+    sCounters.textureWrapCallsEmittedS += emittedS;
+    sCounters.textureWrapCallsEmittedT += emittedT;
+}
+
+void PspProfiler_CountTextureWrapSkip(u32 skippedS, u32 skippedT) {
+    if (!sCaptureActive) {
+        return;
+    }
+    sCounters.textureWrapCallsSkippedS += skippedS;
+    sCounters.textureWrapCallsSkippedT += skippedT;
+}
+
+void PspProfiler_CountTextureParameterCacheMiss(void) {
+    if (sCaptureActive) {
+        sCounters.textureParameterCacheMisses++;
+    }
+}
+
+void PspProfiler_CountTextureParameterCacheReplacement(void) {
+    if (sCaptureActive) {
+        sCounters.textureParameterCacheReplacements++;
+    }
 }
 
 void PspProfiler_RecordTextureCacheLookup(PspProfileTextureCacheClass cache, u32 capacity, u32 occupied,
