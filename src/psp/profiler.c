@@ -623,6 +623,12 @@ static void psp_profiler_write_pspgl_profile(SceUID fd) {
     PSPGL_PROFILE_WRITE_FIELD(texture_cache_flush_commands);
     PSPGL_PROFILE_WRITE_FIELD(texture_cache_sync_requests);
     PSPGL_PROFILE_WRITE_FIELD(texture_cache_sync_commands);
+    PSPGL_PROFILE_WRITE_FIELD(texture_cache_dirty_marks);
+    PSPGL_PROFILE_WRITE_FIELD(texture_cache_dirty_mark_coalesced);
+    PSPGL_PROFILE_WRITE_FIELD(texture_cache_dirty_flushes);
+    PSPGL_PROFILE_WRITE_FIELD(texture_bind_flushes_suppressed);
+    PSPGL_PROFILE_WRITE_FIELD(texture_state_restore_flushes_suppressed);
+    PSPGL_PROFILE_WRITE_FIELD(texture_cache_dirty_textured_draw_checks);
     PSPGL_PROFILE_WRITE_FIELD(texture_image_uploads);
     PSPGL_PROFILE_WRITE_FIELD(texture_compressed_image_uploads);
     PSPGL_PROFILE_WRITE_FIELD(texture_sub_image_uploads);
