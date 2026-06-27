@@ -182,6 +182,12 @@ f32 D_menu_801B907C;
 f32 D_menu_801B9080;
 f32 D_menu_801B9084;
 
+#if defined(TARGET_PSP) && SF64_PSP_PROFILE_FRAME_TRACE
+static f32 sPspTraceTeamLightDirX;
+static f32 sPspTraceTeamLightDirY;
+static f32 sPspTraceTeamLightDirZ;
+#endif
+
 TitleAnimation sTeamAnim[4] = {
     { &aTitleFoxRunningAnim, &aTitleFoxSpeakAnim2, aTitleFoxSkel },
     { &aTitleFalcoRunningAnim, &aTitleFalcoSpeakAnim, aTitleFalcoSkel },
@@ -1019,7 +1025,14 @@ void Title_Screen_Draw(void) {
         Math_SmoothStepToF(&D_menu_801B86CC, D_menu_801B86DC, 0.1f, 100.0f, 0.0001f);
     }
 
-    Title_SetLightRot(D_menu_801B86C8, D_menu_801B86CC, 100.0f, &D_menu_801B82E0, &D_menu_801B82E4, &D_menu_801B82E8);
+    Title_SetLightRot(D_menu_801B86C8, D_menu_801B86CC, 100.0f,
+                      &D_menu_801B82E0, &D_menu_801B82E4, &D_menu_801B82E8);
+
+#if defined(TARGET_PSP) && SF64_PSP_PROFILE_FRAME_TRACE
+    sPspTraceTeamLightDirX = D_menu_801B82E0;
+    sPspTraceTeamLightDirY = D_menu_801B82E4;
+    sPspTraceTeamLightDirZ = D_menu_801B82E8;
+#endif
 
     for (i = 0; i < ARRAY_COUNT(D_menu_801ADA84); i++) {
         Title_Team_Draw(D_menu_801ADA84[i]);
@@ -3528,13 +3541,9 @@ void Title_PspGetTraceMarkers(PspTitleTraceMarkers* markers) {
     if (markers == NULL) {
         return;
     }
-    markers->valid = (gTitleState == TITLE_UPDATE_ENTRY) &&
-                     ((sCutsceneState == TITLE_SCREEN) || (sCutsceneState == TITLE_RANKING) ||
-                      (sCutsceneState == TITLE_GREAT_FOX_TRAVELING) ||
-                      (sCutsceneState == TITLE_CS_TEAM_RUNNING) ||
-                      (sCutsceneState == TITLE_GREAT_FOX_CLOSE_UP) ||
-                      (sCutsceneState == TITLE_TAKE_OFF) ||
-                      (sCutsceneState == TITLE_TAKE_OFF_SPACE));
+    markers->valid =
+        (gTitleState == TITLE_UPDATE_ENTRY) &&
+        (sCutsceneState == TITLE_SCREEN);
     markers->title_state = gTitleState;
     markers->cutscene_state = sCutsceneState;
     markers->scene_state = sSceneState;
@@ -3551,15 +3560,15 @@ void Title_PspGetTraceMarkers(PspTitleTraceMarkers* markers) {
     }
     markers->light_pitch = D_menu_801B86C8;
     markers->light_yaw = D_menu_801B86CC;
-    markers->light_dir_x = D_menu_801B82E0;
-    markers->light_dir_y = D_menu_801B82E4;
-    markers->light_dir_z = D_menu_801B82E8;
+    markers->team_light_dir_x = sPspTraceTeamLightDirX;
+    markers->team_light_dir_y = sPspTraceTeamLightDirY;
+    markers->team_light_dir_z = sPspTraceTeamLightDirZ;
     markers->light_target_x = D_menu_801B905C;
     markers->light_target_y = D_menu_801B9060;
     markers->light_target_z = D_menu_801B9064;
-    markers->ambient_r = gAmbientR;
-    markers->ambient_g = gAmbientG;
-    markers->ambient_b = gAmbientB;
+    markers->team_ambient_r = D_menu_801B8304;
+    markers->team_ambient_g = D_menu_801B8308;
+    markers->team_ambient_b = D_menu_801B830C;
     markers->camera_eye_x = gCsCamEyeX;
     markers->camera_eye_y = gCsCamEyeY;
     markers->camera_eye_z = gCsCamEyeZ;

@@ -311,6 +311,7 @@ typedef struct {
     s32 sceneId;
     s32 drawMode;
     u64 frameStartTick;
+    u32 frameIntervalValid;
     u64 frameIntervalUs;
     u64 totalProfiledFrameUsRaw;
     u64 totalProfiledFrameUsAdjusted;
@@ -355,6 +356,7 @@ static u32 sFrameTraceDropped;
 static u32 sFrameTraceComplete;
 static u64 sFrameStartUs;
 static int sFrameStarted;
+static int sFrameHasPriorBoundary;
 #endif
 #if SF64_PSP_PSPGL_PROFILE
 static struct pspgl_profile_stats sPspglProfileStats;
@@ -429,18 +431,6 @@ PSP_PROFILE_ATTR static PspProfileThreadState* psp_profiler_get_thread_state_loc
     }
     return empty;
 }
-
-PSP_PROFILE_ATTR static PspProfileThreadState* psp_profiler_get_thread_state(void) {
-    int lockState;
-    SceUID threadId;
-    PspProfileThreadState* state;
-
-    threadId = sceKernelGetThreadId();
-    lockState = psp_profiler_lock();
-    state = psp_profiler_get_thread_state_locked(threadId);
-    psp_profiler_unlock(lockState);
-    return state;
-}
 #endif
 
 #if SF64_PSP_GPROF || SF64_PSP_PROFILE_PHASES
@@ -506,6 +496,7 @@ PSP_PROFILE_ATTR static void psp_profiler_reset_phase_capture(void) {
     sFrameTraceDropped = 0;
     sFrameTraceComplete = 0;
     sFrameStarted = 0;
+    sFrameHasPriorBoundary = 0;
 #endif
 #if SF64_PSP_PSPGL_PROFILE
     psp_profiler_zero(&sPspglProfileStats, sizeof(sPspglProfileStats));
@@ -649,6 +640,7 @@ static void psp_profiler_capture_frame_record_locked(u64 now, u32 frameIndex) {
     record->sceneId = gSceneId;
     record->drawMode = gDrawMode;
     record->frameStartTick = sFrameStartUs;
+    record->frameIntervalValid = sFrameHasPriorBoundary;
     record->frameIntervalUs = (now >= sFrameStartUs) ? (now - sFrameStartUs) : 0;
     record->counters = sFrameCounters;
     for (i = 0; i < PSP_PROFILE_PHASE_COUNT; i++) {
@@ -670,6 +662,7 @@ static void psp_profiler_capture_frame_record_locked(u64 now, u32 frameIndex) {
     psp_profiler_frame_trace_sample_title(record);
     sFrameTraceCount++;
     sFrameTraceComplete = (sFrameTraceCount >= SF64_PSP_PROFILE_FRAME_TRACE_FRAMES);
+    sFrameHasPriorBoundary = 1;
     psp_profiler_reset_frame_local(now);
 }
 
@@ -960,7 +953,7 @@ static void psp_profiler_write_frame_summary(u32 slot) {
         return;
     }
     psp_profiler_write_all(fd,
-                           "capture_frame_index,game_frame_counter,sys_frame_counter,vi_per_frame,game_state,scene_id,draw_mode,frame_start_tick,frame_interval_us,total_profiled_frame_us_raw,total_profiled_frame_us_adjusted,graphics_task_us,game_update_us,display_list_processing_us,batch_flush_us,vertex_processing_or_upload_us,lighting_us,clipping_us,texture_processing_or_upload_us,pspgl_state_setup_us,draw_submission_us,gl_flush_us,finish_or_sync_us,gfx_backpressure_us,vblank_wait_us,incomplete_phase_mask,incomplete_phase_depth,title_valid,title_state,title_cutscene_state,title_scene_state,title_timer1,title_timer2,title_timer3,title_msg_frame_count,title_hold_timer,title_selected_team,title_light_pitch,title_light_yaw,title_light_dir_x,title_light_dir_y,title_light_dir_z,title_light_target_x,title_light_target_y,title_light_target_z,title_ambient_r,title_ambient_g,title_ambient_b,title_camera_eye_x,title_camera_eye_y,title_camera_eye_z,title_camera_at_x,title_camera_at_y,title_camera_at_z,title_flags,display_list_tasks,gvtx_commands,vertices_loaded,tri1_commands,tri2_commands,input_triangles,output_triangles,lit_vertices,lighting_evaluations,perspective_divides,batch_flushes,draw_calls,vertices_submitted,texture_uploads,texture_bytes_uploaded,vertex_stream_upload_calls,vertex_stream_upload_bytes,clipping_input_triangles,trivially_accepted_triangles,trivially_rejected_triangles,partially_clipped_triangles,generated_clipping_vertices,modelview_matrix_commands,projection_matrix_commands,matrix_compositions,glFlush_calls,sync_calls\n");
+                           "capture_frame_index,game_frame_counter,sys_frame_counter,vi_per_frame,game_state,scene_id,draw_mode,frame_start_tick,frame_interval_valid,frame_interval_us,total_profiled_frame_us_raw,total_profiled_frame_us_adjusted,graphics_task_us,game_update_us,display_list_processing_us,batch_flush_us,vertex_processing_or_upload_us,lighting_us,clipping_us,texture_processing_or_upload_us,pspgl_state_setup_us,draw_submission_us,gl_flush_us,finish_or_sync_us,gfx_backpressure_us,vblank_wait_us,incomplete_phase_mask,incomplete_phase_depth,title_valid,title_state,title_cutscene_state,title_scene_state,title_timer1,title_timer2,title_timer3,title_msg_frame_count,title_hold_timer,title_selected_team,title_team0_frame_count,title_team1_frame_count,title_team2_frame_count,title_team3_frame_count,title_team0_frame_step,title_team1_frame_step,title_team2_frame_step,title_team3_frame_step,title_team0_motion_enabled,title_team1_motion_enabled,title_team2_motion_enabled,title_team3_motion_enabled,title_light_pitch,title_light_yaw,title_team_light_dir_x,title_team_light_dir_y,title_team_light_dir_z,title_light_target_x,title_light_target_y,title_light_target_z,title_team_ambient_r,title_team_ambient_g,title_team_ambient_b,title_camera_eye_x,title_camera_eye_y,title_camera_eye_z,title_camera_at_x,title_camera_at_y,title_camera_at_z,title_flags,display_list_tasks,gvtx_commands,vertices_loaded,tri1_commands,tri2_commands,input_triangles,output_triangles,lit_vertices,lighting_evaluations,perspective_divides,batch_flushes,draw_calls,vertices_submitted,texture_uploads,texture_bytes_uploaded,vertex_stream_upload_calls,vertex_stream_upload_bytes,clipping_input_triangles,trivially_accepted_triangles,trivially_rejected_triangles,partially_clipped_triangles,generated_clipping_vertices,modelview_matrix_commands,projection_matrix_commands,matrix_compositions,glFlush_calls,sync_calls\n");
     for (i = 0; i < sFrameTraceCount; i++) {
         const PspProfileFrameRecord* r = &sFrameTrace[i];
         u64 vertexUs = psp_profiler_frame_phase_adjusted(r, PSP_PROFILE_PHASE_G_VTX) +
@@ -980,6 +973,7 @@ static void psp_profiler_write_frame_summary(u32 slot) {
         psp_profiler_csv_append_s32(line, sizeof(line), &offset, r->sceneId);
         psp_profiler_csv_append_s32(line, sizeof(line), &offset, r->drawMode);
         psp_profiler_csv_append_u64(line, sizeof(line), &offset, r->frameStartTick);
+        psp_profiler_csv_append_u32(line, sizeof(line), &offset, r->frameIntervalValid);
         psp_profiler_csv_append_u64(line, sizeof(line), &offset, r->frameIntervalUs);
         psp_profiler_csv_append_u64(line, sizeof(line), &offset, r->totalProfiledFrameUsRaw);
         psp_profiler_csv_append_u64(line, sizeof(line), &offset, r->totalProfiledFrameUsAdjusted);
@@ -1020,17 +1014,33 @@ static void psp_profiler_write_frame_summary(u32 slot) {
         psp_profiler_csv_append_s32(line, sizeof(line), &offset, r->title.title_msg_frame_count);
         psp_profiler_csv_append_s32(line, sizeof(line), &offset, r->title.title_hold_timer);
         psp_profiler_csv_append_s32(line, sizeof(line), &offset, r->title.selected_team);
+
+        psp_profiler_csv_append_s32(line, sizeof(line), &offset, r->title.team_frame_count[0]);
+        psp_profiler_csv_append_s32(line, sizeof(line), &offset, r->title.team_frame_count[1]);
+        psp_profiler_csv_append_s32(line, sizeof(line), &offset, r->title.team_frame_count[2]);
+        psp_profiler_csv_append_s32(line, sizeof(line), &offset, r->title.team_frame_count[3]);
+
+        psp_profiler_csv_append_s32(line, sizeof(line), &offset, r->title.team_frame_step[0]);
+        psp_profiler_csv_append_s32(line, sizeof(line), &offset, r->title.team_frame_step[1]);
+        psp_profiler_csv_append_s32(line, sizeof(line), &offset, r->title.team_frame_step[2]);
+        psp_profiler_csv_append_s32(line, sizeof(line), &offset, r->title.team_frame_step[3]);
+
+        psp_profiler_csv_append_s32(line, sizeof(line), &offset, r->title.team_motion_enabled[0]);
+        psp_profiler_csv_append_s32(line, sizeof(line), &offset, r->title.team_motion_enabled[1]);
+        psp_profiler_csv_append_s32(line, sizeof(line), &offset, r->title.team_motion_enabled[2]);
+        psp_profiler_csv_append_s32(line, sizeof(line), &offset, r->title.team_motion_enabled[3]);
+
         psp_profiler_csv_append_f32(line, sizeof(line), &offset, r->title.light_pitch);
         psp_profiler_csv_append_f32(line, sizeof(line), &offset, r->title.light_yaw);
-        psp_profiler_csv_append_f32(line, sizeof(line), &offset, r->title.light_dir_x);
-        psp_profiler_csv_append_f32(line, sizeof(line), &offset, r->title.light_dir_y);
-        psp_profiler_csv_append_f32(line, sizeof(line), &offset, r->title.light_dir_z);
+        psp_profiler_csv_append_f32(line, sizeof(line), &offset, r->title.team_light_dir_x);
+        psp_profiler_csv_append_f32(line, sizeof(line), &offset, r->title.team_light_dir_y);
+        psp_profiler_csv_append_f32(line, sizeof(line), &offset, r->title.team_light_dir_z);
         psp_profiler_csv_append_f32(line, sizeof(line), &offset, r->title.light_target_x);
         psp_profiler_csv_append_f32(line, sizeof(line), &offset, r->title.light_target_y);
         psp_profiler_csv_append_f32(line, sizeof(line), &offset, r->title.light_target_z);
-        psp_profiler_csv_append_f32(line, sizeof(line), &offset, r->title.ambient_r);
-        psp_profiler_csv_append_f32(line, sizeof(line), &offset, r->title.ambient_g);
-        psp_profiler_csv_append_f32(line, sizeof(line), &offset, r->title.ambient_b);
+        psp_profiler_csv_append_f32(line, sizeof(line), &offset, r->title.team_ambient_r);
+        psp_profiler_csv_append_f32(line, sizeof(line), &offset, r->title.team_ambient_g);
+        psp_profiler_csv_append_f32(line, sizeof(line), &offset, r->title.team_ambient_b);
         psp_profiler_csv_append_f32(line, sizeof(line), &offset, r->title.camera_eye_x);
         psp_profiler_csv_append_f32(line, sizeof(line), &offset, r->title.camera_eye_y);
         psp_profiler_csv_append_f32(line, sizeof(line), &offset, r->title.camera_eye_z);
@@ -1506,45 +1516,58 @@ int PspProfiler_ExitRequested(void) {
  * by audio, main, and graphics threads.
  */
 void PspProfiler_PhaseBegin(PspProfilePhase phase) {
+    int lockState;
+    SceUID threadId;
     PspProfileThreadState* state;
 
     if (!sCaptureActive || (phase >= PSP_PROFILE_PHASE_COUNT)) {
         return;
     }
-    state = psp_profiler_get_thread_state();
-    if ((state == NULL) || state->active[phase]) {
-        return;
+
+    threadId = sceKernelGetThreadId();
+    lockState = psp_profiler_lock();
+
+    state = psp_profiler_get_thread_state_locked(threadId);
+    if ((state != NULL) && !state->active[phase]) {
+        state->startUs[phase] = psp_profiler_now_us();
+        state->active[phase] = 1;
     }
-    state->startUs[phase] = psp_profiler_now_us();
-    state->active[phase] = 1;
+
+    psp_profiler_unlock(lockState);
 }
 
 void PspProfiler_PhaseEnd(PspProfilePhase phase) {
     u64 now;
     u64 delta;
     int lockState;
-    PspProfilePhaseState* p;
+    SceUID threadId;
     PspProfileThreadState* state;
 
     if (!sCaptureActive || (phase >= PSP_PROFILE_PHASE_COUNT)) {
         return;
     }
-    state = psp_profiler_get_thread_state();
+
+    threadId = sceKernelGetThreadId();
+    lockState = psp_profiler_lock();
+
+    state = psp_profiler_get_thread_state_locked(threadId);
     if ((state == NULL) || !state->active[phase]) {
+        psp_profiler_unlock(lockState);
         return;
     }
+
     now = psp_profiler_now_us();
     delta = (now >= state->startUs[phase]) ? (now - state->startUs[phase]) : 0;
     state->active[phase] = 0;
 
-    lockState = psp_profiler_lock();
-    p = &sPhase[phase];
-    p->totalUs += delta;
-    p->calls++;
+    sPhase[phase].totalUs += delta;
+    sPhase[phase].calls++;
+
 #if SF64_PSP_PROFILE_FRAME_TRACE
     sFramePhase[phase].totalUs += delta;
     sFramePhase[phase].calls++;
 #endif
+
     psp_profiler_unlock(lockState);
 }
 

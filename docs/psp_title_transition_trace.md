@@ -83,6 +83,11 @@ frame,category,name,count
 It contains per-frame deltas for batch flush reasons, batch-state transitions,
 and texture-flush sources.
 
+The first recorded row has `frame_interval_valid=0` because it spans from the
+manual capture trigger to the first graphics-task completion rather than two
+complete graphics-task boundaries. Subsequent rows have
+`frame_interval_valid=1`.
+
 ## Phase Summary Mapping
 
 The summary CSV derives columns from existing phases:
@@ -195,11 +200,19 @@ D_menu_801B905C / D_menu_801B9060 / D_menu_801B9064  face/look target used by Ti
 D_menu_801B8304 / D_menu_801B8308 / D_menu_801B830C  title ambient RGB setup values
 ```
 
+The trace snapshots the team light direction immediately after the first
+Title_SetLightRot() in Title_Screen_Draw(), before the same working variables
+are overwritten by the later Arwing light setup. The team ambient columns use
+D_menu_801B8304, D_menu_801B8308, and D_menu_801B830C directly.
+
 `Title_Screen_Draw()` sets `gLight1R/G/B` and `gAmbientR/G/B`, optionally eases
 `D_menu_801B86C8/D_menu_801B86CC` toward the face/look target when
 `D_menu_801B9040 != 0`, calls `Title_SetLightRot()`, then draws the four team
 members every frame in this order: Fox, Falco, Slippy, Peppy. The Arwing is
 drawn afterward with a second light setup.
+
+The frame summary also records frame count, frame step, and motion-enabled state
+for all four title-team members.
 
 Character models are not progressively introduced on the PSP title-screen path:
 `Title_Screen_Draw()` calls `Title_Team_Draw()` for all four characters every
