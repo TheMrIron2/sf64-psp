@@ -178,3 +178,19 @@ SF64_PSP_PSPGL_DLIST_SIZE_WORDS=512
 ```
 
 or use the normal system PSPGL path with `USE_LOCAL_PSPGL=0`.
+
+## Hardware Results
+
+Real PSP testing found that 512, 1024, 2048, and 4096 word command-list
+capacities produced effectively identical sustained warm-title graphics-task
+timing. The complete spread across the four tested capacities was approximately
+0.025%.
+
+The 2048-word configuration eliminated capacity rollovers, but total graphics
+time did not improve. The 16-slot command-list ring did not saturate, and no
+reuse-triggered waits occurred. Larger lists reduced PSPGL submission work, but
+the saved time shifted into other work or later synchronization.
+
+The default remains 512 words. The configurable capacity and command-list
+counters remain useful diagnostic infrastructure, but the command-list sizing
+experiment is closed as an explanation for the sustained warm-title slowdown.

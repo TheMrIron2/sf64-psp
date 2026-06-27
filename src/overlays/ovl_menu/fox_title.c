@@ -10,6 +10,9 @@
 #include "fox_title.h"
 #include "assets/ast_title.h"
 #include "assets/ast_text.h"
+#ifdef TARGET_PSP
+#include "src/psp/title_trace.h"
+#endif
 
 #if defined(TARGET_PSP) && !defined(PSP_TRACE_ENABLED)
 #define PSP_TRACE_ENABLED 0
@@ -3517,6 +3520,67 @@ void Title_ScreenFade_Update(void) {
             break;
     }
 }
+
+#if defined(TARGET_PSP) && SF64_PSP_PROFILE_FRAME_TRACE
+void Title_PspGetTraceMarkers(PspTitleTraceMarkers* markers) {
+    s32 i;
+
+    if (markers == NULL) {
+        return;
+    }
+    markers->valid = (gTitleState == TITLE_UPDATE_ENTRY) &&
+                     ((sCutsceneState == TITLE_SCREEN) || (sCutsceneState == TITLE_RANKING) ||
+                      (sCutsceneState == TITLE_GREAT_FOX_TRAVELING) ||
+                      (sCutsceneState == TITLE_CS_TEAM_RUNNING) ||
+                      (sCutsceneState == TITLE_GREAT_FOX_CLOSE_UP) ||
+                      (sCutsceneState == TITLE_TAKE_OFF) ||
+                      (sCutsceneState == TITLE_TAKE_OFF_SPACE));
+    markers->title_state = gTitleState;
+    markers->cutscene_state = sCutsceneState;
+    markers->scene_state = sSceneState;
+    markers->timer1 = sTimer1;
+    markers->timer2 = sTimer2;
+    markers->timer3 = sTimer3;
+    markers->title_msg_frame_count = sTitleMsgFrameCount;
+    markers->title_hold_timer = D_menu_801B82B0;
+    markers->selected_team = D_menu_801B8340;
+    for (i = 0; i < 4; i++) {
+        markers->team_frame_count[i] = sTitleTeam[i].frameCount;
+        markers->team_frame_step[i] = sTitleTeam[i].unk_5C;
+        markers->team_motion_enabled[i] = sTitleTeam[i].unk_54;
+    }
+    markers->light_pitch = D_menu_801B86C8;
+    markers->light_yaw = D_menu_801B86CC;
+    markers->light_dir_x = D_menu_801B82E0;
+    markers->light_dir_y = D_menu_801B82E4;
+    markers->light_dir_z = D_menu_801B82E8;
+    markers->light_target_x = D_menu_801B905C;
+    markers->light_target_y = D_menu_801B9060;
+    markers->light_target_z = D_menu_801B9064;
+    markers->ambient_r = gAmbientR;
+    markers->ambient_g = gAmbientG;
+    markers->ambient_b = gAmbientB;
+    markers->camera_eye_x = gCsCamEyeX;
+    markers->camera_eye_y = gCsCamEyeY;
+    markers->camera_eye_z = gCsCamEyeZ;
+    markers->camera_at_x = gCsCamAtX;
+    markers->camera_at_y = gCsCamAtY;
+    markers->camera_at_z = gCsCamAtZ;
+    markers->flags = 0;
+    if (gGoToTitle) {
+        markers->flags |= 1u << 0;
+    }
+    if (sLevelStartState) {
+        markers->flags |= 1u << 1;
+    }
+    if (D_menu_801B9040) {
+        markers->flags |= 1u << 2;
+    }
+    if (sDrawTeamName) {
+        markers->flags |= 1u << 3;
+    }
+}
+#endif
 
 void Title_SetCamUp3(bool arg0, f32* arg1, f32* arg2, f32* arg3, f32* arg4, f32* arg5, f32* arg6, f32 arg7, f32 arg8,
                      f32 arg9) {
