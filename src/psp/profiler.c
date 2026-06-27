@@ -1,5 +1,9 @@
 #include "src/psp/profiler.h"
 
+#if SF64_PSP_PROFILE_COMPONENTS
+#include "src/psp/render_component.h"
+#endif
+
 #include <pspctrl.h>
 #include <pspiofilemgr.h>
 #include <pspkernel.h>
@@ -30,6 +34,9 @@ extern int gDrawMode;
 #endif
 #ifndef SF64_PSP_PROFILE_FRAME_TRACE
 #define SF64_PSP_PROFILE_FRAME_TRACE 0
+#endif
+#ifndef SF64_PSP_PROFILE_COMPONENTS
+#define SF64_PSP_PROFILE_COMPONENTS 0
 #endif
 #ifndef SF64_PSP_PROFILE_FRAME_TRACE_FRAMES
 #define SF64_PSP_PROFILE_FRAME_TRACE_FRAMES 240
@@ -96,6 +103,9 @@ extern int gDrawMode;
 #if SF64_PSP_PROFILE_FRAME_TRACE && !SF64_PSP_PROFILE_PHASES
 #error "SF64_PSP_PROFILE_FRAME_TRACE requires SF64_PSP_PROFILE_PHASES"
 #endif
+#if SF64_PSP_PROFILE_COMPONENTS && !SF64_PSP_PROFILE_PHASES
+#error "SF64_PSP_PROFILE_COMPONENTS requires SF64_PSP_PROFILE_PHASES"
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE && (SF64_PSP_PROFILE_FRAME_TRACE_FRAMES < 1)
 #error "SF64_PSP_PROFILE_FRAME_TRACE_FRAMES must be at least 1"
 #endif
@@ -120,6 +130,9 @@ typedef struct {
 typedef struct {
     SceUID threadId;
     u64 startUs[PSP_PROFILE_PHASE_COUNT];
+#if SF64_PSP_PROFILE_COMPONENTS
+    u32 componentAtBegin[PSP_PROFILE_PHASE_COUNT];
+#endif
     u8 active[PSP_PROFILE_PHASE_COUNT];
 } PspProfileThreadState;
 
@@ -232,6 +245,83 @@ typedef struct {
         textureCacheBaseKeys[PSP_PROFILE_TEXTURE_CACHE_COUNT][PSP_PROFILE_TEXTURE_CACHE_TRACKED_KEYS];
     u64 textureCacheLookupSeq;
 } PspProfileCounters;
+
+#if SF64_PSP_PROFILE_COMPONENTS
+typedef struct {
+    u64 markerEntries;
+    u64 displayListCommands;
+    u64 nestedDisplayListCalls;
+    u64 gvtxCommands;
+    u64 verticesLoaded;
+    u64 modelviewMatrixCommands;
+    u64 projectionMatrixCommands;
+    u64 matrixCompositions;
+    u64 litVertices;
+    u64 unlitVertices;
+    u64 normalTransforms;
+    u64 normalisations;
+    u64 lightingEvaluations;
+    u64 clipCodeCalculations;
+    u64 perspectiveDivides;
+    u64 tri1Commands;
+    u64 tri2Commands;
+    u64 inputTriangles;
+    u64 triviallyAcceptedTriangles;
+    u64 triviallyRejectedTriangles;
+    u64 partiallyClippedTriangles;
+    u64 generatedClippingVertices;
+    u64 outputTriangles;
+    u64 directFastpathTriangles;
+    u64 generalPathTriangles;
+    u64 perspectivePathTriangles;
+    u64 clippedPathTriangles;
+    u64 directVerticesWritten;
+    u64 effectiveStateResolves;
+    u64 effectiveStateReuses;
+    u64 materialStateResolves;
+    u64 depthStateResolves;
+    u64 fogStateResolves;
+    u64 batchFlushes;
+    u64 verticesSubmitted;
+    u64 drawCalls;
+    u64 vboDrawCalls;
+    u64 vboVertices;
+    u64 smallVboDrawCalls;
+    u64 largeVboDrawCalls;
+    u64 smallVboVertices;
+    u64 largeVboVertices;
+    u64 vertexStreamUploadCalls;
+    u64 vertexStreamUploadBytes;
+    u64 vertexStreamPageSwitches;
+    u64 clientArrayFallbackDraws;
+    u64 clientArrayFallbackVertices;
+    u64 textureCacheHits;
+    u64 textureCacheMisses;
+    u64 textureDecodes;
+    u64 textureUploads;
+    u64 textureBytesUploaded;
+    u64 textureWrapRequestsS;
+    u64 textureWrapRequestsT;
+    u64 textureWrapCallsEmittedS;
+    u64 textureWrapCallsEmittedT;
+    u64 textureWrapCallsSkippedS;
+    u64 textureWrapCallsSkippedT;
+    u64 textureParameterCacheMisses;
+    u64 textureParameterCacheReplacements;
+    u64 glFlushCalls;
+    u64 syncCalls;
+    u64 flushReasons[PSP_PROFILE_FLUSH_COUNT];
+    u64 batchStateTransitions[PSP_PROFILE_BATCH_STATE_COUNT];
+    u64 textureFlushSources[PSP_PROFILE_TEXTURE_FLUSH_COUNT];
+} PspProfileComponentCounters;
+
+typedef struct {
+    u64 regionCount;
+    u64 totalUs;
+    PspProfilePhaseState phases[PSP_PROFILE_PHASE_COUNT];
+    PspProfileComponentCounters counters;
+} PspProfileComponentState;
+#endif
 
 #if SF64_PSP_PROFILE_FRAME_TRACE
 typedef struct {
@@ -347,6 +437,20 @@ static u32 sForcedActivePhaseEnds;
 static u64 sCaptureStartUs;
 static u64 sCaptureEndUs;
 static u64 sTimerReadPairOverheadUs;
+#if SF64_PSP_PROFILE_COMPONENTS
+static PspProfileComponentState sComponent[PSP_PROFILE_COMPONENT_COUNT];
+static u32 sComponentCurrent;
+static int sComponentTaskActive;
+static u64 sComponentRegionStartUs;
+static u64 sComponentMarkerCommandsSeen;
+static u64 sComponentInvalidMarkerIds;
+static u64 sComponentSwitches;
+static u64 sComponentTaskStarts;
+static u64 sComponentTaskEnds;
+static u64 sComponentUnexpectedOutsideTask;
+static u64 sComponentPhaseCrossings;
+static u64 sComponentTaskTotalUs;
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
 static PspProfileFrameRecord sFrameTrace[SF64_PSP_PROFILE_FRAME_TRACE_FRAMES];
 static PspProfilePhaseState sFramePhase[PSP_PROFILE_PHASE_COUNT];
@@ -488,6 +592,20 @@ PSP_PROFILE_ATTR static void psp_profiler_reset_phase_capture(void) {
         sThreadPhase[i].threadId = -1;
     }
     psp_profiler_zero(&sCounters, sizeof(sCounters));
+#if SF64_PSP_PROFILE_COMPONENTS
+    psp_profiler_zero(sComponent, sizeof(sComponent));
+    sComponentCurrent = PSP_PROFILE_COMPONENT_UNATTRIBUTED;
+    sComponentTaskActive = 0;
+    sComponentRegionStartUs = 0;
+    sComponentMarkerCommandsSeen = 0;
+    sComponentInvalidMarkerIds = 0;
+    sComponentSwitches = 0;
+    sComponentTaskStarts = 0;
+    sComponentTaskEnds = 0;
+    sComponentUnexpectedOutsideTask = 0;
+    sComponentPhaseCrossings = 0;
+    sComponentTaskTotalUs = 0;
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
     psp_profiler_zero(sFrameTrace, sizeof(sFrameTrace));
     psp_profiler_zero(sFramePhase, sizeof(sFramePhase));
@@ -596,13 +714,104 @@ static const char* psp_profiler_texture_cache_name(PspProfileTextureCacheClass c
     return names[cache];
 }
 
-#if SF64_PSP_PROFILE_FRAME_TRACE
+#if SF64_PSP_PROFILE_FRAME_TRACE || SF64_PSP_PROFILE_COMPONENTS
 static u64 psp_profiler_adjust_phase_us(const PspProfilePhaseState* phase) {
     u64 overheadUs = phase->calls * sTimerReadPairOverheadUs;
 
     return (phase->totalUs > overheadUs) ? (phase->totalUs - overheadUs) : 0;
 }
+#endif
 
+#if SF64_PSP_PROFILE_COMPONENTS
+static const char* psp_profiler_component_name(u32 component) {
+    static const char* names[PSP_PROFILE_COMPONENT_COUNT] = {
+        "unattributed",
+        "title_common",
+        "title_fox",
+        "title_falco",
+        "title_slippy",
+        "title_peppy",
+        "title_arwing",
+        "title_starfox_logo",
+        "title_n64_logo",
+        "title_press_start",
+        "title_copyright",
+        "title_other_2d"
+    };
+
+    return (component < PSP_PROFILE_COMPONENT_COUNT) ? names[component] : "unknown";
+}
+
+static int psp_profiler_component_phase_supported(PspProfilePhase phase) {
+    switch (phase) {
+        case PSP_PROFILE_PHASE_G_VTX:
+        case PSP_PROFILE_PHASE_TRIANGLE:
+        case PSP_PROFILE_PHASE_CLIPPING:
+        case PSP_PROFILE_PHASE_TEXTURE_PREPARE:
+        case PSP_PROFILE_PHASE_TEXTURE_DECODE:
+        case PSP_PROFILE_PHASE_TEXTURE_UPLOAD:
+        case PSP_PROFILE_PHASE_BATCH_CONSTRUCTION:
+        case PSP_PROFILE_PHASE_BATCH_FLUSH:
+        case PSP_PROFILE_PHASE_PSPGL_STATE_SETUP:
+        case PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD:
+        case PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD_SMALL:
+        case PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD_LARGE:
+        case PSP_PROFILE_PHASE_PSPGL_SUBMIT:
+        case PSP_PROFILE_PHASE_PSPGL_SUBMIT_SMALL:
+        case PSP_PROFILE_PHASE_PSPGL_SUBMIT_LARGE:
+        case PSP_PROFILE_PHASE_GL_FLUSH:
+        case PSP_PROFILE_PHASE_FINISH_SYNC:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static u32 psp_profiler_component_current_index(void) {
+    if (sComponentTaskActive && (sComponentCurrent < PSP_PROFILE_COMPONENT_COUNT)) {
+        return sComponentCurrent;
+    }
+    return PSP_PROFILE_COMPONENT_UNATTRIBUTED;
+}
+
+static PspProfileComponentCounters* psp_profiler_current_component_counters(void) {
+    if (!sComponentTaskActive) {
+        return NULL;
+    }
+    return &sComponent[psp_profiler_component_current_index()].counters;
+}
+
+static void psp_profiler_component_add_phase_items(PspProfilePhase phase, u32 items) {
+    if (sComponentTaskActive && (phase < PSP_PROFILE_PHASE_COUNT) &&
+        psp_profiler_component_phase_supported(phase)) {
+        sComponent[psp_profiler_component_current_index()].phases[phase].items += items;
+    }
+}
+
+static void psp_profiler_component_close_region_locked(u64 now) {
+    u32 component = psp_profiler_component_current_index();
+    u64 delta = (now >= sComponentRegionStartUs) ? (now - sComponentRegionStartUs) : 0;
+
+    sComponent[component].totalUs += delta;
+    sComponent[component].regionCount++;
+    sComponentTaskTotalUs += delta;
+    sComponentRegionStartUs = now;
+}
+
+static u64 psp_profiler_adjust_component_us(u32 component) {
+    u64 overhead;
+    u64 total;
+
+    if (component >= PSP_PROFILE_COMPONENT_COUNT) {
+        return 0;
+    }
+    total = sComponent[component].totalUs;
+    overhead = sComponent[component].regionCount * sTimerReadPairOverheadUs;
+    return (total > overhead) ? (total - overhead) : 0;
+}
+#endif
+
+#if SF64_PSP_PROFILE_FRAME_TRACE
 static void psp_profiler_reset_frame_local(u64 frameStartUs) {
     psp_profiler_zero(sFramePhase, sizeof(sFramePhase));
     psp_profiler_zero(&sFrameCounters, sizeof(sFrameCounters));
@@ -1153,6 +1362,116 @@ static void psp_profiler_write_frame_trace_files(u32 slot) {
 }
 #endif
 
+#if SF64_PSP_PROFILE_COMPONENTS
+static void psp_profiler_write_component_files(u32 slot) {
+    char path[96];
+    char line[4096];
+    SceUID fd;
+    u32 component;
+    u32 i;
+    u64 adjustedTotal = 0;
+
+    for (component = 0; component < PSP_PROFILE_COMPONENT_COUNT; component++) {
+        adjustedTotal += psp_profiler_adjust_component_us(component);
+    }
+
+    snprintf(path, sizeof(path), "%s/profile-%03lu-components.csv", PSP_PROFILE_DIR, (unsigned long) slot);
+    fd = sceIoOpen(path, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_EXCL, 0666);
+    if (fd < 0) {
+        psp_profiler_set_status(PSP_PROF_STATUS_ERROR, slot);
+        return;
+    }
+    psp_profiler_write_all(fd,
+                           "component_id,component_name,region_count,total_us_raw,total_us_adjusted,us_per_frame_adjusted,percent_of_component_task_time,marker_entries,display_list_commands,nested_display_list_calls,gvtx_commands,vertices_loaded,modelview_matrix_commands,projection_matrix_commands,matrix_compositions,lit_vertices,unlit_vertices,normal_transforms,normalisations,lighting_evaluations,clip_code_calculations,perspective_divides,tri1_commands,tri2_commands,input_triangles,trivially_accepted_triangles,trivially_rejected_triangles,partially_clipped_triangles,generated_clipping_vertices,output_triangles,direct_fastpath_triangles,general_path_triangles,perspective_path_triangles,clipped_path_triangles,direct_vertices_written,effective_state_resolves,effective_state_reuses,material_state_resolves,depth_state_resolves,fog_state_resolves,batch_flushes,vertices_submitted,draw_calls,vbo_draw_calls,vbo_vertices,small_vbo_draw_calls,large_vbo_draw_calls,small_vbo_vertices,large_vbo_vertices,vertex_stream_upload_calls,vertex_stream_upload_bytes,vertex_stream_page_switches,client_array_fallback_draws,client_array_fallback_vertices,texture_cache_hits,texture_cache_misses,texture_decodes,texture_uploads,texture_bytes_uploaded,texture_wrap_requests_s,texture_wrap_requests_t,texture_wrap_calls_emitted_s,texture_wrap_calls_emitted_t,texture_wrap_calls_skipped_s,texture_wrap_calls_skipped_t,texture_parameter_cache_misses,texture_parameter_cache_replacements,glFlush_calls,sync_calls\n");
+    for (component = 0; component < PSP_PROFILE_COMPONENT_COUNT; component++) {
+        const PspProfileComponentCounters* c = &sComponent[component].counters;
+        u64 adjusted = psp_profiler_adjust_component_us(component);
+        f32 perFrame = (sCaptureFrames != 0) ? ((f32) adjusted / (f32) sCaptureFrames) : 0.0f;
+        f32 percent = (adjustedTotal != 0) ? ((100.0f * (f32) adjusted) / (f32) adjustedTotal) : 0.0f;
+
+        snprintf(line, sizeof(line),
+                 "%lu,%s,%llu,%llu,%llu,%.3f,%.3f,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu\n",
+                 (unsigned long) component, psp_profiler_component_name(component),
+                 sComponent[component].regionCount, sComponent[component].totalUs, adjusted, perFrame, percent,
+                 c->markerEntries, c->displayListCommands, c->nestedDisplayListCalls, c->gvtxCommands,
+                 c->verticesLoaded, c->modelviewMatrixCommands, c->projectionMatrixCommands,
+                 c->matrixCompositions, c->litVertices, c->unlitVertices, c->normalTransforms,
+                 c->normalisations, c->lightingEvaluations, c->clipCodeCalculations, c->perspectiveDivides,
+                 c->tri1Commands, c->tri2Commands, c->inputTriangles, c->triviallyAcceptedTriangles,
+                 c->triviallyRejectedTriangles, c->partiallyClippedTriangles, c->generatedClippingVertices,
+                 c->outputTriangles, c->directFastpathTriangles, c->generalPathTriangles,
+                 c->perspectivePathTriangles, c->clippedPathTriangles, c->directVerticesWritten,
+                 c->effectiveStateResolves, c->effectiveStateReuses, c->materialStateResolves,
+                 c->depthStateResolves, c->fogStateResolves, c->batchFlushes, c->verticesSubmitted,
+                 c->drawCalls, c->vboDrawCalls, c->vboVertices, c->smallVboDrawCalls, c->largeVboDrawCalls,
+                 c->smallVboVertices, c->largeVboVertices, c->vertexStreamUploadCalls,
+                 c->vertexStreamUploadBytes, c->vertexStreamPageSwitches, c->clientArrayFallbackDraws,
+                 c->clientArrayFallbackVertices, c->textureCacheHits, c->textureCacheMisses,
+                 c->textureDecodes, c->textureUploads, c->textureBytesUploaded, c->textureWrapRequestsS,
+                 c->textureWrapRequestsT, c->textureWrapCallsEmittedS, c->textureWrapCallsEmittedT,
+                 c->textureWrapCallsSkippedS, c->textureWrapCallsSkippedT, c->textureParameterCacheMisses,
+                 c->textureParameterCacheReplacements, c->glFlushCalls, c->syncCalls);
+        psp_profiler_write_all(fd, line);
+    }
+    sceIoClose(fd);
+
+    snprintf(path, sizeof(path), "%s/profile-%03lu-component-phases.csv", PSP_PROFILE_DIR, (unsigned long) slot);
+    fd = sceIoOpen(path, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_EXCL, 0666);
+    if (fd < 0) {
+        psp_profiler_set_status(PSP_PROF_STATUS_ERROR, slot);
+        return;
+    }
+    psp_profiler_write_all(fd, "component_id,component_name,phase,calls,total_us_raw,total_us_adjusted,items\n");
+    for (component = 0; component < PSP_PROFILE_COMPONENT_COUNT; component++) {
+        for (i = 0; i < PSP_PROFILE_PHASE_COUNT; i++) {
+            const PspProfilePhaseState* p = &sComponent[component].phases[i];
+
+            if (!psp_profiler_component_phase_supported((PspProfilePhase) i)) {
+                continue;
+            }
+            snprintf(line, sizeof(line), "%lu,%s,%s,%llu,%llu,%llu,%llu\n", (unsigned long) component,
+                     psp_profiler_component_name(component), psp_profiler_phase_name((PspProfilePhase) i),
+                     p->calls, p->totalUs, psp_profiler_adjust_phase_us(p), p->items);
+            psp_profiler_write_all(fd, line);
+        }
+    }
+    sceIoClose(fd);
+
+    snprintf(path, sizeof(path), "%s/profile-%03lu-component-categories.csv", PSP_PROFILE_DIR, (unsigned long) slot);
+    fd = sceIoOpen(path, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_EXCL, 0666);
+    if (fd < 0) {
+        psp_profiler_set_status(PSP_PROF_STATUS_ERROR, slot);
+        return;
+    }
+    psp_profiler_write_all(fd, "component_id,component_name,category,name,count\n");
+    for (component = 0; component < PSP_PROFILE_COMPONENT_COUNT; component++) {
+        const PspProfileComponentCounters* c = &sComponent[component].counters;
+
+        for (i = 0; i < PSP_PROFILE_FLUSH_COUNT; i++) {
+            snprintf(line, sizeof(line), "%lu,%s,flush_reason,%s,%llu\n", (unsigned long) component,
+                     psp_profiler_component_name(component), psp_profiler_flush_name((PspProfileFlushReason) i),
+                     c->flushReasons[i]);
+            psp_profiler_write_all(fd, line);
+        }
+        for (i = 0; i < PSP_PROFILE_BATCH_STATE_COUNT; i++) {
+            snprintf(line, sizeof(line), "%lu,%s,batch_state_transition,%s,%llu\n", (unsigned long) component,
+                     psp_profiler_component_name(component),
+                     psp_profiler_batch_state_name((PspProfileBatchStateField) i),
+                     c->batchStateTransitions[i]);
+            psp_profiler_write_all(fd, line);
+        }
+        for (i = 0; i < PSP_PROFILE_TEXTURE_FLUSH_COUNT; i++) {
+            snprintf(line, sizeof(line), "%lu,%s,texture_flush_source,%s,%llu\n", (unsigned long) component,
+                     psp_profiler_component_name(component),
+                     psp_profiler_texture_flush_source_name((PspProfileTextureFlushSource) i),
+                     c->textureFlushSources[i]);
+            psp_profiler_write_all(fd, line);
+        }
+    }
+    sceIoClose(fd);
+}
+#endif
+
 static void psp_profiler_write_phase_files(u32 slot) {
     char path[96];
     char line[1024];
@@ -1201,6 +1520,31 @@ static void psp_profiler_write_phase_files(u32 slot) {
 #endif
     );
     psp_profiler_write_all(fd, line);
+#if SF64_PSP_PROFILE_COMPONENTS
+    {
+        u64 rawSum = 0;
+        u64 adjustedSum = 0;
+        u32 component;
+
+        for (component = 0; component < PSP_PROFILE_COMPONENT_COUNT; component++) {
+            rawSum += sComponent[component].totalUs;
+            adjustedSum += psp_profiler_adjust_component_us(component);
+        }
+        snprintf(line, sizeof(line),
+                 "SF64_PSP_PROFILE_COMPONENTS: %d\ncomponent count: %d\nmarker commands seen: %llu\ninvalid marker IDs: %llu\ncomponent switches: %llu\ncomponent task starts: %llu\ncomponent task ends: %llu\ncomponent unexpectedly active outside task: %llu\ncomponent phase crossings: %llu\nraw component task time: %llu\nadjusted component task time: %llu\nsum of component raw time: %llu\nsum of component adjusted time: %llu\ncomponent static bytes: %lu\n\n",
+                 SF64_PSP_PROFILE_COMPONENTS, PSP_PROFILE_COMPONENT_COUNT, sComponentMarkerCommandsSeen,
+                 sComponentInvalidMarkerIds, sComponentSwitches, sComponentTaskStarts, sComponentTaskEnds,
+                 sComponentUnexpectedOutsideTask, sComponentPhaseCrossings, sComponentTaskTotalUs,
+                 (sComponentTaskTotalUs > (sComponentTaskEnds * sTimerReadPairOverheadUs))
+                     ? (sComponentTaskTotalUs - (sComponentTaskEnds * sTimerReadPairOverheadUs))
+                     : 0,
+                 rawSum, adjustedSum, (unsigned long) sizeof(sComponent));
+        psp_profiler_write_all(fd, line);
+    }
+#else
+    psp_profiler_write_all(fd,
+                           "SF64_PSP_PROFILE_COMPONENTS: 0\ncomponent count: 0\ncomponent profiling disabled\n\n");
+#endif
     snprintf(line, sizeof(line),
              "timer overhead samples: %d\nphase totals: inclusive raw and timer-adjusted; nested time is not subtracted\nforced active phase ends on stop: %lu\n\n",
              PSP_PROFILE_TIMER_SAMPLES, (unsigned long) sForcedActivePhaseEnds);
@@ -1317,6 +1661,9 @@ static void psp_profiler_write_phase_files(u32 slot) {
 #if SF64_PSP_PROFILE_FRAME_TRACE
     psp_profiler_write_frame_trace_files(slot);
 #endif
+#if SF64_PSP_PROFILE_COMPONENTS
+    psp_profiler_write_component_files(slot);
+#endif
     psp_profiler_set_status(PSP_PROF_STATUS_SAVED, slot);
 }
 #endif
@@ -1432,15 +1779,38 @@ void PspProfiler_StopCapture(void) {
         }
         for (phase = 0; phase < PSP_PROFILE_PHASE_COUNT; phase++) {
             if (sThreadPhase[thread].active[phase]) {
+                u64 delta = 0;
+
                 if (now >= sThreadPhase[thread].startUs[phase]) {
-                    sPhase[phase].totalUs += now - sThreadPhase[thread].startUs[phase];
+                    delta = now - sThreadPhase[thread].startUs[phase];
+                    sPhase[phase].totalUs += delta;
                 }
                 sPhase[phase].calls++;
+#if SF64_PSP_PROFILE_COMPONENTS
+                if (sComponentTaskActive && psp_profiler_component_phase_supported((PspProfilePhase) phase) &&
+                    (sThreadPhase[thread].componentAtBegin[phase] < PSP_PROFILE_COMPONENT_COUNT)) {
+                    u32 component = sThreadPhase[thread].componentAtBegin[phase];
+
+                    sComponent[component].phases[phase].totalUs += delta;
+                    sComponent[component].phases[phase].calls++;
+                    if (component != psp_profiler_component_current_index()) {
+                        sComponentPhaseCrossings++;
+                    }
+                }
+#endif
                 sThreadPhase[thread].active[phase] = 0;
                 sForcedActivePhaseEnds++;
             }
         }
     }
+#if SF64_PSP_PROFILE_COMPONENTS
+    if (sComponentTaskActive) {
+        psp_profiler_component_close_region_locked(now);
+        sComponentCurrent = PSP_PROFILE_COMPONENT_UNATTRIBUTED;
+        sComponentTaskActive = 0;
+        sComponentTaskEnds++;
+    }
+#endif
     sCaptureEndUs = now;
     psp_profiler_unlock(lockState);
 #if SF64_PSP_PSPGL_PROFILE
@@ -1530,6 +1900,12 @@ void PspProfiler_PhaseBegin(PspProfilePhase phase) {
     state = psp_profiler_get_thread_state_locked(threadId);
     if ((state != NULL) && !state->active[phase]) {
         state->startUs[phase] = psp_profiler_now_us();
+#if SF64_PSP_PROFILE_COMPONENTS
+        state->componentAtBegin[phase] =
+            (sComponentTaskActive && psp_profiler_component_phase_supported(phase))
+                ? psp_profiler_component_current_index()
+                : PSP_PROFILE_COMPONENT_UNATTRIBUTED;
+#endif
         state->active[phase] = 1;
     }
 
@@ -1562,6 +1938,19 @@ void PspProfiler_PhaseEnd(PspProfilePhase phase) {
 
     sPhase[phase].totalUs += delta;
     sPhase[phase].calls++;
+
+#if SF64_PSP_PROFILE_COMPONENTS
+    if (sComponentTaskActive && psp_profiler_component_phase_supported(phase) &&
+        (state->componentAtBegin[phase] < PSP_PROFILE_COMPONENT_COUNT)) {
+        u32 component = state->componentAtBegin[phase];
+
+        sComponent[component].phases[phase].totalUs += delta;
+        sComponent[component].phases[phase].calls++;
+        if (component != psp_profiler_component_current_index()) {
+            sComponentPhaseCrossings++;
+        }
+    }
+#endif
 
 #if SF64_PSP_PROFILE_FRAME_TRACE
     sFramePhase[phase].totalUs += delta;
@@ -1597,6 +1986,91 @@ void PspProfiler_OnGfxTaskComplete(void) {
     }
 }
 
+#if SF64_PSP_PROFILE_COMPONENTS
+void PspProfiler_ComponentTaskBegin(void) {
+    u64 now;
+    int lockState;
+
+    if (!sCaptureActive) {
+        return;
+    }
+
+    now = psp_profiler_now_us();
+    lockState = psp_profiler_lock();
+    if (sComponentTaskActive) {
+        sComponentUnexpectedOutsideTask++;
+        psp_profiler_component_close_region_locked(now);
+    }
+    sComponentCurrent = PSP_PROFILE_COMPONENT_UNATTRIBUTED;
+    sComponentTaskActive = 1;
+    sComponentRegionStartUs = now;
+    sComponentTaskStarts++;
+    psp_profiler_unlock(lockState);
+}
+
+void PspProfiler_ComponentTaskEnd(void) {
+    u64 now;
+    int lockState;
+
+    if (!sCaptureActive) {
+        return;
+    }
+
+    now = psp_profiler_now_us();
+    lockState = psp_profiler_lock();
+    if (!sComponentTaskActive) {
+        sComponentUnexpectedOutsideTask++;
+        psp_profiler_unlock(lockState);
+        return;
+    }
+    psp_profiler_component_close_region_locked(now);
+    sComponentCurrent = PSP_PROFILE_COMPONENT_UNATTRIBUTED;
+    sComponentTaskActive = 0;
+    sComponentTaskEnds++;
+    psp_profiler_unlock(lockState);
+}
+
+void PspProfiler_ComponentMarker(u32 componentId) {
+    u64 now;
+    int lockState;
+
+    if (!sCaptureActive) {
+        return;
+    }
+
+    now = psp_profiler_now_us();
+    lockState = psp_profiler_lock();
+    sComponentMarkerCommandsSeen++;
+    if (componentId >= PSP_PROFILE_COMPONENT_COUNT) {
+        sComponentInvalidMarkerIds++;
+        psp_profiler_unlock(lockState);
+        return;
+    }
+    if (!sComponentTaskActive) {
+        sComponentUnexpectedOutsideTask++;
+        psp_profiler_unlock(lockState);
+        return;
+    }
+    psp_profiler_component_close_region_locked(now);
+    sComponentCurrent = componentId;
+    sComponent[componentId].counters.markerEntries++;
+    sComponentSwitches++;
+    psp_profiler_unlock(lockState);
+}
+
+void PspProfiler_CountNestedDisplayListCall(void) {
+    PspProfileComponentCounters* component;
+
+    if (!sCaptureActive) {
+        return;
+    }
+    component = psp_profiler_current_component_counters();
+    if (component != NULL) {
+        component->nestedDisplayListCalls++;
+    }
+}
+#endif
+
 void PspProfiler_CountDisplayListTask(void) {
     if (sCaptureActive) {
         sCounters.displayListTasks++;
@@ -1609,6 +2083,14 @@ void PspProfiler_CountDisplayListTask(void) {
 void PspProfiler_CountOpcode(u8 opcode) {
     if (sCaptureActive) {
         sCounters.opcodeCounts[opcode]++;
+#if SF64_PSP_PROFILE_COMPONENTS
+        {
+            PspProfileComponentCounters* component = psp_profiler_current_component_counters();
+            if (component != NULL) {
+                component->displayListCommands++;
+            }
+        }
+#endif
     }
 }
 
@@ -1625,6 +2107,21 @@ void PspProfiler_CountGvtx(u32 count, u32 lit) {
         sCounters.unlitVertices += count;
     }
     sPhase[PSP_PROFILE_PHASE_G_VTX].items += count;
+#if SF64_PSP_PROFILE_COMPONENTS
+    {
+        PspProfileComponentCounters* component = psp_profiler_current_component_counters();
+        if (component != NULL) {
+            component->gvtxCommands++;
+            component->verticesLoaded += count;
+            if (lit) {
+                component->litVertices += count;
+            } else {
+                component->unlitVertices += count;
+            }
+        }
+        psp_profiler_component_add_phase_items(PSP_PROFILE_PHASE_G_VTX, count);
+    }
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
     sFrameCounters.gvtxCommands++;
     sFrameCounters.verticesLoaded += count;
@@ -1649,6 +2146,21 @@ void PspProfiler_CountMatrixCommand(u32 projection, u32 composed) {
     if (composed) {
         sCounters.matrixCompositions++;
     }
+#if SF64_PSP_PROFILE_COMPONENTS
+    {
+        PspProfileComponentCounters* component = psp_profiler_current_component_counters();
+        if (component != NULL) {
+            if (projection) {
+                component->projectionMatrixCommands++;
+            } else {
+                component->modelviewMatrixCommands++;
+            }
+            if (composed) {
+                component->matrixCompositions++;
+            }
+        }
+    }
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
     if (projection) {
         sFrameCounters.projectionMatrixCommands++;
@@ -1669,6 +2181,17 @@ void PspProfiler_CountTriangleCommand(u32 triCount, u32 tri1, u32 tri2) {
     sCounters.tri1Commands += tri1;
     sCounters.tri2Commands += tri2;
     sPhase[PSP_PROFILE_PHASE_TRIANGLE].items += triCount;
+#if SF64_PSP_PROFILE_COMPONENTS
+    {
+        PspProfileComponentCounters* component = psp_profiler_current_component_counters();
+        if (component != NULL) {
+            component->inputTriangles += triCount;
+            component->tri1Commands += tri1;
+            component->tri2Commands += tri2;
+        }
+        psp_profiler_component_add_phase_items(PSP_PROFILE_PHASE_TRIANGLE, triCount);
+    }
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
     sFrameCounters.inputTriangles += triCount;
     sFrameCounters.tri1Commands += tri1;
@@ -1687,6 +2210,18 @@ void PspProfiler_CountTriangleResult(u32 accepted, u32 rejected, u32 clipped, u3
     sCounters.partiallyClippedTriangles += clipped;
     sCounters.generatedClippingVertices += generatedVertices;
     sCounters.outputTriangles += outputTriangles;
+#if SF64_PSP_PROFILE_COMPONENTS
+    {
+        PspProfileComponentCounters* component = psp_profiler_current_component_counters();
+        if (component != NULL) {
+            component->triviallyAcceptedTriangles += accepted;
+            component->triviallyRejectedTriangles += rejected;
+            component->partiallyClippedTriangles += clipped;
+            component->generatedClippingVertices += generatedVertices;
+            component->outputTriangles += outputTriangles;
+        }
+    }
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
     sFrameCounters.triviallyAcceptedTriangles += accepted;
     sFrameCounters.triviallyRejectedTriangles += rejected;
@@ -1706,6 +2241,18 @@ void PspProfiler_CountTransformWork(u32 vertices, u32 normals, u32 normalizes, u
     sCounters.lightingEvaluations += lighting;
     sCounters.clipCodeCalculations += clipCodes;
     sCounters.perspectiveDivides += divides;
+#if SF64_PSP_PROFILE_COMPONENTS
+    {
+        PspProfileComponentCounters* component = psp_profiler_current_component_counters();
+        if (component != NULL) {
+            component->normalTransforms += normals;
+            component->normalisations += normalizes;
+            component->lightingEvaluations += lighting;
+            component->clipCodeCalculations += clipCodes;
+            component->perspectiveDivides += divides;
+        }
+    }
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
     sFrameCounters.normalTransforms += normals;
     sFrameCounters.normalisations += normalizes;
@@ -1725,6 +2272,18 @@ void PspProfiler_CountTextureEvent(u32 hit, u32 miss, u32 decode, u32 upload, u3
     sCounters.textureDecodes += decode;
     sCounters.textureUploads += upload;
     sCounters.textureBytesUploaded += bytesUploaded;
+#if SF64_PSP_PROFILE_COMPONENTS
+    {
+        PspProfileComponentCounters* component = psp_profiler_current_component_counters();
+        if (component != NULL) {
+            component->textureCacheHits += hit;
+            component->textureCacheMisses += miss;
+            component->textureDecodes += decode;
+            component->textureUploads += upload;
+            component->textureBytesUploaded += bytesUploaded;
+        }
+    }
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
     sFrameCounters.textureCacheHits += hit;
     sFrameCounters.textureCacheMisses += miss;
@@ -1740,6 +2299,15 @@ void PspProfiler_CountTextureWrapRequest(u32 requestS, u32 requestT) {
     }
     sCounters.textureWrapRequestsS += requestS;
     sCounters.textureWrapRequestsT += requestT;
+#if SF64_PSP_PROFILE_COMPONENTS
+    {
+        PspProfileComponentCounters* component = psp_profiler_current_component_counters();
+        if (component != NULL) {
+            component->textureWrapRequestsS += requestS;
+            component->textureWrapRequestsT += requestT;
+        }
+    }
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
     sFrameCounters.textureWrapRequestsS += requestS;
     sFrameCounters.textureWrapRequestsT += requestT;
@@ -1752,6 +2320,15 @@ void PspProfiler_CountTextureWrapCall(u32 emittedS, u32 emittedT) {
     }
     sCounters.textureWrapCallsEmittedS += emittedS;
     sCounters.textureWrapCallsEmittedT += emittedT;
+#if SF64_PSP_PROFILE_COMPONENTS
+    {
+        PspProfileComponentCounters* component = psp_profiler_current_component_counters();
+        if (component != NULL) {
+            component->textureWrapCallsEmittedS += emittedS;
+            component->textureWrapCallsEmittedT += emittedT;
+        }
+    }
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
     sFrameCounters.textureWrapCallsEmittedS += emittedS;
     sFrameCounters.textureWrapCallsEmittedT += emittedT;
@@ -1764,6 +2341,15 @@ void PspProfiler_CountTextureWrapSkip(u32 skippedS, u32 skippedT) {
     }
     sCounters.textureWrapCallsSkippedS += skippedS;
     sCounters.textureWrapCallsSkippedT += skippedT;
+#if SF64_PSP_PROFILE_COMPONENTS
+    {
+        PspProfileComponentCounters* component = psp_profiler_current_component_counters();
+        if (component != NULL) {
+            component->textureWrapCallsSkippedS += skippedS;
+            component->textureWrapCallsSkippedT += skippedT;
+        }
+    }
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
     sFrameCounters.textureWrapCallsSkippedS += skippedS;
     sFrameCounters.textureWrapCallsSkippedT += skippedT;
@@ -1773,6 +2359,14 @@ void PspProfiler_CountTextureWrapSkip(u32 skippedS, u32 skippedT) {
 void PspProfiler_CountTextureParameterCacheMiss(void) {
     if (sCaptureActive) {
         sCounters.textureParameterCacheMisses++;
+#if SF64_PSP_PROFILE_COMPONENTS
+        {
+            PspProfileComponentCounters* component = psp_profiler_current_component_counters();
+            if (component != NULL) {
+                component->textureParameterCacheMisses++;
+            }
+        }
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
         sFrameCounters.textureParameterCacheMisses++;
 #endif
@@ -1782,6 +2376,14 @@ void PspProfiler_CountTextureParameterCacheMiss(void) {
 void PspProfiler_CountTextureParameterCacheReplacement(void) {
     if (sCaptureActive) {
         sCounters.textureParameterCacheReplacements++;
+#if SF64_PSP_PROFILE_COMPONENTS
+        {
+            PspProfileComponentCounters* component = psp_profiler_current_component_counters();
+            if (component != NULL) {
+                component->textureParameterCacheReplacements++;
+            }
+        }
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
         sFrameCounters.textureParameterCacheReplacements++;
 #endif
@@ -1880,6 +2482,18 @@ void PspProfiler_CountBatchFlush(PspProfileFlushReason reason, u32 submittedVert
         sCounters.flushReasons[reason]++;
     }
     sCounters.verticesSubmitted += submittedVertices;
+#if SF64_PSP_PROFILE_COMPONENTS
+    {
+        PspProfileComponentCounters* component = psp_profiler_current_component_counters();
+        if (component != NULL) {
+            component->batchFlushes++;
+            if (reason < PSP_PROFILE_FLUSH_COUNT) {
+                component->flushReasons[reason]++;
+            }
+            component->verticesSubmitted += submittedVertices;
+        }
+    }
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
     sFrameCounters.batchFlushes++;
     if (reason < PSP_PROFILE_FLUSH_COUNT) {
@@ -1892,47 +2506,89 @@ void PspProfiler_CountBatchFlush(PspProfileFlushReason reason, u32 submittedVert
 void PspProfiler_CountBatchStateTransitions(int textureIdChanged, int textureEnvChanged, int wrapSChanged,
                                            int wrapTChanged, int alphaTestChanged, int blendChanged,
                                            int premultipliedChanged) {
+#if SF64_PSP_PROFILE_COMPONENTS
+    PspProfileComponentCounters* component;
+#endif
+
     if (!sCaptureActive) {
         return;
     }
+#if SF64_PSP_PROFILE_COMPONENTS
+    component = psp_profiler_current_component_counters();
+#endif
     if (textureIdChanged) {
         sCounters.batchStateTransitions[PSP_PROFILE_BATCH_STATE_TEXTURE_ID]++;
+#if SF64_PSP_PROFILE_COMPONENTS
+        if (component != NULL) {
+            component->batchStateTransitions[PSP_PROFILE_BATCH_STATE_TEXTURE_ID]++;
+        }
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
         sFrameCounters.batchStateTransitions[PSP_PROFILE_BATCH_STATE_TEXTURE_ID]++;
 #endif
     }
     if (textureEnvChanged) {
         sCounters.batchStateTransitions[PSP_PROFILE_BATCH_STATE_TEXTURE_ENV]++;
+#if SF64_PSP_PROFILE_COMPONENTS
+        if (component != NULL) {
+            component->batchStateTransitions[PSP_PROFILE_BATCH_STATE_TEXTURE_ENV]++;
+        }
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
         sFrameCounters.batchStateTransitions[PSP_PROFILE_BATCH_STATE_TEXTURE_ENV]++;
 #endif
     }
     if (wrapSChanged) {
         sCounters.batchStateTransitions[PSP_PROFILE_BATCH_STATE_WRAP_S]++;
+#if SF64_PSP_PROFILE_COMPONENTS
+        if (component != NULL) {
+            component->batchStateTransitions[PSP_PROFILE_BATCH_STATE_WRAP_S]++;
+        }
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
         sFrameCounters.batchStateTransitions[PSP_PROFILE_BATCH_STATE_WRAP_S]++;
 #endif
     }
     if (wrapTChanged) {
         sCounters.batchStateTransitions[PSP_PROFILE_BATCH_STATE_WRAP_T]++;
+#if SF64_PSP_PROFILE_COMPONENTS
+        if (component != NULL) {
+            component->batchStateTransitions[PSP_PROFILE_BATCH_STATE_WRAP_T]++;
+        }
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
         sFrameCounters.batchStateTransitions[PSP_PROFILE_BATCH_STATE_WRAP_T]++;
 #endif
     }
     if (alphaTestChanged) {
         sCounters.batchStateTransitions[PSP_PROFILE_BATCH_STATE_ALPHA_TEST]++;
+#if SF64_PSP_PROFILE_COMPONENTS
+        if (component != NULL) {
+            component->batchStateTransitions[PSP_PROFILE_BATCH_STATE_ALPHA_TEST]++;
+        }
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
         sFrameCounters.batchStateTransitions[PSP_PROFILE_BATCH_STATE_ALPHA_TEST]++;
 #endif
     }
     if (blendChanged) {
         sCounters.batchStateTransitions[PSP_PROFILE_BATCH_STATE_BLEND]++;
+#if SF64_PSP_PROFILE_COMPONENTS
+        if (component != NULL) {
+            component->batchStateTransitions[PSP_PROFILE_BATCH_STATE_BLEND]++;
+        }
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
         sFrameCounters.batchStateTransitions[PSP_PROFILE_BATCH_STATE_BLEND]++;
 #endif
     }
     if (premultipliedChanged) {
         sCounters.batchStateTransitions[PSP_PROFILE_BATCH_STATE_PREMULTIPLIED]++;
+#if SF64_PSP_PROFILE_COMPONENTS
+        if (component != NULL) {
+            component->batchStateTransitions[PSP_PROFILE_BATCH_STATE_PREMULTIPLIED]++;
+        }
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
         sFrameCounters.batchStateTransitions[PSP_PROFILE_BATCH_STATE_PREMULTIPLIED]++;
 #endif
@@ -1945,6 +2601,14 @@ void PspProfiler_CountTextureFlushSource(PspProfileTextureFlushSource source) {
     }
     if (source < PSP_PROFILE_TEXTURE_FLUSH_COUNT) {
         sCounters.textureFlushSources[source]++;
+#if SF64_PSP_PROFILE_COMPONENTS
+        {
+            PspProfileComponentCounters* component = psp_profiler_current_component_counters();
+            if (component != NULL) {
+                component->textureFlushSources[source]++;
+            }
+        }
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
         sFrameCounters.textureFlushSources[source]++;
 #endif
@@ -1962,6 +2626,18 @@ void PspProfiler_CountTrianglePath(u32 directFastpathTriangles, u32 generalPathT
     sCounters.perspectivePathTriangles += perspectivePathTriangles;
     sCounters.clippedPathTriangles += clippedPathTriangles;
     sCounters.directVerticesWritten += directVerticesWritten;
+#if SF64_PSP_PROFILE_COMPONENTS
+    {
+        PspProfileComponentCounters* component = psp_profiler_current_component_counters();
+        if (component != NULL) {
+            component->directFastpathTriangles += directFastpathTriangles;
+            component->generalPathTriangles += generalPathTriangles;
+            component->perspectivePathTriangles += perspectivePathTriangles;
+            component->clippedPathTriangles += clippedPathTriangles;
+            component->directVerticesWritten += directVerticesWritten;
+        }
+    }
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
     sFrameCounters.directFastpathTriangles += directFastpathTriangles;
     sFrameCounters.generalPathTriangles += generalPathTriangles;
@@ -1981,6 +2657,18 @@ void PspProfiler_CountEffectiveState(u32 resolves, u32 reuses, u32 materialResol
     sCounters.materialStateResolves += materialResolves;
     sCounters.depthStateResolves += depthResolves;
     sCounters.fogStateResolves += fogResolves;
+#if SF64_PSP_PROFILE_COMPONENTS
+    {
+        PspProfileComponentCounters* component = psp_profiler_current_component_counters();
+        if (component != NULL) {
+            component->effectiveStateResolves += resolves;
+            component->effectiveStateReuses += reuses;
+            component->materialStateResolves += materialResolves;
+            component->depthStateResolves += depthResolves;
+            component->fogStateResolves += fogResolves;
+        }
+    }
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
     sFrameCounters.effectiveStateResolves += resolves;
     sFrameCounters.effectiveStateReuses += reuses;
@@ -1994,6 +2682,15 @@ void PspProfiler_CountDrawCall(u32 vertices) {
     if (sCaptureActive) {
         sCounters.drawCalls++;
         sPhase[PSP_PROFILE_PHASE_PSPGL_SUBMIT].items += vertices;
+#if SF64_PSP_PROFILE_COMPONENTS
+        {
+            PspProfileComponentCounters* component = psp_profiler_current_component_counters();
+            if (component != NULL) {
+                component->drawCalls++;
+            }
+            psp_profiler_component_add_phase_items(PSP_PROFILE_PHASE_PSPGL_SUBMIT, vertices);
+        }
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
         sFrameCounters.drawCalls++;
         sFramePhase[PSP_PROFILE_PHASE_PSPGL_SUBMIT].items += vertices;
@@ -2007,11 +2704,17 @@ void PspProfiler_CountPspglSubmitSplit(u32 smallDraw, u32 largeDraw, u32 vertice
     }
     if (smallDraw) {
         sPhase[PSP_PROFILE_PHASE_PSPGL_SUBMIT_SMALL].items += vertices;
+#if SF64_PSP_PROFILE_COMPONENTS
+        psp_profiler_component_add_phase_items(PSP_PROFILE_PHASE_PSPGL_SUBMIT_SMALL, vertices);
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
         sFramePhase[PSP_PROFILE_PHASE_PSPGL_SUBMIT_SMALL].items += vertices;
 #endif
     } else if (largeDraw) {
         sPhase[PSP_PROFILE_PHASE_PSPGL_SUBMIT_LARGE].items += vertices;
+#if SF64_PSP_PROFILE_COMPONENTS
+        psp_profiler_component_add_phase_items(PSP_PROFILE_PHASE_PSPGL_SUBMIT_LARGE, vertices);
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
         sFramePhase[PSP_PROFILE_PHASE_PSPGL_SUBMIT_LARGE].items += vertices;
 #endif
@@ -2024,11 +2727,17 @@ void PspProfiler_CountPspglVertexStreamUploadSplit(u32 smallDraw, u32 largeDraw,
     }
     if (smallDraw) {
         sPhase[PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD_SMALL].items += uploadBytes;
+#if SF64_PSP_PROFILE_COMPONENTS
+        psp_profiler_component_add_phase_items(PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD_SMALL, uploadBytes);
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
         sFramePhase[PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD_SMALL].items += uploadBytes;
 #endif
     } else if (largeDraw) {
         sPhase[PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD_LARGE].items += uploadBytes;
+#if SF64_PSP_PROFILE_COMPONENTS
+        psp_profiler_component_add_phase_items(PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD_LARGE, uploadBytes);
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
         sFramePhase[PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD_LARGE].items += uploadBytes;
 #endif
@@ -2060,6 +2769,25 @@ void PspProfiler_CountVertexStream(u32 vboDraw, u32 vertices, u32 upload, u32 up
     if (highWaterBytes > sCounters.vertexStreamHighWaterBytes) {
         sCounters.vertexStreamHighWaterBytes = highWaterBytes;
     }
+#if SF64_PSP_PROFILE_COMPONENTS
+    {
+        PspProfileComponentCounters* component = psp_profiler_current_component_counters();
+        if (component != NULL) {
+            component->vboDrawCalls += vboDraw;
+            component->vboVertices += vertices;
+            component->smallVboDrawCalls += smallVboDraw;
+            component->largeVboDrawCalls += largeVboDraw;
+            component->smallVboVertices += smallVboVertices;
+            component->largeVboVertices += largeVboVertices;
+            component->vertexStreamUploadCalls += upload;
+            component->vertexStreamUploadBytes += uploadBytes;
+            component->clientArrayFallbackDraws += fallbackDraw;
+            component->clientArrayFallbackVertices += fallbackVertices;
+            component->vertexStreamPageSwitches += pageSwitch;
+        }
+        psp_profiler_component_add_phase_items(PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD, uploadBytes);
+    }
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
     sFrameCounters.vboDrawCalls += vboDraw;
     sFrameCounters.vboVertices += vertices;
@@ -2085,6 +2813,14 @@ void PspProfiler_CountVertexStream(u32 vboDraw, u32 vertices, u32 upload, u32 up
 void PspProfiler_CountGlFlush(void) {
     if (sCaptureActive) {
         sCounters.glFlushCalls++;
+#if SF64_PSP_PROFILE_COMPONENTS
+        {
+            PspProfileComponentCounters* component = psp_profiler_current_component_counters();
+            if (component != NULL) {
+                component->glFlushCalls++;
+            }
+        }
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
         sFrameCounters.glFlushCalls++;
 #endif
@@ -2094,6 +2830,14 @@ void PspProfiler_CountGlFlush(void) {
 void PspProfiler_CountSync(void) {
     if (sCaptureActive) {
         sCounters.syncCalls++;
+#if SF64_PSP_PROFILE_COMPONENTS
+        {
+            PspProfileComponentCounters* component = psp_profiler_current_component_counters();
+            if (component != NULL) {
+                component->syncCalls++;
+            }
+        }
+#endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
         sFrameCounters.syncCalls++;
 #endif

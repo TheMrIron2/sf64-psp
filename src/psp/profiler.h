@@ -3,6 +3,10 @@
 
 #include "PR/ultratypes.h"
 
+#ifndef SF64_PSP_PROFILE_COMPONENTS
+#define SF64_PSP_PROFILE_COMPONENTS 0
+#endif
+
 typedef enum {
     PSP_PROFILE_PHASE_GFX_TASK,
     PSP_PROFILE_PHASE_DL_TRAVERSAL,
@@ -161,6 +165,18 @@ void PspProfiler_CountSync(void);
 #define PspProfiler_CountTextureParameterCacheReplacement() ((void) 0)
 #define PspProfiler_CountGlFlush() ((void) 0)
 #define PspProfiler_CountSync() ((void) 0)
+#endif
+
+#if SF64_PSP_PROFILE_PHASES && SF64_PSP_PROFILE_COMPONENTS
+void PspProfiler_ComponentTaskBegin(void);
+void PspProfiler_ComponentTaskEnd(void);
+void PspProfiler_ComponentMarker(u32 componentId);
+void PspProfiler_CountNestedDisplayListCall(void);
+#else
+#define PspProfiler_ComponentTaskBegin() ((void) 0)
+#define PspProfiler_ComponentTaskEnd() ((void) 0)
+#define PspProfiler_ComponentMarker(componentId) ((void) 0)
+#define PspProfiler_CountNestedDisplayListCall() ((void) 0)
 #endif
 
 #endif

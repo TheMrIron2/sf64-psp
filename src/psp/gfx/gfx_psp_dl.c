@@ -6,6 +6,10 @@
 #include "src/psp/platform.h"
 #include "src/psp/profiler.h"
 
+#if SF64_PSP_PROFILE_COMPONENTS
+#include "src/psp/render_component.h"
+#endif
+
 #include <stdint.h>
 #include <math.h>
 #include <stddef.h>
@@ -3216,6 +3220,13 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
         const Gfx* cmd = pc++;
         u8 opcode = psp_gfx_dl_opcode(cmd);
 
+#if SF64_PSP_PROFILE_COMPONENTS
+        if ((opcode == G_NOOP) && PSP_PROFILE_DL_COMPONENT_TAG_MATCH(cmd->words.w1)) {
+            PspProfiler_ComponentMarker(PSP_PROFILE_DL_COMPONENT_TAG_ID(cmd->words.w1));
+            continue;
+        }
+#endif
+
         ctx->stats.commandCount++;
         PspProfiler_CountOpcode(opcode);
 
@@ -3248,6 +3259,7 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
             }
 
             ctx->stats.nestedDlFollowed++;
+            PspProfiler_CountNestedDisplayListCall();
             psp_gfx_dl_run_internal(ctx, child, depth + 1);
             if (noPush) {
                 return 1;
@@ -3421,10 +3433,12 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
     psp_gfx_dl_reset_context(ctx);
     ctx->taskIndex = taskIndex;
     PspProfiler_CountDisplayListTask();
+    PspProfiler_ComponentTaskBegin();
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_DL_TRAVERSAL);
     psp_gfx_dl_run_internal(ctx, dl, 0);
     psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_END_OF_TASK);
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_DL_TRAVERSAL);
+    PspProfiler_ComponentTaskEnd();
 
     if (outStats != NULL) {
         *outStats = ctx->stats;

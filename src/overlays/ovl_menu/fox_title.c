@@ -10,8 +10,15 @@
 #include "fox_title.h"
 #include "assets/ast_title.h"
 #include "assets/ast_text.h"
+#if defined(TARGET_PSP) && SF64_PSP_PROFILE_COMPONENTS
+#include "src/psp/render_component.h"
+#endif
 #ifdef TARGET_PSP
 #include "src/psp/title_trace.h"
+#endif
+
+#ifndef PSP_PROFILE_DL_COMPONENT
+#define PSP_PROFILE_DL_COMPONENT(pkt_expr, component) ((void) 0)
 #endif
 
 #if defined(TARGET_PSP) && !defined(PSP_TRACE_ENABLED)
@@ -45,6 +52,23 @@ static f32 PspTitle_SinApprox(f32 angle) {
 
 static f32 PspTitle_CosApprox(f32 angle) {
     return PspTitle_SinApprox(angle + (M_PI * 0.5f));
+}
+#endif
+
+#if defined(TARGET_PSP) && SF64_PSP_PROFILE_COMPONENTS
+static PspProfileComponent Title_PspProfileComponentForTeam(TitleTeam team) {
+    switch (team) {
+        case TEAM_FOX:
+            return PSP_PROFILE_COMPONENT_TITLE_FOX;
+        case TEAM_FALCO:
+            return PSP_PROFILE_COMPONENT_TITLE_FALCO;
+        case TEAM_SLIPPY:
+            return PSP_PROFILE_COMPONENT_TITLE_SLIPPY;
+        case TEAM_PEPPY:
+            return PSP_PROFILE_COMPONENT_TITLE_PEPPY;
+        default:
+            return PSP_PROFILE_COMPONENT_TITLE_COMMON;
+    }
 }
 #endif
 
@@ -353,6 +377,7 @@ void Title_Draw(void) {
         PSP_TRACE("title draw: screen begin");
 
         PSP_TRACE("title draw: matrix push 1");
+        PSP_PROFILE_DL_COMPONENT(gMasterDisp++, PSP_PROFILE_COMPONENT_TITLE_COMMON);
         Title_Matrix_Push();
 
         PSP_TRACE("title draw: screen draw");
@@ -362,18 +387,22 @@ void Title_Draw(void) {
         Matrix_Pop(&gGfxMatrix);
 
         PSP_TRACE("title draw: starfox logo");
+        PSP_PROFILE_DL_COMPONENT(gMasterDisp++, PSP_PROFILE_COMPONENT_TITLE_STARFOX_LOGO);
         Title_StarfoxLogo_Draw();
 
         PSP_TRACE("title draw: copyright symbol");
+        PSP_PROFILE_DL_COMPONENT(gMasterDisp++, PSP_PROFILE_COMPONENT_TITLE_COPYRIGHT);
         Title_CopyrightSymbol_Draw();
 
         PSP_TRACE("title draw: copyright");
         Title_Copyright_Draw();
 
         PSP_TRACE("title draw: press start");
+        PSP_PROFILE_DL_COMPONENT(gMasterDisp++, PSP_PROFILE_COMPONENT_TITLE_PRESS_START);
         Title_PressStart_Draw();
 
         PSP_TRACE("title draw: matrix push 2");
+        PSP_PROFILE_DL_COMPONENT(gMasterDisp++, PSP_PROFILE_COMPONENT_TITLE_N64_LOGO);
         Title_Matrix_Push();
 
         PSP_TRACE("title draw: 64 logo begin");
@@ -383,6 +412,7 @@ void Title_Draw(void) {
         PSP_TRACE("title draw: matrix pop 2");
         Matrix_Pop(&gGfxMatrix);
 
+        PSP_PROFILE_DL_COMPONENT(gMasterDisp++, PSP_PROFILE_COMPONENT_UNATTRIBUTED);
         PSP_TRACE("title draw: screen done");
         break;
 
@@ -1009,6 +1039,7 @@ void Title_Screen_Draw(void) {
     static TitleTeam D_menu_801ADA84[4] = { TEAM_FOX, TEAM_FALCO, TEAM_SLIPPY, TEAM_PEPPY };
 
     PSP_TRACE("title screen draw: begin");
+    PSP_PROFILE_DL_COMPONENT(gMasterDisp++, PSP_PROFILE_COMPONENT_TITLE_COMMON);
 
     gLight1R = D_menu_801B82F8;
     gLight1G = D_menu_801B82FC;
@@ -1035,10 +1066,12 @@ void Title_Screen_Draw(void) {
 #endif
 
     for (i = 0; i < ARRAY_COUNT(D_menu_801ADA84); i++) {
+        PSP_PROFILE_DL_COMPONENT(gMasterDisp++, Title_PspProfileComponentForTeam(D_menu_801ADA84[i]));
         Title_Team_Draw(D_menu_801ADA84[i]);
         sTitleTeam[D_menu_801ADA84[i]].frameCount += sTitleTeam[D_menu_801ADA84[i]].unk_5C;
     }
 
+    PSP_PROFILE_DL_COMPONENT(gMasterDisp++, PSP_PROFILE_COMPONENT_TITLE_ARWING);
     gLight1R = D_menu_801B8310;
     gLight1G = D_menu_801B8314;
     gLight1B = D_menu_801B8318;
@@ -1049,6 +1082,7 @@ void Title_Screen_Draw(void) {
 
     Title_SetLightRot(D_menu_801B86D0, D_menu_801B86D4, 100.0f, &D_menu_801B82E0, &D_menu_801B82E4, &D_menu_801B82E8);
     Title_Arwing_Draw(0);
+    PSP_PROFILE_DL_COMPONENT(gMasterDisp++, PSP_PROFILE_COMPONENT_TITLE_COMMON);
 
     PSP_TRACE("title screen draw: done");
 }

@@ -232,6 +232,24 @@ No title-rendering optimization or timing change is encoded by the trace. The
 trace records raw title state, timers, light values, camera values, and workload
 deltas so hardware captures can align the slowdown with actual state changes.
 
+## Hardware Results
+
+Three 240-frame captures on real PSP hardware agreed on the title transition
+shape. The first full title frame performs one-time texture population, and the
+steady title workload stabilizes immediately afterward.
+
+The apparent continuing slowdown was not a later renderer transition. It matched
+the intentional `Math_SmoothStepToF` ease-out of the title light yaw toward
+57 degrees. Title scene state, character idle animation, geometry counts,
+lighting evaluations, display-list work, and draw workload did not produce a
+second sustained-cost transition.
+
+PSPGL command-list capacity and command-list pool reuse were also ruled out as
+meaningful title-transition causes. No more transition captures are needed for
+this question; the next investigation is sustained title component attribution,
+which measures which generated display-list regions account for the stable
+title-screen cost.
+
 ## Hardware Procedure
 
 1. Launch the game.
