@@ -214,6 +214,9 @@ typedef struct {
     u32 modelviewStackDepth;
     u32 projectionSerial;
     u32 batchProjectionSerial;
+#if SF64_PSP_PROFILE_COMPONENTS
+    u32 batchComponentMask;
+#endif
 #if (USE_N64PSP_VERTEX_CHAIN2 + 0) || \
     (USE_N64PSP_BATCH_LIGHTING + 0)
     n64psp_mat4f alignedModelview;
@@ -1602,6 +1605,49 @@ static void psp_gfx_dl_load_ambient_light(PspGfxDlContext* ctx, const Light* src
     ctx->ambientB = src->l.col[2];
 }
 
+#if SF64_PSP_PROFILE_COMPONENTS
+static u32 psp_gfx_dl_component_bit(u32 component) {
+    if (component >= PSP_PROFILE_COMPONENT_COUNT) {
+        component = PSP_PROFILE_COMPONENT_UNATTRIBUTED;
+    }
+    return 1UL << component;
+}
+
+static u32 psp_gfx_dl_component_popcount(u32 mask) {
+    u32 count = 0;
+
+    while (mask != 0) {
+        count += mask & 1U;
+        mask >>= 1;
+    }
+    return count;
+}
+
+static void psp_gfx_dl_mark_batch_component(PspGfxDlContext* ctx) {
+    ctx->batchComponentMask |= psp_gfx_dl_component_bit(PspProfiler_ComponentCurrentId());
+}
+
+static u32 psp_gfx_dl_batch_owner_component(const PspGfxDlContext* ctx) {
+    u32 mask = ctx->batchComponentMask;
+    u32 component;
+
+    if (mask == 0) {
+        return PSP_PROFILE_COMPONENT_UNATTRIBUTED;
+    }
+    if (psp_gfx_dl_component_popcount(mask) != 1) {
+        return PSP_PROFILE_COMPONENT_MIXED_BATCH;
+    }
+    for (component = 0; component < PSP_PROFILE_COMPONENT_COUNT; component++) {
+        if ((mask & psp_gfx_dl_component_bit(component)) != 0) {
+            return component;
+        }
+    }
+    return PSP_PROFILE_COMPONENT_UNATTRIBUTED;
+}
+#else
+#define psp_gfx_dl_mark_batch_component(ctx) ((void) 0)
+#endif
+
 static void psp_gfx_dl_handle_movemem(PspGfxDlContext* ctx, const Gfx* gfx) {
     u32 index = (gfx->words.w0 >> 16) & 0xFF;
     const Vp* viewport;
@@ -1644,9 +1690,22 @@ static void psp_gfx_dl_handle_movemem(PspGfxDlContext* ctx, const Gfx* gfx) {
 }
 
 static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason reason) {
+#if SF64_PSP_PROFILE_COMPONENTS
+    u32 ownerComponent;
+    u32 ownerMask;
+#endif
+
     if (ctx->batchCount == 0) {
+#if SF64_PSP_PROFILE_COMPONENTS
+        ctx->batchComponentMask = 0;
+#endif
         return;
     }
+#if SF64_PSP_PROFILE_COMPONENTS
+    ownerMask = ctx->batchComponentMask;
+    ownerComponent = psp_gfx_dl_batch_owner_component(ctx);
+    PspProfiler_ComponentScopeBegin(ownerComponent);
+#endif
     (void) reason;
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_BATCH_FLUSH);
     PspGfxPspgl_DrawColoredTriangles(sPspGfxDlBatch, ctx->batchCount, ctx->batchTextureId, ctx->batchTextureRef,
@@ -1657,8 +1716,15 @@ static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason 
                                      &ctx->batchProjection[0][0], ctx->batchPretransformed);
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_BATCH_FLUSH);
     PspProfiler_CountBatchFlush(reason, ctx->batchCount);
+#if SF64_PSP_PROFILE_COMPONENTS
+    PspProfiler_CountBatchComponentOwnership(ownerComponent, ownerMask, ctx->batchCount);
+    PspProfiler_ComponentScopeEnd();
+#endif
     ctx->stats.drawVertexCount += ctx->batchCount;
     ctx->batchCount = 0;
+#if SF64_PSP_PROFILE_COMPONENTS
+    ctx->batchComponentMask = 0;
+#endif
 }
 
 static void psp_gfx_dl_flush_texture_change(PspGfxDlContext* ctx, PspProfileTextureFlushSource source) {
@@ -1949,6 +2015,7 @@ static void psp_gfx_dl_emit_clip_vertex(PspGfxDlContext* ctx, const PspGfxDlClip
     }
 
     dst = &sPspGfxDlBatch[ctx->batchCount++];
+    psp_gfx_dl_mark_batch_component(ctx);
 
     if (ctx->batchPretransformed) {
         float inverseW = 1.0f / src->w;
@@ -2015,6 +2082,7 @@ static void psp_gfx_dl_emit_direct_vertex(PspGfxDlContext* ctx, const PspGfxDlVe
     }
 
     dst = &sPspGfxDlBatch[ctx->batchCount++];
+    psp_gfx_dl_mark_batch_component(ctx);
 
     if (ctx->batchPretransformed) {
         float inverseW = 1.0f / src->clipW;
@@ -2540,6 +2608,7 @@ static void psp_gfx_dl_emit_rect_vertex(PspGfxDlContext* ctx,
     }
 
     dst = &sPspGfxDlBatch[ctx->batchCount++];
+    psp_gfx_dl_mark_batch_component(ctx);
 
     dst->u = u / (float) ctx->textureUploadWidth;
     dst->v = v / (float) ctx->textureUploadHeight;
@@ -3433,12 +3502,10 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
     psp_gfx_dl_reset_context(ctx);
     ctx->taskIndex = taskIndex;
     PspProfiler_CountDisplayListTask();
-    PspProfiler_ComponentTaskBegin();
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_DL_TRAVERSAL);
     psp_gfx_dl_run_internal(ctx, dl, 0);
     psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_END_OF_TASK);
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_DL_TRAVERSAL);
-    PspProfiler_ComponentTaskEnd();
 
     if (outStats != NULL) {
         *outStats = ctx->stats;

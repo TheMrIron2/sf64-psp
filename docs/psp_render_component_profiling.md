@@ -79,15 +79,62 @@ Nested display-list calls do not push or restore component state. A marker
 opens a command-stream region, and that component remains active through nested
 model, limb, and material display lists until another marker changes it.
 
-Task lifecycle is reset in `PspGfxDl_Run()`:
+Task lifecycle is owned by the outer PSPGL render task in
+`PspRenderer_RenderGfxTask()`:
 
 ```text
 task begin -> UNATTRIBUTED, start component timer
+frame setup, starfield, and pre-display-list renderer work -> UNATTRIBUTED
 marker     -> close previous timed region, switch component
+final PSPGL flush and finish/sync -> the active stream component, normally UNATTRIBUTED after title markers
 task end   -> close current region, reset to UNATTRIBUTED
 ```
 
 Invalid component IDs are counted and rejected before indexing the fixed arrays.
+
+## Deferred Batch Ownership
+
+Command interpretation, TnL work, clipping, texture preparation, and state
+resolution follow the active command-stream marker. Deferred batch submission is
+different: vertices can be appended under one component and flushed later after
+another marker has become active.
+
+Component builds therefore track a per-batch ownership mask. Every path that
+appends vertices to the renderer batch ORs in the current command-stream
+component:
+
+```text
+direct triangle output
+general/textured triangle output
+clipping-generated output
+texture rectangles
+```
+
+The ownership mask is cleared whenever the batch is emptied. A batch flush is
+attributed as follows:
+
+```text
+no owner bits      -> UNATTRIBUTED
+one owner bit      -> that component
+multiple owner bits -> MIXED_BATCH
+```
+
+The renderer does not flush at marker boundaries. Mixed batches are not guessed
+or proportionally divided; they are reported as `mixed_batch`, with
+participation counters for the components that contributed vertices.
+
+During the actual call to `PspGfxPspgl_DrawColoredTriangles()` and its nested
+PSPGL phases, the profiler temporarily scopes attribution to the resolved batch
+owner. The scope closes the command-stream component region, opens the batch
+owner region for the submission work, then restores the previous
+command-stream component from the same timer boundary. Invalid nested scope use
+is diagnosed and ignored.
+
+Batch-state transitions and texture-flush-source counters describe why the
+incoming state forced a flush, so they remain attributed to the current
+command-stream component. The actual batch-flush phase, draw submission, VBO
+work, submitted vertices, and owned batch-flush counters follow batch
+ownership.
 
 ## Components
 
@@ -95,6 +142,7 @@ The current component IDs are:
 
 ```text
 UNATTRIBUTED
+MIXED_BATCH
 TITLE_COMMON
 TITLE_FOX
 TITLE_FALCO
@@ -137,7 +185,8 @@ breakdown for display-list traversal time.
 Supported component-local phases include G_VTX processing, triangle processing,
 clipping, texture prepare/decode/upload, batch construction/flush, PSPGL state
 setup, vertex-stream upload, draw submission, `glFlush`, and finish/sync when
-they occur inside an active graphics task.
+they occur inside an active graphics task. Deferred batch submission phases use
+the scoped batch owner rather than the current command-stream marker.
 
 Raw timing is preserved. Adjusted timing subtracts the existing timer-overhead
 calibration and clamps underflow to zero.
@@ -157,8 +206,10 @@ profile-NNN-component-categories.csv
 components. It includes region counts, raw and adjusted time, per-frame time,
 percent of component-task time, marker entries, display-list command counts,
 nested display-list calls, geometry/TnL counters, clipping counters, state
-resolve counters, batch flushes, draw/VBO/upload counters, texture counters,
-texture wrap/cache-parameter counters, `glFlush` calls, and sync calls.
+resolve counters, batch flushes, batch flushes owned by this component,
+mixed-batch participations, owned batch vertices, draw/VBO/upload counters,
+texture counters, texture wrap/cache-parameter counters, `glFlush` calls, and
+sync calls.
 
 `profile-NNN-component-phases.csv` is long-form:
 
@@ -177,8 +228,11 @@ Categories are `flush_reason`, `batch_state_transition`, and
 
 `profile-NNN.txt` records component profiling enablement, component count,
 marker commands seen, invalid marker IDs, component switches, task starts/ends,
-unexpected outside-task state, phase crossings, raw/adjusted component task
-time, sum of component raw/adjusted time, and static component storage.
+unexpected outside-task state, phase crossings, single-owner batch flushes,
+mixed-owner batch flushes, empty-owner batch flushes, maximum components in one
+batch, mixed-batch vertices, scope begin/end counts, invalid scope nesting,
+raw/adjusted component task time, sum of component raw/adjusted time, and
+static component storage.
 
 ## Invariants
 
@@ -189,8 +243,9 @@ outside a component-active graphics task are not forced into a component.
 Per-component flush reasons, batch-state transitions, and texture-flush sources
 should sum to the aggregate category totals for graphics-task-owned events.
 
-Component timing raw sums should match total component task time. Adjusted sums
-may differ only by documented timer-overhead subtraction and clamping.
+Component timing raw sums should match total component task time. Adjusted
+component task time is the sum of component-adjusted region times, so it should
+match `sum of component adjusted time` exactly.
 
 ## Hardware Capture Procedure
 

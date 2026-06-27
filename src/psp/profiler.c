@@ -251,6 +251,9 @@ typedef struct {
     u64 markerEntries;
     u64 displayListCommands;
     u64 nestedDisplayListCalls;
+    u64 batchFlushesOwned;
+    u64 mixedBatchParticipations;
+    u64 batchVerticesOwned;
     u64 gvtxCommands;
     u64 verticesLoaded;
     u64 modelviewMatrixCommands;
@@ -450,6 +453,16 @@ static u64 sComponentTaskEnds;
 static u64 sComponentUnexpectedOutsideTask;
 static u64 sComponentPhaseCrossings;
 static u64 sComponentTaskTotalUs;
+static u64 sComponentSingleOwnerBatchFlushes;
+static u64 sComponentMixedOwnerBatchFlushes;
+static u64 sComponentEmptyOwnerBatchFlushes;
+static u64 sComponentMixedOwnerBatchVertices;
+static u64 sComponentMaximumBatchComponents;
+static u64 sComponentScopeBegins;
+static u64 sComponentScopeEnds;
+static u64 sComponentScopeInvalidNesting;
+static u32 sComponentScopeSavedCurrent;
+static int sComponentScopeActive;
 #endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
 static PspProfileFrameRecord sFrameTrace[SF64_PSP_PROFILE_FRAME_TRACE_FRAMES];
@@ -605,6 +618,16 @@ PSP_PROFILE_ATTR static void psp_profiler_reset_phase_capture(void) {
     sComponentUnexpectedOutsideTask = 0;
     sComponentPhaseCrossings = 0;
     sComponentTaskTotalUs = 0;
+    sComponentSingleOwnerBatchFlushes = 0;
+    sComponentMixedOwnerBatchFlushes = 0;
+    sComponentEmptyOwnerBatchFlushes = 0;
+    sComponentMixedOwnerBatchVertices = 0;
+    sComponentMaximumBatchComponents = 0;
+    sComponentScopeBegins = 0;
+    sComponentScopeEnds = 0;
+    sComponentScopeInvalidNesting = 0;
+    sComponentScopeSavedCurrent = PSP_PROFILE_COMPONENT_UNATTRIBUTED;
+    sComponentScopeActive = 0;
 #endif
 #if SF64_PSP_PROFILE_FRAME_TRACE
     psp_profiler_zero(sFrameTrace, sizeof(sFrameTrace));
@@ -726,6 +749,7 @@ static u64 psp_profiler_adjust_phase_us(const PspProfilePhaseState* phase) {
 static const char* psp_profiler_component_name(u32 component) {
     static const char* names[PSP_PROFILE_COMPONENT_COUNT] = {
         "unattributed",
+        "mixed_batch",
         "title_common",
         "title_fox",
         "title_falco",
@@ -808,6 +832,16 @@ static u64 psp_profiler_adjust_component_us(u32 component) {
     total = sComponent[component].totalUs;
     overhead = sComponent[component].regionCount * sTimerReadPairOverheadUs;
     return (total > overhead) ? (total - overhead) : 0;
+}
+
+static u32 psp_profiler_component_popcount32(u32 value) {
+    u32 count = 0;
+
+    while (value != 0) {
+        count += value & 1U;
+        value >>= 1;
+    }
+    return count;
 }
 #endif
 
@@ -1382,7 +1416,7 @@ static void psp_profiler_write_component_files(u32 slot) {
         return;
     }
     psp_profiler_write_all(fd,
-                           "component_id,component_name,region_count,total_us_raw,total_us_adjusted,us_per_frame_adjusted,percent_of_component_task_time,marker_entries,display_list_commands,nested_display_list_calls,gvtx_commands,vertices_loaded,modelview_matrix_commands,projection_matrix_commands,matrix_compositions,lit_vertices,unlit_vertices,normal_transforms,normalisations,lighting_evaluations,clip_code_calculations,perspective_divides,tri1_commands,tri2_commands,input_triangles,trivially_accepted_triangles,trivially_rejected_triangles,partially_clipped_triangles,generated_clipping_vertices,output_triangles,direct_fastpath_triangles,general_path_triangles,perspective_path_triangles,clipped_path_triangles,direct_vertices_written,effective_state_resolves,effective_state_reuses,material_state_resolves,depth_state_resolves,fog_state_resolves,batch_flushes,vertices_submitted,draw_calls,vbo_draw_calls,vbo_vertices,small_vbo_draw_calls,large_vbo_draw_calls,small_vbo_vertices,large_vbo_vertices,vertex_stream_upload_calls,vertex_stream_upload_bytes,vertex_stream_page_switches,client_array_fallback_draws,client_array_fallback_vertices,texture_cache_hits,texture_cache_misses,texture_decodes,texture_uploads,texture_bytes_uploaded,texture_wrap_requests_s,texture_wrap_requests_t,texture_wrap_calls_emitted_s,texture_wrap_calls_emitted_t,texture_wrap_calls_skipped_s,texture_wrap_calls_skipped_t,texture_parameter_cache_misses,texture_parameter_cache_replacements,glFlush_calls,sync_calls\n");
+                           "component_id,component_name,region_count,total_us_raw,total_us_adjusted,us_per_frame_adjusted,percent_of_component_task_time,marker_entries,display_list_commands,nested_display_list_calls,batch_flushes_owned,mixed_batch_participations,batch_vertices_owned,gvtx_commands,vertices_loaded,modelview_matrix_commands,projection_matrix_commands,matrix_compositions,lit_vertices,unlit_vertices,normal_transforms,normalisations,lighting_evaluations,clip_code_calculations,perspective_divides,tri1_commands,tri2_commands,input_triangles,trivially_accepted_triangles,trivially_rejected_triangles,partially_clipped_triangles,generated_clipping_vertices,output_triangles,direct_fastpath_triangles,general_path_triangles,perspective_path_triangles,clipped_path_triangles,direct_vertices_written,effective_state_resolves,effective_state_reuses,material_state_resolves,depth_state_resolves,fog_state_resolves,batch_flushes,vertices_submitted,draw_calls,vbo_draw_calls,vbo_vertices,small_vbo_draw_calls,large_vbo_draw_calls,small_vbo_vertices,large_vbo_vertices,vertex_stream_upload_calls,vertex_stream_upload_bytes,vertex_stream_page_switches,client_array_fallback_draws,client_array_fallback_vertices,texture_cache_hits,texture_cache_misses,texture_decodes,texture_uploads,texture_bytes_uploaded,texture_wrap_requests_s,texture_wrap_requests_t,texture_wrap_calls_emitted_s,texture_wrap_calls_emitted_t,texture_wrap_calls_skipped_s,texture_wrap_calls_skipped_t,texture_parameter_cache_misses,texture_parameter_cache_replacements,glFlush_calls,sync_calls\n");
     for (component = 0; component < PSP_PROFILE_COMPONENT_COUNT; component++) {
         const PspProfileComponentCounters* c = &sComponent[component].counters;
         u64 adjusted = psp_profiler_adjust_component_us(component);
@@ -1390,10 +1424,11 @@ static void psp_profiler_write_component_files(u32 slot) {
         f32 percent = (adjustedTotal != 0) ? ((100.0f * (f32) adjusted) / (f32) adjustedTotal) : 0.0f;
 
         snprintf(line, sizeof(line),
-                 "%lu,%s,%llu,%llu,%llu,%.3f,%.3f,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu\n",
+                 "%lu,%s,%llu,%llu,%llu,%.3f,%.3f,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu\n",
                  (unsigned long) component, psp_profiler_component_name(component),
                  sComponent[component].regionCount, sComponent[component].totalUs, adjusted, perFrame, percent,
-                 c->markerEntries, c->displayListCommands, c->nestedDisplayListCalls, c->gvtxCommands,
+                 c->markerEntries, c->displayListCommands, c->nestedDisplayListCalls, c->batchFlushesOwned,
+                 c->mixedBatchParticipations, c->batchVerticesOwned, c->gvtxCommands,
                  c->verticesLoaded, c->modelviewMatrixCommands, c->projectionMatrixCommands,
                  c->matrixCompositions, c->litVertices, c->unlitVertices, c->normalTransforms,
                  c->normalisations, c->lightingEvaluations, c->clipCodeCalculations, c->perspectiveDivides,
@@ -1531,13 +1566,13 @@ static void psp_profiler_write_phase_files(u32 slot) {
             adjustedSum += psp_profiler_adjust_component_us(component);
         }
         snprintf(line, sizeof(line),
-                 "SF64_PSP_PROFILE_COMPONENTS: %d\ncomponent count: %d\nmarker commands seen: %llu\ninvalid marker IDs: %llu\ncomponent switches: %llu\ncomponent task starts: %llu\ncomponent task ends: %llu\ncomponent unexpectedly active outside task: %llu\ncomponent phase crossings: %llu\nraw component task time: %llu\nadjusted component task time: %llu\nsum of component raw time: %llu\nsum of component adjusted time: %llu\ncomponent static bytes: %lu\n\n",
+                 "SF64_PSP_PROFILE_COMPONENTS: %d\ncomponent count: %d\nmarker commands seen: %llu\ninvalid marker IDs: %llu\ncomponent switches: %llu\ncomponent task starts: %llu\ncomponent task ends: %llu\ncomponent unexpectedly active outside task: %llu\ncomponent phase crossings: %llu\nsingle-component batch flushes: %llu\nmixed-component batch flushes: %llu\nempty-owner batch flushes: %llu\nmaximum components in one batch: %llu\nmixed-component batch vertices: %llu\ncomponent scope begins: %llu\ncomponent scope ends: %llu\ncomponent scope invalid nesting: %llu\nraw component task time: %llu\nadjusted component task time: %llu\nsum of component raw time: %llu\nsum of component adjusted time: %llu\ncomponent static bytes: %lu\n\n",
                  SF64_PSP_PROFILE_COMPONENTS, PSP_PROFILE_COMPONENT_COUNT, sComponentMarkerCommandsSeen,
                  sComponentInvalidMarkerIds, sComponentSwitches, sComponentTaskStarts, sComponentTaskEnds,
-                 sComponentUnexpectedOutsideTask, sComponentPhaseCrossings, sComponentTaskTotalUs,
-                 (sComponentTaskTotalUs > (sComponentTaskEnds * sTimerReadPairOverheadUs))
-                     ? (sComponentTaskTotalUs - (sComponentTaskEnds * sTimerReadPairOverheadUs))
-                     : 0,
+                 sComponentUnexpectedOutsideTask, sComponentPhaseCrossings, sComponentSingleOwnerBatchFlushes,
+                 sComponentMixedOwnerBatchFlushes, sComponentEmptyOwnerBatchFlushes,
+                 sComponentMaximumBatchComponents, sComponentMixedOwnerBatchVertices, sComponentScopeBegins,
+                 sComponentScopeEnds, sComponentScopeInvalidNesting, sComponentTaskTotalUs, adjustedSum,
                  rawSum, adjustedSum, (unsigned long) sizeof(sComponent));
         psp_profiler_write_all(fd, line);
     }
@@ -1805,6 +1840,11 @@ void PspProfiler_StopCapture(void) {
     }
 #if SF64_PSP_PROFILE_COMPONENTS
     if (sComponentTaskActive) {
+        if (sComponentScopeActive) {
+            sComponentScopeInvalidNesting++;
+            sComponentScopeActive = 0;
+            sComponentScopeSavedCurrent = PSP_PROFILE_COMPONENT_UNATTRIBUTED;
+        }
         psp_profiler_component_close_region_locked(now);
         sComponentCurrent = PSP_PROFILE_COMPONENT_UNATTRIBUTED;
         sComponentTaskActive = 0;
@@ -2002,6 +2042,8 @@ void PspProfiler_ComponentTaskBegin(void) {
         psp_profiler_component_close_region_locked(now);
     }
     sComponentCurrent = PSP_PROFILE_COMPONENT_UNATTRIBUTED;
+    sComponentScopeSavedCurrent = PSP_PROFILE_COMPONENT_UNATTRIBUTED;
+    sComponentScopeActive = 0;
     sComponentTaskActive = 1;
     sComponentRegionStartUs = now;
     sComponentTaskStarts++;
@@ -2022,6 +2064,11 @@ void PspProfiler_ComponentTaskEnd(void) {
         sComponentUnexpectedOutsideTask++;
         psp_profiler_unlock(lockState);
         return;
+    }
+    if (sComponentScopeActive) {
+        sComponentScopeInvalidNesting++;
+        sComponentScopeActive = 0;
+        sComponentScopeSavedCurrent = PSP_PROFILE_COMPONENT_UNATTRIBUTED;
     }
     psp_profiler_component_close_region_locked(now);
     sComponentCurrent = PSP_PROFILE_COMPONENT_UNATTRIBUTED;
@@ -2056,6 +2103,109 @@ void PspProfiler_ComponentMarker(u32 componentId) {
     sComponent[componentId].counters.markerEntries++;
     sComponentSwitches++;
     psp_profiler_unlock(lockState);
+}
+
+u32 PspProfiler_ComponentCurrentId(void) {
+    u32 component;
+    int lockState;
+
+    if (!sCaptureActive) {
+        return PSP_PROFILE_COMPONENT_UNATTRIBUTED;
+    }
+
+    lockState = psp_profiler_lock();
+    component = psp_profiler_component_current_index();
+    psp_profiler_unlock(lockState);
+    return component;
+}
+
+void PspProfiler_ComponentScopeBegin(u32 componentId) {
+    u64 now;
+    int lockState;
+
+    if (!sCaptureActive) {
+        return;
+    }
+
+    now = psp_profiler_now_us();
+    lockState = psp_profiler_lock();
+    if (!sComponentTaskActive || (componentId >= PSP_PROFILE_COMPONENT_COUNT)) {
+        sComponentUnexpectedOutsideTask++;
+        psp_profiler_unlock(lockState);
+        return;
+    }
+    if (sComponentScopeActive) {
+        sComponentScopeInvalidNesting++;
+        psp_profiler_unlock(lockState);
+        return;
+    }
+
+    psp_profiler_component_close_region_locked(now);
+    sComponentScopeSavedCurrent = psp_profiler_component_current_index();
+    sComponentCurrent = componentId;
+    sComponentScopeActive = 1;
+    sComponentScopeBegins++;
+    psp_profiler_unlock(lockState);
+}
+
+void PspProfiler_ComponentScopeEnd(void) {
+    u64 now;
+    int lockState;
+
+    if (!sCaptureActive) {
+        return;
+    }
+
+    now = psp_profiler_now_us();
+    lockState = psp_profiler_lock();
+    if (!sComponentTaskActive || !sComponentScopeActive) {
+        sComponentScopeInvalidNesting++;
+        psp_profiler_unlock(lockState);
+        return;
+    }
+
+    psp_profiler_component_close_region_locked(now);
+    sComponentCurrent = sComponentScopeSavedCurrent;
+    sComponentScopeSavedCurrent = PSP_PROFILE_COMPONENT_UNATTRIBUTED;
+    sComponentScopeActive = 0;
+    sComponentScopeEnds++;
+    psp_profiler_unlock(lockState);
+}
+
+void PspProfiler_CountBatchComponentOwnership(u32 ownerComponentId, u32 componentMask, u32 vertices) {
+    u32 components;
+    u32 component;
+
+    if (!sCaptureActive) {
+        return;
+    }
+    if (ownerComponentId >= PSP_PROFILE_COMPONENT_COUNT) {
+        ownerComponentId = PSP_PROFILE_COMPONENT_UNATTRIBUTED;
+    }
+
+    components = psp_profiler_component_popcount32(componentMask);
+    if (components == 0) {
+        sComponentEmptyOwnerBatchFlushes++;
+    } else if (components == 1) {
+        sComponentSingleOwnerBatchFlushes++;
+    } else {
+        sComponentMixedOwnerBatchFlushes++;
+        sComponentMixedOwnerBatchVertices += vertices;
+    }
+    if (components > sComponentMaximumBatchComponents) {
+        sComponentMaximumBatchComponents = components;
+    }
+
+    sComponent[ownerComponentId].counters.batchFlushesOwned++;
+    sComponent[ownerComponentId].counters.batchVerticesOwned += vertices;
+
+    if (components > 1) {
+        for (component = 0; component < PSP_PROFILE_COMPONENT_COUNT; component++) {
+            if ((componentMask & (1UL << component)) != 0) {
+                sComponent[component].counters.mixedBatchParticipations++;
+            }
+        }
+    }
 }
 
 void PspProfiler_CountNestedDisplayListCall(void) {

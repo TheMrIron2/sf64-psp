@@ -171,11 +171,19 @@ void PspProfiler_CountSync(void);
 void PspProfiler_ComponentTaskBegin(void);
 void PspProfiler_ComponentTaskEnd(void);
 void PspProfiler_ComponentMarker(u32 componentId);
+u32 PspProfiler_ComponentCurrentId(void);
+void PspProfiler_ComponentScopeBegin(u32 componentId);
+void PspProfiler_ComponentScopeEnd(void);
+void PspProfiler_CountBatchComponentOwnership(u32 ownerComponentId, u32 componentMask, u32 vertices);
 void PspProfiler_CountNestedDisplayListCall(void);
 #else
 #define PspProfiler_ComponentTaskBegin() ((void) 0)
 #define PspProfiler_ComponentTaskEnd() ((void) 0)
 #define PspProfiler_ComponentMarker(componentId) ((void) 0)
+#define PspProfiler_ComponentCurrentId() 0
+#define PspProfiler_ComponentScopeBegin(componentId) ((void) 0)
+#define PspProfiler_ComponentScopeEnd() ((void) 0)
+#define PspProfiler_CountBatchComponentOwnership(ownerComponentId, componentMask, vertices) ((void) 0)
 #define PspProfiler_CountNestedDisplayListCall() ((void) 0)
 #endif
 
