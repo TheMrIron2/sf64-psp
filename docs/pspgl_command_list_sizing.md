@@ -6,9 +6,9 @@ handling, buffer pinning, or queue synchronization semantics.
 
 ## Current Design
 
-PSPGL uses a ring of 16 command-list slots. The historical capacity is 512
-32-bit command words per slot, plus the existing four-word `FINISH`, `END`, and
-`NOP` termination sequence. With 16 slots, the raw command-buffer storage is:
+PSPGL uses a ring of 16 command-list slots. The historical capacity is 512 total
+32-bit command words per slot. Four of those words are reserved for the FINISH, END,
+and two NOP termination commands. With 16 slots, the raw command-buffer storage is:
 
 ```text
 512 words  x 4 x 16 = 32 KiB
