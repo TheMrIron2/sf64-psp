@@ -297,3 +297,6 @@ Capture	Input triangles/frame	Graphics task/frame
 002	1,065	77.11 ms
 
 Optimisation seems stable, visually correct and worthwhile.
+
+Follow-up diagnostics for the clipped/rejected Corneria fallback population are
+documented in [psp_trivial_reject_diagnostics.md](psp_trivial_reject_diagnostics.md).

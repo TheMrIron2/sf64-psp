@@ -38,6 +38,9 @@ extern int gDrawMode;
 #ifndef SF64_PSP_PROFILE_COMPONENTS
 #define SF64_PSP_PROFILE_COMPONENTS 0
 #endif
+#ifndef SF64_PSP_PROFILE_TRIVIAL_REJECTS
+#define SF64_PSP_PROFILE_TRIVIAL_REJECTS 0
+#endif
 #ifndef SF64_PSP_PROFILE_FRAME_TRACE_FRAMES
 #define SF64_PSP_PROFILE_FRAME_TRACE_FRAMES 240
 #endif
@@ -105,6 +108,9 @@ extern int gDrawMode;
 #endif
 #if SF64_PSP_PROFILE_COMPONENTS && !SF64_PSP_PROFILE_PHASES
 #error "SF64_PSP_PROFILE_COMPONENTS requires SF64_PSP_PROFILE_PHASES"
+#endif
+#if SF64_PSP_PROFILE_TRIVIAL_REJECTS && !SF64_PSP_PROFILE_PHASES
+#error "SF64_PSP_PROFILE_TRIVIAL_REJECTS requires SF64_PSP_PROFILE_PHASES"
 #endif
 #if SF64_PSP_PROFILE_FRAME_TRACE && (SF64_PSP_PROFILE_FRAME_TRACE_FRAMES < 1)
 #error "SF64_PSP_PROFILE_FRAME_TRACE_FRAMES must be at least 1"
@@ -255,6 +261,13 @@ typedef struct {
     PspProfileTextureCacheBaseKey
         textureCacheBaseKeys[PSP_PROFILE_TEXTURE_CACHE_COUNT][PSP_PROFILE_TEXTURE_CACHE_TRACKED_KEYS];
     u64 textureCacheLookupSeq;
+#if SF64_PSP_PROFILE_TRIVIAL_REJECTS
+    u64 tri2OutcomeMatrix[PSP_PROFILE_TRI_OUTCOME_COUNT][PSP_PROFILE_TRI_OUTCOME_COUNT];
+    u64 trivialRejectCosts[PSP_PROFILE_TRIVIAL_REJECT_COST_COUNT];
+    u64 trivialRejectFlushReasons[PSP_PROFILE_FLUSH_COUNT];
+    u64 trivialRejectStateTransitions[PSP_PROFILE_TRIVIAL_REJECT_STATE_COUNT];
+    u64 trivialRejectRenderStates[PSP_PROFILE_TRIVIAL_REJECT_RENDER_COUNT];
+#endif
 } PspProfileCounters;
 
 #if SF64_PSP_PROFILE_COMPONENTS
@@ -338,6 +351,13 @@ typedef struct {
     u64 flushReasons[PSP_PROFILE_FLUSH_COUNT];
     u64 batchStateTransitions[PSP_PROFILE_BATCH_STATE_COUNT];
     u64 textureFlushSources[PSP_PROFILE_TEXTURE_FLUSH_COUNT];
+#if SF64_PSP_PROFILE_TRIVIAL_REJECTS
+    u64 tri2OutcomeMatrix[PSP_PROFILE_TRI_OUTCOME_COUNT][PSP_PROFILE_TRI_OUTCOME_COUNT];
+    u64 trivialRejectCosts[PSP_PROFILE_TRIVIAL_REJECT_COST_COUNT];
+    u64 trivialRejectFlushReasons[PSP_PROFILE_FLUSH_COUNT];
+    u64 trivialRejectStateTransitions[PSP_PROFILE_TRIVIAL_REJECT_STATE_COUNT];
+    u64 trivialRejectRenderStates[PSP_PROFILE_TRIVIAL_REJECT_RENDER_COUNT];
+#endif
 } PspProfileComponentCounters;
 
 typedef struct {
@@ -767,6 +787,100 @@ static const char* psp_profiler_texture_cache_name(PspProfileTextureCacheClass c
     return names[cache];
 }
 
+#if SF64_PSP_PROFILE_TRIVIAL_REJECTS
+static const char* psp_profiler_tri2_matrix_name(PspProfileTriOutcome first, PspProfileTriOutcome second) {
+    static const char* names[PSP_PROFILE_TRI_OUTCOME_COUNT][PSP_PROFILE_TRI_OUTCOME_COUNT] = {
+        {
+            "direct_direct",
+            "direct_trivial_reject",
+            "direct_partial_clip",
+            "direct_invalid"
+        },
+        {
+            "trivial_reject_direct",
+            "trivial_reject_trivial_reject",
+            "trivial_reject_partial_clip",
+            "trivial_reject_invalid"
+        },
+        {
+            "partial_clip_direct",
+            "partial_clip_trivial_reject",
+            "partial_clip_partial_clip",
+            "partial_clip_invalid"
+        },
+        {
+            "invalid_direct",
+            "invalid_trivial_reject",
+            "invalid_partial_clip",
+            "invalid_invalid"
+        }
+    };
+
+    if ((first >= PSP_PROFILE_TRI_OUTCOME_COUNT) || (second >= PSP_PROFILE_TRI_OUTCOME_COUNT)) {
+        return "unknown_unknown";
+    }
+    return names[first][second];
+}
+
+static const char* psp_profiler_trivial_reject_cost_name(PspProfileTrivialRejectCost cost) {
+    static const char* names[PSP_PROFILE_TRIVIAL_REJECT_COST_COUNT] = {
+        "trivial_reject_triangles",
+        "effective_state_calls",
+        "effective_state_resolves",
+        "effective_state_reuses",
+        "batch_empty_before_state",
+        "batch_nonempty_before_state",
+        "batch_vertices_before_state",
+        "texture_prepare_calls",
+        "texture_cache_hits",
+        "texture_cache_misses",
+        "texture_decodes",
+        "texture_uploads",
+        "texture_bytes_uploaded",
+        "flushes",
+        "flushed_vertices",
+        "scope_begins",
+        "scope_ends",
+        "scope_invalid_nesting",
+        "scope_leaks"
+    };
+
+    return (cost < PSP_PROFILE_TRIVIAL_REJECT_COST_COUNT) ? names[cost] : "unknown";
+}
+
+static const char* psp_profiler_trivial_reject_state_name(PspProfileTrivialRejectStateField field) {
+    static const char* names[PSP_PROFILE_TRIVIAL_REJECT_STATE_COUNT] = {
+        "texture_id_or_ref",
+        "texture_env",
+        "wrap_s",
+        "wrap_t",
+        "alpha_test",
+        "blend",
+        "premultiplied",
+        "depth_test",
+        "depth_write",
+        "fog_enable_or_parameters",
+        "transform_or_projection"
+    };
+
+    return (field < PSP_PROFILE_TRIVIAL_REJECT_STATE_COUNT) ? names[field] : "unknown";
+}
+
+static const char* psp_profiler_trivial_reject_render_name(PspProfileTrivialRejectRenderState state) {
+    static const char* names[PSP_PROFILE_TRIVIAL_REJECT_RENDER_COUNT] = {
+        "textured",
+        "untextured",
+        "alpha_test",
+        "blend",
+        "depth_test",
+        "depth_write",
+        "fog"
+    };
+
+    return (state < PSP_PROFILE_TRIVIAL_REJECT_RENDER_COUNT) ? names[state] : "unknown";
+}
+#endif
+
 #if SF64_PSP_PROFILE_FRAME_TRACE || SF64_PSP_PROFILE_COMPONENTS
 static u64 psp_profiler_adjust_phase_us(const PspProfilePhaseState* phase) {
     u64 overheadUs = phase->calls * sTimerReadPairOverheadUs;
@@ -795,7 +909,14 @@ static const char* psp_profiler_component_name(u32 component) {
 
     return (component < PSP_PROFILE_COMPONENT_COUNT) ? names[component] : "unknown";
 }
+#elif SF64_PSP_PROFILE_TRIVIAL_REJECTS
+static const char* psp_profiler_component_name(u32 component) {
+    (void) component;
+    return "unattributed";
+}
+#endif
 
+#if SF64_PSP_PROFILE_COMPONENTS
 static int psp_profiler_component_phase_supported(PspProfilePhase phase) {
     switch (phase) {
         case PSP_PROFILE_PHASE_G_VTX:
@@ -1542,6 +1663,105 @@ static void psp_profiler_write_component_files(u32 slot) {
 }
 #endif
 
+#if SF64_PSP_PROFILE_TRIVIAL_REJECTS
+static void psp_profiler_write_trivial_reject_rows(SceUID fd, u32 component, const PspProfileCounters* aggregate,
+#if SF64_PSP_PROFILE_COMPONENTS
+                                                   const PspProfileComponentCounters* local
+#else
+                                                   const void* local
+#endif
+) {
+    char line[192];
+    u32 i;
+    u32 j;
+    const char* componentName = psp_profiler_component_name(component);
+
+    (void) local;
+    for (i = 0; i < PSP_PROFILE_TRI_OUTCOME_COUNT; i++) {
+        for (j = 0; j < PSP_PROFILE_TRI_OUTCOME_COUNT; j++) {
+#if SF64_PSP_PROFILE_COMPONENTS
+            u64 count = (local != NULL) ? local->tri2OutcomeMatrix[i][j] : aggregate->tri2OutcomeMatrix[i][j];
+#else
+            u64 count = aggregate->tri2OutcomeMatrix[i][j];
+#endif
+            snprintf(line, sizeof(line), "%lu,%s,tri2_outcome_matrix,%s,%llu\n",
+                     (unsigned long) component, componentName,
+                     psp_profiler_tri2_matrix_name((PspProfileTriOutcome) i, (PspProfileTriOutcome) j), count);
+            psp_profiler_write_all(fd, line);
+        }
+    }
+    for (i = 0; i < PSP_PROFILE_TRIVIAL_REJECT_COST_COUNT; i++) {
+#if SF64_PSP_PROFILE_COMPONENTS
+        u64 count = (local != NULL) ? local->trivialRejectCosts[i] : aggregate->trivialRejectCosts[i];
+#else
+        u64 count = aggregate->trivialRejectCosts[i];
+#endif
+        snprintf(line, sizeof(line), "%lu,%s,trivial_reject_cost,%s,%llu\n",
+                 (unsigned long) component, componentName,
+                 psp_profiler_trivial_reject_cost_name((PspProfileTrivialRejectCost) i), count);
+        psp_profiler_write_all(fd, line);
+    }
+    for (i = 0; i < PSP_PROFILE_FLUSH_COUNT; i++) {
+#if SF64_PSP_PROFILE_COMPONENTS
+        u64 count = (local != NULL) ? local->trivialRejectFlushReasons[i] : aggregate->trivialRejectFlushReasons[i];
+#else
+        u64 count = aggregate->trivialRejectFlushReasons[i];
+#endif
+        snprintf(line, sizeof(line), "%lu,%s,trivial_reject_flush_reason,%s,%llu\n",
+                 (unsigned long) component, componentName, psp_profiler_flush_name((PspProfileFlushReason) i),
+                 count);
+        psp_profiler_write_all(fd, line);
+    }
+    for (i = 0; i < PSP_PROFILE_TRIVIAL_REJECT_STATE_COUNT; i++) {
+#if SF64_PSP_PROFILE_COMPONENTS
+        u64 count = (local != NULL) ? local->trivialRejectStateTransitions[i]
+                                    : aggregate->trivialRejectStateTransitions[i];
+#else
+        u64 count = aggregate->trivialRejectStateTransitions[i];
+#endif
+        snprintf(line, sizeof(line), "%lu,%s,trivial_reject_state_transition,%s,%llu\n",
+                 (unsigned long) component, componentName,
+                 psp_profiler_trivial_reject_state_name((PspProfileTrivialRejectStateField) i), count);
+        psp_profiler_write_all(fd, line);
+    }
+    for (i = 0; i < PSP_PROFILE_TRIVIAL_REJECT_RENDER_COUNT; i++) {
+#if SF64_PSP_PROFILE_COMPONENTS
+        u64 count = (local != NULL) ? local->trivialRejectRenderStates[i] : aggregate->trivialRejectRenderStates[i];
+#else
+        u64 count = aggregate->trivialRejectRenderStates[i];
+#endif
+        snprintf(line, sizeof(line), "%lu,%s,trivial_reject_render_state,%s,%llu\n",
+                 (unsigned long) component, componentName,
+                 psp_profiler_trivial_reject_render_name((PspProfileTrivialRejectRenderState) i), count);
+        psp_profiler_write_all(fd, line);
+    }
+}
+
+static void psp_profiler_write_trivial_reject_file(u32 slot) {
+    char path[96];
+    SceUID fd;
+#if SF64_PSP_PROFILE_COMPONENTS
+    u32 component;
+#endif
+
+    snprintf(path, sizeof(path), "%s/profile-%03lu-trivial-rejects.csv", PSP_PROFILE_DIR, (unsigned long) slot);
+    fd = sceIoOpen(path, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_EXCL, 0666);
+    if (fd < 0) {
+        psp_profiler_set_status(PSP_PROF_STATUS_ERROR, slot);
+        return;
+    }
+    psp_profiler_write_all(fd, "component_id,component_name,category,name,count\n");
+#if SF64_PSP_PROFILE_COMPONENTS
+    for (component = 0; component < PSP_PROFILE_COMPONENT_COUNT; component++) {
+        psp_profiler_write_trivial_reject_rows(fd, component, &sCounters, &sComponent[component].counters);
+    }
+#else
+    psp_profiler_write_trivial_reject_rows(fd, 0, &sCounters, NULL);
+#endif
+    sceIoClose(fd);
+}
+#endif
+
 static void psp_profiler_write_phase_files(u32 slot) {
     char path[96];
     char line[1024];
@@ -1569,11 +1789,11 @@ static void psp_profiler_write_phase_files(u32 slot) {
     }
 
     snprintf(line, sizeof(line),
-             "SF64 git SHA: %s\nn64psp submodule SHA: %s\nPSPGL source mode: %s\nPSPGL git SHA: %s\nPSPGL worktree: %s\nPerfect Dark reference SHA: %s\ncompiler: %s\noptimisation flags: %s\nPROFILE_PSP: %d\nSF64_PSP_PROFILE_PHASES: %d\nSF64_PSP_PSPGL_PROFILE: %d\nSF64_PSP_PSPGL_DLIST_SIZE_WORDS: %d\nSF64_PSP_PSPGL_VBO_STREAM: %d\nSF64_PSP_DIRECT_TRI_FASTPATH: %d\nSF64_PSP_TRI2_PAIR_FASTPATH: %d\nSF64_PSP_TRI2_PAIR_VALIDATE: %d\nSF64_PSP_BATCH_STATE_CACHE: %d\nSF64_PSP_TEXTURE_WRAP_CACHE: %d\nUSE_N64PSP_SINCOS: %d\nCPU clock: %lu\nbus clock: %lu\ncapture slot: %lu\nrequested frame count: %d\nactual frame count: %lu\ntimer overhead us: %llu\n\n",
+             "SF64 git SHA: %s\nn64psp submodule SHA: %s\nPSPGL source mode: %s\nPSPGL git SHA: %s\nPSPGL worktree: %s\nPerfect Dark reference SHA: %s\ncompiler: %s\noptimisation flags: %s\nPROFILE_PSP: %d\nSF64_PSP_PROFILE_PHASES: %d\nSF64_PSP_PROFILE_TRIVIAL_REJECTS: %d\nSF64_PSP_PSPGL_PROFILE: %d\nSF64_PSP_PSPGL_DLIST_SIZE_WORDS: %d\nSF64_PSP_PSPGL_VBO_STREAM: %d\nSF64_PSP_DIRECT_TRI_FASTPATH: %d\nSF64_PSP_TRI2_PAIR_FASTPATH: %d\nSF64_PSP_TRI2_PAIR_VALIDATE: %d\nSF64_PSP_BATCH_STATE_CACHE: %d\nSF64_PSP_TEXTURE_WRAP_CACHE: %d\nUSE_N64PSP_SINCOS: %d\nCPU clock: %lu\nbus clock: %lu\ncapture slot: %lu\nrequested frame count: %d\nactual frame count: %lu\ntimer overhead us: %llu\n\n",
              SF64_GIT_SHA, N64PSP_GIT_SHA, PSPGL_SOURCE_MODE, PSPGL_GIT_SHA, PSPGL_GIT_DIRTY,
              PERFECT_DARK_PSP_SHA, SF64_PSP_COMPILER, SF64_PSP_OPT_FLAGS,
-             SF64_PSP_GPROF, SF64_PSP_PROFILE_PHASES, SF64_PSP_PSPGL_PROFILE, SF64_PSP_PSPGL_DLIST_SIZE_WORDS,
-             SF64_PSP_PSPGL_VBO_STREAM, SF64_PSP_DIRECT_TRI_FASTPATH,
+             SF64_PSP_GPROF, SF64_PSP_PROFILE_PHASES, SF64_PSP_PROFILE_TRIVIAL_REJECTS,
+             SF64_PSP_PSPGL_PROFILE, SF64_PSP_PSPGL_DLIST_SIZE_WORDS, SF64_PSP_PSPGL_VBO_STREAM, SF64_PSP_DIRECT_TRI_FASTPATH,
              SF64_PSP_TRI2_PAIR_FASTPATH, SF64_PSP_TRI2_PAIR_VALIDATE,
              SF64_PSP_BATCH_STATE_CACHE, SF64_PSP_TEXTURE_WRAP_CACHE, USE_N64PSP_SINCOS,
              (unsigned long) scePowerGetCpuClockFrequency(),
@@ -1723,6 +1943,86 @@ static void psp_profiler_write_phase_files(u32 slot) {
              (unsigned long) sTri2PairFirstMismatchFieldMask,
              (unsigned long) sTri2PairFirstMismatchBatchDelta);
     psp_profiler_write_all(fd, line);
+#if SF64_PSP_PROFILE_TRIVIAL_REJECTS
+    {
+        u32 first;
+        u32 second;
+        u32 i;
+        u64 matrixSum = 0;
+        u64 effectiveCalls;
+        u64 batchBeforeTotal;
+        u64 flushReasonTotal = 0;
+
+        psp_profiler_write_all(fd, "\n[TRI2 outcome matrix]\ncell,count\n");
+        for (first = 0; first < PSP_PROFILE_TRI_OUTCOME_COUNT; first++) {
+            for (second = 0; second < PSP_PROFILE_TRI_OUTCOME_COUNT; second++) {
+                u64 count = sCounters.tri2OutcomeMatrix[first][second];
+
+                matrixSum += count;
+                snprintf(line, sizeof(line), "%s,%llu\n",
+                         psp_profiler_tri2_matrix_name((PspProfileTriOutcome) first,
+                                                       (PspProfileTriOutcome) second),
+                         count);
+                psp_profiler_write_all(fd, line);
+            }
+        }
+        effectiveCalls =
+            sCounters.trivialRejectCosts[PSP_PROFILE_TRIVIAL_REJECT_COST_EFFECTIVE_STATE_CALLS];
+        batchBeforeTotal =
+            sCounters.trivialRejectCosts[PSP_PROFILE_TRIVIAL_REJECT_COST_BATCH_EMPTY_BEFORE_STATE] +
+            sCounters.trivialRejectCosts[PSP_PROFILE_TRIVIAL_REJECT_COST_BATCH_NONEMPTY_BEFORE_STATE];
+        for (i = 0; i < PSP_PROFILE_FLUSH_COUNT; i++) {
+            flushReasonTotal += sCounters.trivialRejectFlushReasons[i];
+        }
+        psp_profiler_write_all(fd, "\n[trivial reject diagnostics]\nname,count\n");
+        for (i = 0; i < PSP_PROFILE_TRIVIAL_REJECT_COST_COUNT; i++) {
+            snprintf(line, sizeof(line), "%s,%llu\n",
+                     psp_profiler_trivial_reject_cost_name((PspProfileTrivialRejectCost) i),
+                     sCounters.trivialRejectCosts[i]);
+            psp_profiler_write_all(fd, line);
+        }
+        psp_profiler_write_all(fd, "\n[trivial reject flush reasons]\nreason,count\n");
+        for (i = 0; i < PSP_PROFILE_FLUSH_COUNT; i++) {
+            snprintf(line, sizeof(line), "%s,%llu\n", psp_profiler_flush_name((PspProfileFlushReason) i),
+                     sCounters.trivialRejectFlushReasons[i]);
+            psp_profiler_write_all(fd, line);
+        }
+        psp_profiler_write_all(fd, "\n[trivial reject invariants]\nname,value\n");
+        snprintf(line, sizeof(line),
+                 "tri2_matrix_sum,%llu\ntri2_commands,%llu\ntri2_matrix_matches_tri2_commands,%lu\n",
+                 matrixSum, sCounters.tri2Commands,
+                 (unsigned long) (matrixSum == sCounters.tri2Commands));
+        psp_profiler_write_all(fd, line);
+        snprintf(line, sizeof(line),
+                 "effective_state_calls,%llu\neffective_state_resolves_plus_reuses,%llu\neffective_state_invariant_ok,%lu\n",
+                 effectiveCalls,
+                 sCounters.trivialRejectCosts[PSP_PROFILE_TRIVIAL_REJECT_COST_EFFECTIVE_STATE_RESOLVES] +
+                     sCounters.trivialRejectCosts[PSP_PROFILE_TRIVIAL_REJECT_COST_EFFECTIVE_STATE_REUSES],
+                 (unsigned long) (effectiveCalls ==
+                                  (sCounters.trivialRejectCosts[PSP_PROFILE_TRIVIAL_REJECT_COST_EFFECTIVE_STATE_RESOLVES] +
+                                   sCounters.trivialRejectCosts[PSP_PROFILE_TRIVIAL_REJECT_COST_EFFECTIVE_STATE_REUSES])));
+        psp_profiler_write_all(fd, line);
+        snprintf(line, sizeof(line),
+                 "batch_before_total,%llu\ntrivial_reject_triangles,%llu\nbatch_before_invariant_ok,%lu\n",
+                 batchBeforeTotal,
+                 sCounters.trivialRejectCosts[PSP_PROFILE_TRIVIAL_REJECT_COST_TRIANGLES],
+                 (unsigned long) (batchBeforeTotal ==
+                                  sCounters.trivialRejectCosts[PSP_PROFILE_TRIVIAL_REJECT_COST_TRIANGLES]));
+        psp_profiler_write_all(fd, line);
+        snprintf(line, sizeof(line),
+                 "flush_reason_total,%llu\ntrivial_reject_flushes,%llu\nflush_reason_invariant_ok,%lu\nscope_begins,%llu\nscope_ends,%llu\nscope_balance_ok,%lu\nscope_invalid_nesting,%llu\nscope_leaks,%llu\n",
+                 flushReasonTotal, sCounters.trivialRejectCosts[PSP_PROFILE_TRIVIAL_REJECT_COST_FLUSHES],
+                 (unsigned long) (flushReasonTotal ==
+                                  sCounters.trivialRejectCosts[PSP_PROFILE_TRIVIAL_REJECT_COST_FLUSHES]),
+                 sCounters.trivialRejectCosts[PSP_PROFILE_TRIVIAL_REJECT_COST_SCOPE_BEGINS],
+                 sCounters.trivialRejectCosts[PSP_PROFILE_TRIVIAL_REJECT_COST_SCOPE_ENDS],
+                 (unsigned long) (sCounters.trivialRejectCosts[PSP_PROFILE_TRIVIAL_REJECT_COST_SCOPE_BEGINS] ==
+                                  sCounters.trivialRejectCosts[PSP_PROFILE_TRIVIAL_REJECT_COST_SCOPE_ENDS]),
+                 sCounters.trivialRejectCosts[PSP_PROFILE_TRIVIAL_REJECT_COST_SCOPE_INVALID_NESTING],
+                 sCounters.trivialRejectCosts[PSP_PROFILE_TRIVIAL_REJECT_COST_SCOPE_LEAKS]);
+        psp_profiler_write_all(fd, line);
+    }
+#endif
     snprintf(line, sizeof(line),
              "\n[effective state cache]\neffective_state_resolves,%llu\neffective_state_reuses,%llu\nmaterial_state_resolves,%llu\ndepth_state_resolves,%llu\nfog_state_resolves,%llu\n",
              sCounters.effectiveStateResolves, sCounters.effectiveStateReuses,
@@ -1746,6 +2046,9 @@ static void psp_profiler_write_phase_files(u32 slot) {
 #endif
 #if SF64_PSP_PROFILE_COMPONENTS
     psp_profiler_write_component_files(slot);
+#endif
+#if SF64_PSP_PROFILE_TRIVIAL_REJECTS
+    psp_profiler_write_trivial_reject_file(slot);
 #endif
     psp_profiler_set_status(PSP_PROF_STATUS_SAVED, slot);
 }
@@ -3090,4 +3393,89 @@ void PspProfiler_CountSync(void) {
 #endif
     }
 }
+
+#if SF64_PSP_PROFILE_TRIVIAL_REJECTS
+void PspProfiler_CountTri2OutcomeMatrix(PspProfileTriOutcome first, PspProfileTriOutcome second) {
+    if (!sCaptureActive || (first >= PSP_PROFILE_TRI_OUTCOME_COUNT) || (second >= PSP_PROFILE_TRI_OUTCOME_COUNT)) {
+        return;
+    }
+    sCounters.tri2OutcomeMatrix[first][second]++;
+#if SF64_PSP_PROFILE_COMPONENTS
+    {
+        PspProfileComponentCounters* component = psp_profiler_current_component_counters();
+        if (component != NULL) {
+            component->tri2OutcomeMatrix[first][second]++;
+        }
+    }
+#endif
+}
+
+void PspProfiler_CountTrivialRejectCost(PspProfileTrivialRejectCost cost, u32 count) {
+    if (!sCaptureActive || (cost >= PSP_PROFILE_TRIVIAL_REJECT_COST_COUNT)) {
+        return;
+    }
+    sCounters.trivialRejectCosts[cost] += count;
+#if SF64_PSP_PROFILE_COMPONENTS
+    {
+        PspProfileComponentCounters* component = psp_profiler_current_component_counters();
+        if (component != NULL) {
+            component->trivialRejectCosts[cost] += count;
+        }
+    }
+#endif
+}
+
+void PspProfiler_CountTrivialRejectFlush(PspProfileFlushReason reason, u32 submittedVertices) {
+    if (!sCaptureActive) {
+        return;
+    }
+    sCounters.trivialRejectCosts[PSP_PROFILE_TRIVIAL_REJECT_COST_FLUSHES]++;
+    sCounters.trivialRejectCosts[PSP_PROFILE_TRIVIAL_REJECT_COST_FLUSHED_VERTICES] += submittedVertices;
+    if (reason < PSP_PROFILE_FLUSH_COUNT) {
+        sCounters.trivialRejectFlushReasons[reason]++;
+    }
+#if SF64_PSP_PROFILE_COMPONENTS
+    {
+        PspProfileComponentCounters* component = psp_profiler_current_component_counters();
+        if (component != NULL) {
+            component->trivialRejectCosts[PSP_PROFILE_TRIVIAL_REJECT_COST_FLUSHES]++;
+            component->trivialRejectCosts[PSP_PROFILE_TRIVIAL_REJECT_COST_FLUSHED_VERTICES] += submittedVertices;
+            if (reason < PSP_PROFILE_FLUSH_COUNT) {
+                component->trivialRejectFlushReasons[reason]++;
+            }
+        }
+    }
+#endif
+}
+
+void PspProfiler_CountTrivialRejectStateTransition(PspProfileTrivialRejectStateField field) {
+    if (!sCaptureActive || (field >= PSP_PROFILE_TRIVIAL_REJECT_STATE_COUNT)) {
+        return;
+    }
+    sCounters.trivialRejectStateTransitions[field]++;
+#if SF64_PSP_PROFILE_COMPONENTS
+    {
+        PspProfileComponentCounters* component = psp_profiler_current_component_counters();
+        if (component != NULL) {
+            component->trivialRejectStateTransitions[field]++;
+        }
+    }
+#endif
+}
+
+void PspProfiler_CountTrivialRejectRenderState(PspProfileTrivialRejectRenderState state) {
+    if (!sCaptureActive || (state >= PSP_PROFILE_TRIVIAL_REJECT_RENDER_COUNT)) {
+        return;
+    }
+    sCounters.trivialRejectRenderStates[state]++;
+#if SF64_PSP_PROFILE_COMPONENTS
+    {
+        PspProfileComponentCounters* component = psp_profiler_current_component_counters();
+        if (component != NULL) {
+            component->trivialRejectRenderStates[state]++;
+        }
+    }
+#endif
+}
+#endif
 #endif

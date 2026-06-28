@@ -68,6 +68,10 @@
 #define SF64_PSP_TRI2_PAIR_VALIDATE 0
 #endif
 
+#ifndef SF64_PSP_PROFILE_TRIVIAL_REJECTS
+#define SF64_PSP_PROFILE_TRIVIAL_REJECTS 0
+#endif
+
 #ifndef SF64_PSP_BATCH_STATE_CACHE
 #define SF64_PSP_BATCH_STATE_CACHE 1
 #endif
@@ -330,6 +334,9 @@ typedef struct {
     PspGfxDlEffectiveMaterialState effectiveMaterial;
     PspGfxDlEffectiveDepthState effectiveDepth;
     PspGfxDlEffectiveFogState effectiveFog;
+#if SF64_PSP_PROFILE_TRIVIAL_REJECTS
+    int trivialRejectDiagnosticActive;
+#endif
 #if PSP_RENDERER_DIAGNOSTICS
     u32 vtxCommandCount;
     u32 vtxBatchSizeHistogram[PSP_GFX_DL_MAX_VERTICES + 1];
@@ -1724,6 +1731,11 @@ static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason 
                                      &ctx->batchProjection[0][0], ctx->batchPretransformed);
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_BATCH_FLUSH);
     PspProfiler_CountBatchFlush(reason, ctx->batchCount);
+#if SF64_PSP_PROFILE_TRIVIAL_REJECTS
+    if (ctx->trivialRejectDiagnosticActive) {
+        PspProfiler_CountTrivialRejectFlush(reason, ctx->batchCount);
+    }
+#endif
 #if SF64_PSP_PROFILE_COMPONENTS
     PspProfiler_CountBatchComponentOwnership(ownerComponent, ownerMask, ctx->batchCount);
     PspProfiler_ComponentScopeEnd();
@@ -1773,6 +1785,32 @@ static void psp_gfx_dl_set_batch_texture(PspGfxDlContext* ctx, u32 textureId, Ps
          premultipliedChanged)) {
         PspProfiler_CountBatchStateTransitions(textureIdChanged, textureEnvChanged, wrapSChanged, wrapTChanged,
                                                alphaTestChanged, blendChanged, premultipliedChanged);
+#if SF64_PSP_PROFILE_TRIVIAL_REJECTS
+        if (ctx->trivialRejectDiagnosticActive) {
+            if (textureIdChanged) {
+                PspProfiler_CountTrivialRejectStateTransition(
+                    PSP_PROFILE_TRIVIAL_REJECT_STATE_TEXTURE_ID_OR_REF);
+            }
+            if (textureEnvChanged) {
+                PspProfiler_CountTrivialRejectStateTransition(PSP_PROFILE_TRIVIAL_REJECT_STATE_TEXTURE_ENV);
+            }
+            if (wrapSChanged) {
+                PspProfiler_CountTrivialRejectStateTransition(PSP_PROFILE_TRIVIAL_REJECT_STATE_WRAP_S);
+            }
+            if (wrapTChanged) {
+                PspProfiler_CountTrivialRejectStateTransition(PSP_PROFILE_TRIVIAL_REJECT_STATE_WRAP_T);
+            }
+            if (alphaTestChanged) {
+                PspProfiler_CountTrivialRejectStateTransition(PSP_PROFILE_TRIVIAL_REJECT_STATE_ALPHA_TEST);
+            }
+            if (blendChanged) {
+                PspProfiler_CountTrivialRejectStateTransition(PSP_PROFILE_TRIVIAL_REJECT_STATE_BLEND);
+            }
+            if (premultipliedChanged) {
+                PspProfiler_CountTrivialRejectStateTransition(PSP_PROFILE_TRIVIAL_REJECT_STATE_PREMULTIPLIED);
+            }
+        }
+#endif
         if (textureIdChanged || textureEnvChanged || wrapSChanged || wrapTChanged) {
             psp_gfx_dl_flush_texture_change(ctx, PSP_PROFILE_TEXTURE_FLUSH_MATERIAL_KEY);
         } else {
@@ -1792,6 +1830,16 @@ static void psp_gfx_dl_set_batch_texture(PspGfxDlContext* ctx, u32 textureId, Ps
 static void psp_gfx_dl_set_batch_depth(PspGfxDlContext* ctx, int depthTest, int depthWrite) {
     if ((ctx->batchCount != 0) &&
         ((ctx->batchDepthTest != depthTest) || (ctx->batchDepthWrite != depthWrite))) {
+#if SF64_PSP_PROFILE_TRIVIAL_REJECTS
+        if (ctx->trivialRejectDiagnosticActive) {
+            if (ctx->batchDepthTest != depthTest) {
+                PspProfiler_CountTrivialRejectStateTransition(PSP_PROFILE_TRIVIAL_REJECT_STATE_DEPTH_TEST);
+            }
+            if (ctx->batchDepthWrite != depthWrite) {
+                PspProfiler_CountTrivialRejectStateTransition(PSP_PROFILE_TRIVIAL_REJECT_STATE_DEPTH_WRITE);
+            }
+        }
+#endif
         psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
     }
     ctx->batchDepthTest = depthTest;
@@ -1805,6 +1853,12 @@ static void psp_gfx_dl_set_batch_fog_resolved(PspGfxDlContext* ctx, int fog, con
          (ctx->batchFogColor[1] != color[1]) || (ctx->batchFogColor[2] != color[2]) ||
          (ctx->batchFogColor[3] != color[3]) || (ctx->batchFogStart != start) ||
          (ctx->batchFogEnd != end))) {
+#if SF64_PSP_PROFILE_TRIVIAL_REJECTS
+        if (ctx->trivialRejectDiagnosticActive) {
+            PspProfiler_CountTrivialRejectStateTransition(
+                PSP_PROFILE_TRIVIAL_REJECT_STATE_FOG_ENABLE_OR_PARAMETERS);
+        }
+#endif
         psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
     }
     ctx->batchFog = fog;
@@ -1853,6 +1907,12 @@ static void psp_gfx_dl_set_batch_transform(PspGfxDlContext* ctx, int pretransfor
     if ((ctx->batchCount != 0) &&
         ((ctx->batchPretransformed != pretransformed) ||
          (!pretransformed && (ctx->batchProjectionSerial != projectionSerial)))) {
+#if SF64_PSP_PROFILE_TRIVIAL_REJECTS
+        if (ctx->trivialRejectDiagnosticActive) {
+            PspProfiler_CountTrivialRejectStateTransition(
+                PSP_PROFILE_TRIVIAL_REJECT_STATE_TRANSFORM_OR_PROJECTION);
+        }
+#endif
         psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_TRANSFORM_CHANGE);
     }
     if (!ctx->batchTransformSet || (ctx->batchPretransformed != pretransformed) ||
@@ -1963,6 +2023,34 @@ static u32 psp_gfx_dl_apply_effective_batch_state(PspGfxDlContext* ctx, const Ps
     resolved = materialResolved || depthResolved || fogResolved;
     PspProfiler_CountEffectiveState(resolved ? 1 : 0, resolved ? 0 : 1, materialResolved, depthResolved,
                                     fogResolved);
+#if SF64_PSP_PROFILE_TRIVIAL_REJECTS
+    if (ctx->trivialRejectDiagnosticActive) {
+        PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_EFFECTIVE_STATE_CALLS, 1);
+        PspProfiler_CountTrivialRejectCost(resolved ? PSP_PROFILE_TRIVIAL_REJECT_COST_EFFECTIVE_STATE_RESOLVES
+                                                    : PSP_PROFILE_TRIVIAL_REJECT_COST_EFFECTIVE_STATE_REUSES,
+                                           1);
+        if (ctx->effectiveMaterial.textureId != 0) {
+            PspProfiler_CountTrivialRejectRenderState(PSP_PROFILE_TRIVIAL_REJECT_RENDER_TEXTURED);
+        } else {
+            PspProfiler_CountTrivialRejectRenderState(PSP_PROFILE_TRIVIAL_REJECT_RENDER_UNTEXTURED);
+        }
+        if (ctx->effectiveMaterial.alphaTest) {
+            PspProfiler_CountTrivialRejectRenderState(PSP_PROFILE_TRIVIAL_REJECT_RENDER_ALPHA_TEST);
+        }
+        if (ctx->effectiveMaterial.blend) {
+            PspProfiler_CountTrivialRejectRenderState(PSP_PROFILE_TRIVIAL_REJECT_RENDER_BLEND);
+        }
+        if (ctx->effectiveDepth.depthTest) {
+            PspProfiler_CountTrivialRejectRenderState(PSP_PROFILE_TRIVIAL_REJECT_RENDER_DEPTH_TEST);
+        }
+        if (ctx->effectiveDepth.depthWrite) {
+            PspProfiler_CountTrivialRejectRenderState(PSP_PROFILE_TRIVIAL_REJECT_RENDER_DEPTH_WRITE);
+        }
+        if (ctx->effectiveFog.fog) {
+            PspProfiler_CountTrivialRejectRenderState(PSP_PROFILE_TRIVIAL_REJECT_RENDER_FOG);
+        }
+    }
+#endif
     (void) resolved;
     return ctx->effectiveMaterial.textureId;
 }
@@ -1971,6 +2059,56 @@ static u32 psp_gfx_dl_apply_effective_batch_state(PspGfxDlContext* ctx, const Ps
 static int psp_gfx_dl_vertex_is_valid(PspGfxDlContext* ctx, u8 index) {
     return (index < PSP_GFX_DL_MAX_VERTICES) && ctx->vertices[index].valid;
 }
+
+#if SF64_PSP_PROFILE_TRIVIAL_REJECTS
+static PspProfileTriOutcome psp_gfx_dl_classify_triangle_outcome(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
+    const PspGfxDlVertex* va;
+    const PspGfxDlVertex* vb;
+    const PspGfxDlVertex* vc;
+    u8 sharedClipCode;
+    u8 combinedClipCode;
+
+    if (!psp_gfx_dl_vertex_is_valid(ctx, a) || !psp_gfx_dl_vertex_is_valid(ctx, b) ||
+        !psp_gfx_dl_vertex_is_valid(ctx, c)) {
+        return PSP_PROFILE_TRI_OUTCOME_INVALID;
+    }
+
+    va = &ctx->vertices[a];
+    vb = &ctx->vertices[b];
+    vc = &ctx->vertices[c];
+    sharedClipCode = va->clipCode & vb->clipCode & vc->clipCode;
+    if (sharedClipCode != 0) {
+        return PSP_PROFILE_TRI_OUTCOME_TRIVIAL_REJECT;
+    }
+    combinedClipCode = va->clipCode | vb->clipCode | vc->clipCode;
+    return (combinedClipCode != 0) ? PSP_PROFILE_TRI_OUTCOME_PARTIAL_CLIP : PSP_PROFILE_TRI_OUTCOME_DIRECT;
+}
+
+static void psp_gfx_dl_trivial_reject_scope_begin(PspGfxDlContext* ctx) {
+    if (ctx->trivialRejectDiagnosticActive) {
+        PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_SCOPE_INVALID_NESTING, 1);
+    }
+    ctx->trivialRejectDiagnosticActive = 1;
+    PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_SCOPE_BEGINS, 1);
+}
+
+static void psp_gfx_dl_trivial_reject_scope_end(PspGfxDlContext* ctx) {
+    if (!ctx->trivialRejectDiagnosticActive) {
+        PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_SCOPE_INVALID_NESTING, 1);
+        return;
+    }
+    ctx->trivialRejectDiagnosticActive = 0;
+    PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_SCOPE_ENDS, 1);
+}
+
+static void psp_gfx_dl_trivial_reject_scope_clear_for_task(PspGfxDlContext* ctx) {
+    if (ctx->trivialRejectDiagnosticActive) {
+        ctx->trivialRejectDiagnosticActive = 0;
+        PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_SCOPE_LEAKS, 1);
+        PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_SCOPE_ENDS, 1);
+    }
+}
+#endif
 
 static void psp_gfx_dl_build_clip_vertex(PspGfxDlContext* ctx, const PspGfxDlVertex* src,
                                          PspGfxDlClipVertex* dst) {
@@ -2775,6 +2913,19 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
         ctx->stats.degenerateTriangleCount++;
     }
 
+#if SF64_PSP_PROFILE_TRIVIAL_REJECTS
+    if (sharedClipCode != 0) {
+        PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_TRIANGLES, 1);
+        if (ctx->batchCount == 0) {
+            PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_BATCH_EMPTY_BEFORE_STATE, 1);
+        } else {
+            PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_BATCH_NONEMPTY_BEFORE_STATE, 1);
+        }
+        PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_BATCH_VERTICES_BEFORE_STATE,
+                                           ctx->batchCount);
+        psp_gfx_dl_trivial_reject_scope_begin(ctx);
+    }
+#endif
 #if SF64_PSP_BATCH_STATE_CACHE
     textureId = psp_gfx_dl_apply_effective_batch_state(ctx, va, pretransformed);
 #else
@@ -2791,6 +2942,11 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
                                  psp_gfx_dl_premultiplied_blend_enabled(ctx));
     psp_gfx_dl_set_batch_depth(ctx, (ctx->geometryMode & G_ZBUFFER) != 0, (ctx->otherModeL & Z_UPD) != 0);
     psp_gfx_dl_set_batch_fog(ctx, !pretransformed && ((ctx->otherModeL >> 30) == G_BL_CLR_FOG), va->projection);
+#endif
+#if SF64_PSP_PROFILE_TRIVIAL_REJECTS
+    if (sharedClipCode != 0) {
+        psp_gfx_dl_trivial_reject_scope_end(ctx);
+    }
 #endif
     if (ctx->batchDepthTest) {
         ctx->stats.depthTestTriangleCount++;
@@ -3459,6 +3615,11 @@ static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int pr
     int supported = 1;
     const u16* palette;
 
+#if SF64_PSP_PROFILE_TRIVIAL_REJECTS
+    if (ctx->trivialRejectDiagnosticActive) {
+        PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_TEXTURE_PREPARE_CALLS, 1);
+    }
+#endif
     if ((ctx->textureId != 0) || ctx->textureUploadAttempted || (ctx->textureImage == NULL) ||
         (ctx->textureWidth == 0) || (ctx->textureHeight == 0)) {
         return ctx->textureId != 0;
@@ -3547,6 +3708,23 @@ static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int pr
         }
         result = 0;
     }
+#if SF64_PSP_PROFILE_TRIVIAL_REJECTS
+    if (ctx->trivialRejectDiagnosticActive && supported) {
+        if (hit) {
+            PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_TEXTURE_CACHE_HITS, 1);
+        } else {
+            PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_TEXTURE_CACHE_MISSES, 1);
+            if (ctx->textureId != 0) {
+                u32 bytesUploaded = ctx->textureUploadWidth * ctx->textureUploadHeight * 4U;
+
+                PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_TEXTURE_DECODES, 1);
+                PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_TEXTURE_UPLOADS, 1);
+                PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_TEXTURE_BYTES_UPLOADED,
+                                                   bytesUploaded);
+            }
+        }
+    }
+#endif
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TEXTURE_PREPARE);
     return result;
 }
@@ -3743,30 +3921,27 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
         if (opcode == PSP_GFX_OP_F3D_TRI2) {
             u32 w0 = cmd->words.w0;
             u32 w1 = cmd->words.w1;
+            u8 a0 = psp_gfx_dl_decode_tri_index((w0 >> 16) & 0xFF);
+            u8 b0 = psp_gfx_dl_decode_tri_index((w0 >> 8) & 0xFF);
+            u8 c0 = psp_gfx_dl_decode_tri_index(w0 & 0xFF);
+            u8 a1 = psp_gfx_dl_decode_tri_index((w1 >> 16) & 0xFF);
+            u8 b1 = psp_gfx_dl_decode_tri_index((w1 >> 8) & 0xFF);
+            u8 c1 = psp_gfx_dl_decode_tri_index(w1 & 0xFF);
 
             PspProfiler_CountTriangleCommand(2, 0, 1);
             PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TRIANGLE);
+#if SF64_PSP_PROFILE_TRIVIAL_REJECTS
+            PspProfiler_CountTri2OutcomeMatrix(psp_gfx_dl_classify_triangle_outcome(ctx, a0, b0, c0),
+                                               psp_gfx_dl_classify_triangle_outcome(ctx, a1, b1, c1));
+#endif
 #if SF64_PSP_TRI2_PAIR_FASTPATH && SF64_PSP_DIRECT_TRI_FASTPATH
-            if (!psp_gfx_dl_try_emit_tri2_direct_pair(ctx, psp_gfx_dl_decode_tri_index((w0 >> 16) & 0xFF),
-                                                      psp_gfx_dl_decode_tri_index((w0 >> 8) & 0xFF),
-                                                      psp_gfx_dl_decode_tri_index(w0 & 0xFF),
-                                                      psp_gfx_dl_decode_tri_index((w1 >> 16) & 0xFF),
-                                                      psp_gfx_dl_decode_tri_index((w1 >> 8) & 0xFF),
-                                                      psp_gfx_dl_decode_tri_index(w1 & 0xFF))) {
-                psp_gfx_dl_emit_tri(ctx, psp_gfx_dl_decode_tri_index((w0 >> 16) & 0xFF),
-                                    psp_gfx_dl_decode_tri_index((w0 >> 8) & 0xFF),
-                                    psp_gfx_dl_decode_tri_index(w0 & 0xFF));
-                psp_gfx_dl_emit_tri(ctx, psp_gfx_dl_decode_tri_index((w1 >> 16) & 0xFF),
-                                    psp_gfx_dl_decode_tri_index((w1 >> 8) & 0xFF),
-                                    psp_gfx_dl_decode_tri_index(w1 & 0xFF));
+            if (!psp_gfx_dl_try_emit_tri2_direct_pair(ctx, a0, b0, c0, a1, b1, c1)) {
+                psp_gfx_dl_emit_tri(ctx, a0, b0, c0);
+                psp_gfx_dl_emit_tri(ctx, a1, b1, c1);
             }
 #else
-            psp_gfx_dl_emit_tri(ctx, psp_gfx_dl_decode_tri_index((w0 >> 16) & 0xFF),
-                                psp_gfx_dl_decode_tri_index((w0 >> 8) & 0xFF),
-                                psp_gfx_dl_decode_tri_index(w0 & 0xFF));
-            psp_gfx_dl_emit_tri(ctx, psp_gfx_dl_decode_tri_index((w1 >> 16) & 0xFF),
-                                psp_gfx_dl_decode_tri_index((w1 >> 8) & 0xFF),
-                                psp_gfx_dl_decode_tri_index(w1 & 0xFF));
+            psp_gfx_dl_emit_tri(ctx, a0, b0, c0);
+            psp_gfx_dl_emit_tri(ctx, a1, b1, c1);
 #endif
             PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TRIANGLE);
             continue;
@@ -3818,6 +3993,9 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
     PspProfiler_CountDisplayListTask();
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_DL_TRAVERSAL);
     psp_gfx_dl_run_internal(ctx, dl, 0);
+#if SF64_PSP_PROFILE_TRIVIAL_REJECTS
+    psp_gfx_dl_trivial_reject_scope_clear_for_task(ctx);
+#endif
     psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_END_OF_TASK);
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_DL_TRAVERSAL);
 
