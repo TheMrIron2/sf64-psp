@@ -260,3 +260,40 @@ visually identical output, exact workload/counter agreement apart from the
 documented state-reuse change, no increase in mixed batches, flushes, or draw
 calls, repeatable profiling-disabled graphics-time improvement, and no
 meaningful regression in another gameplay scene.
+
+## Results
+
+Across all 900 frames from 3 Corneria captures:
+
+TRI2 attempts:             324,273
+paired fast-path hits:     229,028
+overall hit rate:           70.63%
+paired triangles handled:  458,056
+vertices validated:      1,374,168
+validation mismatches:            0
+
+invalid-vertex fallbacks:      0
+transform-mismatch fallbacks:  0
+direct-ineligible fallbacks:   0
+buffer preflushes:             0
+
+The fast-path rate actually rises as Corneria becomes busier:
+
+000: 65.03%
+001: 71.29%
+002: 72.41%
+
+It handles approximately:
+
+000: 60.93% of all input triangles
+001: 64.04% of all input triangles
+002: 66.69% of all input triangles
+
+The validation build recorded roughly:
+
+Capture	Input triangles/frame	Graphics task/frame
+000	431	37.89 ms
+001	865	69.85 ms
+002	1,065	77.11 ms
+
+Optimisation seems stable, visually correct and worthwhile.
