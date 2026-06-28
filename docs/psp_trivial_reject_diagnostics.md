@@ -179,3 +179,15 @@ effective-state resolves or reuses, texture preparation, batch flushes, or
 state transitions. If rejected triangles mostly see empty batches, reused state,
 and no texture or flush work, early rejection is unlikely to be a useful PSPGL
 optimization target.
+
+Real-PSP testing found no visual regressions or crashes. Profiling-disabled
+title and Corneria timings were neutral at the overlay's measurement
+resolution. Instrumented structural captures showed substantial reductions in
+effective-state processing and approximately 0.7–1.0 ms less CPU-side
+triangle/batch work in the closely matched first-playable Corneria sample.
+Whole-task time changed less because the renderer reached GPU synchronization
+earlier.
+
+The optimisation is therefore enabled by default as a renderer-efficiency and
+CPU-headroom improvement, while retaining a build option for regression
+testing.
