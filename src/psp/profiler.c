@@ -200,6 +200,17 @@ typedef struct {
     u64 perspectivePathTriangles;
     u64 clippedPathTriangles;
     u64 directVerticesWritten;
+    u64 tri2PairAttempts;
+    u64 tri2PairFastpathHits;
+    u64 tri2PairFastpathTriangles;
+    u64 tri2PairFallbackInvalidVertex;
+    u64 tri2PairFallbackClippedOrRejected;
+    u64 tri2PairFallbackTransformMismatch;
+    u64 tri2PairFallbackDirectIneligible;
+    u64 tri2PairBufferPreflushes;
+    u64 tri2PairStateApplicationsSaved;
+    u64 tri2PairVerticesEmitted;
+    u64 tri2PairValidationMismatches;
     u64 effectiveStateResolves;
     u64 effectiveStateReuses;
     u64 materialStateResolves;
@@ -279,6 +290,17 @@ typedef struct {
     u64 perspectivePathTriangles;
     u64 clippedPathTriangles;
     u64 directVerticesWritten;
+    u64 tri2PairAttempts;
+    u64 tri2PairFastpathHits;
+    u64 tri2PairFastpathTriangles;
+    u64 tri2PairFallbackInvalidVertex;
+    u64 tri2PairFallbackClippedOrRejected;
+    u64 tri2PairFallbackTransformMismatch;
+    u64 tri2PairFallbackDirectIneligible;
+    u64 tri2PairBufferPreflushes;
+    u64 tri2PairStateApplicationsSaved;
+    u64 tri2PairVerticesEmitted;
+    u64 tri2PairValidationMismatches;
     u64 effectiveStateResolves;
     u64 effectiveStateReuses;
     u64 materialStateResolves;
@@ -440,6 +462,10 @@ static u32 sForcedActivePhaseEnds;
 static u64 sCaptureStartUs;
 static u64 sCaptureEndUs;
 static u64 sTimerReadPairOverheadUs;
+static u32 sTri2PairFirstMismatchSeen;
+static u32 sTri2PairFirstMismatchVertex;
+static u32 sTri2PairFirstMismatchFieldMask;
+static u32 sTri2PairFirstMismatchBatchDelta;
 #if SF64_PSP_PROFILE_COMPONENTS
 static PspProfileComponentState sComponent[PSP_PROFILE_COMPONENT_COUNT];
 static u32 sComponentCurrent;
@@ -605,6 +631,10 @@ PSP_PROFILE_ATTR static void psp_profiler_reset_phase_capture(void) {
         sThreadPhase[i].threadId = -1;
     }
     psp_profiler_zero(&sCounters, sizeof(sCounters));
+    sTri2PairFirstMismatchSeen = 0;
+    sTri2PairFirstMismatchVertex = 0;
+    sTri2PairFirstMismatchFieldMask = 0;
+    sTri2PairFirstMismatchBatchDelta = 0;
 #if SF64_PSP_PROFILE_COMPONENTS
     psp_profiler_zero(sComponent, sizeof(sComponent));
     sComponentCurrent = PSP_PROFILE_COMPONENT_UNATTRIBUTED;
@@ -1416,7 +1446,7 @@ static void psp_profiler_write_component_files(u32 slot) {
         return;
     }
     psp_profiler_write_all(fd,
-                           "component_id,component_name,region_count,total_us_raw,total_us_adjusted,us_per_frame_adjusted,percent_of_component_task_time,marker_entries,display_list_commands,nested_display_list_calls,batch_flushes_owned,mixed_batch_participations,batch_vertices_owned,gvtx_commands,vertices_loaded,modelview_matrix_commands,projection_matrix_commands,matrix_compositions,lit_vertices,unlit_vertices,normal_transforms,normalisations,lighting_evaluations,clip_code_calculations,perspective_divides,tri1_commands,tri2_commands,input_triangles,trivially_accepted_triangles,trivially_rejected_triangles,partially_clipped_triangles,generated_clipping_vertices,output_triangles,direct_fastpath_triangles,general_path_triangles,perspective_path_triangles,clipped_path_triangles,direct_vertices_written,effective_state_resolves,effective_state_reuses,material_state_resolves,depth_state_resolves,fog_state_resolves,batch_flushes,vertices_submitted,draw_calls,vbo_draw_calls,vbo_vertices,small_vbo_draw_calls,large_vbo_draw_calls,small_vbo_vertices,large_vbo_vertices,vertex_stream_upload_calls,vertex_stream_upload_bytes,vertex_stream_page_switches,client_array_fallback_draws,client_array_fallback_vertices,texture_cache_hits,texture_cache_misses,texture_decodes,texture_uploads,texture_bytes_uploaded,texture_wrap_requests_s,texture_wrap_requests_t,texture_wrap_calls_emitted_s,texture_wrap_calls_emitted_t,texture_wrap_calls_skipped_s,texture_wrap_calls_skipped_t,texture_parameter_cache_misses,texture_parameter_cache_replacements,glFlush_calls,sync_calls\n");
+                           "component_id,component_name,region_count,total_us_raw,total_us_adjusted,us_per_frame_adjusted,percent_of_component_task_time,marker_entries,display_list_commands,nested_display_list_calls,batch_flushes_owned,mixed_batch_participations,batch_vertices_owned,gvtx_commands,vertices_loaded,modelview_matrix_commands,projection_matrix_commands,matrix_compositions,lit_vertices,unlit_vertices,normal_transforms,normalisations,lighting_evaluations,clip_code_calculations,perspective_divides,tri1_commands,tri2_commands,input_triangles,trivially_accepted_triangles,trivially_rejected_triangles,partially_clipped_triangles,generated_clipping_vertices,output_triangles,direct_fastpath_triangles,general_path_triangles,perspective_path_triangles,clipped_path_triangles,direct_vertices_written,tri2_pair_attempts,tri2_pair_fastpath_hits,tri2_pair_fastpath_triangles,tri2_pair_fallback_invalid_vertex,tri2_pair_fallback_clipped_or_rejected,tri2_pair_fallback_transform_mismatch,tri2_pair_fallback_direct_ineligible,tri2_pair_buffer_preflushes,tri2_pair_state_applications_saved,tri2_pair_vertices_emitted,tri2_pair_validation_mismatches,effective_state_resolves,effective_state_reuses,material_state_resolves,depth_state_resolves,fog_state_resolves,batch_flushes,vertices_submitted,draw_calls,vbo_draw_calls,vbo_vertices,small_vbo_draw_calls,large_vbo_draw_calls,small_vbo_vertices,large_vbo_vertices,vertex_stream_upload_calls,vertex_stream_upload_bytes,vertex_stream_page_switches,client_array_fallback_draws,client_array_fallback_vertices,texture_cache_hits,texture_cache_misses,texture_decodes,texture_uploads,texture_bytes_uploaded,texture_wrap_requests_s,texture_wrap_requests_t,texture_wrap_calls_emitted_s,texture_wrap_calls_emitted_t,texture_wrap_calls_skipped_s,texture_wrap_calls_skipped_t,texture_parameter_cache_misses,texture_parameter_cache_replacements,glFlush_calls,sync_calls\n");
     for (component = 0; component < PSP_PROFILE_COMPONENT_COUNT; component++) {
         const PspProfileComponentCounters* c = &sComponent[component].counters;
         u64 adjusted = psp_profiler_adjust_component_us(component);
@@ -1424,7 +1454,7 @@ static void psp_profiler_write_component_files(u32 slot) {
         f32 percent = (adjustedTotal != 0) ? ((100.0f * (f32) adjusted) / (f32) adjustedTotal) : 0.0f;
 
         snprintf(line, sizeof(line),
-                 "%lu,%s,%llu,%llu,%llu,%.3f,%.3f,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu\n",
+                 "%lu,%s,%llu,%llu,%llu,%.3f,%.3f,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu\n",
                  (unsigned long) component, psp_profiler_component_name(component),
                  sComponent[component].regionCount, sComponent[component].totalUs, adjusted, perFrame, percent,
                  c->markerEntries, c->displayListCommands, c->nestedDisplayListCalls, c->batchFlushesOwned,
@@ -1436,6 +1466,11 @@ static void psp_profiler_write_component_files(u32 slot) {
                  c->triviallyRejectedTriangles, c->partiallyClippedTriangles, c->generatedClippingVertices,
                  c->outputTriangles, c->directFastpathTriangles, c->generalPathTriangles,
                  c->perspectivePathTriangles, c->clippedPathTriangles, c->directVerticesWritten,
+                 c->tri2PairAttempts, c->tri2PairFastpathHits, c->tri2PairFastpathTriangles,
+                 c->tri2PairFallbackInvalidVertex, c->tri2PairFallbackClippedOrRejected,
+                 c->tri2PairFallbackTransformMismatch, c->tri2PairFallbackDirectIneligible,
+                 c->tri2PairBufferPreflushes, c->tri2PairStateApplicationsSaved,
+                 c->tri2PairVerticesEmitted, c->tri2PairValidationMismatches,
                  c->effectiveStateResolves, c->effectiveStateReuses, c->materialStateResolves,
                  c->depthStateResolves, c->fogStateResolves, c->batchFlushes, c->verticesSubmitted,
                  c->drawCalls, c->vboDrawCalls, c->vboVertices, c->smallVboDrawCalls, c->largeVboDrawCalls,
@@ -1534,11 +1569,12 @@ static void psp_profiler_write_phase_files(u32 slot) {
     }
 
     snprintf(line, sizeof(line),
-             "SF64 git SHA: %s\nn64psp submodule SHA: %s\nPSPGL source mode: %s\nPSPGL git SHA: %s\nPSPGL worktree: %s\nPerfect Dark reference SHA: %s\ncompiler: %s\noptimisation flags: %s\nPROFILE_PSP: %d\nSF64_PSP_PROFILE_PHASES: %d\nSF64_PSP_PSPGL_PROFILE: %d\nSF64_PSP_PSPGL_DLIST_SIZE_WORDS: %d\nSF64_PSP_PSPGL_VBO_STREAM: %d\nSF64_PSP_DIRECT_TRI_FASTPATH: %d\nSF64_PSP_BATCH_STATE_CACHE: %d\nSF64_PSP_TEXTURE_WRAP_CACHE: %d\nUSE_N64PSP_SINCOS: %d\nCPU clock: %lu\nbus clock: %lu\ncapture slot: %lu\nrequested frame count: %d\nactual frame count: %lu\ntimer overhead us: %llu\n\n",
+             "SF64 git SHA: %s\nn64psp submodule SHA: %s\nPSPGL source mode: %s\nPSPGL git SHA: %s\nPSPGL worktree: %s\nPerfect Dark reference SHA: %s\ncompiler: %s\noptimisation flags: %s\nPROFILE_PSP: %d\nSF64_PSP_PROFILE_PHASES: %d\nSF64_PSP_PSPGL_PROFILE: %d\nSF64_PSP_PSPGL_DLIST_SIZE_WORDS: %d\nSF64_PSP_PSPGL_VBO_STREAM: %d\nSF64_PSP_DIRECT_TRI_FASTPATH: %d\nSF64_PSP_TRI2_PAIR_FASTPATH: %d\nSF64_PSP_TRI2_PAIR_VALIDATE: %d\nSF64_PSP_BATCH_STATE_CACHE: %d\nSF64_PSP_TEXTURE_WRAP_CACHE: %d\nUSE_N64PSP_SINCOS: %d\nCPU clock: %lu\nbus clock: %lu\ncapture slot: %lu\nrequested frame count: %d\nactual frame count: %lu\ntimer overhead us: %llu\n\n",
              SF64_GIT_SHA, N64PSP_GIT_SHA, PSPGL_SOURCE_MODE, PSPGL_GIT_SHA, PSPGL_GIT_DIRTY,
              PERFECT_DARK_PSP_SHA, SF64_PSP_COMPILER, SF64_PSP_OPT_FLAGS,
              SF64_PSP_GPROF, SF64_PSP_PROFILE_PHASES, SF64_PSP_PSPGL_PROFILE, SF64_PSP_PSPGL_DLIST_SIZE_WORDS,
              SF64_PSP_PSPGL_VBO_STREAM, SF64_PSP_DIRECT_TRI_FASTPATH,
+             SF64_PSP_TRI2_PAIR_FASTPATH, SF64_PSP_TRI2_PAIR_VALIDATE,
              SF64_PSP_BATCH_STATE_CACHE, SF64_PSP_TEXTURE_WRAP_CACHE, USE_N64PSP_SINCOS,
              (unsigned long) scePowerGetCpuClockFrequency(),
              (unsigned long) scePowerGetBusClockFrequency(), (unsigned long) slot, SF64_PSP_PROFILE_CAPTURE_FRAMES,
@@ -1674,6 +1710,18 @@ static void psp_profiler_write_phase_files(u32 slot) {
              "\n[triangle path statistics]\ndirect_fastpath_triangles,%llu\ngeneral_path_triangles,%llu\nperspective_path_triangles,%llu\nclipped_path_triangles,%llu\ndirect_vertices_written,%llu\n",
              sCounters.directFastpathTriangles, sCounters.generalPathTriangles,
              sCounters.perspectivePathTriangles, sCounters.clippedPathTriangles, sCounters.directVerticesWritten);
+    psp_profiler_write_all(fd, line);
+    snprintf(line, sizeof(line),
+             "\n[TRI2 pair fast path]\nattempts,%llu\nfastpath_hits,%llu\nfastpath_triangles,%llu\nfallback_invalid_vertex,%llu\nfallback_clipped_or_rejected,%llu\nfallback_transform_mismatch,%llu\nfallback_direct_ineligible,%llu\nbuffer_preflushes,%llu\nstate_applications_saved,%llu\nvertices_emitted,%llu\nvalidation_mismatches,%llu\nfirst_mismatch_seen,%lu\nfirst_mismatch_vertex,%lu\nfirst_mismatch_field_mask,0x%08lx\nfirst_mismatch_batch_delta,%lu\n",
+             sCounters.tri2PairAttempts, sCounters.tri2PairFastpathHits,
+             sCounters.tri2PairFastpathTriangles, sCounters.tri2PairFallbackInvalidVertex,
+             sCounters.tri2PairFallbackClippedOrRejected, sCounters.tri2PairFallbackTransformMismatch,
+             sCounters.tri2PairFallbackDirectIneligible, sCounters.tri2PairBufferPreflushes,
+             sCounters.tri2PairStateApplicationsSaved, sCounters.tri2PairVerticesEmitted,
+             sCounters.tri2PairValidationMismatches, (unsigned long) sTri2PairFirstMismatchSeen,
+             (unsigned long) sTri2PairFirstMismatchVertex,
+             (unsigned long) sTri2PairFirstMismatchFieldMask,
+             (unsigned long) sTri2PairFirstMismatchBatchDelta);
     psp_profiler_write_all(fd, line);
     snprintf(line, sizeof(line),
              "\n[effective state cache]\neffective_state_resolves,%llu\neffective_state_reuses,%llu\nmaterial_state_resolves,%llu\ndepth_state_resolves,%llu\nfog_state_resolves,%llu\n",
@@ -2795,6 +2843,55 @@ void PspProfiler_CountTrianglePath(u32 directFastpathTriangles, u32 generalPathT
     sFrameCounters.clippedPathTriangles += clippedPathTriangles;
     sFrameCounters.directVerticesWritten += directVerticesWritten;
 #endif
+}
+
+void PspProfiler_CountTri2PairFastpath(u32 hit, u32 invalidVertex, u32 clippedOrRejected,
+                                       u32 transformMismatch, u32 directIneligible, u32 bufferPreflush,
+                                       u32 validationMismatch) {
+    u32 attempts = hit + invalidVertex + clippedOrRejected + transformMismatch + directIneligible;
+
+    if (!sCaptureActive) {
+        return;
+    }
+    sCounters.tri2PairAttempts += attempts;
+    sCounters.tri2PairFastpathHits += hit;
+    sCounters.tri2PairFastpathTriangles += hit * 2U;
+    sCounters.tri2PairFallbackInvalidVertex += invalidVertex;
+    sCounters.tri2PairFallbackClippedOrRejected += clippedOrRejected;
+    sCounters.tri2PairFallbackTransformMismatch += transformMismatch;
+    sCounters.tri2PairFallbackDirectIneligible += directIneligible;
+    sCounters.tri2PairBufferPreflushes += bufferPreflush;
+    sCounters.tri2PairStateApplicationsSaved += hit;
+    sCounters.tri2PairVerticesEmitted += hit * 6U;
+    sCounters.tri2PairValidationMismatches += validationMismatch;
+#if SF64_PSP_PROFILE_COMPONENTS
+    {
+        PspProfileComponentCounters* component = psp_profiler_current_component_counters();
+        if (component != NULL) {
+            component->tri2PairAttempts += attempts;
+            component->tri2PairFastpathHits += hit;
+            component->tri2PairFastpathTriangles += hit * 2U;
+            component->tri2PairFallbackInvalidVertex += invalidVertex;
+            component->tri2PairFallbackClippedOrRejected += clippedOrRejected;
+            component->tri2PairFallbackTransformMismatch += transformMismatch;
+            component->tri2PairFallbackDirectIneligible += directIneligible;
+            component->tri2PairBufferPreflushes += bufferPreflush;
+            component->tri2PairStateApplicationsSaved += hit;
+            component->tri2PairVerticesEmitted += hit * 6U;
+            component->tri2PairValidationMismatches += validationMismatch;
+        }
+    }
+#endif
+}
+
+void PspProfiler_RecordTri2PairValidationMismatch(u32 vertexIndex, u32 fieldMask, u32 batchDelta) {
+    if (!sCaptureActive || sTri2PairFirstMismatchSeen) {
+        return;
+    }
+    sTri2PairFirstMismatchSeen = 1;
+    sTri2PairFirstMismatchVertex = vertexIndex;
+    sTri2PairFirstMismatchFieldMask = fieldMask;
+    sTri2PairFirstMismatchBatchDelta = batchDelta;
 }
 
 void PspProfiler_CountEffectiveState(u32 resolves, u32 reuses, u32 materialResolves, u32 depthResolves,

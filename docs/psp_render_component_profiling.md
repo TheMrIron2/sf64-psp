@@ -234,6 +234,19 @@ batch, mixed-batch vertices, scope begin/end counts, invalid scope nesting,
 raw/adjusted component task time, sum of component raw/adjusted time, and
 static component storage.
 
+## Title Hardware Results
+
+A stable real-PSP title-screen capture over 300 frames showed about 997 `TRI2`
+commands per frame, 2093 input triangles per frame, and a 99.93% direct-path
+triangle rate. The four title character components plus the Arwing accounted
+for approximately 86.5% of component-scoped graphics task time.
+
+The capture selected triangle processing and batch construction as the next
+optimisation target: `TRI2` carries nearly all title geometry, almost all of it
+already reaches the direct triangle path, and the cost is shared across major
+model components rather than isolated to one pathological model. Raw capture
+CSV/TXT files and ZIP archives are intentionally not committed.
+
 ## Invariants
 
 Including `UNATTRIBUTED`, component counters should sum to the equivalent

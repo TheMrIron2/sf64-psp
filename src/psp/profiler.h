@@ -112,6 +112,10 @@ void PspProfiler_CountTextureFlushSource(PspProfileTextureFlushSource source);
 void PspProfiler_CountTrianglePath(u32 directFastpathTriangles, u32 generalPathTriangles,
                                    u32 perspectivePathTriangles, u32 clippedPathTriangles,
                                    u32 directVerticesWritten);
+void PspProfiler_CountTri2PairFastpath(u32 hit, u32 invalidVertex, u32 clippedOrRejected,
+                                       u32 transformMismatch, u32 directIneligible, u32 bufferPreflush,
+                                       u32 validationMismatch);
+void PspProfiler_RecordTri2PairValidationMismatch(u32 vertexIndex, u32 fieldMask, u32 batchDelta);
 void PspProfiler_CountEffectiveState(u32 resolves, u32 reuses, u32 materialResolves, u32 depthResolves,
                                      u32 fogResolves);
 void PspProfiler_CountDrawCall(u32 vertices);
@@ -150,6 +154,10 @@ void PspProfiler_CountSync(void);
 #define PspProfiler_CountTrianglePath(directFastpathTriangles, generalPathTriangles, perspectivePathTriangles, \
                                       clippedPathTriangles, directVerticesWritten)                            \
     ((void) 0)
+#define PspProfiler_CountTri2PairFastpath(hit, invalidVertex, clippedOrRejected, transformMismatch, \
+                                          directIneligible, bufferPreflush, validationMismatch)      \
+    ((void) 0)
+#define PspProfiler_RecordTri2PairValidationMismatch(vertexIndex, fieldMask, batchDelta) ((void) 0)
 #define PspProfiler_CountEffectiveState(resolves, reuses, materialResolves, depthResolves, fogResolves) ((void) 0)
 #define PspProfiler_CountDrawCall(vertices) ((void) 0)
 #define PspProfiler_CountPspglSubmitSplit(smallDraw, largeDraw, vertices) ((void) 0)
