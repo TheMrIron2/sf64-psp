@@ -76,6 +76,10 @@
 #define SF64_PSP_BATCH_STATE_CACHE 1
 #endif
 
+#ifndef SF64_PSP_EARLY_TRIVIAL_REJECT
+#define SF64_PSP_EARLY_TRIVIAL_REJECT 0
+#endif
+
 #define PSP_GFX_DL_MAX_DEPTH 8
 #define PSP_GFX_DL_MAX_COMMANDS 8192
 #define PSP_GFX_DL_MAX_NESTED_COMMANDS 2048
@@ -1892,6 +1896,14 @@ static void psp_gfx_dl_resolve_fog_values(PspGfxDlContext* ctx, int fog, const f
     }
 }
 
+static int psp_gfx_dl_resolve_fog_state_values(PspGfxDlContext* ctx, const PspGfxDlVertex* vertex,
+                                               int pretransformed, float color[4], float* start, float* end) {
+    int requestedFog = !pretransformed && ((ctx->otherModeL >> 30) == G_BL_CLR_FOG);
+
+    psp_gfx_dl_resolve_fog_values(ctx, requestedFog, vertex->projection, color, start, end);
+    return requestedFog && (ctx->fogMul != 0) && (*end > *start) && (*start >= 0.0f);
+}
+
 static void psp_gfx_dl_set_batch_fog(PspGfxDlContext* ctx, int fog, const float projection[4][4]) {
     float color[4];
     float start;
@@ -1978,7 +1990,6 @@ static int psp_gfx_dl_resolve_effective_depth_state(PspGfxDlContext* ctx) {
 static int psp_gfx_dl_resolve_effective_fog_state(PspGfxDlContext* ctx, const PspGfxDlVertex* vertex,
                                                   int pretransformed) {
     PspGfxDlEffectiveFogState* fog = &ctx->effectiveFog;
-    int requestedFog = !pretransformed && ((ctx->otherModeL >> 30) == G_BL_CLR_FOG);
     u32 projectionSerial = pretransformed ? 0 : vertex->projectionSerial;
 
     if (fog->valid && !fog->dirty && (fog->pretransformed == pretransformed) &&
@@ -1986,8 +1997,8 @@ static int psp_gfx_dl_resolve_effective_fog_state(PspGfxDlContext* ctx, const Ps
         return 0;
     }
 
-    psp_gfx_dl_resolve_fog_values(ctx, requestedFog, vertex->projection, fog->color, &fog->start, &fog->end);
-    fog->fog = requestedFog && (ctx->fogMul != 0) && (fog->end > fog->start) && (fog->start >= 0.0f);
+    fog->fog = psp_gfx_dl_resolve_fog_state_values(ctx, vertex, pretransformed,
+                                                   fog->color, &fog->start, &fog->end);
     fog->pretransformed = pretransformed;
     fog->projectionSerial = projectionSerial;
     fog->valid = 1;
@@ -2084,6 +2095,7 @@ static PspProfileTriOutcome psp_gfx_dl_classify_triangle_outcome(PspGfxDlContext
     return (combinedClipCode != 0) ? PSP_PROFILE_TRI_OUTCOME_PARTIAL_CLIP : PSP_PROFILE_TRI_OUTCOME_DIRECT;
 }
 
+#if !SF64_PSP_EARLY_TRIVIAL_REJECT
 static void psp_gfx_dl_trivial_reject_scope_begin(PspGfxDlContext* ctx) {
     if (ctx->trivialRejectDiagnosticActive) {
         PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_SCOPE_INVALID_NESTING, 1);
@@ -2100,6 +2112,7 @@ static void psp_gfx_dl_trivial_reject_scope_end(PspGfxDlContext* ctx) {
     ctx->trivialRejectDiagnosticActive = 0;
     PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_SCOPE_ENDS, 1);
 }
+#endif
 
 static void psp_gfx_dl_trivial_reject_scope_clear_for_task(PspGfxDlContext* ctx) {
     if (ctx->trivialRejectDiagnosticActive) {
@@ -2327,30 +2340,44 @@ static void psp_gfx_dl_count_tri2_pair_triangle_stats(PspGfxDlContext* ctx, cons
     }
 }
 
+static void psp_gfx_dl_count_fog_depth_vertex(PspGfxDlContext* ctx, const PspGfxDlVertex* vertex,
+                                              float fogStart, float fogEnd) {
+    float fogDepth = -vertex->viewZ;
+
+    if (vertex->viewW != 0.0f) {
+        fogDepth /= vertex->viewW;
+    }
+    if (!ctx->hasFogDepthRange) {
+        ctx->hasFogDepthRange = 1;
+        ctx->fogRangeStart = fogStart;
+        ctx->fogRangeEnd = fogEnd;
+        ctx->fogDepthMin = fogDepth;
+        ctx->fogDepthMax = fogDepth;
+    } else {
+        if (fogDepth < ctx->fogDepthMin) {
+            ctx->fogDepthMin = fogDepth;
+        }
+        if (fogDepth > ctx->fogDepthMax) {
+            ctx->fogDepthMax = fogDepth;
+        }
+    }
+}
+
+static void psp_gfx_dl_count_fog_triangle_stats(PspGfxDlContext* ctx, const PspGfxDlVertex* a,
+                                                const PspGfxDlVertex* b, const PspGfxDlVertex* c,
+                                                float fogStart, float fogEnd) {
+    ctx->stats.fogTriangleCount++;
+    psp_gfx_dl_count_fog_depth_vertex(ctx, a, fogStart, fogEnd);
+    psp_gfx_dl_count_fog_depth_vertex(ctx, b, fogStart, fogEnd);
+    psp_gfx_dl_count_fog_depth_vertex(ctx, c, fogStart, fogEnd);
+}
+
 static void psp_gfx_dl_count_tri2_pair_fog_stats(PspGfxDlContext* ctx, const PspGfxDlVertex* const vertices[6]) {
     u32 i;
 
     ctx->stats.fogTriangleCount += 2;
     for (i = 0; i < 6; i++) {
-        float fogDepth = -vertices[i]->viewZ;
-
-        if (vertices[i]->viewW != 0.0f) {
-            fogDepth /= vertices[i]->viewW;
-        }
-        if (!ctx->hasFogDepthRange) {
-            ctx->hasFogDepthRange = 1;
-            ctx->fogRangeStart = ctx->batchFogStart;
-            ctx->fogRangeEnd = ctx->batchFogEnd;
-            ctx->fogDepthMin = fogDepth;
-            ctx->fogDepthMax = fogDepth;
-        } else {
-            if (fogDepth < ctx->fogDepthMin) {
-                ctx->fogDepthMin = fogDepth;
-            }
-            if (fogDepth > ctx->fogDepthMax) {
-                ctx->fogDepthMax = fogDepth;
-            }
-        }
+        psp_gfx_dl_count_fog_depth_vertex(ctx, vertices[i], ctx->batchFogStart, ctx->batchFogEnd);
     }
 }
 
@@ -2861,7 +2888,17 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
     u8 combinedClipCode;
     u8 sharedClipCode;
     u32 emittedTriangles;
-    u32 textureId;
+    u32 textureId = 0;
+#if SF64_PSP_EARLY_TRIVIAL_REJECT || !SF64_PSP_BATCH_STATE_CACHE
+    int depthTest;
+    int depthWrite;
+#endif
+#if SF64_PSP_EARLY_TRIVIAL_REJECT
+    int fogEnabled;
+    float fogColor[4];
+    float fogStart;
+    float fogEnd;
+#endif
 #if !SF64_PSP_BATCH_STATE_CACHE
     PspGfxPspglTextureEnv textureEnv = PSP_GFX_PSPGL_TEX_REPLACE;
 #endif
@@ -2877,10 +2914,12 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
     }
 
 #if !SF64_PSP_BATCH_STATE_CACHE
+#if !SF64_PSP_EARLY_TRIVIAL_REJECT
     if (ctx->textureEnabled && (ctx->textureId == 0)) {
         psp_gfx_dl_prepare_texture(ctx, 1, psp_gfx_dl_premultiplied_blend_enabled(ctx));
     }
     textureId = ctx->textureEnabled ? ctx->textureId : 0;
+#endif
 #endif
 
     va = &ctx->vertices[a];
@@ -2895,11 +2934,20 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
         ctx->stats.projectedTriangleCount++;
     }
 #if !SF64_PSP_BATCH_STATE_CACHE
+#if !SF64_PSP_EARLY_TRIVIAL_REJECT
     psp_gfx_dl_set_batch_transform(ctx, pretransformed, va->projectionSerial, va->projection);
+#endif
 #endif
 
     sharedClipCode = va->clipCode & vb->clipCode & vc->clipCode;
     combinedClipCode = va->clipCode | vb->clipCode | vc->clipCode;
+#if SF64_PSP_EARLY_TRIVIAL_REJECT || !SF64_PSP_BATCH_STATE_CACHE
+    depthTest = (ctx->geometryMode & G_ZBUFFER) != 0;
+    depthWrite = (ctx->otherModeL & Z_UPD) != 0;
+#endif
+#if SF64_PSP_EARLY_TRIVIAL_REJECT
+    fogEnabled = psp_gfx_dl_resolve_fog_state_values(ctx, va, pretransformed, fogColor, &fogStart, &fogEnd);
+#endif
     if (sharedClipCode != 0) {
         ctx->stats.sharedClipTriangleCount++;
     }
@@ -2923,12 +2971,41 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
         }
         PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_BATCH_VERTICES_BEFORE_STATE,
                                            ctx->batchCount);
+#if SF64_PSP_EARLY_TRIVIAL_REJECT
+        PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_EARLY_REJECT_TAKEN, 1);
+#else
         psp_gfx_dl_trivial_reject_scope_begin(ctx);
+#endif
+    }
+#endif
+#if SF64_PSP_EARLY_TRIVIAL_REJECT
+    if (sharedClipCode != 0) {
+        if (depthTest) {
+            ctx->stats.depthTestTriangleCount++;
+        }
+        if (depthWrite) {
+            ctx->stats.depthWriteTriangleCount++;
+        }
+        if (fogEnabled) {
+            psp_gfx_dl_count_fog_triangle_stats(ctx, va, vb, vc, fogStart, fogEnd);
+        }
+        ctx->stats.clipRejectedTriangleCount++;
+        ctx->stats.triangleCount++;
+        PspProfiler_CountTriangleResult(0, 1, 0, 0, 0);
+        PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_BATCH_CONSTRUCTION);
+        return;
     }
 #endif
 #if SF64_PSP_BATCH_STATE_CACHE
     textureId = psp_gfx_dl_apply_effective_batch_state(ctx, va, pretransformed);
 #else
+#if SF64_PSP_EARLY_TRIVIAL_REJECT
+    if (ctx->textureEnabled && (ctx->textureId == 0)) {
+        psp_gfx_dl_prepare_texture(ctx, 1, psp_gfx_dl_premultiplied_blend_enabled(ctx));
+    }
+    textureId = ctx->textureEnabled ? ctx->textureId : 0;
+    psp_gfx_dl_set_batch_transform(ctx, pretransformed, va->projectionSerial, va->projection);
+#endif
     if ((ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_SHADE_DECAL_ALPHA) ||
         (ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_SHADE_ALPHA) ||
         (ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_PRIM_ALPHA)) {
@@ -2940,13 +3017,15 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
                                  psp_gfx_dl_texture_wrap(ctx->textureCmt, ctx->textureMaskT),
                                  psp_gfx_dl_alpha_test_enabled(ctx), psp_gfx_dl_blend_enabled(ctx),
                                  psp_gfx_dl_premultiplied_blend_enabled(ctx));
-    psp_gfx_dl_set_batch_depth(ctx, (ctx->geometryMode & G_ZBUFFER) != 0, (ctx->otherModeL & Z_UPD) != 0);
+    psp_gfx_dl_set_batch_depth(ctx, depthTest, depthWrite);
     psp_gfx_dl_set_batch_fog(ctx, !pretransformed && ((ctx->otherModeL >> 30) == G_BL_CLR_FOG), va->projection);
 #endif
 #if SF64_PSP_PROFILE_TRIVIAL_REJECTS
+#if !SF64_PSP_EARLY_TRIVIAL_REJECT
     if (sharedClipCode != 0) {
         psp_gfx_dl_trivial_reject_scope_end(ctx);
     }
+#endif
 #endif
     if (ctx->batchDepthTest) {
         ctx->stats.depthTestTriangleCount++;
@@ -2955,31 +3034,7 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
         ctx->stats.depthWriteTriangleCount++;
     }
     if (ctx->batchFog) {
-        const PspGfxDlVertex* fogVertices[3] = { va, vb, vc };
-        u32 fogVertexIndex;
-
-        ctx->stats.fogTriangleCount++;
-        for (fogVertexIndex = 0; fogVertexIndex < 3; fogVertexIndex++) {
-            float fogDepth = -fogVertices[fogVertexIndex]->viewZ;
-
-            if (fogVertices[fogVertexIndex]->viewW != 0.0f) {
-                fogDepth /= fogVertices[fogVertexIndex]->viewW;
-            }
-            if (!ctx->hasFogDepthRange) {
-                ctx->hasFogDepthRange = 1;
-                ctx->fogRangeStart = ctx->batchFogStart;
-                ctx->fogRangeEnd = ctx->batchFogEnd;
-                ctx->fogDepthMin = fogDepth;
-                ctx->fogDepthMax = fogDepth;
-            } else {
-                if (fogDepth < ctx->fogDepthMin) {
-                    ctx->fogDepthMin = fogDepth;
-                }
-                if (fogDepth > ctx->fogDepthMax) {
-                    ctx->fogDepthMax = fogDepth;
-                }
-            }
-        }
+        psp_gfx_dl_count_fog_triangle_stats(ctx, va, vb, vc, ctx->batchFogStart, ctx->batchFogEnd);
     }
     if (sharedClipCode != 0) {
         emittedTriangles = 0;

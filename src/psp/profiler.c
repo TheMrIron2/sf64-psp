@@ -56,6 +56,9 @@ extern int gDrawMode;
 #ifndef SF64_PSP_BATCH_STATE_CACHE
 #define SF64_PSP_BATCH_STATE_CACHE 1
 #endif
+#ifndef SF64_PSP_EARLY_TRIVIAL_REJECT
+#define SF64_PSP_EARLY_TRIVIAL_REJECT 0
+#endif
 #ifndef SF64_PSP_TEXTURE_WRAP_CACHE
 #define SF64_PSP_TEXTURE_WRAP_CACHE 1
 #endif
@@ -839,6 +842,7 @@ static const char* psp_profiler_trivial_reject_cost_name(PspProfileTrivialReject
         "texture_bytes_uploaded",
         "flushes",
         "flushed_vertices",
+        "early_reject_taken",
         "scope_begins",
         "scope_ends",
         "scope_invalid_nesting",
@@ -1789,13 +1793,13 @@ static void psp_profiler_write_phase_files(u32 slot) {
     }
 
     snprintf(line, sizeof(line),
-             "SF64 git SHA: %s\nn64psp submodule SHA: %s\nPSPGL source mode: %s\nPSPGL git SHA: %s\nPSPGL worktree: %s\nPerfect Dark reference SHA: %s\ncompiler: %s\noptimisation flags: %s\nPROFILE_PSP: %d\nSF64_PSP_PROFILE_PHASES: %d\nSF64_PSP_PROFILE_TRIVIAL_REJECTS: %d\nSF64_PSP_PSPGL_PROFILE: %d\nSF64_PSP_PSPGL_DLIST_SIZE_WORDS: %d\nSF64_PSP_PSPGL_VBO_STREAM: %d\nSF64_PSP_DIRECT_TRI_FASTPATH: %d\nSF64_PSP_TRI2_PAIR_FASTPATH: %d\nSF64_PSP_TRI2_PAIR_VALIDATE: %d\nSF64_PSP_BATCH_STATE_CACHE: %d\nSF64_PSP_TEXTURE_WRAP_CACHE: %d\nUSE_N64PSP_SINCOS: %d\nCPU clock: %lu\nbus clock: %lu\ncapture slot: %lu\nrequested frame count: %d\nactual frame count: %lu\ntimer overhead us: %llu\n\n",
+             "SF64 git SHA: %s\nn64psp submodule SHA: %s\nPSPGL source mode: %s\nPSPGL git SHA: %s\nPSPGL worktree: %s\nPerfect Dark reference SHA: %s\ncompiler: %s\noptimisation flags: %s\nPROFILE_PSP: %d\nSF64_PSP_PROFILE_PHASES: %d\nSF64_PSP_PROFILE_TRIVIAL_REJECTS: %d\nSF64_PSP_PSPGL_PROFILE: %d\nSF64_PSP_PSPGL_DLIST_SIZE_WORDS: %d\nSF64_PSP_PSPGL_VBO_STREAM: %d\nSF64_PSP_DIRECT_TRI_FASTPATH: %d\nSF64_PSP_TRI2_PAIR_FASTPATH: %d\nSF64_PSP_TRI2_PAIR_VALIDATE: %d\nSF64_PSP_BATCH_STATE_CACHE: %d\nSF64_PSP_EARLY_TRIVIAL_REJECT: %d\nSF64_PSP_TEXTURE_WRAP_CACHE: %d\nUSE_N64PSP_SINCOS: %d\nCPU clock: %lu\nbus clock: %lu\ncapture slot: %lu\nrequested frame count: %d\nactual frame count: %lu\ntimer overhead us: %llu\n\n",
              SF64_GIT_SHA, N64PSP_GIT_SHA, PSPGL_SOURCE_MODE, PSPGL_GIT_SHA, PSPGL_GIT_DIRTY,
              PERFECT_DARK_PSP_SHA, SF64_PSP_COMPILER, SF64_PSP_OPT_FLAGS,
              SF64_PSP_GPROF, SF64_PSP_PROFILE_PHASES, SF64_PSP_PROFILE_TRIVIAL_REJECTS,
              SF64_PSP_PSPGL_PROFILE, SF64_PSP_PSPGL_DLIST_SIZE_WORDS, SF64_PSP_PSPGL_VBO_STREAM, SF64_PSP_DIRECT_TRI_FASTPATH,
              SF64_PSP_TRI2_PAIR_FASTPATH, SF64_PSP_TRI2_PAIR_VALIDATE,
-             SF64_PSP_BATCH_STATE_CACHE, SF64_PSP_TEXTURE_WRAP_CACHE, USE_N64PSP_SINCOS,
+             SF64_PSP_BATCH_STATE_CACHE, SF64_PSP_EARLY_TRIVIAL_REJECT, SF64_PSP_TEXTURE_WRAP_CACHE, USE_N64PSP_SINCOS,
              (unsigned long) scePowerGetCpuClockFrequency(),
              (unsigned long) scePowerGetBusClockFrequency(), (unsigned long) slot, SF64_PSP_PROFILE_CAPTURE_FRAMES,
              (unsigned long) sCaptureFrames, sTimerReadPairOverheadUs);
@@ -1994,13 +1998,17 @@ static void psp_profiler_write_phase_files(u32 slot) {
                  (unsigned long) (matrixSum == sCounters.tri2Commands));
         psp_profiler_write_all(fd, line);
         snprintf(line, sizeof(line),
-                 "effective_state_calls,%llu\neffective_state_resolves_plus_reuses,%llu\neffective_state_invariant_ok,%lu\n",
+                 "effective_state_calls,%llu\neffective_state_resolves_plus_reuses,%llu\neffective_state_invariant_ok,%lu\nearly_reject_taken,%llu\nearly_reject_matches_triangles,%lu\n",
                  effectiveCalls,
                  sCounters.trivialRejectCosts[PSP_PROFILE_TRIVIAL_REJECT_COST_EFFECTIVE_STATE_RESOLVES] +
                      sCounters.trivialRejectCosts[PSP_PROFILE_TRIVIAL_REJECT_COST_EFFECTIVE_STATE_REUSES],
                  (unsigned long) (effectiveCalls ==
                                   (sCounters.trivialRejectCosts[PSP_PROFILE_TRIVIAL_REJECT_COST_EFFECTIVE_STATE_RESOLVES] +
-                                   sCounters.trivialRejectCosts[PSP_PROFILE_TRIVIAL_REJECT_COST_EFFECTIVE_STATE_REUSES])));
+                                   sCounters.trivialRejectCosts[PSP_PROFILE_TRIVIAL_REJECT_COST_EFFECTIVE_STATE_REUSES])),
+                 sCounters.trivialRejectCosts[PSP_PROFILE_TRIVIAL_REJECT_COST_EARLY_REJECT_TAKEN],
+                 (unsigned long) (!SF64_PSP_EARLY_TRIVIAL_REJECT ||
+                                  (sCounters.trivialRejectCosts[PSP_PROFILE_TRIVIAL_REJECT_COST_EARLY_REJECT_TAKEN] ==
+                                   sCounters.trivialRejectCosts[PSP_PROFILE_TRIVIAL_REJECT_COST_TRIANGLES])));
         psp_profiler_write_all(fd, line);
         snprintf(line, sizeof(line),
                  "batch_before_total,%llu\ntrivial_reject_triangles,%llu\nbatch_before_invariant_ok,%lu\n",

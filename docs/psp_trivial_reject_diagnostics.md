@@ -36,8 +36,11 @@ The single-triangle path validates indices, reads cached vertices, computes
 clip codes, records triangle statistics, applies effective batch/material
 state, and only then reaches the final `sharedClipCode != 0` reject branch.
 
-This diagnostic does not move that branch. It observes the current work done
-between detecting `sharedClipCode != 0` and reaching the existing reject.
+With `SF64_PSP_EARLY_TRIVIAL_REJECT=0`, this diagnostic observes the current
+work done between detecting `sharedClipCode != 0` and reaching the existing
+reject. With `SF64_PSP_EARLY_TRIVIAL_REJECT=1`, the single-triangle path can
+return before that state work. The optimization experiment is documented in
+[psp_early_trivial_reject.md](psp_early_trivial_reject.md).
 
 ## TRI2 Matrix
 
@@ -71,6 +74,8 @@ the existing state/texture work that happens before the final reject. It counts:
   bytes caused while scoped;
 * flushes and flushed vertices caused while scoped, split by existing flush
   reason;
+* `early_reject_taken`, which counts trivially rejected triangles returned
+  before effective or batch state was applied;
 * actual state-transition fields detected by the existing transition
   comparisons;
 * the resolved render-state classification: textured, untextured, alpha test,
@@ -78,6 +83,15 @@ the existing state/texture work that happens before the final reject. It counts:
 
 Scope counters record begins, ends, invalid nesting, and leaks. A leaked scope
 is diagnosed and cleared at task end rather than carried into the next task.
+
+When early rejection is enabled, the diagnostic still counts
+`trivial_reject_triangles`, batch empty/nonempty state, and
+`batch_vertices_before_state` at the point where state would formerly have been
+applied. It does not enter the scoped state-work diagnostic for the rejected
+triangle. Expected scoped-work values for early-rejected triangles are therefore
+zero: effective-state calls/resolves/reuses, texture prepare/cache/decode/upload
+costs, reject-triggered flushes, state-transition rows, and scope
+begins/ends/invalid nesting/leaks.
 
 ## Output
 
@@ -114,6 +128,28 @@ scope_begins == scope_ends
 scope_invalid_nesting == 0
 scope_leaks == 0
 ```
+
+With `SF64_PSP_EARLY_TRIVIAL_REJECT=1`, also expect:
+
+```text
+early_reject_taken == trivial_reject_triangles
+effective_state_calls == 0
+effective_state_resolves == 0
+effective_state_reuses == 0
+texture_prepare_calls == 0
+texture_cache_hits == 0
+texture_cache_misses == 0
+texture_decodes == 0
+texture_uploads == 0
+texture_bytes_uploaded == 0
+trivial_reject_flushes == 0
+trivial_reject_flushed_vertices == 0
+scope_begins == 0
+scope_ends == 0
+```
+
+With `SF64_PSP_EARLY_TRIVIAL_REJECT=0`, the existing scoped-work invariants
+remain the useful control checks.
 
 ## Capture Procedure
 
