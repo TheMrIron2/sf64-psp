@@ -16,6 +16,16 @@
 #endif
 
 typedef enum {
+    PSP_PROFILE_VERTEX_REUSE_SOURCE_DIRECT,
+    PSP_PROFILE_VERTEX_REUSE_SOURCE_GENERIC_UNCLIPPED,
+    PSP_PROFILE_VERTEX_REUSE_SOURCE_CLIPPED_ORIGINAL,
+    PSP_PROFILE_VERTEX_REUSE_SOURCE_CLIPPED_GENERATED,
+    PSP_PROFILE_VERTEX_REUSE_SOURCE_RECTANGLE,
+    PSP_PROFILE_VERTEX_REUSE_SOURCE_UNKNOWN,
+    PSP_PROFILE_VERTEX_REUSE_SOURCE_COUNT
+} PspProfileVertexReuseSource;
+
+typedef enum {
     PSP_PROFILE_PHASE_GFX_TASK,
     PSP_PROFILE_PHASE_DL_TRAVERSAL,
     PSP_PROFILE_PHASE_G_VTX,
@@ -209,8 +219,9 @@ void PspProfiler_CountTrivialRejectRenderState(PspProfileTrivialRejectRenderStat
 #if SF64_PSP_PROFILE_VERTEX_REUSE
 void PspProfiler_AnalyzeAllPspglDrawVertexReuse(const void* packets, u32 packetCount);
 void PspProfiler_AnalyzeRendererBatchVertexReuse(const void* packets, u32 packetCount, u32 ownerComponentId,
-                                                 u32 componentMask, u32 directVertices, u32 clippedVertices,
-                                                 u32 rectVertices);
+                                                 u32 componentMask,
+                                                 const PspProfileVertexReuseSource* provenance,
+                                                 u32 provenanceCount);
 #endif
 #else
 #define PspProfiler_PhaseBegin(phase) ((void) 0)
