@@ -72,6 +72,10 @@
 #define SF64_PSP_PROFILE_TRIVIAL_REJECTS 0
 #endif
 
+#ifndef SF64_PSP_PROFILE_VERTEX_REUSE
+#define SF64_PSP_PROFILE_VERTEX_REUSE 0
+#endif
+
 #ifndef SF64_PSP_BATCH_STATE_CACHE
 #define SF64_PSP_BATCH_STATE_CACHE 1
 #endif
@@ -340,6 +344,11 @@ typedef struct {
     PspGfxDlEffectiveFogState effectiveFog;
 #if SF64_PSP_PROFILE_TRIVIAL_REJECTS
     int trivialRejectDiagnosticActive;
+#endif
+#if SF64_PSP_PROFILE_VERTEX_REUSE
+    u32 batchDirectVertices;
+    u32 batchClippedVertices;
+    u32 batchRectVertices;
 #endif
 #if PSP_RENDERER_DIAGNOSTICS
     u32 vtxCommandCount;
@@ -1667,6 +1676,23 @@ static u32 psp_gfx_dl_batch_owner_component(const PspGfxDlContext* ctx) {
 #define psp_gfx_dl_mark_batch_component(ctx) ((void) 0)
 #endif
 
+#if SF64_PSP_PROFILE_VERTEX_REUSE
+#define psp_gfx_dl_mark_direct_vertex(ctx) ((ctx)->batchDirectVertices++)
+#define psp_gfx_dl_mark_clipped_vertex(ctx) ((ctx)->batchClippedVertices++)
+#define psp_gfx_dl_mark_rect_vertex(ctx) ((ctx)->batchRectVertices++)
+#define psp_gfx_dl_reset_vertex_reuse_batch(ctx) \
+    do {                                         \
+        (ctx)->batchDirectVertices = 0;          \
+        (ctx)->batchClippedVertices = 0;         \
+        (ctx)->batchRectVertices = 0;            \
+    } while (0)
+#else
+#define psp_gfx_dl_mark_direct_vertex(ctx) ((void) 0)
+#define psp_gfx_dl_mark_clipped_vertex(ctx) ((void) 0)
+#define psp_gfx_dl_mark_rect_vertex(ctx) ((void) 0)
+#define psp_gfx_dl_reset_vertex_reuse_batch(ctx) ((void) 0)
+#endif
+
 static void psp_gfx_dl_handle_movemem(PspGfxDlContext* ctx, const Gfx* gfx) {
     u32 index = (gfx->words.w0 >> 16) & 0xFF;
     const Vp* viewport;
@@ -1712,18 +1738,27 @@ static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason 
 #if SF64_PSP_PROFILE_COMPONENTS
     u32 ownerComponent;
     u32 ownerMask;
+#elif SF64_PSP_PROFILE_VERTEX_REUSE
+    u32 ownerComponent = 0;
+    u32 ownerMask = 0;
 #endif
 
     if (ctx->batchCount == 0) {
 #if SF64_PSP_PROFILE_COMPONENTS
         ctx->batchComponentMask = 0;
 #endif
+        psp_gfx_dl_reset_vertex_reuse_batch(ctx);
         return;
     }
 #if SF64_PSP_PROFILE_COMPONENTS
     ownerMask = ctx->batchComponentMask;
     ownerComponent = psp_gfx_dl_batch_owner_component(ctx);
     PspProfiler_ComponentScopeBegin(ownerComponent);
+#endif
+#if SF64_PSP_PROFILE_VERTEX_REUSE
+    PspProfiler_AnalyzeRendererBatchVertexReuse(sPspGfxDlBatch, ctx->batchCount, ownerComponent, ownerMask,
+                                                ctx->batchDirectVertices, ctx->batchClippedVertices,
+                                                ctx->batchRectVertices);
 #endif
     (void) reason;
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_BATCH_FLUSH);
@@ -1749,6 +1784,7 @@ static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason 
 #if SF64_PSP_PROFILE_COMPONENTS
     ctx->batchComponentMask = 0;
 #endif
+    psp_gfx_dl_reset_vertex_reuse_batch(ctx);
 }
 
 static void psp_gfx_dl_flush_texture_change(PspGfxDlContext* ctx, PspProfileTextureFlushSource source) {
@@ -2175,6 +2211,7 @@ static void psp_gfx_dl_emit_clip_vertex(PspGfxDlContext* ctx, const PspGfxDlClip
 
     dst = &sPspGfxDlBatch[ctx->batchCount++];
     psp_gfx_dl_mark_batch_component(ctx);
+    psp_gfx_dl_mark_clipped_vertex(ctx);
 
     if (ctx->batchPretransformed) {
         float inverseW = 1.0f / src->w;
@@ -2242,6 +2279,7 @@ static void psp_gfx_dl_emit_direct_vertex(PspGfxDlContext* ctx, const PspGfxDlVe
 
     dst = &sPspGfxDlBatch[ctx->batchCount++];
     psp_gfx_dl_mark_batch_component(ctx);
+    psp_gfx_dl_mark_direct_vertex(ctx);
 
     if (ctx->batchPretransformed) {
         float inverseW = 1.0f / src->clipW;
@@ -2322,6 +2360,7 @@ static void psp_gfx_dl_emit_direct_vertex_unchecked(PspGfxDlContext* ctx, const 
     PspGfxPspglColorVertex* dst = &sPspGfxDlBatch[ctx->batchCount++];
 
     psp_gfx_dl_mark_batch_component(ctx);
+    psp_gfx_dl_mark_direct_vertex(ctx);
     psp_gfx_dl_build_direct_vertex(ctx, src, uScale, vScale, dst);
 }
 
@@ -3118,6 +3157,7 @@ static void psp_gfx_dl_emit_rect_vertex(PspGfxDlContext* ctx,
 
     dst = &sPspGfxDlBatch[ctx->batchCount++];
     psp_gfx_dl_mark_batch_component(ctx);
+    psp_gfx_dl_mark_rect_vertex(ctx);
 
     dst->u = u / (float) ctx->textureUploadWidth;
     dst->v = v / (float) ctx->textureUploadHeight;

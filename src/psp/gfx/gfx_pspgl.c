@@ -37,6 +37,9 @@
 #ifndef SF64_PSP_TEXTURE_WRAP_CACHE
 #define SF64_PSP_TEXTURE_WRAP_CACHE 1
 #endif
+#ifndef SF64_PSP_PROFILE_VERTEX_REUSE
+#define SF64_PSP_PROFILE_VERTEX_REUSE 0
+#endif
 
 struct PspGfxPspglTextureParameterState {
     GLuint texture;
@@ -1495,6 +1498,10 @@ void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u3
     if ((vertices == NULL) || (vertexCount == 0)) {
         return;
     }
+
+#if SF64_PSP_PROFILE_VERTEX_REUSE
+    PspProfiler_AnalyzeAllPspglDrawVertexReuse(vertices, vertexCount);
+#endif
 
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
 
