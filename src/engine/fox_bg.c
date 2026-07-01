@@ -170,6 +170,7 @@ void Background_DrawStarfield(void) {
     }
 
     PspRenderer_EndStarfield();
+    PSP_RENDERER_DL_STARFIELD_MARKER(gMasterDisp++);
 }
 
 void Background_DrawPartialStarfield(s32 yMin, s32 yMax) {

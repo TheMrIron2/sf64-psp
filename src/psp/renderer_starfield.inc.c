@@ -104,3 +104,7 @@ void PspRenderer_AddStar(s16 x, s16 y, u32 color) {
 void PspRenderer_EndStarfield(void) {
     sStarfieldReady = 1;
 }
+
+void PspRenderer_DrawPendingStarfield(void) {
+    psp_renderer_draw_starfield_batch();
+}
