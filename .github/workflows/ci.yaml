@@ -9,9 +9,9 @@ permissions:
   contents: read
 
 jobs:
-  psp-bootstrap:
+  pspgl-bootstrap:
     name: PSPGL bootstrap
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container:
       image: pspdev/pspdev:latest
 
@@ -21,23 +21,11 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install Python
-        run: |
-          apk add --no-cache python3 py3-pip
-
-      - name: Install Python dependencies
-        run: |
-          python3 -m pip install --break-system-packages -r tools/requirements-python.txt
-
       - name: Show toolchain info
         run: |
-          echo "PSPDEV=$PSPDEV"
-          which psp-gcc
           psp-gcc --version
-          ls -la "$PSPDEV/psp/include/GL" || true
-          ls -la "$PSPDEV/psp/include/GLES" || true
-          ls -la "$PSPDEV/psp/lib/libGL.a" || true
+          psp-config --psp-prefix
+          psp-config --pspsdk-path
 
       - name: Build bootstrap EBOOT
-        run: |
-          make bootstrap COLOR=0 VERBOSE=1
+        run: make bootstrap
