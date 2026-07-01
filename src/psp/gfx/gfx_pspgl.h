@@ -83,5 +83,6 @@ void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u3
                                       int blend, int premultiplied, int depthTest, int depthWrite, int fog,
                                       const float* fogColor, float fogStart, float fogEnd,
                                       const float* projectionMatrix, int pretransformed);
+void PspGfxPspgl_DrawSolidRect(float ulx, float uly, float lrx, float lry, u32 color, int blend);
 
 #endif

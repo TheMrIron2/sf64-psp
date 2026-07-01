@@ -1,6 +1,7 @@
 #include "src/psp/gfx/gfx_psp.h"
 #include "src/psp/gfx/gfx_pspgl.h"
 #include "src/psp/profiler.h"
+#include "macros.h"
 
 #include <GLES/gl.h>
 #include <stddef.h>
@@ -30,6 +31,10 @@
     (PSP_GFX_PSPGL_VERTEX_STREAM_SMALL_ARENA_BYTES + \
      (PSP_GFX_PSPGL_VERTEX_STREAM_LARGE_PAGES_PER_SET * PSP_GFX_PSPGL_VERTEX_STREAM_LARGE_PAGE_BYTES))
 #define PSP_GFX_PSPGL_TEXTURE_PARAMETER_FALLBACK_CACHE_SIZE 32
+#define PSP_GFX_PSPGL_N64_WIDTH 320.0f
+#define PSP_GFX_PSPGL_N64_HEIGHT 240.0f
+#define PSP_GFX_PSPGL_SCREEN_MARGIN 8.0f
+#define PSP_GFX_PSPGL_BLACK 0xFF000000u
 
 #ifndef SF64_PSP_PSPGL_VBO_STREAM
 #define SF64_PSP_PSPGL_VBO_STREAM 1
@@ -929,10 +934,21 @@ void PspGfxPspgl_BeginFrame(void) {
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
 
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glDepthMask(GL_FALSE);
     psp_gfx_pspgl_reset_vertex_stream();
+    glClear(GL_DEPTH_BUFFER_BIT);
+    glDepthMask(GL_FALSE);
+    psp_gfx_pspgl_invalidate_state_cache();
+    PspGfxPspgl_DrawSolidRect(0.0f, 0.0f, PSP_GFX_PSPGL_N64_WIDTH, PSP_GFX_PSPGL_SCREEN_MARGIN,
+                              PSP_GFX_PSPGL_BLACK, 0);
+    PspGfxPspgl_DrawSolidRect(0.0f, PSP_GFX_PSPGL_N64_HEIGHT - PSP_GFX_PSPGL_SCREEN_MARGIN,
+                              PSP_GFX_PSPGL_N64_WIDTH, PSP_GFX_PSPGL_N64_HEIGHT, PSP_GFX_PSPGL_BLACK, 0);
+    PspGfxPspgl_DrawSolidRect(0.0f, PSP_GFX_PSPGL_SCREEN_MARGIN, PSP_GFX_PSPGL_SCREEN_MARGIN,
+                              PSP_GFX_PSPGL_N64_HEIGHT - PSP_GFX_PSPGL_SCREEN_MARGIN,
+                              PSP_GFX_PSPGL_BLACK, 0);
+    PspGfxPspgl_DrawSolidRect(PSP_GFX_PSPGL_N64_WIDTH - PSP_GFX_PSPGL_SCREEN_MARGIN,
+                              PSP_GFX_PSPGL_SCREEN_MARGIN, PSP_GFX_PSPGL_N64_WIDTH,
+                              PSP_GFX_PSPGL_N64_HEIGHT - PSP_GFX_PSPGL_SCREEN_MARGIN,
+                              PSP_GFX_PSPGL_BLACK, 0);
     psp_gfx_pspgl_invalidate_state_cache();
 }
 
@@ -1585,5 +1601,61 @@ void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u3
 
     if (!psp_gfx_pspgl_draw_vbo_stream(vertices, vertexCount)) {
         psp_gfx_pspgl_draw_client_arrays(vertices, vertexCount);
+    }
+}
+
+void PspGfxPspgl_DrawSolidRect(float ulx, float uly, float lrx, float lry, u32 color, int blend) {
+    PspGfxPspglColorVertex vertices[6];
+
+    vertices[0].u = 0.0f;
+    vertices[0].v = 0.0f;
+    vertices[0].color = color;
+    vertices[0].x = (ulx / 160.0f) - 1.0f;
+    vertices[0].y = 1.0f - (uly / 120.0f);
+    vertices[0].z = 0.0f;
+
+    vertices[1].u = 0.0f;
+    vertices[1].v = 0.0f;
+    vertices[1].color = color;
+    vertices[1].x = (lrx / 160.0f) - 1.0f;
+    vertices[1].y = 1.0f - (uly / 120.0f);
+    vertices[1].z = 0.0f;
+
+    vertices[2].u = 0.0f;
+    vertices[2].v = 0.0f;
+    vertices[2].color = color;
+    vertices[2].x = (lrx / 160.0f) - 1.0f;
+    vertices[2].y = 1.0f - (lry / 120.0f);
+    vertices[2].z = 0.0f;
+
+    vertices[3] = vertices[0];
+    vertices[4] = vertices[2];
+
+    vertices[5].u = 0.0f;
+    vertices[5].v = 0.0f;
+    vertices[5].color = color;
+    vertices[5].x = (ulx / 160.0f) - 1.0f;
+    vertices[5].y = 1.0f - (lry / 120.0f);
+    vertices[5].z = 0.0f;
+
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
+    psp_gfx_pspgl_load_projection_identity();
+    psp_gfx_pspgl_load_modelview_identity();
+    psp_gfx_pspgl_enable_client_arrays();
+    psp_gfx_pspgl_texture_2d(0);
+    psp_gfx_pspgl_alpha_test(0);
+    psp_gfx_pspgl_depth_test(0);
+    psp_gfx_pspgl_depth_mask(GL_FALSE);
+    psp_gfx_pspgl_fog_disabled();
+    if (blend) {
+        psp_gfx_pspgl_blend(1);
+        psp_gfx_pspgl_blend_func(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    } else {
+        psp_gfx_pspgl_blend(0);
+    }
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
+
+    if (!psp_gfx_pspgl_draw_vbo_stream(vertices, ARRAY_COUNT(vertices))) {
+        psp_gfx_pspgl_draw_client_arrays(vertices, ARRAY_COUNT(vertices));
     }
 }

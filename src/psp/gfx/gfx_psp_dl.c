@@ -1,10 +1,12 @@
 #include "src/psp/gfx/gfx_psp_dl.h"
 
+#include "buffers.h"
 #include "macros.h"
 #include "sf64thread.h"
 #include "src/psp/gfx/gfx_pspgl.h"
 #include "src/psp/platform.h"
 #include "src/psp/profiler.h"
+#include "src/psp/renderer.h"
 
 #if SF64_PSP_PROFILE_COMPONENTS
 #include "src/psp/render_component.h"
@@ -34,6 +36,9 @@
 #ifndef N64PSP_VERTEX_BATCH_DIAGNOSTICS
 #define N64PSP_VERTEX_BATCH_DIAGNOSTICS 0
 #endif
+
+static int sPspGfxDlBackgroundFeedbackPrimed = 0;
+static u32 sPspGfxDlBackgroundFeedbackSeedColor = 0xFF000000u;
 
 #ifndef USE_N64PSP_BATCH_LIGHTING
 #define USE_N64PSP_BATCH_LIGHTING 0
@@ -291,6 +296,12 @@ typedef struct {
     u8 primitiveG;
     u8 primitiveB;
     u8 primitiveA;
+    u32 fillColor;
+    const void* colorImage;
+    u32 colorImageFormat;
+    u32 colorImageSize;
+    u32 colorImageWidth;
+    int colorImageIsDisplay;
     PspGfxDlCombineMode combineMode;
     PspGfxPspglTextureEnv batchTextureEnv;
     PspGfxPspglTextureWrap batchWrapS;
@@ -314,6 +325,7 @@ typedef struct {
     int batchPretransformed;
     int batchTransformSet;
     u32 otherModeL;
+    u32 otherModeH;
     u8 fogR;
     u8 fogG;
     u8 fogB;
@@ -510,6 +522,19 @@ static u32 psp_gfx_dl_pack_rgba_u8(u32 r, u32 g, u32 b, u32 a, int premultiplied
     return r | (g << 8) | (b << 16) | (a << 24);
 }
 
+static u32 psp_gfx_dl_rgba5551_to_rgba8888(u16 color) {
+    u32 r5 = (color >> 11) & 0x1F;
+    u32 g5 = (color >> 6) & 0x1F;
+    u32 b5 = (color >> 1) & 0x1F;
+    u32 a1 = color & 1U;
+    u32 r = (r5 << 3) | (r5 >> 2);
+    u32 g = (g5 << 3) | (g5 >> 2);
+    u32 b = (b5 << 3) | (b5 >> 2);
+    u32 a = a1 ? 255U : 0U;
+
+    return psp_gfx_dl_pack_rgba_u8(r, g, b, a, 0);
+}
+
 static float psp_gfx_dl_fog_distance(const float projection[4][4], float ndcZ) {
     float denominator = projection[2][2] - (ndcZ * projection[2][3]);
 
@@ -573,6 +598,23 @@ static const void* psp_gfx_dl_resolve_ptr(const PspGfxDlContext* ctx, u32 raw) {
         return NULL;
     }
     return (const void*) (uintptr_t) (base + (raw & 0xFFFFFFU));
+}
+
+static int psp_gfx_dl_is_display_color_image(const void* image) {
+    u32 i;
+
+    if (image == NULL) {
+        return 1;
+    }
+    if ((gFrameBuffer != NULL) && ((image == gFrameBuffer) || (image == gFrameBuffer->data))) {
+        return 1;
+    }
+    for (i = 0; i < 3U; i++) {
+        if ((image == &gFrameBuffers[i]) || (image == gFrameBuffers[i].data)) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static int psp_gfx_dl_is_end(u8 opcode) {
@@ -2258,6 +2300,38 @@ static void psp_gfx_dl_emit_clip_vertex(PspGfxDlContext* ctx, const PspGfxDlClip
     psp_gfx_dl_emit_clip_vertex_with_source(ctx, src, psp_gfx_dl_clipped_vertex_source(src));
 }
 
+static void psp_gfx_dl_count_fog_depth_vertex(PspGfxDlContext* ctx, const PspGfxDlVertex* vertex,
+                                              float fogStart, float fogEnd) {
+    float fogDepth = -vertex->viewZ;
+
+    if (vertex->viewW != 0.0f) {
+        fogDepth /= vertex->viewW;
+    }
+    if (!ctx->hasFogDepthRange) {
+        ctx->hasFogDepthRange = 1;
+        ctx->fogRangeStart = fogStart;
+        ctx->fogRangeEnd = fogEnd;
+        ctx->fogDepthMin = fogDepth;
+        ctx->fogDepthMax = fogDepth;
+    } else {
+        if (fogDepth < ctx->fogDepthMin) {
+            ctx->fogDepthMin = fogDepth;
+        }
+        if (fogDepth > ctx->fogDepthMax) {
+            ctx->fogDepthMax = fogDepth;
+        }
+    }
+}
+
+static void psp_gfx_dl_count_fog_triangle_stats(PspGfxDlContext* ctx, const PspGfxDlVertex* a,
+                                                const PspGfxDlVertex* b, const PspGfxDlVertex* c,
+                                                float fogStart, float fogEnd) {
+    ctx->stats.fogTriangleCount++;
+    psp_gfx_dl_count_fog_depth_vertex(ctx, a, fogStart, fogEnd);
+    psp_gfx_dl_count_fog_depth_vertex(ctx, b, fogStart, fogEnd);
+    psp_gfx_dl_count_fog_depth_vertex(ctx, c, fogStart, fogEnd);
+}
+
 #if SF64_PSP_DIRECT_TRI_FASTPATH
 static void psp_gfx_dl_vertex_color_u8(PspGfxDlContext* ctx, const PspGfxDlVertex* src, u32* r, u32* g, u32* b,
                                        u32* a) {
@@ -2394,38 +2468,6 @@ static void psp_gfx_dl_count_tri2_pair_triangle_stats(PspGfxDlContext* ctx, cons
     if ((area > -0.000001f) && (area < 0.000001f)) {
         ctx->stats.degenerateTriangleCount++;
     }
-}
-
-static void psp_gfx_dl_count_fog_depth_vertex(PspGfxDlContext* ctx, const PspGfxDlVertex* vertex,
-                                              float fogStart, float fogEnd) {
-    float fogDepth = -vertex->viewZ;
-
-    if (vertex->viewW != 0.0f) {
-        fogDepth /= vertex->viewW;
-    }
-    if (!ctx->hasFogDepthRange) {
-        ctx->hasFogDepthRange = 1;
-        ctx->fogRangeStart = fogStart;
-        ctx->fogRangeEnd = fogEnd;
-        ctx->fogDepthMin = fogDepth;
-        ctx->fogDepthMax = fogDepth;
-    } else {
-        if (fogDepth < ctx->fogDepthMin) {
-            ctx->fogDepthMin = fogDepth;
-        }
-        if (fogDepth > ctx->fogDepthMax) {
-            ctx->fogDepthMax = fogDepth;
-        }
-    }
-}
-
-static void psp_gfx_dl_count_fog_triangle_stats(PspGfxDlContext* ctx, const PspGfxDlVertex* a,
-                                                const PspGfxDlVertex* b, const PspGfxDlVertex* c,
-                                                float fogStart, float fogEnd) {
-    ctx->stats.fogTriangleCount++;
-    psp_gfx_dl_count_fog_depth_vertex(ctx, a, fogStart, fogEnd);
-    psp_gfx_dl_count_fog_depth_vertex(ctx, b, fogStart, fogEnd);
-    psp_gfx_dl_count_fog_depth_vertex(ctx, c, fogStart, fogEnd);
 }
 
 static void psp_gfx_dl_count_tri2_pair_fog_stats(PspGfxDlContext* ctx, const PspGfxDlVertex* const vertices[6]) {
@@ -3263,6 +3305,99 @@ static void psp_gfx_dl_handle_set_primitive_color(PspGfxDlContext* ctx, const Gf
     ctx->primitiveA = (u8) gfx->words.w1;
 }
 
+static void psp_gfx_dl_handle_set_fill_color(PspGfxDlContext* ctx, const Gfx* gfx) {
+    u16 color = (u16) (gfx->words.w1 >> 16);
+
+    ctx->fillColor = psp_gfx_dl_rgba5551_to_rgba8888(color);
+}
+
+static int psp_gfx_dl_is_fill_cycle(const PspGfxDlContext* ctx) {
+    return (ctx->otherModeH & G_CYC_FILL) == G_CYC_FILL;
+}
+
+static int psp_gfx_dl_fill_uses_primitive_color(const PspGfxDlContext* ctx) {
+    return !psp_gfx_dl_is_fill_cycle(ctx) &&
+           (ctx->combineMode == PSP_GFX_DL_COMBINE_PRIMITIVE);
+}
+
+static int psp_gfx_dl_is_active_background_rect(u32 ulx, u32 uly, u32 lrx, u32 lry) {
+    return (ulx == SCREEN_MARGIN) && (uly == SCREEN_MARGIN) &&
+           (lrx == (SCREEN_WIDTH - SCREEN_MARGIN)) &&
+           (lry == (SCREEN_HEIGHT - SCREEN_MARGIN + 1U));
+}
+
+#if PSP_RENDERER_DIAGNOSTICS
+static void psp_gfx_dl_log_active_background_fill(const PspGfxDlContext* ctx, u32 color, int primitiveFill, int blend) {
+    char line[192];
+
+    snprintf(line, sizeof(line),
+             "[pspgl-dl] active-bg-fill prim=%d blend=%d cycleFill=%d color=%08lx prim=%02x%02x%02x%02x "
+             "fill=%08lx seed=%08lx otherL=%08lx otherH=%08lx",
+             primitiveFill, blend, psp_gfx_dl_is_fill_cycle(ctx), (unsigned long) color,
+             ctx->primitiveR, ctx->primitiveG, ctx->primitiveB, ctx->primitiveA,
+             (unsigned long) ctx->fillColor, (unsigned long) sPspGfxDlBackgroundFeedbackSeedColor,
+             (unsigned long) ctx->otherModeL, (unsigned long) ctx->otherModeH);
+    PspPlatform_LogLine(line);
+}
+#endif
+
+static void psp_gfx_dl_handle_fill_rectangle(PspGfxDlContext* ctx, const Gfx* gfx) {
+    u32 w0 = gfx->words.w0;
+    u32 w1 = gfx->words.w1;
+    u32 lrxInt = ((w0 >> 14) & 0x3FF) + 1U;
+    u32 lryInt = ((w0 >> 2) & 0x3FF) + 1U;
+    u32 ulxInt = (w1 >> 14) & 0x3FF;
+    u32 ulyInt = (w1 >> 2) & 0x3FF;
+    float lrx = (float) lrxInt;
+    float lry = (float) lryInt;
+    float ulx = (float) ulxInt;
+    float uly = (float) ulyInt;
+    u32 color = ctx->fillColor;
+    int blend = 0;
+    int primitiveFill = psp_gfx_dl_fill_uses_primitive_color(ctx);
+    int activeBackgroundRect = psp_gfx_dl_is_active_background_rect(ulxInt, ulyInt, lrxInt, lryInt);
+
+    if (lrxInt <= ulxInt || lryInt <= ulyInt) {
+        return;
+    }
+
+    if (primitiveFill) {
+        color = psp_gfx_dl_pack_rgba_u8(ctx->primitiveR, ctx->primitiveG, ctx->primitiveB,
+                                        ctx->primitiveA, 0);
+        blend = ((ctx->otherModeL & FORCE_BL) != 0) && (ctx->primitiveA != 255);
+        ctx->stats.fillRectanglePrimitiveColorCount++;
+    } else if (!psp_gfx_dl_is_fill_cycle(ctx)) {
+        ctx->stats.fillRectangleUnsupportedCount++;
+    }
+
+    if (!ctx->colorImageIsDisplay) {
+#if PSP_RENDERER_DIAGNOSTICS
+        if (activeBackgroundRect) {
+            psp_gfx_dl_log_active_background_fill(ctx, color, primitiveFill, blend);
+        }
+#endif
+        ctx->stats.fillRectangleCount++;
+        return;
+    }
+
+    psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+#if PSP_RENDERER_DIAGNOSTICS
+    if (activeBackgroundRect) {
+        psp_gfx_dl_log_active_background_fill(ctx, color, primitiveFill, blend);
+    }
+#endif
+    if (primitiveFill && blend && activeBackgroundRect && !sPspGfxDlBackgroundFeedbackPrimed) {
+        PspGfxPspgl_DrawSolidRect(ulx, uly, lrx, lry, sPspGfxDlBackgroundFeedbackSeedColor, 0);
+        sPspGfxDlBackgroundFeedbackPrimed = 1;
+    }
+    PspGfxPspgl_DrawSolidRect(ulx, uly, lrx, lry, color, blend);
+    if (psp_gfx_dl_is_fill_cycle(ctx) && activeBackgroundRect) {
+        sPspGfxDlBackgroundFeedbackSeedColor = ctx->fillColor | 0xFF000000u;
+        sPspGfxDlBackgroundFeedbackPrimed = 0;
+    }
+    ctx->stats.fillRectangleCount++;
+}
+
 static void psp_gfx_dl_handle_set_fog_color(PspGfxDlContext* ctx, const Gfx* gfx) {
     if (ctx->batchCount != 0) {
         psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
@@ -3664,6 +3799,19 @@ static void psp_gfx_dl_handle_other_mode_l(PspGfxDlContext* ctx, const Gfx* gfx)
     psp_gfx_dl_mark_effective_state_dirty(ctx);
 }
 
+static void psp_gfx_dl_handle_other_mode_h(PspGfxDlContext* ctx, const Gfx* gfx) {
+    u32 shift = (gfx->words.w0 >> 8) & 0xFF;
+    u32 length = gfx->words.w0 & 0xFF;
+    u32 mask;
+
+    if ((length == 0) || (shift >= 32) || (length > (32 - shift))) {
+        psp_gfx_dl_count_unsupported(ctx, PSP_GFX_OP_F3D_SETOTHERMODE_H);
+        return;
+    }
+    mask = (length == 32) ? 0xFFFFFFFFU : (((1U << length) - 1U) << shift);
+    ctx->otherModeH = (ctx->otherModeH & ~mask) | (gfx->words.w1 & mask);
+}
+
 static void psp_gfx_dl_handle_geometry_mode(PspGfxDlContext* ctx, const Gfx* gfx, int set) {
     u32 nextGeometryMode;
 
@@ -3697,6 +3845,19 @@ static void psp_gfx_dl_handle_set_texture_image(PspGfxDlContext* ctx, const Gfx*
     ctx->textureUploadHeight = 0;
     ctx->textureUploadAttempted = 0;
     psp_gfx_dl_mark_effective_material_dirty(ctx);
+}
+
+static void psp_gfx_dl_handle_set_color_image(PspGfxDlContext* ctx, const Gfx* gfx) {
+    const void* image = psp_gfx_dl_resolve_ptr(ctx, gfx->words.w1);
+
+    if (ctx->batchCount != 0) {
+        psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+    }
+    ctx->colorImageFormat = (gfx->words.w0 >> 21) & 0x7;
+    ctx->colorImageSize = (gfx->words.w0 >> 19) & 0x3;
+    ctx->colorImageWidth = (gfx->words.w0 & 0xFFF) + 1U;
+    ctx->colorImage = image;
+    ctx->colorImageIsDisplay = psp_gfx_dl_is_display_color_image(image);
 }
 
 static void psp_gfx_dl_handle_load_tlut(PspGfxDlContext* ctx) {
@@ -3882,6 +4043,14 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
         const Gfx* cmd = pc++;
         u8 opcode = psp_gfx_dl_opcode(cmd);
 
+        if ((opcode == G_NOOP) && PSP_RENDERER_DL_MARKER_MATCH(cmd->words.w1)) {
+            if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_STARFIELD) {
+                psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+                PspRenderer_DrawPendingStarfield();
+                continue;
+            }
+        }
+
 #if SF64_PSP_PROFILE_COMPONENTS
         if ((opcode == G_NOOP) && PSP_PROFILE_DL_COMPONENT_TAG_MATCH(cmd->words.w1)) {
             PspProfiler_ComponentMarker(PSP_PROFILE_DL_COMPONENT_TAG_ID(cmd->words.w1));
@@ -3954,6 +4123,11 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
             continue;
         }
 
+        if (opcode == PSP_GFX_OP_F3D_SETOTHERMODE_H) {
+            psp_gfx_dl_handle_other_mode_h(ctx, cmd);
+            continue;
+        }
+
         if (opcode == PSP_GFX_OP_F3D_SETGEOMETRYMODE) {
             psp_gfx_dl_handle_geometry_mode(ctx, cmd, 1);
             continue;
@@ -3979,8 +4153,18 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
             continue;
         }
 
+        if (opcode == G_SETCIMG) {
+            psp_gfx_dl_handle_set_color_image(ctx, cmd);
+            continue;
+        }
+
         if (opcode == G_SETPRIMCOLOR) {
             psp_gfx_dl_handle_set_primitive_color(ctx, cmd);
+            continue;
+        }
+
+        if (opcode == G_SETFILLCOLOR) {
+            psp_gfx_dl_handle_set_fill_color(ctx, cmd);
             continue;
         }
 
@@ -4021,6 +4205,11 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
             half2 = pc++;
             ctx->stats.commandCount += 2;
             psp_gfx_dl_handle_texture_rectangle(ctx, cmd, half1, half2, opcode == G_TEXRECTFLIP);
+            continue;
+        }
+
+        if (opcode == G_FILLRECT) {
+            psp_gfx_dl_handle_fill_rectangle(ctx, cmd);
             continue;
         }
 
@@ -4086,6 +4275,12 @@ static void psp_gfx_dl_reset_context(PspGfxDlContext* ctx) {
     ctx->primitiveG = 255;
     ctx->primitiveB = 255;
     ctx->primitiveA = 255;
+    ctx->fillColor = psp_gfx_dl_pack_rgba_u8(0, 0, 0, 255, 0);
+    ctx->colorImage = NULL;
+    ctx->colorImageWidth = SCREEN_WIDTH;
+    ctx->colorImageFormat = G_IM_FMT_RGBA;
+    ctx->colorImageSize = G_IM_SIZ_16b;
+    ctx->colorImageIsDisplay = 1;
     ctx->fogA = 255;
     ctx->combineUsesTextureAlpha = 1;
 #if (USE_N64PSP_VERTEX_CHAIN2 + 0) || \
@@ -4127,7 +4322,7 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
                  "[pspgl-dl] task=%lu cmds=%lu vtx=%lu tri=%lu drawv=%lu dl=%lu reject=%lu mtx=%lu unsup=%lu "
                  "push=%lu pop=%lu mtxReject=%lu vp=%lu invalid=%lu outside=%lu tex=%lu texReject=%lu "
                  "rgba16=%lu ci4=%lu ia8=%lu ia16=%lu texTri=%lu alphaTestTri=%lu blendTri=%lu "
-                 "texRect=%lu rectReject=%lu "
+                 "texRect=%lu rectReject=%lu fillRect=%lu fillPrim=%lu fillUnsup=%lu "
                  "firstUnsup=0x%02lx "
                  "cmdLimit=%lu depthLimit=%lu",
                  (unsigned long) taskIndex, (unsigned long) ctx->stats.commandCount,
@@ -4145,6 +4340,9 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
                  (unsigned long) ctx->stats.blendTriangleCount,
                  (unsigned long) ctx->stats.textureRectangleCount,
                  (unsigned long) ctx->stats.textureRectangleRejected,
+                 (unsigned long) ctx->stats.fillRectangleCount,
+                 (unsigned long) ctx->stats.fillRectanglePrimitiveColorCount,
+                 (unsigned long) ctx->stats.fillRectangleUnsupportedCount,
                  (unsigned long) ctx->stats.firstUnsupportedOpcode,
                  (unsigned long) ctx->stats.commandLimitHit, (unsigned long) ctx->stats.depthLimitHit);
         PspPlatform_LogLine(line);
