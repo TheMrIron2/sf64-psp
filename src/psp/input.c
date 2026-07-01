@@ -41,13 +41,13 @@ static void psp_input_map_buttons(const SceCtrlData* in, OSContPad* out) {
         out->button |= B_BUTTON;
     }
     if (buttons & PSP_CTRL_SQUARE) {
-        out->button |= Z_TRIG;
+        out->button |= D_CBUTTONS;
     }
     if (buttons & PSP_CTRL_TRIANGLE) {
-        out->button |= U_CBUTTONS;
+        out->button |= L_CBUTTONS;
     }
     if (buttons & PSP_CTRL_LTRIGGER) {
-        out->button |= L_TRIG;
+        out->button |= Z_TRIG;
     }
     if (buttons & PSP_CTRL_RTRIGGER) {
         out->button |= R_TRIG;

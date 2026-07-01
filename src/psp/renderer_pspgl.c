@@ -215,9 +215,9 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
         renderStart = sceKernelGetSystemTimeWide();
     #endif
 
+        PspProfiler_ComponentTaskBegin();
         PspGfx_BeginFrame();
         PspGfxPspgl_BeginFrame();
-        psp_renderer_draw_starfield();
 
         if ((task != NULL) && (task->task.t.data_ptr != NULL)) {
             dl = (const Gfx*) task->task.t.data_ptr;
@@ -231,6 +231,7 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
     #endif
 
         PspGfx_EndFrame();
+        PspProfiler_ComponentTaskEnd();
 
     #if PSP_FPS_OVERLAY
         psp_renderer_perf_frame_complete(
@@ -263,4 +264,8 @@ void PspRenderer_AddStar(s16 x, s16 y, u32 n64FillColor) {
 
 void PspRenderer_EndStarfield(void) {
     sStarfieldReady = 1;
+}
+
+void PspRenderer_DrawPendingStarfield(void) {
+    psp_renderer_draw_starfield();
 }

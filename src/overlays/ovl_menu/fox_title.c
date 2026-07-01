@@ -10,6 +10,16 @@
 #include "fox_title.h"
 #include "assets/ast_title.h"
 #include "assets/ast_text.h"
+#if defined(TARGET_PSP) && SF64_PSP_PROFILE_COMPONENTS
+#include "src/psp/render_component.h"
+#endif
+#ifdef TARGET_PSP
+#include "src/psp/title_trace.h"
+#endif
+
+#ifndef PSP_PROFILE_DL_COMPONENT
+#define PSP_PROFILE_DL_COMPONENT(pkt_expr, component) ((void) 0)
+#endif
 
 #if defined(TARGET_PSP) && !defined(PSP_TRACE_ENABLED)
 #define PSP_TRACE_ENABLED 0
@@ -42,6 +52,23 @@ static f32 PspTitle_SinApprox(f32 angle) {
 
 static f32 PspTitle_CosApprox(f32 angle) {
     return PspTitle_SinApprox(angle + (M_PI * 0.5f));
+}
+#endif
+
+#if defined(TARGET_PSP) && SF64_PSP_PROFILE_COMPONENTS
+static PspProfileComponent Title_PspProfileComponentForTeam(TitleTeam team) {
+    switch (team) {
+        case TEAM_FOX:
+            return PSP_PROFILE_COMPONENT_TITLE_FOX;
+        case TEAM_FALCO:
+            return PSP_PROFILE_COMPONENT_TITLE_FALCO;
+        case TEAM_SLIPPY:
+            return PSP_PROFILE_COMPONENT_TITLE_SLIPPY;
+        case TEAM_PEPPY:
+            return PSP_PROFILE_COMPONENT_TITLE_PEPPY;
+        default:
+            return PSP_PROFILE_COMPONENT_TITLE_COMMON;
+    }
 }
 #endif
 
@@ -178,6 +205,12 @@ f32 D_menu_801B9078;
 f32 D_menu_801B907C;
 f32 D_menu_801B9080;
 f32 D_menu_801B9084;
+
+#if defined(TARGET_PSP) && SF64_PSP_PROFILE_FRAME_TRACE
+static f32 sPspTraceTeamLightDirX;
+static f32 sPspTraceTeamLightDirY;
+static f32 sPspTraceTeamLightDirZ;
+#endif
 
 TitleAnimation sTeamAnim[4] = {
     { &aTitleFoxRunningAnim, &aTitleFoxSpeakAnim2, aTitleFoxSkel },
@@ -344,6 +377,7 @@ void Title_Draw(void) {
         PSP_TRACE("title draw: screen begin");
 
         PSP_TRACE("title draw: matrix push 1");
+        PSP_PROFILE_DL_COMPONENT(gMasterDisp++, PSP_PROFILE_COMPONENT_TITLE_COMMON);
         Title_Matrix_Push();
 
         PSP_TRACE("title draw: screen draw");
@@ -353,18 +387,22 @@ void Title_Draw(void) {
         Matrix_Pop(&gGfxMatrix);
 
         PSP_TRACE("title draw: starfox logo");
+        PSP_PROFILE_DL_COMPONENT(gMasterDisp++, PSP_PROFILE_COMPONENT_TITLE_STARFOX_LOGO);
         Title_StarfoxLogo_Draw();
 
         PSP_TRACE("title draw: copyright symbol");
+        PSP_PROFILE_DL_COMPONENT(gMasterDisp++, PSP_PROFILE_COMPONENT_TITLE_COPYRIGHT);
         Title_CopyrightSymbol_Draw();
 
         PSP_TRACE("title draw: copyright");
         Title_Copyright_Draw();
 
         PSP_TRACE("title draw: press start");
+        PSP_PROFILE_DL_COMPONENT(gMasterDisp++, PSP_PROFILE_COMPONENT_TITLE_PRESS_START);
         Title_PressStart_Draw();
 
         PSP_TRACE("title draw: matrix push 2");
+        PSP_PROFILE_DL_COMPONENT(gMasterDisp++, PSP_PROFILE_COMPONENT_TITLE_N64_LOGO);
         Title_Matrix_Push();
 
         PSP_TRACE("title draw: 64 logo begin");
@@ -374,6 +412,7 @@ void Title_Draw(void) {
         PSP_TRACE("title draw: matrix pop 2");
         Matrix_Pop(&gGfxMatrix);
 
+        PSP_PROFILE_DL_COMPONENT(gMasterDisp++, PSP_PROFILE_COMPONENT_UNATTRIBUTED);
         PSP_TRACE("title draw: screen done");
         break;
 
@@ -1000,6 +1039,7 @@ void Title_Screen_Draw(void) {
     static TitleTeam D_menu_801ADA84[4] = { TEAM_FOX, TEAM_FALCO, TEAM_SLIPPY, TEAM_PEPPY };
 
     PSP_TRACE("title screen draw: begin");
+    PSP_PROFILE_DL_COMPONENT(gMasterDisp++, PSP_PROFILE_COMPONENT_TITLE_COMMON);
 
     gLight1R = D_menu_801B82F8;
     gLight1G = D_menu_801B82FC;
@@ -1016,13 +1056,22 @@ void Title_Screen_Draw(void) {
         Math_SmoothStepToF(&D_menu_801B86CC, D_menu_801B86DC, 0.1f, 100.0f, 0.0001f);
     }
 
-    Title_SetLightRot(D_menu_801B86C8, D_menu_801B86CC, 100.0f, &D_menu_801B82E0, &D_menu_801B82E4, &D_menu_801B82E8);
+    Title_SetLightRot(D_menu_801B86C8, D_menu_801B86CC, 100.0f,
+                      &D_menu_801B82E0, &D_menu_801B82E4, &D_menu_801B82E8);
+
+#if defined(TARGET_PSP) && SF64_PSP_PROFILE_FRAME_TRACE
+    sPspTraceTeamLightDirX = D_menu_801B82E0;
+    sPspTraceTeamLightDirY = D_menu_801B82E4;
+    sPspTraceTeamLightDirZ = D_menu_801B82E8;
+#endif
 
     for (i = 0; i < ARRAY_COUNT(D_menu_801ADA84); i++) {
+        PSP_PROFILE_DL_COMPONENT(gMasterDisp++, Title_PspProfileComponentForTeam(D_menu_801ADA84[i]));
         Title_Team_Draw(D_menu_801ADA84[i]);
         sTitleTeam[D_menu_801ADA84[i]].frameCount += sTitleTeam[D_menu_801ADA84[i]].unk_5C;
     }
 
+    PSP_PROFILE_DL_COMPONENT(gMasterDisp++, PSP_PROFILE_COMPONENT_TITLE_ARWING);
     gLight1R = D_menu_801B8310;
     gLight1G = D_menu_801B8314;
     gLight1B = D_menu_801B8318;
@@ -1033,6 +1082,7 @@ void Title_Screen_Draw(void) {
 
     Title_SetLightRot(D_menu_801B86D0, D_menu_801B86D4, 100.0f, &D_menu_801B82E0, &D_menu_801B82E4, &D_menu_801B82E8);
     Title_Arwing_Draw(0);
+    PSP_PROFILE_DL_COMPONENT(gMasterDisp++, PSP_PROFILE_COMPONENT_TITLE_COMMON);
 
     PSP_TRACE("title screen draw: done");
 }
@@ -3517,6 +3567,63 @@ void Title_ScreenFade_Update(void) {
             break;
     }
 }
+
+#if defined(TARGET_PSP) && SF64_PSP_PROFILE_FRAME_TRACE
+void Title_PspGetTraceMarkers(PspTitleTraceMarkers* markers) {
+    s32 i;
+
+    if (markers == NULL) {
+        return;
+    }
+    markers->valid =
+        (gTitleState == TITLE_UPDATE_ENTRY) &&
+        (sCutsceneState == TITLE_SCREEN);
+    markers->title_state = gTitleState;
+    markers->cutscene_state = sCutsceneState;
+    markers->scene_state = sSceneState;
+    markers->timer1 = sTimer1;
+    markers->timer2 = sTimer2;
+    markers->timer3 = sTimer3;
+    markers->title_msg_frame_count = sTitleMsgFrameCount;
+    markers->title_hold_timer = D_menu_801B82B0;
+    markers->selected_team = D_menu_801B8340;
+    for (i = 0; i < 4; i++) {
+        markers->team_frame_count[i] = sTitleTeam[i].frameCount;
+        markers->team_frame_step[i] = sTitleTeam[i].unk_5C;
+        markers->team_motion_enabled[i] = sTitleTeam[i].unk_54;
+    }
+    markers->light_pitch = D_menu_801B86C8;
+    markers->light_yaw = D_menu_801B86CC;
+    markers->team_light_dir_x = sPspTraceTeamLightDirX;
+    markers->team_light_dir_y = sPspTraceTeamLightDirY;
+    markers->team_light_dir_z = sPspTraceTeamLightDirZ;
+    markers->light_target_x = D_menu_801B905C;
+    markers->light_target_y = D_menu_801B9060;
+    markers->light_target_z = D_menu_801B9064;
+    markers->team_ambient_r = D_menu_801B8304;
+    markers->team_ambient_g = D_menu_801B8308;
+    markers->team_ambient_b = D_menu_801B830C;
+    markers->camera_eye_x = gCsCamEyeX;
+    markers->camera_eye_y = gCsCamEyeY;
+    markers->camera_eye_z = gCsCamEyeZ;
+    markers->camera_at_x = gCsCamAtX;
+    markers->camera_at_y = gCsCamAtY;
+    markers->camera_at_z = gCsCamAtZ;
+    markers->flags = 0;
+    if (gGoToTitle) {
+        markers->flags |= 1u << 0;
+    }
+    if (sLevelStartState) {
+        markers->flags |= 1u << 1;
+    }
+    if (D_menu_801B9040) {
+        markers->flags |= 1u << 2;
+    }
+    if (sDrawTeamName) {
+        markers->flags |= 1u << 3;
+    }
+}
+#endif
 
 void Title_SetCamUp3(bool arg0, f32* arg1, f32* arg2, f32* arg3, f32* arg4, f32* arg5, f32* arg6, f32 arg7, f32 arg8,
                      f32 arg9) {

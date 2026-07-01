@@ -56,6 +56,9 @@ typedef struct {
     u32 blendTriangleCount;
     u32 textureRectangleCount;
     u32 textureRectangleRejected;
+    u32 fillRectangleCount;
+    u32 fillRectanglePrimitiveColorCount;
+    u32 fillRectangleUnsupportedCount;
     u32 commandLimitHit;
     u32 depthLimitHit;
     u32 maxDepthReached;

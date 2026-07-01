@@ -35,7 +35,6 @@ void pspDebugScreenSetXY(int x, int y);
 void pspDebugScreenPrintf(const char* fmt, ...);
 float sqrtf(float x);
 
-#define PSP_VI_PER_FRAME 2
 #define PSP_LOG_PATH "ms0:/sf64_psp.log"
 #ifndef PSP_LOG_ENABLED
 #define PSP_LOG_ENABLED 0
@@ -259,7 +258,7 @@ static int psp_vi_thread(SceSize args, void* argp) {
     (void) argp;
 
     while (!sExitRequested) {
-        sceDisplayWaitVblankStart();
+        // game already divides frame pacing with gVIsPerFrame
         sceDisplayWaitVblankStart();
         PspPlatform_PostViEvent();
     }
