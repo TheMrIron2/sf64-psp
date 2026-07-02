@@ -10,9 +10,9 @@ existing `osCont*` interface. Controllers 2-4 remain disconnected.
 | Analog nub | Control Stick |
 | Cross | A |
 | Circle | B |
-| Square | Z |
-| Triangle | C-Up |
-| L trigger | L |
+| Square | C-Down |
+| Triangle | C-Left |
+| L trigger | Z |
 | R trigger | R |
 | Start | Start |
 | D-pad | N64 D-pad |

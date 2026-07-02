@@ -17,7 +17,4 @@ tens-of-thousands-of-flushes saving this experiment was intended to obtain.
 The valid PSPGL implementation is therefore the OFF/control path: keep the
 bind-driven texture-cache invalidation behavior intact.
 
-Future optimisation work should move away from texture-cache invalidation. The
-safest next candidates are command-list sizing, followed by the GE set-bit
-iteration experiment. Both have direct profiling evidence and do not challenge
-required texture semantics.
+Future optimisation work should move away from texture-cache invalidation.
