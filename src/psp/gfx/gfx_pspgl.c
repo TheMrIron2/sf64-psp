@@ -5,7 +5,22 @@
 
 #include <GLES/gl.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
+
+#ifndef PSP_RENDERER_DIAGNOSTICS
+#define PSP_RENDERER_DIAGNOSTICS 0
+#endif
+
+#if PSP_RENDERER_DIAGNOSTICS
+/*
+ * Declared directly (instead of including src/psp/platform.h) because that
+ * header pulls in sf64thread.h -> libultra/ultra64.h, whose PR/os_libc.h
+ * bcmp/bcopy/bzero prototypes conflict with the PSP SDK's own <strings.h>
+ * once <string.h> is in scope, which it already is in this file.
+ */
+void PspPlatform_LogLine(const char* line);
+#endif
 
 #define PSP_GFX_PSPGL_CI8_TEXTURE_CACHE_SIZE 96
 #define PSP_GFX_PSPGL_CONVERTED_TEXTURE_CACHE_SIZE 64
@@ -170,6 +185,10 @@ static u32 sVertexStreamLargePageIndex;
 static int sVertexStreamInitialized;
 static int sVertexStreamAvailable;
 static u32 sTextureParameterGeneration;
+#if PSP_RENDERER_DIAGNOSTICS
+static u32 sInvalidTextureRefDiagCount;
+static u32 sTextureExpectedMismatchBackendDiagCount;
+#endif
 #if SF64_PSP_TEXTURE_WRAP_CACHE
 /*
  * Resident texture cache entries own the authoritative wrap state for their
@@ -645,6 +664,19 @@ static u32 psp_gfx_pspgl_next_power_of_two(u32 value) {
         result <<= 1;
     }
     return result;
+}
+
+/*
+ * Pure, side-effect-free mirror of the pixel-budget check every
+ * PspGfxPspgl_Create*Texture() performs before uploading. Exposed so the
+ * display-list frontend can attribute a prepare-texture failure to the
+ * pixel budget precisely, without duplicating cache/upload behaviour.
+ */
+int PspGfxPspgl_TextureExceedsPixelBudget(u32 width, u32 height) {
+    u32 finalWidth = psp_gfx_pspgl_next_power_of_two(width);
+    u32 finalHeight = psp_gfx_pspgl_next_power_of_two(height);
+
+    return (finalWidth * finalHeight) > PSP_GFX_PSPGL_MAX_TEXTURE_PIXELS;
 }
 
 #if SF64_PSP_PSPGL_VBO_STREAM
@@ -1522,11 +1554,15 @@ void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u3
     u32 textureId, PspGfxPspglTextureRef textureRef, PspGfxPspglTextureEnv textureEnv,
     u32 textureEnvColor, PspGfxPspglTextureWrap wrapS, PspGfxPspglTextureWrap wrapT, int alphaTest,
     int blend, int premultiplied, int depthTest, int depthWrite, int fog, const float* fogColor, float fogStart, float fogEnd,
-    const float* projectionMatrix, int pretransformed
+    const float* projectionMatrix, int pretransformed, int textureExpected
 ) {
     GLint glTextureEnv;
     GLint glWrapS;
     GLint glWrapT;
+
+#if !PSP_RENDERER_DIAGNOSTICS
+    (void) textureExpected;
+#endif
 
     if ((vertices == NULL) || (vertexCount == 0)) {
         return;
@@ -1569,6 +1605,29 @@ void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u3
 
     // this controls GL_TEXTURE_2D, but does not disable GL_TEXTURE_COORD_ARRAY for untextured geometry
     if (textureId != 0) {
+#if PSP_RENDERER_DIAGNOSTICS
+        /*
+         * textureId is nonzero (the frontend resolved a texture) but the
+         * retained textureRef/GL handle it carried along doesn't match the
+         * cache slot's current generation. This distinguishes a frontend
+         * preparation failure (textureId == 0) from a stale/invalidated
+         * cache reference surviving past an eviction.
+         */
+        if (!psp_gfx_pspgl_texture_ref_valid(textureId, &textureRef) && (sInvalidTextureRefDiagCount < 32)) {
+            char line[224];
+
+            snprintf(line, sizeof(line),
+                     "[pspgl-texref-invalid] diag=%lu texId=%lu refTexture=%lu refGeneration=%lu refState=%p "
+                     "stateValid=%d stateTexture=%lu stateGeneration=%lu",
+                     (unsigned long) sInvalidTextureRefDiagCount, (unsigned long) textureId,
+                     (unsigned long) textureRef.texture, (unsigned long) textureRef.generation,
+                     (void*) textureRef.state, (textureRef.state != NULL) ? textureRef.state->valid : -1,
+                     (textureRef.state != NULL) ? (unsigned long) textureRef.state->texture : 0UL,
+                     (textureRef.state != NULL) ? (unsigned long) textureRef.state->generation : 0UL);
+            PspPlatform_LogLine(line);
+            sInvalidTextureRefDiagCount++;
+        }
+#endif
         psp_gfx_pspgl_texture_2d(1);
 
         if (alphaTest) {
@@ -1615,6 +1674,25 @@ void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u3
             psp_gfx_pspgl_texture_env_color(textureEnvColor);
         }
     } else {
+#if PSP_RENDERER_DIAGNOSTICS
+        /*
+         * Backend-side cross-check for the same textureExpected/textureId==0
+         * mismatch the frontend logs with full GBI context at flush time
+         * (see psp_gfx_dl_log_texture_expected_mismatch in gfx_psp_dl.c).
+         * Seeing this line confirms the mismatch reaches the actual GL
+         * submission unmodified, ruling out a frontend->backend parameter
+         * plumbing bug as the explanation.
+         */
+        if (textureExpected && (sTextureExpectedMismatchBackendDiagCount < 32)) {
+            char line[128];
+
+            snprintf(line, sizeof(line),
+                     "[pspgl-tex-expected-mismatch-backend] diag=%lu vertexCount=%lu textureId=0",
+                     (unsigned long) sTextureExpectedMismatchBackendDiagCount, (unsigned long) vertexCount);
+            PspPlatform_LogLine(line);
+            sTextureExpectedMismatchBackendDiagCount++;
+        }
+#endif
         psp_gfx_pspgl_texture_2d(0);
         psp_gfx_pspgl_alpha_test(0);
         psp_gfx_pspgl_blend(0);
