@@ -132,6 +132,12 @@ u32 PspGfxPspgl_CreateIa8Texture(const u8* pixels, u32 width, u32 height, u32* u
                                  PspGfxPspglTextureRef* textureRef);
 u32 PspGfxPspgl_GetIa8Texture(const u8* pixels, u32 width, u32 height, u32* uploadWidth, u32* uploadHeight,
                               PspGfxPspglTextureRef* textureRef);
+int PspGfxPspgl_FindIa8EnvBlendTexture(const u8* pixels, u32 width, u32 height, u32 primitiveColor,
+                                       u32 environmentColor, u32* textureId, u32* uploadWidth, u32* uploadHeight,
+                                       PspGfxPspglTextureRef* textureRef);
+u32 PspGfxPspgl_CreateIa8EnvBlendTexture(const u8* pixels, u32 width, u32 height, u32 primitiveColor,
+                                         u32 environmentColor, u32* uploadWidth, u32* uploadHeight,
+                                         PspGfxPspglTextureRef* textureRef);
 int PspGfxPspgl_FindIa16Texture(const u16* pixels, u32 width, u32 height, u32* textureId, u32* uploadWidth,
                                 u32* uploadHeight, PspGfxPspglTextureRef* textureRef);
 u32 PspGfxPspgl_CreateIa16Texture(const u16* pixels, u32 width, u32 height, u32* uploadWidth, u32* uploadHeight,

@@ -121,6 +121,10 @@ typedef struct {
     u32 uploadWidth;
     u32 uploadHeight;
     PspGfxConvertedTextureFormat format;
+    int envBlend;
+    u32 primitiveColor;
+    u32 environmentColor;
+    u32 colorTransfer;
     GLuint texture;
     PspGfxPspglTextureParameterState parameterState;
 } PspGfxConvertedTextureCacheEntry;
@@ -612,7 +616,8 @@ static u64 psp_gfx_pspgl_rgba32_base_hash(const void* pixels) {
 }
 
 static u64 psp_gfx_pspgl_converted_key_hash(const void* pixels, const u16* palette, u32 width, u32 height,
-                                            PspGfxConvertedTextureFormat format) {
+                                            PspGfxConvertedTextureFormat format, int envBlend, u32 primitiveColor,
+                                            u32 environmentColor) {
     u64 hash = psp_gfx_pspgl_hash_start(PSP_PROFILE_TEXTURE_CACHE_CONVERTED);
 
     hash = psp_gfx_pspgl_hash_ptr(hash, pixels);
@@ -620,6 +625,10 @@ static u64 psp_gfx_pspgl_converted_key_hash(const void* pixels, const u16* palet
     hash = psp_gfx_pspgl_hash_u64(hash, width);
     hash = psp_gfx_pspgl_hash_u64(hash, height);
     hash = psp_gfx_pspgl_hash_u64(hash, format);
+    hash = psp_gfx_pspgl_hash_u64(hash, envBlend ? 1 : 0);
+    hash = psp_gfx_pspgl_hash_u64(hash, primitiveColor);
+    hash = psp_gfx_pspgl_hash_u64(hash, environmentColor);
+    hash = psp_gfx_pspgl_hash_u64(hash, SF64_PSP_COLOR_TRANSFER);
     return hash;
 }
 
@@ -832,7 +841,8 @@ static void psp_gfx_pspgl_reset_vertex_stream(void) {
 static int psp_gfx_pspgl_find_converted_texture(const void* pixels, const u16* palette, u32 width, u32 height,
                                                 PspGfxConvertedTextureFormat format, u32* textureId,
                                                 PspGfxPspglTextureRef* textureRef, u32* uploadWidth,
-                                                u32* uploadHeight, int countHit) {
+                                                u32* uploadHeight, int envBlend, u32 primitiveColor,
+                                                u32 environmentColor, int countHit) {
     PspGfxConvertedTextureCacheEntry* entry;
 #if SF64_PSP_PROFILE_PHASES
     u64 keyHash;
@@ -845,13 +855,16 @@ static int psp_gfx_pspgl_find_converted_texture(const void* pixels, const u16* p
         return 0;
     }
 #if SF64_PSP_PROFILE_PHASES
-    keyHash = psp_gfx_pspgl_converted_key_hash(pixels, palette, width, height, format);
+    keyHash = psp_gfx_pspgl_converted_key_hash(pixels, palette, width, height, format, envBlend, primitiveColor,
+                                               environmentColor);
     baseHash = psp_gfx_pspgl_converted_base_hash(pixels, format);
 #endif
     for (i = 0; i < sConvertedTextureCacheCount; i++) {
         entry = &sConvertedTextureCache[i];
         if ((entry->pixels == pixels) && (entry->palette == palette) && (entry->width == width) &&
-            (entry->height == height) && (entry->format == format)) {
+            (entry->height == height) && (entry->format == format) && (entry->envBlend == envBlend) &&
+            (entry->primitiveColor == primitiveColor) && (entry->environmentColor == environmentColor) &&
+            (entry->colorTransfer == SF64_PSP_COLOR_TRANSFER)) {
             *textureId = entry->texture;
             *textureRef = psp_gfx_pspgl_texture_ref(&entry->parameterState);
             *uploadWidth = entry->uploadWidth;
@@ -876,7 +889,8 @@ static int psp_gfx_pspgl_find_converted_texture(const void* pixels, const u16* p
 }
 
 static u32 psp_gfx_pspgl_create_converted_texture(const void* pixels, const u16* palette, u32 width, u32 height,
-                                                  PspGfxConvertedTextureFormat format, u32* uploadWidth,
+                                                  PspGfxConvertedTextureFormat format, int envBlend,
+                                                  u32 primitiveColor, u32 environmentColor, u32* uploadWidth,
                                                   u32* uploadHeight, PspGfxPspglTextureRef* textureRef) {
     PspGfxConvertedTextureCacheEntry* entry;
     u32 finalWidth;
@@ -900,7 +914,8 @@ static u32 psp_gfx_pspgl_create_converted_texture(const void* pixels, const u16*
         return 0;
     }
 #if SF64_PSP_PROFILE_PHASES
-    keyHash = psp_gfx_pspgl_converted_key_hash(pixels, palette, width, height, format);
+    keyHash = psp_gfx_pspgl_converted_key_hash(pixels, palette, width, height, format, envBlend, primitiveColor,
+                                               environmentColor);
     baseHash = psp_gfx_pspgl_converted_base_hash(pixels, format);
 #endif
     PspProfiler_CountTextureEvent(0, 1, 0, 0, 0);
@@ -923,11 +938,27 @@ static u32 psp_gfx_pspgl_create_converted_texture(const void* pixels, const u16*
             } else if (format == PSP_GFX_TEXTURE_IA8) {
                 u8 packed = ((const u8*) pixels)[srcIndex];
                 u8 intensity = psp_gfx_color_transfer_u8((packed >> 4) * 17);
+                u8 alpha = (packed & 0xF) * 17;
 
-                out[0] = intensity;
-                out[1] = intensity;
-                out[2] = intensity;
-                out[3] = (packed & 0xF) * 17;
+                if (envBlend) {
+                    u8 pr = (u8) (primitiveColor & 0xFFU);
+                    u8 pg = (u8) ((primitiveColor >> 8) & 0xFFU);
+                    u8 pb = (u8) ((primitiveColor >> 16) & 0xFFU);
+                    u8 pa = (u8) ((primitiveColor >> 24) & 0xFFU);
+                    u8 er = (u8) (environmentColor & 0xFFU);
+                    u8 eg = (u8) ((environmentColor >> 8) & 0xFFU);
+                    u8 eb = (u8) ((environmentColor >> 16) & 0xFFU);
+
+                    out[0] = (u8) (((u32) er * (255U - intensity) + ((u32) pr * intensity) + 127U) / 255U);
+                    out[1] = (u8) (((u32) eg * (255U - intensity) + ((u32) pg * intensity) + 127U) / 255U);
+                    out[2] = (u8) (((u32) eb * (255U - intensity) + ((u32) pb * intensity) + 127U) / 255U);
+                    out[3] = (u8) ((((u32) alpha * pa) + 127U) / 255U);
+                } else {
+                    out[0] = intensity;
+                    out[1] = intensity;
+                    out[2] = intensity;
+                    out[3] = alpha;
+                }
             } else {
                 u16 packed = psp_gfx_pspgl_read_u16(pixels, srcIndex);
                 u8 intensity = psp_gfx_color_transfer_u8((u8) (packed >> 8));
@@ -950,7 +981,8 @@ static u32 psp_gfx_pspgl_create_converted_texture(const void* pixels, const u16*
         PspProfiler_RecordTextureCacheEviction(
             PSP_PROFILE_TEXTURE_CACHE_CONVERTED,
             psp_gfx_pspgl_converted_key_hash(entry->pixels, entry->palette, entry->width, entry->height,
-                                             entry->format));
+                                             entry->format, entry->envBlend, entry->primitiveColor,
+                                             entry->environmentColor));
 #endif
         psp_gfx_pspgl_invalidate_bound_texture();
 #if SF64_PSP_TEXTURE_WRAP_CACHE
@@ -966,6 +998,10 @@ static u32 psp_gfx_pspgl_create_converted_texture(const void* pixels, const u16*
     entry->uploadWidth = finalWidth;
     entry->uploadHeight = finalHeight;
     entry->format = format;
+    entry->envBlend = envBlend;
+    entry->primitiveColor = primitiveColor;
+    entry->environmentColor = environmentColor;
+    entry->colorTransfer = SF64_PSP_COLOR_TRANSFER;
 #if SF64_PSP_PROFILE_PHASES
     PspProfiler_RecordTextureCacheInsertion(PSP_PROFILE_TEXTURE_CACHE_CONVERTED,
                                             PSP_GFX_PSPGL_CONVERTED_TEXTURE_CACHE_SIZE, sConvertedTextureCacheCount,
@@ -995,11 +1031,11 @@ static u32 psp_gfx_pspgl_get_converted_texture(const void* pixels, const u16* pa
     u32 textureId;
 
     if (psp_gfx_pspgl_find_converted_texture(pixels, palette, width, height, format, &textureId, textureRef,
-                                             uploadWidth, uploadHeight, 1)) {
+                                             uploadWidth, uploadHeight, 0, 0, 0, 1)) {
         return textureId;
     }
-    return psp_gfx_pspgl_create_converted_texture(pixels, palette, width, height, format, uploadWidth, uploadHeight,
-                                                  textureRef);
+    return psp_gfx_pspgl_create_converted_texture(pixels, palette, width, height, format, 0, 0, 0, uploadWidth,
+                                                  uploadHeight, textureRef);
 }
 
 void PspGfxPspgl_Init(void) {
@@ -1212,13 +1248,13 @@ u32 PspGfxPspgl_GetCi8Texture(const u8* indices, const u16* palette, u32 width, 
 int PspGfxPspgl_FindCi4Texture(const u8* indices, const u16* palette, u32 width, u32 height, u32* textureId,
                                PspGfxPspglTextureRef* textureRef, u32* uploadWidth, u32* uploadHeight) {
     return psp_gfx_pspgl_find_converted_texture(indices, palette, width, height, PSP_GFX_TEXTURE_CI4, textureId,
-                                                textureRef, uploadWidth, uploadHeight, 1);
+                                                textureRef, uploadWidth, uploadHeight, 0, 0, 0, 1);
 }
 
 u32 PspGfxPspgl_CreateCi4Texture(const u8* indices, const u16* palette, u32 width, u32 height, u32* uploadWidth,
                                  u32* uploadHeight, PspGfxPspglTextureRef* textureRef) {
-    return psp_gfx_pspgl_create_converted_texture(indices, palette, width, height, PSP_GFX_TEXTURE_CI4, uploadWidth,
-                                                  uploadHeight, textureRef);
+    return psp_gfx_pspgl_create_converted_texture(indices, palette, width, height, PSP_GFX_TEXTURE_CI4, 0, 0, 0,
+                                                  uploadWidth, uploadHeight, textureRef);
 }
 
 u32 PspGfxPspgl_GetCi4Texture(const u8* indices, const u16* palette, u32 width, u32 height, u32* uploadWidth,
@@ -1593,13 +1629,13 @@ u32 PspGfxPspgl_GetRgba32Texture(const void* pixels, u32 width, u32 height, int 
 int PspGfxPspgl_FindIa8Texture(const u8* pixels, u32 width, u32 height, u32* textureId, u32* uploadWidth,
                                u32* uploadHeight, PspGfxPspglTextureRef* textureRef) {
     return psp_gfx_pspgl_find_converted_texture(pixels, NULL, width, height, PSP_GFX_TEXTURE_IA8, textureId,
-                                                textureRef, uploadWidth, uploadHeight, 1);
+                                                textureRef, uploadWidth, uploadHeight, 0, 0, 0, 1);
 }
 
 u32 PspGfxPspgl_CreateIa8Texture(const u8* pixels, u32 width, u32 height, u32* uploadWidth, u32* uploadHeight,
                                  PspGfxPspglTextureRef* textureRef) {
-    return psp_gfx_pspgl_create_converted_texture(pixels, NULL, width, height, PSP_GFX_TEXTURE_IA8, uploadWidth,
-                                                  uploadHeight, textureRef);
+    return psp_gfx_pspgl_create_converted_texture(pixels, NULL, width, height, PSP_GFX_TEXTURE_IA8, 0, 0, 0,
+                                                  uploadWidth, uploadHeight, textureRef);
 }
 
 u32 PspGfxPspgl_GetIa8Texture(const u8* pixels, u32 width, u32 height, u32* uploadWidth, u32* uploadHeight,
@@ -1608,16 +1644,32 @@ u32 PspGfxPspgl_GetIa8Texture(const u8* pixels, u32 width, u32 height, u32* uplo
                                                uploadHeight, textureRef);
 }
 
+int PspGfxPspgl_FindIa8EnvBlendTexture(const u8* pixels, u32 width, u32 height, u32 primitiveColor,
+                                       u32 environmentColor, u32* textureId, u32* uploadWidth, u32* uploadHeight,
+                                       PspGfxPspglTextureRef* textureRef) {
+    return psp_gfx_pspgl_find_converted_texture(pixels, NULL, width, height, PSP_GFX_TEXTURE_IA8, textureId,
+                                                textureRef, uploadWidth, uploadHeight, 1, primitiveColor,
+                                                environmentColor, 1);
+}
+
+u32 PspGfxPspgl_CreateIa8EnvBlendTexture(const u8* pixels, u32 width, u32 height, u32 primitiveColor,
+                                         u32 environmentColor, u32* uploadWidth, u32* uploadHeight,
+                                         PspGfxPspglTextureRef* textureRef) {
+    return psp_gfx_pspgl_create_converted_texture(pixels, NULL, width, height, PSP_GFX_TEXTURE_IA8, 1,
+                                                  primitiveColor, environmentColor, uploadWidth, uploadHeight,
+                                                  textureRef);
+}
+
 int PspGfxPspgl_FindIa16Texture(const u16* pixels, u32 width, u32 height, u32* textureId, u32* uploadWidth,
                                 u32* uploadHeight, PspGfxPspglTextureRef* textureRef) {
     return psp_gfx_pspgl_find_converted_texture(pixels, NULL, width, height, PSP_GFX_TEXTURE_IA16, textureId,
-                                                textureRef, uploadWidth, uploadHeight, 1);
+                                                textureRef, uploadWidth, uploadHeight, 0, 0, 0, 1);
 }
 
 u32 PspGfxPspgl_CreateIa16Texture(const u16* pixels, u32 width, u32 height, u32* uploadWidth, u32* uploadHeight,
                                   PspGfxPspglTextureRef* textureRef) {
-    return psp_gfx_pspgl_create_converted_texture(pixels, NULL, width, height, PSP_GFX_TEXTURE_IA16, uploadWidth,
-                                                  uploadHeight, textureRef);
+    return psp_gfx_pspgl_create_converted_texture(pixels, NULL, width, height, PSP_GFX_TEXTURE_IA16, 0, 0, 0,
+                                                  uploadWidth, uploadHeight, textureRef);
 }
 
 u32 PspGfxPspgl_GetIa16Texture(const u16* pixels, u32 width, u32 height, u32* uploadWidth, u32* uploadHeight,

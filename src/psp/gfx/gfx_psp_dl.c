@@ -612,8 +612,11 @@ static int psp_gfx_dl_premultiplied_blend_enabled(PspGfxDlContext* ctx) {
 }
 
 static int psp_gfx_dl_baked_env_blend_texture_enabled(const PspGfxDlContext* ctx) {
-    return (ctx->combineMode == PSP_GFX_DL_COMBINE_ENV_TEX_PRIM_ALPHA_BLEND) &&
-           (ctx->textureFormat == G_IM_FMT_RGBA) && (ctx->textureSize == G_IM_SIZ_32b);
+    if (ctx->combineMode != PSP_GFX_DL_COMBINE_ENV_TEX_PRIM_ALPHA_BLEND) {
+        return 0;
+    }
+    return ((ctx->textureFormat == G_IM_FMT_RGBA) && (ctx->textureSize == G_IM_SIZ_32b)) ||
+           ((ctx->textureFormat == G_IM_FMT_IA) && (ctx->textureSize == G_IM_SIZ_8b));
 }
 
 static PspGfxPspglTextureEnv psp_gfx_dl_texture_env_for_combine(const PspGfxDlContext* ctx) {
@@ -4153,14 +4156,29 @@ static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int pr
             }
         }
     } else if ((ctx->textureFormat == G_IM_FMT_IA) && (ctx->textureSize == G_IM_SIZ_8b)) {
-        hit = PspGfxPspgl_FindIa8Texture((const u8*) ctx->textureImage, ctx->textureWidth, ctx->textureHeight,
-                                         &ctx->textureId, &ctx->textureUploadWidth, &ctx->textureUploadHeight,
-                                         &ctx->textureRef);
+        if (psp_gfx_dl_baked_env_blend_texture_enabled(ctx)) {
+            hit = PspGfxPspgl_FindIa8EnvBlendTexture((const u8*) ctx->textureImage, ctx->textureWidth,
+                                                     ctx->textureHeight, psp_gfx_dl_primitive_color(ctx),
+                                                     psp_gfx_dl_environment_color(ctx), &ctx->textureId,
+                                                     &ctx->textureUploadWidth, &ctx->textureUploadHeight,
+                                                     &ctx->textureRef);
+        } else {
+            hit = PspGfxPspgl_FindIa8Texture((const u8*) ctx->textureImage, ctx->textureWidth, ctx->textureHeight,
+                                             &ctx->textureId, &ctx->textureUploadWidth, &ctx->textureUploadHeight,
+                                             &ctx->textureRef);
+        }
         if (!hit) {
             psp_gfx_dl_flush_texture_change(ctx, PSP_PROFILE_TEXTURE_FLUSH_CACHE_MISS_UPLOAD);
-            ctx->textureId = PspGfxPspgl_CreateIa8Texture((const u8*) ctx->textureImage, ctx->textureWidth,
-                                                          ctx->textureHeight, &ctx->textureUploadWidth,
-                                                          &ctx->textureUploadHeight, &ctx->textureRef);
+            if (psp_gfx_dl_baked_env_blend_texture_enabled(ctx)) {
+                ctx->textureId = PspGfxPspgl_CreateIa8EnvBlendTexture(
+                    (const u8*) ctx->textureImage, ctx->textureWidth, ctx->textureHeight,
+                    psp_gfx_dl_primitive_color(ctx), psp_gfx_dl_environment_color(ctx),
+                    &ctx->textureUploadWidth, &ctx->textureUploadHeight, &ctx->textureRef);
+            } else {
+                ctx->textureId = PspGfxPspgl_CreateIa8Texture((const u8*) ctx->textureImage, ctx->textureWidth,
+                                                              ctx->textureHeight, &ctx->textureUploadWidth,
+                                                              &ctx->textureUploadHeight, &ctx->textureRef);
+            }
         }
     } else if ((ctx->textureFormat == G_IM_FMT_IA) && (ctx->textureSize == G_IM_SIZ_16b)) {
         hit = PspGfxPspgl_FindIa16Texture((const u16*) ctx->textureImage, ctx->textureWidth, ctx->textureHeight,
