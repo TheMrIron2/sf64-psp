@@ -48,6 +48,7 @@ typedef struct {
     u32 textureCount;
     u32 textureRejected;
     u32 rgba16TextureCount;
+    u32 rgba32TextureCount;
     u32 ci4TextureCount;
     u32 ia8TextureCount;
     u32 ia16TextureCount;

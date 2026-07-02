@@ -207,12 +207,6 @@ typedef struct {
     int alphaTest;
     int blend;
     int premultiplied;
-    /*
-     * Set from ctx->textureEnabled (the gsSPTexture on/off state), not from
-     * textureId != 0. This lets diagnostics tell "texturing intentionally
-     * off" apart from "texturing was requested but preparation failed".
-     */
-    int textureExpected;
     int valid;
     int dirty;
 } PspGfxDlEffectiveMaterialState;
@@ -293,7 +287,6 @@ typedef struct {
     int textureUploadAttempted;
     u32 batchTextureId;
     PspGfxPspglTextureRef batchTextureRef;
-    int batchTextureExpected;
     u32 geometryMode;
     u32 lightCount;
     PspGfxDlLight lights[7];
@@ -388,15 +381,6 @@ typedef struct {
     u32 vtxLightCountHistogram[8];
     u32 litVertexCount;
     u32 unlitVertexCount;
-    u32 alphaTextureDiagCount;
-    u32 alphaBatchDiagCount;
-    /* Retained result of the most recent psp_gfx_dl_prepare_texture() call,
-     * consumed by the textureExpected/textureId==0 mismatch log below. */
-    int texturePrepareCacheHit;
-    int texturePrepareCreateResult;
-    const char* texturePrepareReason;
-    u32 texturePrepareFailureDiagCount;
-    u32 textureExpectedMismatchDiagCount;
 #endif
 #if N64PSP_VERTEX_BATCH_DIAGNOSTICS
     u32 vtxDiagCommands;
@@ -642,10 +626,19 @@ static int psp_gfx_dl_premultiplied_blend_enabled(PspGfxDlContext* ctx) {
         return 0;
     }
     return psp_gfx_dl_blend_enabled(ctx) && ((ctx->otherModeL & CVG_DST_SAVE) == CVG_DST_SAVE) &&
-           (ctx->textureFormat == G_IM_FMT_RGBA) && (ctx->textureSize == G_IM_SIZ_16b);
+           (ctx->textureFormat == G_IM_FMT_RGBA) &&
+           ((ctx->textureSize == G_IM_SIZ_16b) || (ctx->textureSize == G_IM_SIZ_32b));
+}
+
+static int psp_gfx_dl_baked_env_blend_texture_enabled(const PspGfxDlContext* ctx) {
+    return (ctx->combineMode == PSP_GFX_DL_COMBINE_ENV_TEX_PRIM_ALPHA_BLEND) &&
+           (ctx->textureFormat == G_IM_FMT_RGBA) && (ctx->textureSize == G_IM_SIZ_32b);
 }
 
 static PspGfxPspglTextureEnv psp_gfx_dl_texture_env_for_combine(const PspGfxDlContext* ctx) {
+    if (psp_gfx_dl_baked_env_blend_texture_enabled(ctx)) {
+        return PSP_GFX_PSPGL_TEX_REPLACE;
+    }
     if (ctx->combineMode == PSP_GFX_DL_COMBINE_ENV_TEX_PRIM_ALPHA_BLEND) {
         return PSP_GFX_PSPGL_TEX_BLEND;
     }
@@ -659,6 +652,9 @@ static PspGfxPspglTextureEnv psp_gfx_dl_texture_env_for_combine(const PspGfxDlCo
 }
 
 static u32 psp_gfx_dl_texture_env_color_for_combine(const PspGfxDlContext* ctx) {
+    if (psp_gfx_dl_baked_env_blend_texture_enabled(ctx)) {
+        return 0;
+    }
     if (ctx->combineMode == PSP_GFX_DL_COMBINE_ENV_TEX_PRIM_ALPHA_BLEND) {
         return psp_gfx_dl_primitive_rgb_texture_env_color(ctx);
     }
@@ -1881,11 +1877,6 @@ static void psp_gfx_dl_handle_movemem(PspGfxDlContext* ctx, const Gfx* gfx) {
     }
 }
 
-#if PSP_RENDERER_DIAGNOSTICS
-static void psp_gfx_dl_log_alpha_batch(PspGfxDlContext* ctx, PspProfileFlushReason reason);
-static void psp_gfx_dl_log_texture_expected_mismatch(PspGfxDlContext* ctx, PspProfileFlushReason reason);
-#endif
-
 static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason reason) {
 #if SF64_PSP_PROFILE_COMPONENTS
     u32 ownerComponent;
@@ -1912,10 +1903,6 @@ static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason 
                                                 sPspGfxDlBatchProvenance, ctx->batchProvenanceCount);
 #endif
     (void) reason;
-#if PSP_RENDERER_DIAGNOSTICS
-    psp_gfx_dl_log_alpha_batch(ctx, reason);
-    psp_gfx_dl_log_texture_expected_mismatch(ctx, reason);
-#endif
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_BATCH_FLUSH);
     PspGfxPspgl_DrawColoredTriangles(sPspGfxDlBatch, ctx->batchCount, ctx->batchTextureId, ctx->batchTextureRef,
                                      ctx->batchTextureEnv, ctx->batchTextureEnvColor, ctx->batchWrapS,
@@ -1923,8 +1910,7 @@ static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason 
                                      ctx->batchPremultiplied, ctx->batchDepthTest,
                                      ctx->batchDepthWrite, ctx->batchFog, ctx->batchFogColor, ctx->batchFogStart,
                                      ctx->batchFogEnd,
-                                     &ctx->batchProjection[0][0], ctx->batchPretransformed,
-                                     ctx->batchTextureExpected);
+                                     &ctx->batchProjection[0][0], ctx->batchPretransformed);
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_BATCH_FLUSH);
     PspProfiler_CountBatchFlush(reason, ctx->batchCount);
 #if SF64_PSP_PROFILE_TRIVIAL_REJECTS
@@ -1969,7 +1955,7 @@ static void psp_gfx_dl_set_batch_texture(PspGfxDlContext* ctx, u32 textureId, Ps
                                          PspGfxPspglTextureEnv textureEnv, u32 textureEnvColor,
                                          PspGfxDlCombineMode combineMode, u32 primitiveColor, u32 environmentColor,
                                          PspGfxPspglTextureWrap wrapS, PspGfxPspglTextureWrap wrapT, int alphaTest,
-                                         int blend, int premultiplied, int textureExpected) {
+                                         int blend, int premultiplied) {
     int textureIdChanged = (ctx->batchTextureId != textureId) ||
                            !psp_gfx_dl_texture_ref_equal(ctx->batchTextureRef, textureRef);
     int textureEnvChanged = ctx->batchTextureEnv != textureEnv;
@@ -2030,200 +2016,7 @@ static void psp_gfx_dl_set_batch_texture(PspGfxDlContext* ctx, u32 textureId, Ps
     ctx->batchAlphaTest = alphaTest;
     ctx->batchBlend = blend;
     ctx->batchPremultiplied = premultiplied;
-    /*
-     * Diagnostic-only: not part of the state-transition comparison above, so
-     * carrying it does not change flush cadence or any rendering behaviour.
-     */
-    ctx->batchTextureExpected = textureExpected;
 }
-
-#if PSP_RENDERER_DIAGNOSTICS
-static void psp_gfx_dl_rgba16_alpha_stats(const PspGfxDlContext* ctx, u32* transparent, u32* opaque) {
-    const u16* pixels = (const u16*) ctx->textureImage;
-    u32 count = ctx->textureWidth * ctx->textureHeight;
-    u32 i;
-
-    *transparent = 0;
-    *opaque = 0;
-    if (pixels == NULL) {
-        return;
-    }
-    for (i = 0; i < count; i++) {
-        if ((pixels[i] & 1U) != 0) {
-            (*opaque)++;
-        } else {
-            (*transparent)++;
-        }
-    }
-}
-
-static void psp_gfx_dl_log_alpha_texture_state(PspGfxDlContext* ctx, u32 textureId, int pretransformed) {
-    char line[256];
-    u32 alpha0;
-    u32 alpha1;
-
-    if (ctx->alphaTextureDiagCount >= 32) {
-        return;
-    }
-    if ((textureId == 0) || (ctx->textureFormat != G_IM_FMT_RGBA) || (ctx->textureSize != G_IM_SIZ_16b) ||
-        !ctx->batchBlend) {
-        return;
-    }
-    if ((ctx->primitiveA == 255) && (ctx->combineMode != PSP_GFX_DL_COMBINE_MODULATE_PRIM_ALPHA) &&
-        (ctx->combineMode != PSP_GFX_DL_COMBINE_UNKNOWN)) {
-        return;
-    }
-
-    psp_gfx_dl_rgba16_alpha_stats(ctx, &alpha0, &alpha1);
-
-    snprintf(line, sizeof(line),
-             "[pspgl-alpha-tex] task=%lu diag=%lu tex=%p id=%lu fmt=%lu siz=%lu wh=%lux%lu upload=%lux%lu "
-             "scale=%04lx/%04lx combine=%d texEnv=%d otherL=%08lx geom=%08lx prim=%02x%02x%02x%02x "
-             "alphaTest=%d blend=%d premul=%d depth=%d/%d pre=%d a0=%lu a1=%lu",
-             (unsigned long) ctx->taskIndex, (unsigned long) ctx->alphaTextureDiagCount, ctx->textureImage,
-             (unsigned long) textureId, (unsigned long) ctx->textureFormat, (unsigned long) ctx->textureSize,
-             (unsigned long) ctx->textureWidth, (unsigned long) ctx->textureHeight,
-             (unsigned long) ctx->textureUploadWidth, (unsigned long) ctx->textureUploadHeight,
-             (unsigned long) ctx->textureScaleS, (unsigned long) ctx->textureScaleT,
-             (int) ctx->combineMode, (int) ctx->batchTextureEnv, (unsigned long) ctx->otherModeL,
-             (unsigned long) ctx->geometryMode, ctx->primitiveR, ctx->primitiveG, ctx->primitiveB, ctx->primitiveA,
-             ctx->batchAlphaTest, ctx->batchBlend, ctx->batchPremultiplied, ctx->batchDepthTest,
-             ctx->batchDepthWrite, pretransformed, (unsigned long) alpha0, (unsigned long) alpha1);
-    PspPlatform_LogLine(line);
-    ctx->alphaTextureDiagCount++;
-}
-
-static long psp_gfx_dl_diag_milli(float value) {
-    if (value >= 0.0f) {
-        return (long) ((value * 1000.0f) + 0.5f);
-    }
-    return (long) ((value * 1000.0f) - 0.5f);
-}
-
-static void psp_gfx_dl_log_alpha_batch(PspGfxDlContext* ctx, PspProfileFlushReason reason) {
-    const PspGfxPspglColorVertex* vertex;
-    char line[320];
-    float minU;
-    float maxU;
-    float minV;
-    float maxV;
-    float minX;
-    float maxX;
-    float minY;
-    float maxY;
-    u32 minA;
-    u32 maxA;
-    u32 i;
-
-    if ((ctx->alphaBatchDiagCount >= 48) || (ctx->batchCount == 0) || (ctx->batchTextureId == 0) ||
-        !ctx->batchBlend) {
-        return;
-    }
-
-    vertex = &sPspGfxDlBatch[0];
-    minU = maxU = vertex->u;
-    minV = maxV = vertex->v;
-    minX = maxX = vertex->x;
-    minY = maxY = vertex->y;
-    minA = maxA = (vertex->color >> 24) & 0xFFU;
-
-    for (i = 1; i < ctx->batchCount; i++) {
-        u32 alpha;
-
-        vertex = &sPspGfxDlBatch[i];
-        if (vertex->u < minU) {
-            minU = vertex->u;
-        }
-        if (vertex->u > maxU) {
-            maxU = vertex->u;
-        }
-        if (vertex->v < minV) {
-            minV = vertex->v;
-        }
-        if (vertex->v > maxV) {
-            maxV = vertex->v;
-        }
-        if (vertex->x < minX) {
-            minX = vertex->x;
-        }
-        if (vertex->x > maxX) {
-            maxX = vertex->x;
-        }
-        if (vertex->y < minY) {
-            minY = vertex->y;
-        }
-        if (vertex->y > maxY) {
-            maxY = vertex->y;
-        }
-        alpha = (vertex->color >> 24) & 0xFFU;
-        if (alpha < minA) {
-            minA = alpha;
-        }
-        if (alpha > maxA) {
-            maxA = alpha;
-        }
-    }
-
-    snprintf(line, sizeof(line),
-             "[pspgl-alpha-batch] task=%lu diag=%lu reason=%d verts=%lu texId=%lu combine=%d env=%d "
-             "wrap=%d/%d blend=%d premul=%d depth=%d/%d prim=%08lx envc=%08lx texc=%08lx "
-             "uvm=%ld,%ld..%ld,%ld xym=%ld,%ld..%ld,%ld a=%lu..%lu "
-             "c0=%08lx uv0=%ld,%ld c1=%08lx uv1=%ld,%ld c2=%08lx uv2=%ld,%ld",
-             (unsigned long) ctx->taskIndex, (unsigned long) ctx->alphaBatchDiagCount, (int) reason,
-             (unsigned long) ctx->batchCount, (unsigned long) ctx->batchTextureId, (int) ctx->batchCombineMode,
-             (int) ctx->batchTextureEnv, (int) ctx->batchWrapS, (int) ctx->batchWrapT, ctx->batchBlend,
-             ctx->batchPremultiplied, ctx->batchDepthTest, ctx->batchDepthWrite,
-             (unsigned long) ctx->batchPrimitiveColor, (unsigned long) ctx->batchEnvironmentColor,
-             (unsigned long) ctx->batchTextureEnvColor, psp_gfx_dl_diag_milli(minU),
-             psp_gfx_dl_diag_milli(minV), psp_gfx_dl_diag_milli(maxU), psp_gfx_dl_diag_milli(maxV),
-             psp_gfx_dl_diag_milli(minX), psp_gfx_dl_diag_milli(minY), psp_gfx_dl_diag_milli(maxX),
-             psp_gfx_dl_diag_milli(maxY), (unsigned long) minA, (unsigned long) maxA,
-             (unsigned long) sPspGfxDlBatch[0].color, psp_gfx_dl_diag_milli(sPspGfxDlBatch[0].u),
-             psp_gfx_dl_diag_milli(sPspGfxDlBatch[0].v), (unsigned long) sPspGfxDlBatch[1].color,
-             psp_gfx_dl_diag_milli(sPspGfxDlBatch[1].u), psp_gfx_dl_diag_milli(sPspGfxDlBatch[1].v),
-             (unsigned long) sPspGfxDlBatch[2].color, psp_gfx_dl_diag_milli(sPspGfxDlBatch[2].u),
-             psp_gfx_dl_diag_milli(sPspGfxDlBatch[2].v));
-    PspPlatform_LogLine(line);
-    ctx->alphaBatchDiagCount++;
-}
-
-/*
- * Fires when the display-list frontend intended to texture this batch
- * (textureExpected, carried from ctx->textureEnabled -- not inferred from
- * textureId) but the batch is about to submit with textureId == 0. This is
- * the exact condition that makes PspGfxPspgl_DrawColoredTriangles() fall
- * back to a flat, untextured, unblended draw. Distinguishes that failure
- * from geometry that was never meant to be textured in the first place.
- */
-static void psp_gfx_dl_log_texture_expected_mismatch(PspGfxDlContext* ctx, PspProfileFlushReason reason) {
-    char line[448];
-
-    if (!ctx->batchTextureExpected || (ctx->batchTextureId != 0) || (ctx->batchCount == 0)) {
-        return;
-    }
-    if (ctx->textureExpectedMismatchDiagCount >= 32) {
-        return;
-    }
-
-    snprintf(line, sizeof(line),
-             "[pspgl-tex-expected-mismatch] task=%lu diag=%lu reason=%d verts=%lu combine=%d otherL=%08lx "
-             "otherH=%08lx prim=%02x%02x%02x%02x tex=%p fmt=%lu siz=%lu wh=%lux%lu upload=%lux%lu "
-             "attempted=%d cacheHit=%d createOk=%d prepReason=%s texId=%lu refState=%p refTex=%lu refGen=%lu "
-             "alphaTest=%d blend=%d",
-             (unsigned long) ctx->taskIndex, (unsigned long) ctx->textureExpectedMismatchDiagCount, (int) reason,
-             (unsigned long) ctx->batchCount, (int) ctx->batchCombineMode, (unsigned long) ctx->otherModeL,
-             (unsigned long) ctx->otherModeH, ctx->primitiveR, ctx->primitiveG, ctx->primitiveB, ctx->primitiveA,
-             ctx->textureImage, (unsigned long) ctx->textureFormat, (unsigned long) ctx->textureSize,
-             (unsigned long) ctx->textureWidth, (unsigned long) ctx->textureHeight,
-             (unsigned long) ctx->textureUploadWidth, (unsigned long) ctx->textureUploadHeight,
-             ctx->textureUploadAttempted, ctx->texturePrepareCacheHit, ctx->texturePrepareCreateResult,
-             ctx->texturePrepareReason ? ctx->texturePrepareReason : "none", (unsigned long) ctx->batchTextureId,
-             (void*) ctx->batchTextureRef.state, (unsigned long) ctx->batchTextureRef.texture,
-             (unsigned long) ctx->batchTextureRef.generation, ctx->batchAlphaTest, ctx->batchBlend);
-    PspPlatform_LogLine(line);
-    ctx->textureExpectedMismatchDiagCount++;
-}
-#endif
 
 static void psp_gfx_dl_set_batch_depth(PspGfxDlContext* ctx, int depthTest, int depthWrite) {
     if ((ctx->batchCount != 0) &&
@@ -2353,7 +2146,6 @@ static int psp_gfx_dl_resolve_effective_material_state(PspGfxDlContext* ctx) {
     material->textureId = ctx->textureEnabled ? ctx->textureId : 0;
     material->textureRef = ctx->textureEnabled ? ctx->textureRef : psp_gfx_dl_null_texture_ref();
     /* Frontend intent (gsSPTexture on/off), not derived from textureId. */
-    material->textureExpected = ctx->textureEnabled;
     material->textureEnv = psp_gfx_dl_texture_env_for_combine(ctx);
     material->textureEnvColor = psp_gfx_dl_texture_env_color_for_combine(ctx);
     material->wrapS = psp_gfx_dl_texture_wrap(ctx->textureCms, ctx->textureMaskS);
@@ -2421,13 +2213,10 @@ static u32 psp_gfx_dl_apply_effective_batch_state(PspGfxDlContext* ctx, const Ps
                                  psp_gfx_dl_environment_color(ctx),
                                  ctx->effectiveMaterial.wrapS, ctx->effectiveMaterial.wrapT,
                                  ctx->effectiveMaterial.alphaTest, ctx->effectiveMaterial.blend,
-                                 ctx->effectiveMaterial.premultiplied, ctx->effectiveMaterial.textureExpected);
+                                 ctx->effectiveMaterial.premultiplied);
     psp_gfx_dl_set_batch_depth(ctx, ctx->effectiveDepth.depthTest, ctx->effectiveDepth.depthWrite);
     psp_gfx_dl_set_batch_fog_resolved(ctx, ctx->effectiveFog.fog, ctx->effectiveFog.color,
                                       ctx->effectiveFog.start, ctx->effectiveFog.end);
-#if PSP_RENDERER_DIAGNOSTICS
-    psp_gfx_dl_log_alpha_texture_state(ctx, ctx->effectiveMaterial.textureId, pretransformed);
-#endif
     resolved = materialResolved || depthResolved || fogResolved;
     PspProfiler_CountEffectiveState(resolved ? 1 : 0, resolved ? 0 : 1, materialResolved, depthResolved,
                                     fogResolved);
@@ -2927,7 +2716,7 @@ static int psp_gfx_dl_try_emit_tri2_direct_pair(PspGfxDlContext* ctx, u8 a0, u8 
                                  psp_gfx_dl_texture_wrap(ctx->textureCms, ctx->textureMaskS),
                                  psp_gfx_dl_texture_wrap(ctx->textureCmt, ctx->textureMaskT),
                                  psp_gfx_dl_alpha_test_enabled(ctx), psp_gfx_dl_blend_enabled(ctx),
-                                 psp_gfx_dl_premultiplied_blend_enabled(ctx), ctx->textureEnabled);
+                                 psp_gfx_dl_premultiplied_blend_enabled(ctx));
     psp_gfx_dl_set_batch_depth(ctx, (ctx->geometryMode & G_ZBUFFER) != 0, (ctx->otherModeL & Z_UPD) != 0);
     psp_gfx_dl_set_batch_fog(ctx, !pretransformed0 && ((ctx->otherModeL >> 30) == G_BL_CLR_FOG), va0->projection);
 #endif
@@ -3445,7 +3234,7 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
                                  psp_gfx_dl_texture_wrap(ctx->textureCms, ctx->textureMaskS),
                                  psp_gfx_dl_texture_wrap(ctx->textureCmt, ctx->textureMaskT),
                                  psp_gfx_dl_alpha_test_enabled(ctx), psp_gfx_dl_blend_enabled(ctx),
-                                 psp_gfx_dl_premultiplied_blend_enabled(ctx), ctx->textureEnabled);
+                                 psp_gfx_dl_premultiplied_blend_enabled(ctx));
     psp_gfx_dl_set_batch_depth(ctx, depthTest, depthWrite);
     psp_gfx_dl_set_batch_fog(ctx, !pretransformed && ((ctx->otherModeL >> 30) == G_BL_CLR_FOG), va->projection);
 #endif
@@ -3606,7 +3395,7 @@ static void psp_gfx_dl_handle_texture_rectangle(PspGfxDlContext* ctx, const Gfx*
         psp_gfx_dl_texture_wrap(ctx->textureCms, ctx->textureMaskS),
         psp_gfx_dl_texture_wrap(ctx->textureCmt, ctx->textureMaskT),
         psp_gfx_dl_alpha_test_enabled(ctx), psp_gfx_dl_blend_enabled(ctx),
-        psp_gfx_dl_premultiplied_blend_enabled(ctx), 1);
+        psp_gfx_dl_premultiplied_blend_enabled(ctx));
     psp_gfx_dl_set_batch_depth(ctx, 0, 0);
     psp_gfx_dl_set_batch_fog(ctx, 0, ctx->projection);
     psp_gfx_dl_set_batch_transform(ctx, 1, 0, NULL);
@@ -3637,6 +3426,10 @@ static void psp_gfx_dl_handle_set_primitive_color(PspGfxDlContext* ctx, const Gf
 
     if ((ctx->primitiveR != r) || (ctx->primitiveG != g) || (ctx->primitiveB != b) || (ctx->primitiveA != a)) {
         psp_gfx_dl_mark_effective_material_dirty(ctx);
+        if (psp_gfx_dl_baked_env_blend_texture_enabled(ctx)) {
+            ctx->textureId = 0;
+            ctx->textureUploadAttempted = 0;
+        }
     }
     ctx->primitiveR = r;
     ctx->primitiveG = g;
@@ -3653,6 +3446,10 @@ static void psp_gfx_dl_handle_set_environment_color(PspGfxDlContext* ctx, const 
     if ((ctx->environmentR != r) || (ctx->environmentG != g) || (ctx->environmentB != b) ||
         (ctx->environmentA != a)) {
         psp_gfx_dl_mark_effective_material_dirty(ctx);
+        if (psp_gfx_dl_baked_env_blend_texture_enabled(ctx)) {
+            ctx->textureId = 0;
+            ctx->textureUploadAttempted = 0;
+        }
     }
     ctx->environmentR = r;
     ctx->environmentG = g;
@@ -3797,6 +3594,7 @@ static int psp_gfx_dl_combine_cycle1_matches(u32 mux0, u32 mux1, u32 a, u32 b, u
 static void psp_gfx_dl_handle_set_combine(PspGfxDlContext* ctx, const Gfx* gfx) {
     u32 mux0 = gfx->words.w0 & 0x00FFFFFF;
     u32 mux1 = gfx->words.w1;
+    PspGfxDlCombineMode oldCombineMode = ctx->combineMode;
 
     if (psp_gfx_dl_combine_cycle0_matches(mux0, mux1, G_CCMUX_TEXEL0, G_CCMUX_0, G_CCMUX_SHADE,
                                           G_CCMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_TEXEL0) &&
@@ -3858,6 +3656,10 @@ static void psp_gfx_dl_handle_set_combine(PspGfxDlContext* ctx, const Gfx* gfx) 
     } else {
         ctx->combineMode = PSP_GFX_DL_COMBINE_UNKNOWN;
         ctx->combineUsesTextureAlpha = 1;
+    }
+    if ((oldCombineMode != ctx->combineMode) && psp_gfx_dl_baked_env_blend_texture_enabled(ctx)) {
+        ctx->textureId = 0;
+        ctx->textureUploadAttempted = 0;
     }
     psp_gfx_dl_mark_effective_material_dirty(ctx);
 }
@@ -4274,36 +4076,6 @@ static void psp_gfx_dl_handle_set_tile(PspGfxDlContext* ctx, const Gfx* gfx) {
     psp_gfx_dl_mark_effective_material_dirty(ctx);
 }
 
-#if PSP_RENDERER_DIAGNOSTICS
-/*
- * Reason labels for every psp_gfx_dl_prepare_texture() return path that
- * leaves textureId at zero. Logged immediately (rate-limited) and retained
- * on ctx so the flush-time textureExpected/textureId==0 mismatch log
- * (psp_gfx_dl_log_texture_expected_mismatch) can report the last outcome.
- */
-static void psp_gfx_dl_log_texture_prepare_failure(PspGfxDlContext* ctx, const char* reason) {
-    char line[224];
-
-    ctx->texturePrepareReason = reason;
-    if (ctx->texturePrepareFailureDiagCount >= 32) {
-        return;
-    }
-    snprintf(line, sizeof(line),
-             "[pspgl-texprep-fail] task=%lu diag=%lu reason=%s tex=%p fmt=%lu siz=%lu wh=%lux%lu "
-             "attempted=%d combine=%d",
-             (unsigned long) ctx->taskIndex, (unsigned long) ctx->texturePrepareFailureDiagCount, reason,
-             ctx->textureImage, (unsigned long) ctx->textureFormat, (unsigned long) ctx->textureSize,
-             (unsigned long) ctx->textureWidth, (unsigned long) ctx->textureHeight, ctx->textureUploadAttempted,
-             (int) ctx->combineMode);
-    PspPlatform_LogLine(line);
-    ctx->texturePrepareFailureDiagCount++;
-}
-
-static int psp_gfx_dl_texture_exceeds_pixel_budget(const PspGfxDlContext* ctx) {
-    return PspGfxPspgl_TextureExceedsPixelBudget(ctx->textureWidth, ctx->textureHeight);
-}
-#endif
-
 static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int premultiply) {
     int result;
     int hit = 0;
@@ -4319,26 +4091,16 @@ static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int pr
         return 1;
     }
     if (ctx->textureUploadAttempted) {
-        /* Already attempted this generation; the reason was logged when the
-         * attempt happened, so avoid re-logging on every subsequent triangle. */
+        /* Already attempted this generation; avoid retrying on every subsequent triangle. */
         return 0;
     }
     if (ctx->textureImage == NULL) {
-#if PSP_RENDERER_DIAGNOSTICS
-        psp_gfx_dl_log_texture_prepare_failure(ctx, "missing-image");
-#endif
         return 0;
     }
     if ((ctx->textureWidth == 0) || (ctx->textureHeight == 0)) {
-#if PSP_RENDERER_DIAGNOSTICS
-        psp_gfx_dl_log_texture_prepare_failure(ctx, "missing-dimensions");
-#endif
         return 0;
     }
     if ((ctx->textureFormat == G_IM_FMT_CI) && (ctx->texturePalette == NULL)) {
-#if PSP_RENDERER_DIAGNOSTICS
-        psp_gfx_dl_log_texture_prepare_failure(ctx, "invalid-pointer");
-#endif
         return 0;
     }
 
@@ -4377,6 +4139,32 @@ static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int pr
                                                              &ctx->textureUploadWidth, &ctx->textureUploadHeight,
                                                              &ctx->textureRef);
         }
+    } else if ((ctx->textureFormat == G_IM_FMT_RGBA) && (ctx->textureSize == G_IM_SIZ_32b)) {
+        if (psp_gfx_dl_baked_env_blend_texture_enabled(ctx)) {
+            hit = PspGfxPspgl_FindRgba32EnvBlendTexture(ctx->textureImage, ctx->textureWidth, ctx->textureHeight,
+                                                        psp_gfx_dl_primitive_color(ctx),
+                                                        psp_gfx_dl_environment_color(ctx), &ctx->textureId,
+                                                        &ctx->textureRef, &ctx->textureUploadWidth,
+                                                        &ctx->textureUploadHeight);
+        } else {
+            hit = PspGfxPspgl_FindRgba32Texture(ctx->textureImage, ctx->textureWidth, ctx->textureHeight,
+                                                premultiply, &ctx->textureId, &ctx->textureRef,
+                                                &ctx->textureUploadWidth, &ctx->textureUploadHeight);
+        }
+        if (!hit) {
+            psp_gfx_dl_flush_texture_change(ctx, PSP_PROFILE_TEXTURE_FLUSH_CACHE_MISS_UPLOAD);
+            if (psp_gfx_dl_baked_env_blend_texture_enabled(ctx)) {
+                ctx->textureId = PspGfxPspgl_CreateRgba32EnvBlendTexture(
+                    ctx->textureImage, ctx->textureWidth, ctx->textureHeight, psp_gfx_dl_primitive_color(ctx),
+                    psp_gfx_dl_environment_color(ctx), &ctx->textureUploadWidth, &ctx->textureUploadHeight,
+                    &ctx->textureRef);
+            } else {
+                ctx->textureId = PspGfxPspgl_CreateRgba32Texture(ctx->textureImage, ctx->textureWidth,
+                                                                 ctx->textureHeight, premultiply,
+                                                                 &ctx->textureUploadWidth, &ctx->textureUploadHeight,
+                                                                 &ctx->textureRef);
+            }
+        }
     } else if ((ctx->textureFormat == G_IM_FMT_IA) && (ctx->textureSize == G_IM_SIZ_8b)) {
         hit = PspGfxPspgl_FindIa8Texture((const u8*) ctx->textureImage, ctx->textureWidth, ctx->textureHeight,
                                          &ctx->textureId, &ctx->textureUploadWidth, &ctx->textureUploadHeight,
@@ -4410,44 +4198,22 @@ static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int pr
             ctx->stats.ci4TextureCount++;
         } else if ((ctx->textureFormat == G_IM_FMT_RGBA) && (ctx->textureSize == G_IM_SIZ_16b)) {
             ctx->stats.rgba16TextureCount++;
+        } else if ((ctx->textureFormat == G_IM_FMT_RGBA) && (ctx->textureSize == G_IM_SIZ_32b)) {
+            ctx->stats.rgba32TextureCount++;
         } else if ((ctx->textureFormat == G_IM_FMT_IA) && (ctx->textureSize == G_IM_SIZ_8b)) {
             ctx->stats.ia8TextureCount++;
         } else if ((ctx->textureFormat == G_IM_FMT_IA) && (ctx->textureSize == G_IM_SIZ_16b)) {
             ctx->stats.ia16TextureCount++;
         }
         result = 1;
-#if PSP_RENDERER_DIAGNOSTICS
-        ctx->texturePrepareReason = "ok";
-#endif
     } else {
         if (supported) {
             ctx->stats.textureRejected++;
-#if PSP_RENDERER_DIAGNOSTICS
-            if (psp_gfx_dl_texture_exceeds_pixel_budget(ctx)) {
-                psp_gfx_dl_log_texture_prepare_failure(ctx, "cache-allocation-failure");
-            } else {
-                /*
-                 * Format is supported, inputs are valid, and the texture
-                 * fits the pixel budget, but PspGfxPspgl_Create*Texture()
-                 * still returned textureId == 0. The backend doesn't
-                 * currently distinguish a glGenTextures() name-generation
-                 * failure from a glTexImage2D() upload failure, so this
-                 * catches both until the backend exposes that detail.
-                 */
-                psp_gfx_dl_log_texture_prepare_failure(ctx, "other");
-            }
-#endif
         } else {
-#if PSP_RENDERER_DIAGNOSTICS
-            psp_gfx_dl_log_texture_prepare_failure(ctx, "unsupported-format");
-#endif
+            ctx->stats.textureRejected++;
         }
         result = 0;
     }
-#if PSP_RENDERER_DIAGNOSTICS
-    ctx->texturePrepareCacheHit = hit;
-    ctx->texturePrepareCreateResult = (ctx->textureId != 0);
-#endif
 #if SF64_PSP_PROFILE_TRIVIAL_REJECTS
     if (ctx->trivialRejectDiagnosticActive && supported) {
         if (hit) {
@@ -4800,7 +4566,7 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
         snprintf(line, sizeof(line),
                  "[pspgl-dl] task=%lu cmds=%lu vtx=%lu tri=%lu drawv=%lu dl=%lu reject=%lu mtx=%lu unsup=%lu "
                  "push=%lu pop=%lu mtxReject=%lu vp=%lu invalid=%lu outside=%lu tex=%lu texReject=%lu "
-                 "rgba16=%lu ci4=%lu ia8=%lu ia16=%lu texTri=%lu alphaTestTri=%lu blendTri=%lu "
+                 "rgba16=%lu rgba32=%lu ci4=%lu ia8=%lu ia16=%lu texTri=%lu alphaTestTri=%lu blendTri=%lu "
                  "texRect=%lu rectReject=%lu fillRect=%lu fillPrim=%lu fillUnsup=%lu "
                  "firstUnsup=0x%02lx "
                  "cmdLimit=%lu depthLimit=%lu",
@@ -4813,6 +4579,7 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
                  (unsigned long) ctx->stats.viewportCount, (unsigned long) ctx->stats.invalidVertexCount,
                  (unsigned long) ctx->stats.outsideVertexCount, (unsigned long) ctx->stats.textureCount,
                  (unsigned long) ctx->stats.textureRejected, (unsigned long) ctx->stats.rgba16TextureCount,
+                 (unsigned long) ctx->stats.rgba32TextureCount,
                  (unsigned long) ctx->stats.ci4TextureCount, (unsigned long) ctx->stats.ia8TextureCount,
                  (unsigned long) ctx->stats.ia16TextureCount, (unsigned long) ctx->stats.texturedTriangleCount,
                  (unsigned long) ctx->stats.alphaTestTriangleCount,

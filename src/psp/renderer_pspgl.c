@@ -174,7 +174,7 @@ static void psp_renderer_draw_starfield(void) {
 
     PspGfxPspgl_DrawColoredTriangles(sStarfieldVertices, out, 0, (PspGfxPspglTextureRef) { 0 },
                                      PSP_GFX_PSPGL_TEX_REPLACE, 0, PSP_GFX_PSPGL_WRAP_CLAMP,
-                                     PSP_GFX_PSPGL_WRAP_CLAMP, 0, 0, 0, 0, 0, 0, NULL, 0.0f, 0.0f, NULL, 1, 0);
+                                     PSP_GFX_PSPGL_WRAP_CLAMP, 0, 0, 0, 0, 0, 0, NULL, 0.0f, 0.0f, NULL, 1);
     sStarfieldReady = 0;
 }
 

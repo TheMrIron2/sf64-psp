@@ -894,6 +894,7 @@ static const char* psp_profiler_texture_cache_name(PspProfileTextureCacheClass c
     static const char* names[PSP_PROFILE_TEXTURE_CACHE_COUNT] = {
         "ci8",
         "rgba16",
+        "rgba32",
         "converted"
     };
 
