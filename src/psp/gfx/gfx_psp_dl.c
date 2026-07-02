@@ -271,6 +271,8 @@ typedef struct {
     u32 textureHeight;
     u32 textureUploadWidth;
     u32 textureUploadHeight;
+    u32 textureTileUls;
+    u32 textureTileUlt;
     u32 textureCms;
     u32 textureCmt;
     u32 textureMaskS;
@@ -556,6 +558,25 @@ static PspGfxPspglTextureWrap psp_gfx_dl_texture_wrap(u32 mode, u32 mask) {
      * backend state, so canonicalise non-clamped tiles to REPEAT.
      */
     return PSP_GFX_PSPGL_WRAP_REPEAT;
+}
+
+static float psp_gfx_dl_normalize_s10_5(const PspGfxDlContext* ctx, s16 coord, u32 uploadSize, u32 tileOrigin) {
+    (void) ctx;
+
+    if (uploadSize == 0) {
+        return 0.0f;
+    }
+    return ((float) coord - ((float) tileOrigin * 8.0f)) / (32.0f * (float) uploadSize);
+}
+
+static float psp_gfx_dl_normalize_texel_coord(const PspGfxDlContext* ctx, float coord, u32 uploadSize,
+                                              u32 tileOrigin) {
+    (void) ctx;
+
+    if (uploadSize == 0) {
+        return 0.0f;
+    }
+    return (coord - ((float) tileOrigin * 0.25f)) / (float) uploadSize;
 }
 
 static int psp_gfx_dl_alpha_test_enabled(PspGfxDlContext* ctx) {
@@ -2242,8 +2263,8 @@ static void psp_gfx_dl_build_clip_vertex(PspGfxDlContext* ctx, const PspGfxDlVer
         dst->a = (float) src->a / 255.0f;
     }
     if ((ctx->textureUploadWidth != 0) && (ctx->textureUploadHeight != 0)) {
-        dst->u = ((float) src->s / 32.0f) / (float) ctx->textureUploadWidth;
-        dst->v = ((float) src->t / 32.0f) / (float) ctx->textureUploadHeight;
+        dst->u = psp_gfx_dl_normalize_s10_5(ctx, src->s, ctx->textureUploadWidth, ctx->textureTileUls);
+        dst->v = psp_gfx_dl_normalize_s10_5(ctx, src->t, ctx->textureUploadHeight, ctx->textureTileUlt);
     } else {
         dst->u = 0.0f;
         dst->v = 0.0f;
@@ -2386,8 +2407,11 @@ static void psp_gfx_dl_emit_direct_vertex(PspGfxDlContext* ctx, const PspGfxDlVe
 
     psp_gfx_dl_vertex_color_u8(ctx, src, &r, &g, &b, &a);
     dst->color = psp_gfx_dl_pack_rgba_u8(r, g, b, a, ctx->batchPremultiplied);
-    dst->u = (float) src->s * uScale;
-    dst->v = (float) src->t * vScale;
+    (void) uScale;
+    (void) vScale;
+
+    dst->u = psp_gfx_dl_normalize_s10_5(ctx, src->s, ctx->textureUploadWidth, ctx->textureTileUls);
+    dst->v = psp_gfx_dl_normalize_s10_5(ctx, src->t, ctx->textureUploadHeight, ctx->textureTileUlt);
 }
 
 static void psp_gfx_dl_emit_direct_triangle(PspGfxDlContext* ctx, const PspGfxDlVertex* a,
@@ -2442,8 +2466,11 @@ static void psp_gfx_dl_build_direct_vertex(PspGfxDlContext* ctx, const PspGfxDlV
 
     psp_gfx_dl_vertex_color_u8(ctx, src, &r, &g, &b, &a);
     dst->color = psp_gfx_dl_pack_rgba_u8(r, g, b, a, ctx->batchPremultiplied);
-    dst->u = (float) src->s * uScale;
-    dst->v = (float) src->t * vScale;
+    (void) uScale;
+    (void) vScale;
+
+    dst->u = psp_gfx_dl_normalize_s10_5(ctx, src->s, ctx->textureUploadWidth, ctx->textureTileUls);
+    dst->v = psp_gfx_dl_normalize_s10_5(ctx, src->t, ctx->textureUploadHeight, ctx->textureTileUlt);
 }
 
 static void psp_gfx_dl_emit_direct_vertex_unchecked(PspGfxDlContext* ctx, const PspGfxDlVertex* src,
@@ -3223,8 +3250,8 @@ static void psp_gfx_dl_emit_rect_vertex(PspGfxDlContext* ctx,
     psp_gfx_dl_mark_batch_component(ctx);
     psp_gfx_dl_mark_vertex_reuse_source(ctx, PSP_PROFILE_VERTEX_REUSE_SOURCE_RECTANGLE);
 
-    dst->u = u / (float) ctx->textureUploadWidth;
-    dst->v = v / (float) ctx->textureUploadHeight;
+    dst->u = psp_gfx_dl_normalize_texel_coord(ctx, u, ctx->textureUploadWidth, ctx->textureTileUls);
+    dst->v = psp_gfx_dl_normalize_texel_coord(ctx, v, ctx->textureUploadHeight, ctx->textureTileUlt);
 
     r = ctx->primitiveR;
     g = ctx->primitiveG;
@@ -4009,6 +4036,8 @@ static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int pr
 
 static void psp_gfx_dl_handle_set_tile_size(PspGfxDlContext* ctx, const Gfx* gfx) {
     u32 tile = (gfx->words.w1 >> 24) & 0x7;
+    u32 uls;
+    u32 ult;
     u32 lrs;
     u32 lrt;
 
@@ -4016,8 +4045,12 @@ static void psp_gfx_dl_handle_set_tile_size(PspGfxDlContext* ctx, const Gfx* gfx
         return;
     }
 
+    uls = (gfx->words.w0 >> 12) & 0xFFF;
+    ult = gfx->words.w0 & 0xFFF;
     lrs = (gfx->words.w1 >> 12) & 0xFFF;
     lrt = gfx->words.w1 & 0xFFF;
+    ctx->textureTileUls = uls;
+    ctx->textureTileUlt = ult;
     ctx->textureWidth = (lrs >> G_TEXTURE_IMAGE_FRAC) + 1;
     ctx->textureHeight = (lrt >> G_TEXTURE_IMAGE_FRAC) + 1;
     ctx->textureUploadAttempted = 0;
