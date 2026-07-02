@@ -1941,7 +1941,7 @@ void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u3
 
         if (alphaTest) {
             psp_gfx_pspgl_alpha_test(1);
-            psp_gfx_pspgl_alpha_func(GL_GREATER, 0.0f);
+            psp_gfx_pspgl_alpha_func(GL_GREATER, (alphaTest > 1) ? 0.5f : 0.0f);
         } else {
             psp_gfx_pspgl_alpha_test(0);
         }

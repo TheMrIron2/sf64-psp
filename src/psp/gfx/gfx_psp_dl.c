@@ -477,6 +477,7 @@ static u32 sLoggedRejectedDlTargets;
 #endif
 
 static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int premultiply);
+static int psp_gfx_dl_blend_enabled(PspGfxDlContext* ctx);
 
 /*
  * Calculated lighting always goes through the square-root transfer LUT
@@ -593,7 +594,17 @@ static float psp_gfx_dl_normalize_texel_coord(const PspGfxDlContext* ctx, float 
     return (coord - ((float) tileOrigin * 0.25f)) / (float) uploadSize;
 }
 
+static int psp_gfx_dl_rgba16_coverage_alpha_enabled(PspGfxDlContext* ctx) {
+    return ctx->combineUsesTextureAlpha && psp_gfx_dl_blend_enabled(ctx) &&
+           ((ctx->otherModeL & CVG_DST_SAVE) == CVG_DST_SAVE) &&
+           ((ctx->otherModeL & 3U) == G_AC_NONE) &&
+           (ctx->textureFormat == G_IM_FMT_RGBA) && (ctx->textureSize == G_IM_SIZ_16b);
+}
+
 static int psp_gfx_dl_alpha_test_enabled(PspGfxDlContext* ctx) {
+    if (psp_gfx_dl_rgba16_coverage_alpha_enabled(ctx)) {
+        return 2;
+    }
     return ctx->combineUsesTextureAlpha &&
            (((ctx->otherModeL & 3U) != G_AC_NONE) || ((ctx->otherModeL & CVG_X_ALPHA) != 0));
 }
@@ -2370,7 +2381,6 @@ static void psp_gfx_dl_emit_clip_vertex_with_source(PspGfxDlContext* ctx, const 
         dst->y = src->viewY;
         dst->z = src->viewZ;
     }
-
     r = src->r;
     g = src->g;
     b = src->b;
@@ -2484,7 +2494,6 @@ static void psp_gfx_dl_emit_direct_vertex(PspGfxDlContext* ctx, const PspGfxDlVe
         dst->y = src->viewY;
         dst->z = src->viewZ;
     }
-
     psp_gfx_dl_vertex_color_u8(ctx, src, &r, &g, &b, &a);
     dst->color = psp_gfx_dl_pack_rgba_u8(r, g, b, a, ctx->batchPremultiplied);
     (void) uScale;
@@ -2543,7 +2552,6 @@ static void psp_gfx_dl_build_direct_vertex(PspGfxDlContext* ctx, const PspGfxDlV
         dst->y = src->viewY;
         dst->z = src->viewZ;
     }
-
     psp_gfx_dl_vertex_color_u8(ctx, src, &r, &g, &b, &a);
     dst->color = psp_gfx_dl_pack_rgba_u8(r, g, b, a, ctx->batchPremultiplied);
     (void) uScale;
