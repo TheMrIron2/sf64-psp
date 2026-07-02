@@ -4228,6 +4228,8 @@ static void psp_gfx_dl_handle_set_tile_size(PspGfxDlContext* ctx, const Gfx* gfx
     u32 ult;
     u32 lrs;
     u32 lrt;
+    u32 widthQuarters;
+    u32 heightQuarters;
 
     if (tile != G_TX_RENDERTILE) {
         return;
@@ -4237,10 +4239,12 @@ static void psp_gfx_dl_handle_set_tile_size(PspGfxDlContext* ctx, const Gfx* gfx
     ult = gfx->words.w0 & 0xFFF;
     lrs = (gfx->words.w1 >> 12) & 0xFFF;
     lrt = gfx->words.w1 & 0xFFF;
+    widthQuarters = (lrs >= uls) ? (lrs - uls) : 0;
+    heightQuarters = (lrt >= ult) ? (lrt - ult) : 0;
     ctx->textureTileUls = uls;
     ctx->textureTileUlt = ult;
-    ctx->textureWidth = (lrs >> G_TEXTURE_IMAGE_FRAC) + 1;
-    ctx->textureHeight = (lrt >> G_TEXTURE_IMAGE_FRAC) + 1;
+    ctx->textureWidth = (widthQuarters >> G_TEXTURE_IMAGE_FRAC) + 1;
+    ctx->textureHeight = (heightQuarters >> G_TEXTURE_IMAGE_FRAC) + 1;
     ctx->textureUploadAttempted = 0;
     psp_gfx_dl_prepare_texture(ctx, 0, psp_gfx_dl_premultiplied_blend_enabled(ctx));
     psp_gfx_dl_mark_effective_material_dirty(ctx);
