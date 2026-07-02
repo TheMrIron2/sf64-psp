@@ -5,6 +5,54 @@
 
 #include <stddef.h>
 
+/*
+ * Renderer colour-transfer policy, matching sf64-dc (gfx_retro_dc.c): a
+ * square-root transfer table256[i] = 255 * sqrt(i / 255) is applied exactly
+ * once to every RGB input the fixed-function combine consumes -- vertex
+ * shade colours, texture RGB at upload, primitive/environment/fog/fill
+ * colours. Alpha is never transformed.
+ *
+ *   SF64_PSP_COLOR_TRANSFER=0  raw behaviour (transfer applied only to
+ *                              calculated lighting, as before)
+ *   SF64_PSP_COLOR_TRANSFER=1  sf64-dc square-root policy
+ *
+ * The mode is compile-time only: texture caches hold transformed texels, so
+ * toggling requires a rebuild rather than runtime cache invalidation.
+ */
+#ifndef SF64_PSP_COLOR_TRANSFER
+#define SF64_PSP_COLOR_TRANSFER 1
+#endif
+
+/* 255 * sqrt(i / 255) table; always built (calculated lighting uses it even
+ * when SF64_PSP_COLOR_TRANSFER is 0). */
+extern u8 gPspGfxColorTransferLut[256];
+
+void PspGfxPspgl_InitColorTransfer(void);
+
+/* Policy-gated RGB transfer for everything other than calculated lighting. */
+static inline u8 psp_gfx_color_transfer_u8(u8 value) {
+#if SF64_PSP_COLOR_TRANSFER
+    return gPspGfxColorTransferLut[value];
+#else
+    return value;
+#endif
+}
+
+/* N64 RGBA5551 fill colour to the renderer vertex layout 0xAABBGGRR: 5-bit
+ * channels expand to 8 bits, RGB carries the transfer policy exactly once,
+ * the alpha bit expands to 0/255 untransformed. */
+static inline u32 psp_gfx_rgba5551_to_abgr8888(u16 color) {
+    u32 r5 = (color >> 11) & 0x1F;
+    u32 g5 = (color >> 6) & 0x1F;
+    u32 b5 = (color >> 1) & 0x1F;
+    u32 r = psp_gfx_color_transfer_u8((u8) ((r5 << 3) | (r5 >> 2)));
+    u32 g = psp_gfx_color_transfer_u8((u8) ((g5 << 3) | (g5 >> 2)));
+    u32 b = psp_gfx_color_transfer_u8((u8) ((b5 << 3) | (b5 >> 2)));
+    u32 a = (color & 1U) ? 255U : 0U;
+
+    return r | (g << 8) | (b << 16) | (a << 24);
+}
+
 typedef struct {
     // native PSP GE vertex order
     float u;

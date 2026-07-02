@@ -408,9 +408,6 @@ static PspGfxDlPositionPair
     sPspGfxDlScalarTransformOutput[PSP_GFX_DL_MAX_VERTICES];
 #endif
 
-static u8 sLightingRemap[256];
-static int sLightingRemapInitialized;
-
 #if (USE_N64PSP_VERTEX_CHAIN2 + 0)
 static n64psp_vec4f
     sPspGfxDlTransformInput[PSP_GFX_DL_MAX_VERTICES]
@@ -481,19 +478,11 @@ static u32 sLoggedRejectedDlTargets;
 
 static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int premultiply);
 
-static void psp_gfx_dl_init_lighting_remap(void) {
-    u32 i;
-
-    if (sLightingRemapInitialized) {
-        return;
-    }
-    /* Match the N64 brightness response used by the Dreamcast renderer. */
-    for (i = 0; i < 256; i++) {
-        sLightingRemap[i] = (u8) (255.0f * sqrtf((float) i / 255.0f));
-    }
-    sLightingRemapInitialized = 1;
-}
-
+/*
+ * Calculated lighting always goes through the square-root transfer LUT
+ * (gPspGfxColorTransferLut), independent of SF64_PSP_COLOR_TRANSFER; the
+ * combine inputs it feeds must not be transformed again downstream.
+ */
 static u8 psp_gfx_dl_remap_lighting(float value) {
     if (value <= 0.0f) {
         return 0;
@@ -502,7 +491,7 @@ static u8 psp_gfx_dl_remap_lighting(float value) {
         return 255;
     }
 
-    return sLightingRemap[(u8) value];
+    return gPspGfxColorTransferLut[(u8) value];
 }
 
 static u8 psp_gfx_dl_float_to_u8(float value) {
@@ -537,17 +526,9 @@ static u32 psp_gfx_dl_pack_rgba_u8(u32 r, u32 g, u32 b, u32 a, int premultiplied
     return r | (g << 8) | (b << 16) | (a << 24);
 }
 
+/* Fill-rectangle colours only; RGB carries the transfer policy, alpha raw. */
 static u32 psp_gfx_dl_rgba5551_to_rgba8888(u16 color) {
-    u32 r5 = (color >> 11) & 0x1F;
-    u32 g5 = (color >> 6) & 0x1F;
-    u32 b5 = (color >> 1) & 0x1F;
-    u32 a1 = color & 1U;
-    u32 r = (r5 << 3) | (r5 >> 2);
-    u32 g = (g5 << 3) | (g5 >> 2);
-    u32 b = (b5 << 3) | (b5 >> 2);
-    u32 a = a1 ? 255U : 0U;
-
-    return psp_gfx_dl_pack_rgba_u8(r, g, b, a, 0);
+    return psp_gfx_rgba5551_to_abgr8888(color);
 }
 
 static u32 psp_gfx_dl_primitive_color(const PspGfxDlContext* ctx) {
@@ -3419,9 +3400,12 @@ static void psp_gfx_dl_handle_texture_rectangle(PspGfxDlContext* ctx, const Gfx*
 }
 
 static void psp_gfx_dl_handle_set_primitive_color(PspGfxDlContext* ctx, const Gfx* gfx) {
-    u8 r = (u8) (gfx->words.w1 >> 24);
-    u8 g = (u8) (gfx->words.w1 >> 16);
-    u8 b = (u8) (gfx->words.w1 >> 8);
+    /* Stored pre-transformed (RGB only) so every consumer -- vertex colour
+     * builders, texenv constant, baked env-blend inputs -- sees the transfer
+     * exactly once. Transform before the dirty compare below. */
+    u8 r = psp_gfx_color_transfer_u8((u8) (gfx->words.w1 >> 24));
+    u8 g = psp_gfx_color_transfer_u8((u8) (gfx->words.w1 >> 16));
+    u8 b = psp_gfx_color_transfer_u8((u8) (gfx->words.w1 >> 8));
     u8 a = (u8) gfx->words.w1;
 
     if ((ctx->primitiveR != r) || (ctx->primitiveG != g) || (ctx->primitiveB != b) || (ctx->primitiveA != a)) {
@@ -3438,9 +3422,9 @@ static void psp_gfx_dl_handle_set_primitive_color(PspGfxDlContext* ctx, const Gf
 }
 
 static void psp_gfx_dl_handle_set_environment_color(PspGfxDlContext* ctx, const Gfx* gfx) {
-    u8 r = (u8) (gfx->words.w1 >> 24);
-    u8 g = (u8) (gfx->words.w1 >> 16);
-    u8 b = (u8) (gfx->words.w1 >> 8);
+    u8 r = psp_gfx_color_transfer_u8((u8) (gfx->words.w1 >> 24));
+    u8 g = psp_gfx_color_transfer_u8((u8) (gfx->words.w1 >> 16));
+    u8 b = psp_gfx_color_transfer_u8((u8) (gfx->words.w1 >> 8));
     u8 a = (u8) gfx->words.w1;
 
     if ((ctx->environmentR != r) || (ctx->environmentG != g) || (ctx->environmentB != b) ||
@@ -3554,9 +3538,9 @@ static void psp_gfx_dl_handle_set_fog_color(PspGfxDlContext* ctx, const Gfx* gfx
     if (ctx->batchCount != 0) {
         psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
     }
-    ctx->fogR = (u8) (gfx->words.w1 >> 24);
-    ctx->fogG = (u8) (gfx->words.w1 >> 16);
-    ctx->fogB = (u8) (gfx->words.w1 >> 8);
+    ctx->fogR = psp_gfx_color_transfer_u8((u8) (gfx->words.w1 >> 24));
+    ctx->fogG = psp_gfx_color_transfer_u8((u8) (gfx->words.w1 >> 16));
+    ctx->fogB = psp_gfx_color_transfer_u8((u8) (gfx->words.w1 >> 8));
     ctx->fogA = (u8) gfx->words.w1;
     psp_gfx_dl_mark_effective_fog_dirty(ctx);
 }
@@ -3915,9 +3899,12 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
                 ctx->lightingMappedMax = out->b;
             }
         } else {
-            out->r = in->v.cn[0];
-            out->g = in->v.cn[1];
-            out->b = in->v.cn[2];
+            /* Unlit shade RGB gets the same transfer the lit path applies via
+             * psp_gfx_dl_remap_lighting(); every triangle path (direct, tri2,
+             * generic, clipped) consumes these already-transformed values. */
+            out->r = psp_gfx_color_transfer_u8(in->v.cn[0]);
+            out->g = psp_gfx_color_transfer_u8(in->v.cn[1]);
+            out->b = psp_gfx_color_transfer_u8(in->v.cn[2]);
         }
         out->a = in->v.cn[3];
         out->s = in->v.tc[0];
@@ -4544,7 +4531,7 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
     char line[512];
 #endif
 
-    psp_gfx_dl_init_lighting_remap();
+    PspGfxPspgl_InitColorTransfer();
     psp_gfx_dl_reset_context(ctx);
     ctx->taskIndex = taskIndex;
     PspProfiler_CountDisplayListTask();

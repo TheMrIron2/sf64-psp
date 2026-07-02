@@ -11,9 +11,13 @@
 #include <pspdisplay.h>
 #include <pspdebug.h>
 #include <stdint.h>
+// <string.h> drags in <strings.h>, which conflicts with PR/os_libc.h via sf64thread.h
 
-#define PSPGL_STARFIELD_CAP 512
+#include <stdio.h>
+
+#define PSPGL_STARFIELD_CAP 1000
 #define PSPGL_STARFIELD_VERTICES_PER_STAR 6
+#define PSPGL_STARFIELD_CHUNK_STARS 512
 
 typedef struct {
     s16 x;
@@ -22,12 +26,19 @@ typedef struct {
 } PspGlStar;
 
 static PspGlStar sStarfieldStars[PSPGL_STARFIELD_CAP];
-static PspGfxPspglColorVertex sStarfieldVertices[PSPGL_STARFIELD_CAP * PSPGL_STARFIELD_VERTICES_PER_STAR];
+static PspGfxPspglColorVertex sStarfieldVertices[PSPGL_STARFIELD_CHUNK_STARS * PSPGL_STARFIELD_VERTICES_PER_STAR];
 static const u8 sStarfieldCorners[PSPGL_STARFIELD_VERTICES_PER_STAR][2] = {
     { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 0 }, { 1, 1 }, { 0, 1 },
 };
 static u32 sStarfieldCount;
 static int sStarfieldReady;
+
+#if PSP_RENDERER_DIAGNOSTICS
+static u32 sStarfieldDiagRequested;
+static u32 sStarfieldDiagTraversed;
+static u32 sStarfieldDroppedStars;
+static u32 sStarfieldDiagLast[6] = { 0xFFFFFFFFu, 0, 0, 0, 0, 0 };
+#endif
 
 #ifndef PSP_FPS_OVERLAY
 #define PSP_FPS_OVERLAY 0
@@ -144,37 +155,88 @@ static void psp_renderer_perf_frame_complete(u64 renderUs) {
 
 #endif
 
-static void psp_renderer_draw_starfield(void) {
+#if PSP_RENDERER_DIAGNOSTICS
+static void psp_renderer_log_starfield_diag(u32 chunks) {
+    u32 values[6];
+    char line[128];
     u32 i;
-    u32 out = 0;
+    int changed = 0;
+
+    values[0] = sStarfieldDiagRequested;
+    values[1] = sStarfieldDiagTraversed;
+    values[2] = sStarfieldCount + sStarfieldDroppedStars; /* visible */
+    values[3] = sStarfieldCount;                          /* submitted */
+    values[4] = chunks;
+    values[5] = sStarfieldDroppedStars;
+
+    for (i = 0; i < 6; i++) {
+        if (values[i] != sStarfieldDiagLast[i]) {
+            changed = 1;
+        }
+        sStarfieldDiagLast[i] = values[i];
+    }
+    if (!changed) {
+        return;
+    }
+
+    snprintf(line, sizeof(line), "[starfield] req=%lu trav=%lu vis=%lu sub=%lu chunks=%lu drop=%lu",
+             (unsigned long) values[0], (unsigned long) values[1], (unsigned long) values[2],
+             (unsigned long) values[3], (unsigned long) values[4], (unsigned long) values[5]);
+    PspPlatform_LogLine(line);
+}
+#endif
+
+static void psp_renderer_draw_starfield(void) {
+    u32 first;
+#if PSP_RENDERER_DIAGNOSTICS
+    u32 chunks = 0;
+#endif
 
     if (!sStarfieldReady || (sStarfieldCount == 0)) {
         return;
     }
 
-    for (i = 0; i < sStarfieldCount; i++) {
-        const PspGlStar* star = &sStarfieldStars[i];
-        float x0 = ((float) star->x / 160.0f) - 1.0f;
-        float y0 = 1.0f - ((float) star->y / 120.0f);
-        float x1 = ((float) (star->x + 1) / 160.0f) - 1.0f;
-        float y1 = 1.0f - ((float) (star->y + 1) / 120.0f);
-        u32 corner;
+    for (first = 0; first < sStarfieldCount; first += PSPGL_STARFIELD_CHUNK_STARS) {
+        u32 chunkCount = sStarfieldCount - first;
+        u32 out = 0;
+        u32 i;
 
-        for (corner = 0; corner < PSPGL_STARFIELD_VERTICES_PER_STAR; corner++) {
-            PspGfxPspglColorVertex* vertex = &sStarfieldVertices[out++];
-
-            vertex->x = sStarfieldCorners[corner][0] ? x1 : x0;
-            vertex->y = sStarfieldCorners[corner][1] ? y1 : y0;
-            vertex->z = 0.0f;
-            vertex->color = star->color;
-            vertex->u = 0.0f;
-            vertex->v = 0.0f;
+        if (chunkCount > PSPGL_STARFIELD_CHUNK_STARS) {
+            chunkCount = PSPGL_STARFIELD_CHUNK_STARS;
         }
+
+        for (i = 0; i < chunkCount; i++) {
+            const PspGlStar* star = &sStarfieldStars[first + i];
+            float x0 = ((float) star->x / 160.0f) - 1.0f;
+            float y0 = 1.0f - ((float) star->y / 120.0f);
+            float x1 = ((float) (star->x + 1) / 160.0f) - 1.0f;
+            float y1 = 1.0f - ((float) (star->y + 1) / 120.0f);
+            u32 corner;
+
+            for (corner = 0; corner < PSPGL_STARFIELD_VERTICES_PER_STAR; corner++) {
+                PspGfxPspglColorVertex* vertex = &sStarfieldVertices[out++];
+
+                vertex->x = sStarfieldCorners[corner][0] ? x1 : x0;
+                vertex->y = sStarfieldCorners[corner][1] ? y1 : y0;
+                vertex->z = 0.0f;
+                vertex->color = star->color;
+                vertex->u = 0.0f;
+                vertex->v = 0.0f;
+            }
+        }
+
+        PspGfxPspgl_DrawColoredTriangles(sStarfieldVertices, out, 0, (PspGfxPspglTextureRef) { 0 },
+                                         PSP_GFX_PSPGL_TEX_REPLACE, 0, PSP_GFX_PSPGL_WRAP_CLAMP,
+                                         PSP_GFX_PSPGL_WRAP_CLAMP, 0, 0, 0, 0, 0, 0, NULL, 0.0f, 0.0f, NULL, 1);
+#if PSP_RENDERER_DIAGNOSTICS
+        chunks++;
+#endif
     }
 
-    PspGfxPspgl_DrawColoredTriangles(sStarfieldVertices, out, 0, (PspGfxPspglTextureRef) { 0 },
-                                     PSP_GFX_PSPGL_TEX_REPLACE, 0, PSP_GFX_PSPGL_WRAP_CLAMP,
-                                     PSP_GFX_PSPGL_WRAP_CLAMP, 0, 0, 0, 0, 0, 0, NULL, 0.0f, 0.0f, NULL, 1);
+#if PSP_RENDERER_DIAGNOSTICS
+    psp_renderer_log_starfield_diag(chunks);
+#endif
+
     sStarfieldReady = 0;
 }
 
@@ -247,24 +309,39 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
 void PspRenderer_BeginStarfield(void) {
     sStarfieldCount = 0;
     sStarfieldReady = 0;
+#if PSP_RENDERER_DIAGNOSTICS
+    sStarfieldDiagRequested = 0;
+    sStarfieldDiagTraversed = 0;
+    sStarfieldDroppedStars = 0;
+#endif
 }
 
 void PspRenderer_AddStar(s16 x, s16 y, u32 n64FillColor) {
     PspGlStar* star;
 
     if (sStarfieldCount >= PSPGL_STARFIELD_CAP) {
+#if PSP_RENDERER_DIAGNOSTICS
+        sStarfieldDroppedStars++;
+#endif
         return;
     }
 
     star = &sStarfieldStars[sStarfieldCount++];
     star->x = x;
     star->y = y;
-    star->color = n64FillColor;
+    star->color = psp_gfx_rgba5551_to_abgr8888((u16) (n64FillColor & 0xFFFFu));
 }
 
 void PspRenderer_EndStarfield(void) {
     sStarfieldReady = 1;
 }
+
+#if PSP_RENDERER_DIAGNOSTICS
+void PspRenderer_StarfieldDiagCounts(u32 requested, u32 traversed) {
+    sStarfieldDiagRequested = requested;
+    sStarfieldDiagTraversed = traversed;
+}
+#endif
 
 void PspRenderer_DrawPendingStarfield(void) {
     psp_renderer_draw_starfield();

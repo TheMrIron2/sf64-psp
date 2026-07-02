@@ -4,6 +4,7 @@
 #include "macros.h"
 
 #include <GLES/gl.h>
+#include <math.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
@@ -631,10 +632,28 @@ static u64 psp_gfx_pspgl_converted_base_hash(const void* pixels, PspGfxConverted
 }
 #endif
 
+u8 gPspGfxColorTransferLut[256];
+static int sColorTransferInitialized;
+
+void PspGfxPspgl_InitColorTransfer(void) {
+    u32 i;
+
+    if (sColorTransferInitialized) {
+        return;
+    }
+    /* Match the N64 brightness response used by the Dreamcast renderer. */
+    for (i = 0; i < 256; i++) {
+        gPspGfxColorTransferLut[i] = (u8) (255.0f * sqrtf((float) i / 255.0f));
+    }
+    sColorTransferInitialized = 1;
+}
+
+/* Decodes to transformed RGB (transfer policy) with raw alpha; also covers
+ * CI4/CI8 palette entries, which route through this conversion. */
 static void psp_gfx_pspgl_rgba16_to_rgba8(u16 color, u8* out) {
-    out[0] = (u8) (((color >> 11) & 0x1F) * 255 / 31);
-    out[1] = (u8) (((color >> 6) & 0x1F) * 255 / 31);
-    out[2] = (u8) (((color >> 1) & 0x1F) * 255 / 31);
+    out[0] = psp_gfx_color_transfer_u8((u8) (((color >> 11) & 0x1F) * 255 / 31));
+    out[1] = psp_gfx_color_transfer_u8((u8) (((color >> 6) & 0x1F) * 255 / 31));
+    out[2] = psp_gfx_color_transfer_u8((u8) (((color >> 1) & 0x1F) * 255 / 31));
     out[3] = (color & 1) ? 255 : 0;
 }
 
@@ -903,7 +922,7 @@ static u32 psp_gfx_pspgl_create_converted_texture(const void* pixels, const u16*
                 psp_gfx_pspgl_rgba16_to_rgba8(psp_gfx_pspgl_read_u16(palette, index), out);
             } else if (format == PSP_GFX_TEXTURE_IA8) {
                 u8 packed = ((const u8*) pixels)[srcIndex];
-                u8 intensity = (packed >> 4) * 17;
+                u8 intensity = psp_gfx_color_transfer_u8((packed >> 4) * 17);
 
                 out[0] = intensity;
                 out[1] = intensity;
@@ -911,7 +930,7 @@ static u32 psp_gfx_pspgl_create_converted_texture(const void* pixels, const u16*
                 out[3] = (packed & 0xF) * 17;
             } else {
                 u16 packed = psp_gfx_pspgl_read_u16(pixels, srcIndex);
-                u8 intensity = (u8) (packed >> 8);
+                u8 intensity = psp_gfx_color_transfer_u8((u8) (packed >> 8));
 
                 out[0] = intensity;
                 out[1] = intensity;
@@ -984,6 +1003,7 @@ static u32 psp_gfx_pspgl_get_converted_texture(const void* pixels, const u16* pa
 }
 
 void PspGfxPspgl_Init(void) {
+    PspGfxPspgl_InitColorTransfer();
     psp_gfx_pspgl_invalidate_state_cache();
     glViewport(0, 0, PspGfx_GetWidth(), PspGfx_GetHeight());
 
@@ -1461,9 +1481,12 @@ static u32 psp_gfx_pspgl_create_rgba32_texture(const void* pixels, u32 width, u3
             u32 srcIndex = (srcY * width) + srcX;
             u32 dstIndex = (y * finalWidth) + x;
             u32 texel = psp_gfx_pspgl_read_n64_rgba32(pixels, srcIndex);
-            u8 r = (u8) ((texel >> 24) & 0xFFU);
-            u8 g = (u8) ((texel >> 16) & 0xFFU);
-            u8 b = (u8) ((texel >> 8) & 0xFFU);
+            /* Transfer applies to texture RGB only; the envBlend inputs below
+             * (primitiveColor/environmentColor) arrive already transformed
+             * from the frontend, so the baked result needs no second pass. */
+            u8 r = psp_gfx_color_transfer_u8((u8) ((texel >> 24) & 0xFFU));
+            u8 g = psp_gfx_color_transfer_u8((u8) ((texel >> 16) & 0xFFU));
+            u8 b = psp_gfx_color_transfer_u8((u8) ((texel >> 8) & 0xFFU));
             u8 a = (u8) (texel & 0xFFU);
             u8* out = &sTextureUpload[dstIndex * 4];
 

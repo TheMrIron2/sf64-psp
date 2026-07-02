@@ -25,7 +25,8 @@
 #include "prevent_bss_reordering2.h"
 // #include "prevent_bss_reordering3.h"
 
-#define PSP_STARFIELD_CAP 800
+/* Capacity of the runtime star arrays allocated by Play_GenerateStarfield(). */
+#define STARFIELD_SOURCE_CAPACITY 1000
 
 
 f32 gWarpZoneBgAlpha;
@@ -104,69 +105,91 @@ f32 sGroundPositions360z[4] = {
 
 
 void Background_DrawStarfield(void) {
+    f32 by;
+    f32 bx;
+    s16 vy;
+    s16 vx;
     s32 i;
+    s32 requested;
     s32 starCount;
-    u32 seed;
+    f32 zCos;
+    f32 zSin;
     f32 xField;
     f32 yField;
+    f32* xStar;
+    f32* yStar;
+    u32* color;
 
     /*
-     * PSP-native starfield.
-     *
-     * The original N64 path emitted hundreds of 1x1 RDP fill rectangles
-     * from gStarOffsetsX/Y and gStarFillColors. On PSP this is both poor for
-     * performance and was unstable during bring-up.
-     * Generate a native starfield and submit it as one batch instead.
+     * Original N64 starfield traversal over the runtime gStarOffsetsX/Y and
+     * gStarFillColors arrays, in the original 320x240 logical coordinate
+     * space with its 1.5-screen (480x360) toroidal field. Instead of one
+     * RDP fill rectangle per star, visible stars are handed to the native
+     * PSP batch and drawn at the marker's position in the stream.
      */
 
     PspRenderer_BeginStarfield();
 
     starCount = gStarCount;
-    if (gGameState != GSTATE_PLAY) {
-        starCount = PSP_STARFIELD_CAP;
-    }
-
-    if (starCount > PSP_STARFIELD_CAP) {
-        starCount = PSP_STARFIELD_CAP;
-    }
-
-    xField = gStarfieldX;
-    yField = gStarfieldY;
-    seed = 0x1234ABCDu;
-
-    for (i = 0; i < starCount; i++) {
-        s16 vx;
-        s16 vy;
-        u32 brightness;
-        u32 color;
-
-        seed = (seed * 1664525u) + 1013904223u;
-        vx = (s16) ((seed >> 16) % SCREEN_WIDTH);
-
-        seed = (seed * 1664525u) + 1013904223u;
-        vy = (s16) ((seed >> 16) % SCREEN_HEIGHT);
-
-        vx = (s16) ((vx + (s32) xField) % SCREEN_WIDTH);
-        vy = (s16) ((vy + (s32) yField) % SCREEN_HEIGHT);
-
-        if (vx < 0) {
-            vx += SCREEN_WIDTH;
+    if (starCount != 0) {
+        if (gGameState != GSTATE_PLAY) {
+            starCount = 1000;
         }
-        if (vy < 0) {
-            vy += SCREEN_HEIGHT;
+        requested = starCount;
+        /* Play_GenerateStarfield() allocates 1000 entries; never read past
+         * them. A clamp shows up as req > trav in the diagnostics line. */
+        if (starCount > STARFIELD_SOURCE_CAPACITY) {
+            starCount = STARFIELD_SOURCE_CAPACITY;
         }
 
-        seed = (seed * 1664525u) + 1013904223u;
-        brightness = 128 + ((seed >> 24) & 0x7F);
+        while (gStarfieldX >= 1.5f * SCREEN_WIDTH) {
+            gStarfieldX -= 1.5f * SCREEN_WIDTH;
+        }
+        while (gStarfieldX < 0.0f) {
+            gStarfieldX += 1.5f * SCREEN_WIDTH;
+        }
+        while (gStarfieldY >= 1.5f * SCREEN_HEIGHT) {
+            gStarfieldY -= 1.5f * SCREEN_HEIGHT;
+        }
+        while (gStarfieldY < 0.0f) {
+            gStarfieldY += 1.5f * SCREEN_HEIGHT;
+        }
 
-        // PSP renderer colours are 0xAABBGGRR
+        xField = gStarfieldX;
+        yField = gStarfieldY;
 
-        color = 0xFF000000 |
-                ((brightness & 0xFF) << 16) |
-                ((brightness & 0xFF) << 8) |
-                (brightness & 0xFF);
+        xStar = gStarOffsetsX;
+        yStar = gStarOffsetsY;
+        color = gStarFillColors;
 
-        PspRenderer_AddStar(vx, vy, color);
+        zCos = __cosf(gStarfieldRoll);
+        zSin = __sinf(gStarfieldRoll);
+
+        for (i = 0; i < starCount; i++, yStar++, xStar++, color++) {
+            bx = *xStar + xField;
+            by = *yStar + yField;
+            if (bx >= 1.25f * SCREEN_WIDTH) {
+                bx -= 1.5f * SCREEN_WIDTH;
+            }
+            bx -= SCREEN_WIDTH / 2.0f;
+
+            if (by >= 1.25f * SCREEN_HEIGHT) {
+                by -= 1.5f * SCREEN_HEIGHT;
+            }
+            by -= SCREEN_HEIGHT / 2.0f;
+
+            vx = (zCos * bx) + (zSin * by) + SCREEN_WIDTH / 2.0f;
+            vy = (-zSin * bx) + (zCos * by) + SCREEN_HEIGHT / 2.0f;
+            if ((vx >= 0) && (vx < SCREEN_WIDTH) && (vy > 0) && (vy < SCREEN_HEIGHT)) {
+                PspRenderer_AddStar(vx, vy, *color);
+            }
+        }
+
+#if PSP_RENDERER_DIAGNOSTICS
+        PspRenderer_StarfieldDiagCounts((u32) requested, (u32) starCount);
+#else
+        (void) requested;
+#endif
     }
 
     PspRenderer_EndStarfield();
