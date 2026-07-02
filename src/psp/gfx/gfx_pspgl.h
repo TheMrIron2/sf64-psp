@@ -28,6 +28,7 @@ typedef char PspGfxPspglColorVertexZOffsetCheck[(offsetof(PspGfxPspglColorVertex
 typedef enum {
     PSP_GFX_PSPGL_TEX_REPLACE,
     PSP_GFX_PSPGL_TEX_MODULATE,
+    PSP_GFX_PSPGL_TEX_BLEND,
 } PspGfxPspglTextureEnv;
 
 typedef enum {
@@ -79,9 +80,10 @@ u32 PspGfxPspgl_GetIa16Texture(const u16* pixels, u32 width, u32 height, u32* up
                                PspGfxPspglTextureRef* textureRef);
 void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u32 vertexCount, u32 textureId,
                                       PspGfxPspglTextureRef textureRef, PspGfxPspglTextureEnv textureEnv,
-                                      PspGfxPspglTextureWrap wrapS, PspGfxPspglTextureWrap wrapT, int alphaTest,
-                                      int blend, int premultiplied, int depthTest, int depthWrite, int fog,
-                                      const float* fogColor, float fogStart, float fogEnd,
+                                      u32 textureEnvColor, PspGfxPspglTextureWrap wrapS,
+                                      PspGfxPspglTextureWrap wrapT, int alphaTest, int blend, int premultiplied,
+                                      int depthTest, int depthWrite, int fog, const float* fogColor, float fogStart,
+                                      float fogEnd,
                                       const float* projectionMatrix, int pretransformed);
 void PspGfxPspgl_DrawSolidRect(float ulx, float uly, float lrx, float lry, u32 color, int blend);
 

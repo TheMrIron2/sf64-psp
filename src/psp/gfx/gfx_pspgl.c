@@ -140,6 +140,8 @@ typedef struct {
     PspGfxPspglTextureRef boundTextureRef;
     int textureEnvModeValid;
     GLint textureEnvMode;
+    int textureEnvColorValid;
+    GLfloat textureEnvColor[4];
 } PspGfxPspglStateCache;
 
 #if SF64_PSP_PSPGL_VBO_STREAM
@@ -488,6 +490,21 @@ static void psp_gfx_pspgl_texture_env_mode(GLint mode) {
         glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, mode);
         sStateCache.textureEnvModeValid = 1;
         sStateCache.textureEnvMode = mode;
+    }
+}
+
+static void psp_gfx_pspgl_texture_env_color(u32 color) {
+    GLfloat rgba[4];
+
+    rgba[0] = (GLfloat) (color & 0xFFU) / 255.0f;
+    rgba[1] = (GLfloat) ((color >> 8) & 0xFFU) / 255.0f;
+    rgba[2] = (GLfloat) ((color >> 16) & 0xFFU) / 255.0f;
+    rgba[3] = (GLfloat) ((color >> 24) & 0xFFU) / 255.0f;
+
+    if (!sStateCache.textureEnvColorValid || !psp_gfx_pspgl_float4_equal(sStateCache.textureEnvColor, rgba)) {
+        glTexEnvfv(GL_TEXTURE_ENV, GL_TEXTURE_ENV_COLOR, rgba);
+        sStateCache.textureEnvColorValid = 1;
+        memcpy(sStateCache.textureEnvColor, rgba, sizeof(sStateCache.textureEnvColor));
     }
 }
 
@@ -1503,8 +1520,8 @@ static int psp_gfx_pspgl_draw_vbo_stream(const PspGfxPspglColorVertex* vertices,
 
 void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u32 vertexCount,
     u32 textureId, PspGfxPspglTextureRef textureRef, PspGfxPspglTextureEnv textureEnv,
-    PspGfxPspglTextureWrap wrapS, PspGfxPspglTextureWrap wrapT, int alphaTest, int blend, int premultiplied,
-    int depthTest, int depthWrite, int fog, const float* fogColor, float fogStart, float fogEnd,
+    u32 textureEnvColor, PspGfxPspglTextureWrap wrapS, PspGfxPspglTextureWrap wrapT, int alphaTest,
+    int blend, int premultiplied, int depthTest, int depthWrite, int fog, const float* fogColor, float fogStart, float fogEnd,
     const float* projectionMatrix, int pretransformed
 ) {
     GLint glTextureEnv;
@@ -1585,13 +1602,18 @@ void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u3
 
         psp_gfx_pspgl_set_texture_wrap(textureId, glWrapS, glWrapT);
 
-        if (textureEnv == PSP_GFX_PSPGL_TEX_MODULATE) {
+        if (textureEnv == PSP_GFX_PSPGL_TEX_BLEND) {
+            glTextureEnv = GL_BLEND;
+        } else if (textureEnv == PSP_GFX_PSPGL_TEX_MODULATE) {
             glTextureEnv = GL_MODULATE;
         } else {
             glTextureEnv = GL_REPLACE;
         }
 
         psp_gfx_pspgl_texture_env_mode(glTextureEnv);
+        if (textureEnv == PSP_GFX_PSPGL_TEX_BLEND) {
+            psp_gfx_pspgl_texture_env_color(textureEnvColor);
+        }
     } else {
         psp_gfx_pspgl_texture_2d(0);
         psp_gfx_pspgl_alpha_test(0);

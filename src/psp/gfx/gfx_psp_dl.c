@@ -194,13 +194,14 @@ typedef enum {
     PSP_GFX_DL_COMBINE_MODULATE_SHADE_ALPHA,
     PSP_GFX_DL_COMBINE_MODULATE_PRIM_ALPHA,
     PSP_GFX_DL_COMBINE_MODULATE_SHADE_PRIM_ALPHA,
-    PSP_GFX_DL_COMBINE_TEXTURE_PRIM_ALPHA,
+    PSP_GFX_DL_COMBINE_ENV_TEX_PRIM_ALPHA_BLEND,
 } PspGfxDlCombineMode;
 
 typedef struct {
     u32 textureId;
     PspGfxPspglTextureRef textureRef;
     PspGfxPspglTextureEnv textureEnv;
+    u32 textureEnvColor;
     PspGfxPspglTextureWrap wrapS;
     PspGfxPspglTextureWrap wrapT;
     int alphaTest;
@@ -302,6 +303,10 @@ typedef struct {
     u8 primitiveG;
     u8 primitiveB;
     u8 primitiveA;
+    u8 environmentR;
+    u8 environmentG;
+    u8 environmentB;
+    u8 environmentA;
     u32 fillColor;
     const void* colorImage;
     u32 colorImageFormat;
@@ -309,7 +314,11 @@ typedef struct {
     u32 colorImageWidth;
     int colorImageIsDisplay;
     PspGfxDlCombineMode combineMode;
+    PspGfxDlCombineMode batchCombineMode;
     PspGfxPspglTextureEnv batchTextureEnv;
+    u32 batchTextureEnvColor;
+    u32 batchPrimitiveColor;
+    u32 batchEnvironmentColor;
     PspGfxPspglTextureWrap batchWrapS;
     PspGfxPspglTextureWrap batchWrapT;
     int combineUsesTextureAlpha;
@@ -543,6 +552,18 @@ static u32 psp_gfx_dl_rgba5551_to_rgba8888(u16 color) {
     return psp_gfx_dl_pack_rgba_u8(r, g, b, a, 0);
 }
 
+static u32 psp_gfx_dl_primitive_color(const PspGfxDlContext* ctx) {
+    return psp_gfx_dl_pack_rgba_u8(ctx->primitiveR, ctx->primitiveG, ctx->primitiveB, ctx->primitiveA, 0);
+}
+
+static u32 psp_gfx_dl_primitive_rgb_texture_env_color(const PspGfxDlContext* ctx) {
+    return psp_gfx_dl_pack_rgba_u8(ctx->primitiveR, ctx->primitiveG, ctx->primitiveB, 255U, 0);
+}
+
+static u32 psp_gfx_dl_environment_color(const PspGfxDlContext* ctx) {
+    return psp_gfx_dl_pack_rgba_u8(ctx->environmentR, ctx->environmentG, ctx->environmentB, ctx->environmentA, 0);
+}
+
 static float psp_gfx_dl_fog_distance(const float projection[4][4], float ndcZ) {
     float denominator = projection[2][2] - (ndcZ * projection[2][3]);
 
@@ -603,8 +624,31 @@ static int psp_gfx_dl_blend_enabled(PspGfxDlContext* ctx) {
 }
 
 static int psp_gfx_dl_premultiplied_blend_enabled(PspGfxDlContext* ctx) {
+    if (ctx->combineMode == PSP_GFX_DL_COMBINE_ENV_TEX_PRIM_ALPHA_BLEND) {
+        return 0;
+    }
     return psp_gfx_dl_blend_enabled(ctx) && ((ctx->otherModeL & CVG_DST_SAVE) == CVG_DST_SAVE) &&
            (ctx->textureFormat == G_IM_FMT_RGBA) && (ctx->textureSize == G_IM_SIZ_16b);
+}
+
+static PspGfxPspglTextureEnv psp_gfx_dl_texture_env_for_combine(const PspGfxDlContext* ctx) {
+    if (ctx->combineMode == PSP_GFX_DL_COMBINE_ENV_TEX_PRIM_ALPHA_BLEND) {
+        return PSP_GFX_PSPGL_TEX_BLEND;
+    }
+    if ((ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_SHADE_DECAL_ALPHA) ||
+        (ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_SHADE_ALPHA) ||
+        (ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_PRIM_ALPHA) ||
+        (ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_SHADE_PRIM_ALPHA)) {
+        return PSP_GFX_PSPGL_TEX_MODULATE;
+    }
+    return PSP_GFX_PSPGL_TEX_REPLACE;
+}
+
+static u32 psp_gfx_dl_texture_env_color_for_combine(const PspGfxDlContext* ctx) {
+    if (ctx->combineMode == PSP_GFX_DL_COMBINE_ENV_TEX_PRIM_ALPHA_BLEND) {
+        return psp_gfx_dl_primitive_rgb_texture_env_color(ctx);
+    }
+    return 0;
 }
 
 static u8 psp_gfx_dl_opcode(const Gfx* gfx) {
@@ -1858,8 +1902,9 @@ static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason 
 #endif
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_BATCH_FLUSH);
     PspGfxPspgl_DrawColoredTriangles(sPspGfxDlBatch, ctx->batchCount, ctx->batchTextureId, ctx->batchTextureRef,
-                                     ctx->batchTextureEnv, ctx->batchWrapS, ctx->batchWrapT, ctx->batchAlphaTest,
-                                     ctx->batchBlend, ctx->batchPremultiplied, ctx->batchDepthTest,
+                                     ctx->batchTextureEnv, ctx->batchTextureEnvColor, ctx->batchWrapS,
+                                     ctx->batchWrapT, ctx->batchAlphaTest, ctx->batchBlend,
+                                     ctx->batchPremultiplied, ctx->batchDepthTest,
                                      ctx->batchDepthWrite, ctx->batchFog, ctx->batchFogColor, ctx->batchFogStart,
                                      ctx->batchFogEnd,
                                      &ctx->batchProjection[0][0], ctx->batchPretransformed);
@@ -1904,11 +1949,14 @@ static int psp_gfx_dl_texture_ref_equal(PspGfxPspglTextureRef a, PspGfxPspglText
 }
 
 static void psp_gfx_dl_set_batch_texture(PspGfxDlContext* ctx, u32 textureId, PspGfxPspglTextureRef textureRef,
-                                         PspGfxPspglTextureEnv textureEnv, PspGfxPspglTextureWrap wrapS,
-                                         PspGfxPspglTextureWrap wrapT, int alphaTest, int blend, int premultiplied) {
+                                         PspGfxPspglTextureEnv textureEnv, u32 textureEnvColor,
+                                         PspGfxDlCombineMode combineMode, u32 primitiveColor, u32 environmentColor,
+                                         PspGfxPspglTextureWrap wrapS, PspGfxPspglTextureWrap wrapT, int alphaTest,
+                                         int blend, int premultiplied) {
     int textureIdChanged = (ctx->batchTextureId != textureId) ||
                            !psp_gfx_dl_texture_ref_equal(ctx->batchTextureRef, textureRef);
     int textureEnvChanged = ctx->batchTextureEnv != textureEnv;
+    int textureEnvColorChanged = ctx->batchTextureEnvColor != textureEnvColor;
     int wrapSChanged = ctx->batchWrapS != wrapS;
     int wrapTChanged = ctx->batchWrapT != wrapT;
     int alphaTestChanged = ctx->batchAlphaTest != alphaTest;
@@ -1916,9 +1964,10 @@ static void psp_gfx_dl_set_batch_texture(PspGfxDlContext* ctx, u32 textureId, Ps
     int premultipliedChanged = ctx->batchPremultiplied != premultiplied;
 
     if ((ctx->batchCount != 0) &&
-        (textureIdChanged || textureEnvChanged || wrapSChanged || wrapTChanged || alphaTestChanged || blendChanged ||
-         premultipliedChanged)) {
-        PspProfiler_CountBatchStateTransitions(textureIdChanged, textureEnvChanged, wrapSChanged, wrapTChanged,
+        (textureIdChanged || textureEnvChanged || textureEnvColorChanged || wrapSChanged || wrapTChanged ||
+         alphaTestChanged || blendChanged || premultipliedChanged)) {
+        PspProfiler_CountBatchStateTransitions(textureIdChanged, textureEnvChanged || textureEnvColorChanged,
+                                               wrapSChanged, wrapTChanged,
                                                alphaTestChanged, blendChanged, premultipliedChanged);
 #if SF64_PSP_PROFILE_TRIVIAL_REJECTS
         if (ctx->trivialRejectDiagnosticActive) {
@@ -1926,7 +1975,7 @@ static void psp_gfx_dl_set_batch_texture(PspGfxDlContext* ctx, u32 textureId, Ps
                 PspProfiler_CountTrivialRejectStateTransition(
                     PSP_PROFILE_TRIVIAL_REJECT_STATE_TEXTURE_ID_OR_REF);
             }
-            if (textureEnvChanged) {
+            if (textureEnvChanged || textureEnvColorChanged) {
                 PspProfiler_CountTrivialRejectStateTransition(PSP_PROFILE_TRIVIAL_REJECT_STATE_TEXTURE_ENV);
             }
             if (wrapSChanged) {
@@ -1946,7 +1995,7 @@ static void psp_gfx_dl_set_batch_texture(PspGfxDlContext* ctx, u32 textureId, Ps
             }
         }
 #endif
-        if (textureIdChanged || textureEnvChanged || wrapSChanged || wrapTChanged) {
+        if (textureIdChanged || textureEnvChanged || textureEnvColorChanged || wrapSChanged || wrapTChanged) {
             psp_gfx_dl_flush_texture_change(ctx, PSP_PROFILE_TEXTURE_FLUSH_MATERIAL_KEY);
         } else {
             psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
@@ -1955,6 +2004,10 @@ static void psp_gfx_dl_set_batch_texture(PspGfxDlContext* ctx, u32 textureId, Ps
     ctx->batchTextureId = textureId;
     ctx->batchTextureRef = textureRef;
     ctx->batchTextureEnv = textureEnv;
+    ctx->batchTextureEnvColor = textureEnvColor;
+    ctx->batchCombineMode = combineMode;
+    ctx->batchPrimitiveColor = primitiveColor;
+    ctx->batchEnvironmentColor = environmentColor;
     ctx->batchWrapS = wrapS;
     ctx->batchWrapT = wrapT;
     ctx->batchAlphaTest = alphaTest;
@@ -2091,14 +2144,15 @@ static void psp_gfx_dl_log_alpha_batch(PspGfxDlContext* ctx, PspProfileFlushReas
 
     snprintf(line, sizeof(line),
              "[pspgl-alpha-batch] task=%lu diag=%lu reason=%d verts=%lu texId=%lu combine=%d env=%d "
-             "wrap=%d/%d blend=%d premul=%d depth=%d/%d prim=%02x%02x%02x%02x "
+             "wrap=%d/%d blend=%d premul=%d depth=%d/%d prim=%08lx envc=%08lx texc=%08lx "
              "uvm=%ld,%ld..%ld,%ld xym=%ld,%ld..%ld,%ld a=%lu..%lu "
              "c0=%08lx uv0=%ld,%ld c1=%08lx uv1=%ld,%ld c2=%08lx uv2=%ld,%ld",
              (unsigned long) ctx->taskIndex, (unsigned long) ctx->alphaBatchDiagCount, (int) reason,
-             (unsigned long) ctx->batchCount, (unsigned long) ctx->batchTextureId, (int) ctx->combineMode,
+             (unsigned long) ctx->batchCount, (unsigned long) ctx->batchTextureId, (int) ctx->batchCombineMode,
              (int) ctx->batchTextureEnv, (int) ctx->batchWrapS, (int) ctx->batchWrapT, ctx->batchBlend,
-             ctx->batchPremultiplied, ctx->batchDepthTest, ctx->batchDepthWrite, ctx->primitiveR,
-             ctx->primitiveG, ctx->primitiveB, ctx->primitiveA, psp_gfx_dl_diag_milli(minU),
+             ctx->batchPremultiplied, ctx->batchDepthTest, ctx->batchDepthWrite,
+             (unsigned long) ctx->batchPrimitiveColor, (unsigned long) ctx->batchEnvironmentColor,
+             (unsigned long) ctx->batchTextureEnvColor, psp_gfx_dl_diag_milli(minU),
              psp_gfx_dl_diag_milli(minV), psp_gfx_dl_diag_milli(maxU), psp_gfx_dl_diag_milli(maxV),
              psp_gfx_dl_diag_milli(minX), psp_gfx_dl_diag_milli(minY), psp_gfx_dl_diag_milli(maxX),
              psp_gfx_dl_diag_milli(maxY), (unsigned long) minA, (unsigned long) maxA,
@@ -2239,14 +2293,8 @@ static int psp_gfx_dl_resolve_effective_material_state(PspGfxDlContext* ctx) {
 
     material->textureId = ctx->textureEnabled ? ctx->textureId : 0;
     material->textureRef = ctx->textureEnabled ? ctx->textureRef : psp_gfx_dl_null_texture_ref();
-    material->textureEnv = PSP_GFX_PSPGL_TEX_REPLACE;
-    if ((ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_SHADE_DECAL_ALPHA) ||
-        (ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_SHADE_ALPHA) ||
-        (ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_PRIM_ALPHA) ||
-        (ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_SHADE_PRIM_ALPHA) ||
-        (ctx->combineMode == PSP_GFX_DL_COMBINE_TEXTURE_PRIM_ALPHA)) {
-        material->textureEnv = PSP_GFX_PSPGL_TEX_MODULATE;
-    }
+    material->textureEnv = psp_gfx_dl_texture_env_for_combine(ctx);
+    material->textureEnvColor = psp_gfx_dl_texture_env_color_for_combine(ctx);
     material->wrapS = psp_gfx_dl_texture_wrap(ctx->textureCms, ctx->textureMaskS);
     material->wrapT = psp_gfx_dl_texture_wrap(ctx->textureCmt, ctx->textureMaskT);
     material->alphaTest = psp_gfx_dl_alpha_test_enabled(ctx);
@@ -2307,7 +2355,9 @@ static u32 psp_gfx_dl_apply_effective_batch_state(PspGfxDlContext* ctx, const Ps
     psp_gfx_dl_resolve_effective_state(ctx, vertex, pretransformed, &materialResolved, &depthResolved, &fogResolved);
     psp_gfx_dl_set_batch_transform(ctx, pretransformed, vertex->projectionSerial, vertex->projection);
     psp_gfx_dl_set_batch_texture(ctx, ctx->effectiveMaterial.textureId, ctx->effectiveMaterial.textureRef,
-                                 ctx->effectiveMaterial.textureEnv,
+                                 ctx->effectiveMaterial.textureEnv, ctx->effectiveMaterial.textureEnvColor,
+                                 ctx->combineMode, psp_gfx_dl_primitive_color(ctx),
+                                 psp_gfx_dl_environment_color(ctx),
                                  ctx->effectiveMaterial.wrapS, ctx->effectiveMaterial.wrapT,
                                  ctx->effectiveMaterial.alphaTest, ctx->effectiveMaterial.blend,
                                  ctx->effectiveMaterial.premultiplied);
@@ -2431,10 +2481,10 @@ static void psp_gfx_dl_build_clip_vertex(PspGfxDlContext* ctx, const PspGfxDlVer
         dst->g = ((float) src->g * (float) ctx->primitiveG) / (255.0f * 255.0f);
         dst->b = ((float) src->b * (float) ctx->primitiveB) / (255.0f * 255.0f);
         dst->a = (float) ctx->primitiveA / 255.0f;
-    } else if (ctx->combineMode == PSP_GFX_DL_COMBINE_TEXTURE_PRIM_ALPHA) {
-        dst->r = 1.0f;
-        dst->g = 1.0f;
-        dst->b = 1.0f;
+    } else if (ctx->combineMode == PSP_GFX_DL_COMBINE_ENV_TEX_PRIM_ALPHA_BLEND) {
+        dst->r = (float) ctx->environmentR / 255.0f;
+        dst->g = (float) ctx->environmentG / 255.0f;
+        dst->b = (float) ctx->environmentB / 255.0f;
         dst->a = (float) ctx->primitiveA / 255.0f;
     } else if ((ctx->combineMode == PSP_GFX_DL_COMBINE_DECAL_RGB) ||
                (ctx->combineMode == PSP_GFX_DL_COMBINE_DECAL_RGBA)) {
@@ -2554,10 +2604,10 @@ static void psp_gfx_dl_vertex_color_u8(PspGfxDlContext* ctx, const PspGfxDlVerte
         *g = (src->g * ctx->primitiveG) / 255U;
         *b = (src->b * ctx->primitiveB) / 255U;
         *a = ctx->primitiveA;
-    } else if (ctx->combineMode == PSP_GFX_DL_COMBINE_TEXTURE_PRIM_ALPHA) {
-        *r = 255;
-        *g = 255;
-        *b = 255;
+    } else if (ctx->combineMode == PSP_GFX_DL_COMBINE_ENV_TEX_PRIM_ALPHA_BLEND) {
+        *r = ctx->environmentR;
+        *g = ctx->environmentG;
+        *b = ctx->environmentB;
         *a = ctx->primitiveA;
     } else if ((ctx->combineMode == PSP_GFX_DL_COMBINE_DECAL_RGB) ||
                (ctx->combineMode == PSP_GFX_DL_COMBINE_DECAL_RGBA)) {
@@ -2810,12 +2860,9 @@ static int psp_gfx_dl_try_emit_tri2_direct_pair(PspGfxDlContext* ctx, u8 a0, u8 
     }
     textureId = ctx->textureEnabled ? ctx->textureId : 0;
     psp_gfx_dl_set_batch_texture(ctx, textureId, ctx->textureEnabled ? ctx->textureRef : psp_gfx_dl_null_texture_ref(),
-                                 ((ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_SHADE_DECAL_ALPHA) ||
-                                  (ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_SHADE_ALPHA) ||
-                                  (ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_PRIM_ALPHA) ||
-                                  (ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_SHADE_PRIM_ALPHA) ||
-                                  (ctx->combineMode == PSP_GFX_DL_COMBINE_TEXTURE_PRIM_ALPHA)) ?
-                                     PSP_GFX_PSPGL_TEX_MODULATE : PSP_GFX_PSPGL_TEX_REPLACE,
+                                 psp_gfx_dl_texture_env_for_combine(ctx),
+                                 psp_gfx_dl_texture_env_color_for_combine(ctx), ctx->combineMode,
+                                 psp_gfx_dl_primitive_color(ctx), psp_gfx_dl_environment_color(ctx),
                                  psp_gfx_dl_texture_wrap(ctx->textureCms, ctx->textureMaskS),
                                  psp_gfx_dl_texture_wrap(ctx->textureCmt, ctx->textureMaskT),
                                  psp_gfx_dl_alpha_test_enabled(ctx), psp_gfx_dl_blend_enabled(ctx),
@@ -3330,15 +3377,10 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
     textureId = ctx->textureEnabled ? ctx->textureId : 0;
     psp_gfx_dl_set_batch_transform(ctx, pretransformed, va->projectionSerial, va->projection);
 #endif
-    if ((ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_SHADE_DECAL_ALPHA) ||
-        (ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_SHADE_ALPHA) ||
-        (ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_PRIM_ALPHA) ||
-        (ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_SHADE_PRIM_ALPHA) ||
-        (ctx->combineMode == PSP_GFX_DL_COMBINE_TEXTURE_PRIM_ALPHA)) {
-        textureEnv = PSP_GFX_PSPGL_TEX_MODULATE;
-    }
+    textureEnv = psp_gfx_dl_texture_env_for_combine(ctx);
     psp_gfx_dl_set_batch_texture(ctx, textureId, ctx->textureEnabled ? ctx->textureRef : psp_gfx_dl_null_texture_ref(),
-                                 textureEnv,
+                                 textureEnv, psp_gfx_dl_texture_env_color_for_combine(ctx), ctx->combineMode,
+                                 psp_gfx_dl_primitive_color(ctx), psp_gfx_dl_environment_color(ctx),
                                  psp_gfx_dl_texture_wrap(ctx->textureCms, ctx->textureMaskS),
                                  psp_gfx_dl_texture_wrap(ctx->textureCmt, ctx->textureMaskT),
                                  psp_gfx_dl_alpha_test_enabled(ctx), psp_gfx_dl_blend_enabled(ctx),
@@ -3499,6 +3541,7 @@ static void psp_gfx_dl_handle_texture_rectangle(PspGfxDlContext* ctx, const Gfx*
 
     psp_gfx_dl_set_batch_texture(
         ctx, ctx->textureId, ctx->textureRef, PSP_GFX_PSPGL_TEX_MODULATE,
+        0, ctx->combineMode, psp_gfx_dl_primitive_color(ctx), psp_gfx_dl_environment_color(ctx),
         psp_gfx_dl_texture_wrap(ctx->textureCms, ctx->textureMaskS),
         psp_gfx_dl_texture_wrap(ctx->textureCmt, ctx->textureMaskT),
         psp_gfx_dl_alpha_test_enabled(ctx), psp_gfx_dl_blend_enabled(ctx),
@@ -3526,10 +3569,34 @@ static void psp_gfx_dl_handle_texture_rectangle(PspGfxDlContext* ctx, const Gfx*
 }
 
 static void psp_gfx_dl_handle_set_primitive_color(PspGfxDlContext* ctx, const Gfx* gfx) {
-    ctx->primitiveR = (u8) (gfx->words.w1 >> 24);
-    ctx->primitiveG = (u8) (gfx->words.w1 >> 16);
-    ctx->primitiveB = (u8) (gfx->words.w1 >> 8);
-    ctx->primitiveA = (u8) gfx->words.w1;
+    u8 r = (u8) (gfx->words.w1 >> 24);
+    u8 g = (u8) (gfx->words.w1 >> 16);
+    u8 b = (u8) (gfx->words.w1 >> 8);
+    u8 a = (u8) gfx->words.w1;
+
+    if ((ctx->primitiveR != r) || (ctx->primitiveG != g) || (ctx->primitiveB != b) || (ctx->primitiveA != a)) {
+        psp_gfx_dl_mark_effective_material_dirty(ctx);
+    }
+    ctx->primitiveR = r;
+    ctx->primitiveG = g;
+    ctx->primitiveB = b;
+    ctx->primitiveA = a;
+}
+
+static void psp_gfx_dl_handle_set_environment_color(PspGfxDlContext* ctx, const Gfx* gfx) {
+    u8 r = (u8) (gfx->words.w1 >> 24);
+    u8 g = (u8) (gfx->words.w1 >> 16);
+    u8 b = (u8) (gfx->words.w1 >> 8);
+    u8 a = (u8) gfx->words.w1;
+
+    if ((ctx->environmentR != r) || (ctx->environmentG != g) || (ctx->environmentB != b) ||
+        (ctx->environmentA != a)) {
+        psp_gfx_dl_mark_effective_material_dirty(ctx);
+    }
+    ctx->environmentR = r;
+    ctx->environmentG = g;
+    ctx->environmentB = b;
+    ctx->environmentA = a;
 }
 
 static void psp_gfx_dl_handle_set_fill_color(PspGfxDlContext* ctx, const Gfx* gfx) {
@@ -3666,15 +3733,6 @@ static int psp_gfx_dl_combine_cycle1_matches(u32 mux0, u32 mux1, u32 a, u32 b, u
            (caa == (aa & 0x7)) && (cab == (ab & 0x7)) && (cac == (ac & 0x7)) && (cad == (ad & 0x7));
 }
 
-static int psp_gfx_dl_combine_cycle0_alpha_matches(u32 mux0, u32 mux1, u32 aa, u32 ab, u32 ac, u32 ad) {
-    u32 caa = (mux0 >> 12) & 0x7;
-    u32 cac = (mux0 >> 9) & 0x7;
-    u32 cab = (mux1 >> 12) & 0x7;
-    u32 cad = (mux1 >> 9) & 0x7;
-
-    return (caa == (aa & 0x7)) && (cab == (ab & 0x7)) && (cac == (ac & 0x7)) && (cad == (ad & 0x7));
-}
-
 static void psp_gfx_dl_handle_set_combine(PspGfxDlContext* ctx, const Gfx* gfx) {
     u32 mux0 = gfx->words.w0 & 0x00FFFFFF;
     u32 mux1 = gfx->words.w1;
@@ -3728,9 +3786,13 @@ static void psp_gfx_dl_handle_set_combine(PspGfxDlContext* ctx, const Gfx* gfx) 
                                                  G_CCMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_TEXEL0)) {
         ctx->combineMode = PSP_GFX_DL_COMBINE_MODULATE_PRIM_ALPHA;
         ctx->combineUsesTextureAlpha = 1;
-    } else if (psp_gfx_dl_combine_cycle0_alpha_matches(mux0, mux1, G_ACMUX_TEXEL0, G_ACMUX_0,
-                                                       G_ACMUX_PRIMITIVE, G_ACMUX_0)) {
-        ctx->combineMode = PSP_GFX_DL_COMBINE_TEXTURE_PRIM_ALPHA;
+    } else if (psp_gfx_dl_combine_cycle0_matches(mux0, mux1, G_CCMUX_PRIMITIVE, G_CCMUX_ENVIRONMENT,
+                                                 G_CCMUX_TEXEL0, G_CCMUX_ENVIRONMENT, G_ACMUX_TEXEL0,
+                                                 G_ACMUX_0, G_ACMUX_PRIMITIVE, G_ACMUX_0) &&
+               psp_gfx_dl_combine_cycle1_matches(mux0, mux1, G_CCMUX_PRIMITIVE, G_CCMUX_ENVIRONMENT,
+                                                 G_CCMUX_TEXEL0, G_CCMUX_ENVIRONMENT, G_ACMUX_TEXEL0,
+                                                 G_ACMUX_0, G_ACMUX_PRIMITIVE, G_ACMUX_0)) {
+        ctx->combineMode = PSP_GFX_DL_COMBINE_ENV_TEX_PRIM_ALPHA_BLEND;
         ctx->combineUsesTextureAlpha = 1;
     } else {
         ctx->combineMode = PSP_GFX_DL_COMBINE_UNKNOWN;
@@ -4433,6 +4495,11 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
             continue;
         }
 
+        if (opcode == G_SETENVCOLOR) {
+            psp_gfx_dl_handle_set_environment_color(ctx, cmd);
+            continue;
+        }
+
         if (opcode == G_SETFILLCOLOR) {
             psp_gfx_dl_handle_set_fill_color(ctx, cmd);
             continue;
@@ -4545,6 +4612,10 @@ static void psp_gfx_dl_reset_context(PspGfxDlContext* ctx) {
     ctx->primitiveG = 255;
     ctx->primitiveB = 255;
     ctx->primitiveA = 255;
+    ctx->environmentR = 255;
+    ctx->environmentG = 255;
+    ctx->environmentB = 255;
+    ctx->environmentA = 255;
     ctx->fillColor = psp_gfx_dl_pack_rgba_u8(0, 0, 0, 255, 0);
     ctx->colorImage = NULL;
     ctx->colorImageWidth = SCREEN_WIDTH;
