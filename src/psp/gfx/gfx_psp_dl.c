@@ -61,6 +61,12 @@ static u32 sPspGfxDlBackgroundFeedbackSeedColor = 0xFF000000u;
 #define PSP_RENDERER_DIAGNOSTICS 0
 #endif
 
+#if PSP_RENDERER_DIAGNOSTICS
+#include "assets/ast_map.h"
+
+extern Gfx gMapVenomCloudRuntimeDL[];
+#endif
+
 #ifndef SF64_PSP_DIRECT_TRI_FASTPATH
 #define SF64_PSP_DIRECT_TRI_FASTPATH 1
 #endif
@@ -741,6 +747,34 @@ static int psp_gfx_dl_has_bounded_end(const Gfx* dl) {
     }
     return 0;
 }
+
+#if PSP_RENDERER_DIAGNOSTICS
+static int sMapExplosionDlProbeDone;
+static int sMapVenomDlProbeDone;
+static int sMapCursorDlProbeDone;
+
+static int psp_gfx_dl_same_address(const void* a, const void* b) {
+    return (((uintptr_t) a) & 0x3FFFFFFFu) == (((uintptr_t) b) & 0x3FFFFFFFu);
+}
+
+static void psp_gfx_dl_probe_map_asset_dl(const char* label, const Gfx* dl, u32 rawTarget, int noPush,
+                                          int boundedEnd, u32 depth, const void* expectedVtx) {
+    char line[224];
+    u32 i;
+
+    snprintf(line, sizeof(line),
+             "[map-dl-probe] label=%s raw=%08lx resolved=%p noPush=%d boundedEnd=%d depth=%lu expectedVtx=%p",
+             label, (unsigned long) rawTarget, (const void*) dl, noPush, boundedEnd, (unsigned long) depth,
+             expectedVtx);
+    PspPlatform_LogLine(line);
+    for (i = 0; i < 8; i++) {
+        snprintf(line, sizeof(line), "[map-dl-raw] label=%s i=%lu addr=%p w0=%08lx w1=%08lx",
+                 label, (unsigned long) i, (const void*) &dl[i], (unsigned long) dl[i].words.w0,
+                 (unsigned long) dl[i].words.w1);
+        PspPlatform_LogLine(line);
+    }
+}
+#endif
 
 static int psp_gfx_dl_is_noop_state(u8 opcode) {
     if (opcode >= G_TEXRECT) {
@@ -4369,6 +4403,26 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
             const Gfx* child = (const Gfx*) psp_gfx_dl_resolve_ptr(ctx, cmd->words.w1);
             int noPush = ((cmd->words.w0 >> 16) & 0xFF) == G_DL_NOPUSH;
             int childHasEnd = (child != NULL) && psp_gfx_dl_has_bounded_end(child);
+
+#if PSP_RENDERER_DIAGNOSTICS
+            if ((child != NULL) && !sMapExplosionDlProbeDone &&
+                psp_gfx_dl_same_address(child, aMapPlanetExplosionDL)) {
+                psp_gfx_dl_probe_map_asset_dl("expl", child, cmd->words.w1, noPush, childHasEnd, depth + 1,
+                                              (const void*) &ast_map_seg6_vtx_47A28[0]);
+                sMapExplosionDlProbeDone = 1;
+            }
+            if ((child != NULL) && !sMapVenomDlProbeDone &&
+                psp_gfx_dl_same_address(child, gMapVenomCloudRuntimeDL)) {
+                psp_gfx_dl_probe_map_asset_dl("venom", child, cmd->words.w1, noPush, childHasEnd, depth + 1,
+                                              (const void*) &ast_map_seg6_vtx_47F00[0]);
+                sMapVenomDlProbeDone = 1;
+            }
+            if ((child != NULL) && !sMapCursorDlProbeDone && psp_gfx_dl_same_address(child, aMapCursorDL)) {
+                psp_gfx_dl_probe_map_asset_dl("cursor", child, cmd->words.w1, noPush, childHasEnd, depth + 1,
+                                              (const void*) &ast_map_seg6_vtx_1DD98[0]);
+                sMapCursorDlProbeDone = 1;
+            }
+#endif
 
             if (!childHasEnd) {
                 ctx->stats.nestedDlRejected++;
