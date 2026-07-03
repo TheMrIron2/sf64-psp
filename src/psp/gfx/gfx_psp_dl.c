@@ -61,10 +61,6 @@ static u32 sPspGfxDlBackgroundFeedbackSeedColor = 0xFF000000u;
 #define PSP_RENDERER_DIAGNOSTICS 0
 #endif
 
-#ifndef MAP_EXPLOSION_DIAG
-#define MAP_EXPLOSION_DIAG 0
-#endif
-
 #ifndef SF64_PSP_DIRECT_TRI_FASTPATH
 #define SF64_PSP_DIRECT_TRI_FASTPATH 1
 #endif
@@ -339,7 +335,6 @@ typedef struct {
     int batchDepthBias;
     int batchFog;
     int batchPointFilter;
-    int batchMapExplosionDiag;
     float batchFogColor[4];
     float batchFogStart;
     float batchFogEnd;
@@ -362,7 +357,6 @@ typedef struct {
     int hasProjection;
     int hasVertexBounds;
     int hasClipSample;
-    u32 mapExplosionDiagLogCount;
     u32 clipSampleVertexCount;
     u32 clipSampleGeneratedCount;
     float clipLargestWRatio;
@@ -662,80 +656,7 @@ static int psp_gfx_dl_baked_env_blend_texture_enabled(const PspGfxDlContext* ctx
            ((ctx->textureFormat == G_IM_FMT_IA) && (ctx->textureSize == G_IM_SIZ_8b));
 }
 
-static __attribute__((unused)) int psp_gfx_dl_is_zb_cld_surf(const PspGfxDlContext* ctx) {
-    return ((ctx->geometryMode & G_ZBUFFER) != 0) &&
-           ((ctx->otherModeL & (Z_CMP | Z_UPD | IM_RD | CVG_DST_SAVE | FORCE_BL | ZMODE_DEC)) ==
-            (Z_CMP | IM_RD | CVG_DST_SAVE | FORCE_BL | ZMODE_XLU));
-}
-
-static int psp_gfx_dl_map_explosion_diag_match(const PspGfxDlContext* ctx) {
-#if (MAP_EXPLOSION_DIAG + 0)
-    return (ctx->textureFormat == G_IM_FMT_IA) && (ctx->textureSize == G_IM_SIZ_8b) &&
-           (ctx->textureWidth == 32U) && (ctx->textureHeight == 32U) &&
-           (ctx->combineMode == PSP_GFX_DL_COMBINE_ENV_TEX_PRIM_ALPHA_BLEND) &&
-           psp_gfx_dl_is_zb_cld_surf(ctx);
-#else
-    (void) ctx;
-    return 0;
-#endif
-}
-
-static int psp_gfx_dl_diag_alpha_test(const PspGfxDlContext* ctx, int alphaTest) {
-    (void) ctx;
-#if (MAP_EXPLOSION_DIAG + 0)
-    if (psp_gfx_dl_map_explosion_diag_match(ctx) && ((MAP_EXPLOSION_DIAG == 1) || (MAP_EXPLOSION_DIAG == 2))) {
-        return 0;
-    }
-#endif
-    return alphaTest;
-}
-
-static int psp_gfx_dl_diag_blend(const PspGfxDlContext* ctx, int blend) {
-    (void) ctx;
-#if (MAP_EXPLOSION_DIAG + 0)
-    if (psp_gfx_dl_map_explosion_diag_match(ctx) && ((MAP_EXPLOSION_DIAG == 1) || (MAP_EXPLOSION_DIAG == 2))) {
-        return (MAP_EXPLOSION_DIAG == 2);
-    }
-#endif
-    return blend;
-}
-
-static int psp_gfx_dl_diag_premultiplied(const PspGfxDlContext* ctx, int premultiplied) {
-    (void) ctx;
-#if (MAP_EXPLOSION_DIAG + 0)
-    if (psp_gfx_dl_map_explosion_diag_match(ctx) && ((MAP_EXPLOSION_DIAG == 1) || (MAP_EXPLOSION_DIAG == 2))) {
-        return 0;
-    }
-#endif
-    return premultiplied;
-}
-
-static int psp_gfx_dl_diag_depth_test(const PspGfxDlContext* ctx, int depthTest) {
-    (void) ctx;
-#if (MAP_EXPLOSION_DIAG + 0)
-    if (psp_gfx_dl_map_explosion_diag_match(ctx) && (MAP_EXPLOSION_DIAG == 3)) {
-        return 0;
-    }
-#endif
-    return depthTest;
-}
-
-static int psp_gfx_dl_diag_depth_write(const PspGfxDlContext* ctx, int depthWrite) {
-    (void) ctx;
-#if (MAP_EXPLOSION_DIAG + 0)
-    if (psp_gfx_dl_map_explosion_diag_match(ctx) && (MAP_EXPLOSION_DIAG == 3)) {
-        return 0;
-    }
-#endif
-    return depthWrite;
-}
-
 static PspGfxPspglTextureEnv psp_gfx_dl_texture_env_for_combine(const PspGfxDlContext* ctx) {
-#if (MAP_EXPLOSION_DIAG + 0)
-    if (psp_gfx_dl_map_explosion_diag_match(ctx) && (MAP_EXPLOSION_DIAG == 2)) {
-        return PSP_GFX_PSPGL_TEX_REPLACE;
-    }
-#endif
     if (psp_gfx_dl_baked_env_blend_texture_enabled(ctx)) {
         return PSP_GFX_PSPGL_TEX_REPLACE;
     }
@@ -1977,137 +1898,6 @@ static void psp_gfx_dl_handle_movemem(PspGfxDlContext* ctx, const Gfx* gfx) {
     }
 }
 
-static __attribute__((unused)) const char* psp_gfx_dl_texture_env_name(PspGfxPspglTextureEnv env) {
-    switch (env) {
-        case PSP_GFX_PSPGL_TEX_REPLACE:
-            return "REPLACE";
-        case PSP_GFX_PSPGL_TEX_MODULATE:
-            return "MODULATE";
-        case PSP_GFX_PSPGL_TEX_BLEND:
-            return "BLEND";
-        default:
-            return "?";
-    }
-}
-
-static __attribute__((unused)) const char* psp_gfx_dl_wrap_name(PspGfxPspglTextureWrap wrap) {
-    switch (wrap) {
-        case PSP_GFX_PSPGL_WRAP_CLAMP:
-            return "CLAMP";
-        case PSP_GFX_PSPGL_WRAP_REPEAT:
-            return "REPEAT";
-        case PSP_GFX_PSPGL_WRAP_MIRROR:
-            return "MIRROR";
-        default:
-            return "?";
-    }
-}
-
-#if (MAP_EXPLOSION_DIAG + 0)
-static void psp_gfx_dl_batch_uv_z_range(const PspGfxDlContext* ctx, float* minU, float* maxU, float* minV,
-                                        float* maxV, float* minZ, float* maxZ) {
-    u32 i;
-
-    *minU = *maxU = sPspGfxDlBatch[0].u;
-    *minV = *maxV = sPspGfxDlBatch[0].v;
-    *minZ = *maxZ = sPspGfxDlBatch[0].z;
-    for (i = 1; i < ctx->batchCount; i++) {
-        if (sPspGfxDlBatch[i].u < *minU) {
-            *minU = sPspGfxDlBatch[i].u;
-        }
-        if (sPspGfxDlBatch[i].u > *maxU) {
-            *maxU = sPspGfxDlBatch[i].u;
-        }
-        if (sPspGfxDlBatch[i].v < *minV) {
-            *minV = sPspGfxDlBatch[i].v;
-        }
-        if (sPspGfxDlBatch[i].v > *maxV) {
-            *maxV = sPspGfxDlBatch[i].v;
-        }
-        if (sPspGfxDlBatch[i].z < *minZ) {
-            *minZ = sPspGfxDlBatch[i].z;
-        }
-        if (sPspGfxDlBatch[i].z > *maxZ) {
-            *maxZ = sPspGfxDlBatch[i].z;
-        }
-    }
-}
-#endif
-
-static __attribute__((unused)) void psp_gfx_dl_count_ia8_ranges(const u8* pixels, u32 width, u32 height, u32* minI,
-                                                                u32* maxI, u32* minA, u32* maxA) {
-    u32 i;
-    u32 count = width * height;
-
-    *minI = *minA = 255;
-    *maxI = *maxA = 0;
-    for (i = 0; i < count; i++) {
-        u32 intensity = (pixels[i] >> 4) * 17U;
-        u32 alpha = (pixels[i] & 0xFU) * 17U;
-
-        if (intensity < *minI) {
-            *minI = intensity;
-        }
-        if (intensity > *maxI) {
-            *maxI = intensity;
-        }
-        if (alpha < *minA) {
-            *minA = alpha;
-        }
-        if (alpha > *maxA) {
-            *maxA = alpha;
-        }
-    }
-}
-
-static void psp_gfx_dl_log_diagnostic_batch(PspGfxDlContext* ctx) {
-#if (MAP_EXPLOSION_DIAG + 0)
-    char line[512];
-    float minU;
-    float maxU;
-    float minV;
-    float maxV;
-    float minZ;
-    float maxZ;
-    const char* blendSrc = ctx->batchPremultiplied ? "ONE" : "SRC_ALPHA";
-    const char* blendDst = "ONE_MINUS_SRC_ALPHA";
-
-    if ((ctx->batchCount == 0) || !ctx->batchMapExplosionDiag) {
-        return;
-    }
-    psp_gfx_dl_batch_uv_z_range(ctx, &minU, &maxU, &minV, &maxV, &minZ, &maxZ);
-
-    if ((ctx->mapExplosionDiagLogCount < 1U) && (ctx->textureImage != NULL)) {
-        u32 minI;
-        u32 maxI;
-        u32 minA;
-        u32 maxA;
-        int refValid = (ctx->batchTextureId != 0) && (ctx->batchTextureRef.state != NULL) &&
-                       (ctx->batchTextureRef.texture == ctx->batchTextureId);
-
-        psp_gfx_dl_count_ia8_ranges((const u8*) ctx->textureImage, ctx->textureWidth, ctx->textureHeight,
-                                    &minI, &maxI, &minA, &maxA);
-        snprintf(line, sizeof(line),
-                 "[map-explosion-diag] mode=%d verts=%lu clipRejects=%lu clipped=%lu tex=%lu refValid=%d "
-                 "iaI=%lu..%lu iaA=%lu..%lu uv=%.5f..%.5f/%.5f..%.5f prim=%02x%02x%02x%02x env=%02x%02x%02x%02x "
-                 "texEnv=%s envColor=%08lx blend=%d %s/%s depthTest=%d depthWrite=%d z=%.3f..%.3f bias=%d",
-                 MAP_EXPLOSION_DIAG, (unsigned long) ctx->batchCount,
-                 (unsigned long) ctx->stats.clipRejectedTriangleCount,
-                 (unsigned long) ctx->stats.clippedTriangleCount, (unsigned long) ctx->batchTextureId, refValid,
-                 (unsigned long) minI, (unsigned long) maxI, (unsigned long) minA, (unsigned long) maxA,
-                 minU, maxU, minV, maxV, ctx->primitiveR, ctx->primitiveG, ctx->primitiveB, ctx->primitiveA,
-                 ctx->environmentR, ctx->environmentG, ctx->environmentB, ctx->environmentA,
-                 psp_gfx_dl_texture_env_name(ctx->batchTextureEnv), (unsigned long) ctx->batchTextureEnvColor,
-                 ctx->batchBlend, ctx->batchBlend ? blendSrc : "NONE", ctx->batchBlend ? blendDst : "NONE",
-                 ctx->batchDepthTest, ctx->batchDepthWrite, minZ, maxZ, ctx->batchDepthBias);
-        PspPlatform_LogLine(line);
-        ctx->mapExplosionDiagLogCount++;
-    }
-#else
-    (void) ctx;
-#endif
-}
-
 static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason reason) {
 #if SF64_PSP_PROFILE_COMPONENTS
     u32 ownerComponent;
@@ -2134,7 +1924,6 @@ static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason 
                                                 sPspGfxDlBatchProvenance, ctx->batchProvenanceCount);
 #endif
     (void) reason;
-    psp_gfx_dl_log_diagnostic_batch(ctx);
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_BATCH_FLUSH);
     PspGfxPspgl_DrawColoredTriangles(sPspGfxDlBatch, ctx->batchCount, ctx->batchTextureId, ctx->batchTextureRef,
                                      ctx->batchTextureEnv, ctx->batchTextureEnvColor, ctx->batchWrapS,
@@ -2187,7 +1976,7 @@ static void psp_gfx_dl_set_batch_texture(PspGfxDlContext* ctx, u32 textureId, Ps
                                          PspGfxPspglTextureEnv textureEnv, u32 textureEnvColor,
                                          PspGfxDlCombineMode combineMode, u32 primitiveColor, u32 environmentColor,
                                          PspGfxPspglTextureWrap wrapS, PspGfxPspglTextureWrap wrapT, int alphaTest,
-                                         int blend, int premultiplied, int pointFilter, int mapExplosionDiag) {
+                                         int blend, int premultiplied, int pointFilter) {
     int textureIdChanged = (ctx->batchTextureId != textureId) ||
                            !psp_gfx_dl_texture_ref_equal(ctx->batchTextureRef, textureRef);
     int textureEnvChanged = ctx->batchTextureEnv != textureEnv;
@@ -2198,11 +1987,10 @@ static void psp_gfx_dl_set_batch_texture(PspGfxDlContext* ctx, u32 textureId, Ps
     int blendChanged = ctx->batchBlend != blend;
     int premultipliedChanged = ctx->batchPremultiplied != premultiplied;
     int pointFilterChanged = ctx->batchPointFilter != pointFilter;
-    int mapExplosionDiagChanged = ctx->batchMapExplosionDiag != mapExplosionDiag;
 
     if ((ctx->batchCount != 0) &&
         (textureIdChanged || textureEnvChanged || textureEnvColorChanged || wrapSChanged || wrapTChanged ||
-         alphaTestChanged || blendChanged || premultipliedChanged || pointFilterChanged || mapExplosionDiagChanged)) {
+         alphaTestChanged || blendChanged || premultipliedChanged || pointFilterChanged)) {
         PspProfiler_CountBatchStateTransitions(textureIdChanged, textureEnvChanged || textureEnvColorChanged,
                                                wrapSChanged, wrapTChanged,
                                                alphaTestChanged, blendChanged, premultipliedChanged);
@@ -2251,7 +2039,6 @@ static void psp_gfx_dl_set_batch_texture(PspGfxDlContext* ctx, u32 textureId, Ps
     ctx->batchBlend = blend;
     ctx->batchPremultiplied = premultiplied;
     ctx->batchPointFilter = pointFilter;
-    ctx->batchMapExplosionDiag = mapExplosionDiag;
 }
 
 static void psp_gfx_dl_set_batch_depth(PspGfxDlContext* ctx, int depthTest, int depthWrite, int depthBias) {
@@ -2386,20 +2173,14 @@ static int psp_gfx_dl_resolve_effective_material_state(PspGfxDlContext* ctx) {
 
     material->textureId = ctx->textureEnabled ? ctx->textureId : 0;
     material->textureRef = ctx->textureEnabled ? ctx->textureRef : psp_gfx_dl_null_texture_ref();
-#if (MAP_EXPLOSION_DIAG + 0)
-    if (psp_gfx_dl_map_explosion_diag_match(ctx) && (MAP_EXPLOSION_DIAG == 1)) {
-        material->textureId = 0;
-        material->textureRef = psp_gfx_dl_null_texture_ref();
-    }
-#endif
     /* Frontend intent (gsSPTexture on/off), not derived from textureId. */
     material->textureEnv = psp_gfx_dl_texture_env_for_combine(ctx);
     material->textureEnvColor = psp_gfx_dl_texture_env_color_for_combine(ctx);
     material->wrapS = psp_gfx_dl_texture_wrap(ctx->textureCms, ctx->textureMaskS);
     material->wrapT = psp_gfx_dl_texture_wrap(ctx->textureCmt, ctx->textureMaskT);
-    material->alphaTest = psp_gfx_dl_diag_alpha_test(ctx, psp_gfx_dl_alpha_test_enabled(ctx));
-    material->blend = psp_gfx_dl_diag_blend(ctx, psp_gfx_dl_blend_enabled(ctx));
-    material->premultiplied = psp_gfx_dl_diag_premultiplied(ctx, premultiplied);
+    material->alphaTest = psp_gfx_dl_alpha_test_enabled(ctx);
+    material->blend = psp_gfx_dl_blend_enabled(ctx);
+    material->premultiplied = premultiplied;
     /*
      * The PSP GE's ordinary linear filtering does not reproduce the N64's
      * RGBA5551 coverage behavior for split transparent cloud-surface quads:
@@ -2419,8 +2200,8 @@ static int psp_gfx_dl_resolve_effective_depth_state(PspGfxDlContext* ctx) {
     if (depth->valid && !depth->dirty) {
         return 0;
     }
-    depth->depthTest = psp_gfx_dl_diag_depth_test(ctx, (ctx->geometryMode & G_ZBUFFER) != 0);
-    depth->depthWrite = psp_gfx_dl_diag_depth_write(ctx, (ctx->otherModeL & Z_UPD) != 0);
+    depth->depthTest = (ctx->geometryMode & G_ZBUFFER) != 0;
+    depth->depthWrite = (ctx->otherModeL & Z_UPD) != 0;
     depth->depthBias = psp_gfx_dl_depth_bias_enabled(ctx);
     depth->valid = 1;
     depth->dirty = 0;
@@ -2469,8 +2250,7 @@ static u32 psp_gfx_dl_apply_effective_batch_state(PspGfxDlContext* ctx, const Ps
                                  psp_gfx_dl_environment_color(ctx),
                                  ctx->effectiveMaterial.wrapS, ctx->effectiveMaterial.wrapT,
                                  ctx->effectiveMaterial.alphaTest, ctx->effectiveMaterial.blend,
-                                 ctx->effectiveMaterial.premultiplied, ctx->effectiveMaterial.pointFilter,
-                                 psp_gfx_dl_map_explosion_diag_match(ctx));
+                                 ctx->effectiveMaterial.premultiplied, ctx->effectiveMaterial.pointFilter);
     psp_gfx_dl_set_batch_depth(ctx, ctx->effectiveDepth.depthTest, ctx->effectiveDepth.depthWrite,
                                ctx->effectiveDepth.depthBias);
     psp_gfx_dl_set_batch_fog_resolved(ctx, ctx->effectiveFog.fog, ctx->effectiveFog.color,
@@ -2606,14 +2386,6 @@ static void psp_gfx_dl_build_clip_vertex(PspGfxDlContext* ctx, const PspGfxDlVer
         dst->b = (float) src->b / 255.0f;
         dst->a = (float) src->a / 255.0f;
     }
-#if (MAP_EXPLOSION_DIAG + 0)
-    if (psp_gfx_dl_map_explosion_diag_match(ctx) && (MAP_EXPLOSION_DIAG == 1)) {
-        dst->r = 1.0f;
-        dst->g = 0.0f;
-        dst->b = 0.0f;
-        dst->a = 1.0f;
-    }
-#endif
     if ((ctx->textureUploadWidth != 0) && (ctx->textureUploadHeight != 0)) {
         dst->u = psp_gfx_dl_normalize_s10_5_s(ctx, src->s, ctx->textureUploadWidth, ctx->textureTileUls);
         dst->v = psp_gfx_dl_normalize_s10_5_t(ctx, src->t, ctx->textureUploadHeight, ctx->textureTileUlt);
@@ -2737,14 +2509,6 @@ static void psp_gfx_dl_vertex_color_u8(PspGfxDlContext* ctx, const PspGfxDlVerte
         *b = src->b;
         *a = src->a;
     }
-#if (MAP_EXPLOSION_DIAG + 0)
-    if (psp_gfx_dl_map_explosion_diag_match(ctx) && (MAP_EXPLOSION_DIAG == 1)) {
-        *r = 255;
-        *g = 0;
-        *b = 0;
-        *a = 255;
-    }
-#endif
 }
 
 static void psp_gfx_dl_emit_direct_vertex(PspGfxDlContext* ctx, const PspGfxDlVertex* src, float uScale,
@@ -2989,13 +2753,10 @@ static int psp_gfx_dl_try_emit_tri2_direct_pair(PspGfxDlContext* ctx, u8 a0, u8 
                                  psp_gfx_dl_primitive_color(ctx), psp_gfx_dl_environment_color(ctx),
                                  psp_gfx_dl_texture_wrap(ctx->textureCms, ctx->textureMaskS),
                                  psp_gfx_dl_texture_wrap(ctx->textureCmt, ctx->textureMaskT),
-                                 psp_gfx_dl_diag_alpha_test(ctx, psp_gfx_dl_alpha_test_enabled(ctx)),
-                                 psp_gfx_dl_diag_blend(ctx, psp_gfx_dl_blend_enabled(ctx)),
-                                 psp_gfx_dl_diag_premultiplied(ctx, psp_gfx_dl_premultiplied_blend_enabled(ctx)),
-                                 psp_gfx_dl_rgba16_coverage_alpha_enabled(ctx),
-                                 psp_gfx_dl_map_explosion_diag_match(ctx));
-    psp_gfx_dl_set_batch_depth(ctx, psp_gfx_dl_diag_depth_test(ctx, (ctx->geometryMode & G_ZBUFFER) != 0),
-                               psp_gfx_dl_diag_depth_write(ctx, (ctx->otherModeL & Z_UPD) != 0),
+                                 psp_gfx_dl_alpha_test_enabled(ctx), psp_gfx_dl_blend_enabled(ctx),
+                                 psp_gfx_dl_premultiplied_blend_enabled(ctx),
+                                 psp_gfx_dl_rgba16_coverage_alpha_enabled(ctx));
+    psp_gfx_dl_set_batch_depth(ctx, (ctx->geometryMode & G_ZBUFFER) != 0, (ctx->otherModeL & Z_UPD) != 0,
                                psp_gfx_dl_depth_bias_enabled(ctx));
     psp_gfx_dl_set_batch_fog(ctx, !pretransformed0 && ((ctx->otherModeL >> 30) == G_BL_CLR_FOG), va0->projection);
 #endif
@@ -3512,13 +3273,10 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
                                  psp_gfx_dl_primitive_color(ctx), psp_gfx_dl_environment_color(ctx),
                                  psp_gfx_dl_texture_wrap(ctx->textureCms, ctx->textureMaskS),
                                  psp_gfx_dl_texture_wrap(ctx->textureCmt, ctx->textureMaskT),
-                                 psp_gfx_dl_diag_alpha_test(ctx, psp_gfx_dl_alpha_test_enabled(ctx)),
-                                 psp_gfx_dl_diag_blend(ctx, psp_gfx_dl_blend_enabled(ctx)),
-                                 psp_gfx_dl_diag_premultiplied(ctx, psp_gfx_dl_premultiplied_blend_enabled(ctx)),
-                                 psp_gfx_dl_rgba16_coverage_alpha_enabled(ctx),
-                                 psp_gfx_dl_map_explosion_diag_match(ctx));
-    psp_gfx_dl_set_batch_depth(ctx, psp_gfx_dl_diag_depth_test(ctx, depthTest),
-                               psp_gfx_dl_diag_depth_write(ctx, depthWrite), psp_gfx_dl_depth_bias_enabled(ctx));
+                                 psp_gfx_dl_alpha_test_enabled(ctx), psp_gfx_dl_blend_enabled(ctx),
+                                 psp_gfx_dl_premultiplied_blend_enabled(ctx),
+                                 psp_gfx_dl_rgba16_coverage_alpha_enabled(ctx));
+    psp_gfx_dl_set_batch_depth(ctx, depthTest, depthWrite, psp_gfx_dl_depth_bias_enabled(ctx));
     psp_gfx_dl_set_batch_fog(ctx, !pretransformed && ((ctx->otherModeL >> 30) == G_BL_CLR_FOG), va->projection);
 #endif
 #if SF64_PSP_PROFILE_TRIVIAL_REJECTS
@@ -3677,10 +3435,8 @@ static void psp_gfx_dl_handle_texture_rectangle(PspGfxDlContext* ctx, const Gfx*
         0, ctx->combineMode, psp_gfx_dl_primitive_color(ctx), psp_gfx_dl_environment_color(ctx),
         psp_gfx_dl_texture_wrap(ctx->textureCms, ctx->textureMaskS),
         psp_gfx_dl_texture_wrap(ctx->textureCmt, ctx->textureMaskT),
-        psp_gfx_dl_diag_alpha_test(ctx, psp_gfx_dl_alpha_test_enabled(ctx)),
-        psp_gfx_dl_diag_blend(ctx, psp_gfx_dl_blend_enabled(ctx)),
-        psp_gfx_dl_diag_premultiplied(ctx, psp_gfx_dl_premultiplied_blend_enabled(ctx)),
-        psp_gfx_dl_rgba16_coverage_alpha_enabled(ctx), psp_gfx_dl_map_explosion_diag_match(ctx));
+        psp_gfx_dl_alpha_test_enabled(ctx), psp_gfx_dl_blend_enabled(ctx),
+        psp_gfx_dl_premultiplied_blend_enabled(ctx), psp_gfx_dl_rgba16_coverage_alpha_enabled(ctx));
     psp_gfx_dl_set_batch_depth(ctx, 0, 0, 0);
     psp_gfx_dl_set_batch_fog(ctx, 0, ctx->projection);
     psp_gfx_dl_set_batch_transform(ctx, 1, 0, NULL);
@@ -4457,18 +4213,7 @@ static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int pr
             }
         }
     } else if ((ctx->textureFormat == G_IM_FMT_IA) && (ctx->textureSize == G_IM_SIZ_8b)) {
-        int diagnosticMode = 0;
-#if (MAP_EXPLOSION_DIAG + 0)
-        if (psp_gfx_dl_map_explosion_diag_match(ctx) && (MAP_EXPLOSION_DIAG == 2)) {
-            diagnosticMode = 1;
-        }
-#endif
-        if (diagnosticMode != 0) {
-            hit = PspGfxPspgl_FindIa8DiagnosticTexture((const u8*) ctx->textureImage, ctx->textureWidth,
-                                                       ctx->textureHeight, diagnosticMode, &ctx->textureId,
-                                                       &ctx->textureUploadWidth, &ctx->textureUploadHeight,
-                                                       &ctx->textureRef);
-        } else if (psp_gfx_dl_baked_env_blend_texture_enabled(ctx)) {
+        if (psp_gfx_dl_baked_env_blend_texture_enabled(ctx)) {
             hit = PspGfxPspgl_FindIa8EnvBlendTexture((const u8*) ctx->textureImage, ctx->textureWidth,
                                                      ctx->textureHeight, psp_gfx_dl_primitive_color(ctx),
                                                      psp_gfx_dl_environment_color(ctx), &ctx->textureId,
@@ -4481,11 +4226,7 @@ static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int pr
         }
         if (!hit) {
             psp_gfx_dl_flush_texture_change(ctx, PSP_PROFILE_TEXTURE_FLUSH_CACHE_MISS_UPLOAD);
-            if (diagnosticMode != 0) {
-                ctx->textureId = PspGfxPspgl_CreateIa8DiagnosticTexture(
-                    (const u8*) ctx->textureImage, ctx->textureWidth, ctx->textureHeight, diagnosticMode,
-                    &ctx->textureUploadWidth, &ctx->textureUploadHeight, &ctx->textureRef);
-            } else if (psp_gfx_dl_baked_env_blend_texture_enabled(ctx)) {
+            if (psp_gfx_dl_baked_env_blend_texture_enabled(ctx)) {
                 ctx->textureId = PspGfxPspgl_CreateIa8EnvBlendTexture(
                     (const u8*) ctx->textureImage, ctx->textureWidth, ctx->textureHeight,
                     psp_gfx_dl_primitive_color(ctx), psp_gfx_dl_environment_color(ctx),

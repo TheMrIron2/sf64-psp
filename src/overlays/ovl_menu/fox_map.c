@@ -16,6 +16,18 @@
 #include "assets/ast_text.h"
 #include "assets/ast_font_3d.h"
 
+#if defined(TARGET_PSP)
+#ifndef PSP_RENDERER_DIAGNOSTICS
+#define PSP_RENDERER_DIAGNOSTICS 0
+#endif
+#ifndef MAP_STATE_TRACE
+#define MAP_STATE_TRACE PSP_RENDERER_DIAGNOSTICS
+#endif
+#if (MAP_STATE_TRACE + 0)
+#include "src/psp/platform.h"
+#endif
+#endif
+
 // BSS STARTS HERE
 u8 gMapPlanetCloudTex[96 * 96];
 u8 gMapCorneriaTex[96 * 96];
@@ -145,6 +157,110 @@ f32 D_menu_801CECC0[3][10];
 f32 D_menu_801CED38[3][10];
 f32 D_menu_801CEDB0[3][10];
 f32 D_menu_801CEE28[3][10];
+
+#if defined(TARGET_PSP) && (MAP_STATE_TRACE + 0)
+typedef struct {
+    s32 frame;
+    s32 emitted;
+    s32 repeatDrawCalls;
+} MapStateTraceEmissionFrame;
+
+static MapStateTraceEmissionFrame sMapStateTraceEmissionFrame = { -1, 0 };
+static s32 sMapStateTraceLastEmissionCount = -1;
+static s32 sMapStateTraceLastRepeatDrawCount = -1;
+
+static void Map_StateTrace_LogS32(const char* name, s32 oldValue, s32 newValue, const char* func,
+                                  const char* branch) {
+    char line[512];
+
+    if (oldValue == newValue) {
+        return;
+    }
+    sprintf(line,
+            "[map-state] frame=%ld %s %ld->%ld at %s:%s state=%ld sub=%ld timer95C=%ld timer1=%ld timer2=%ld "
+            "timer3=%ld D34=%ld D38=%ld D40=%.3f scale=%.3f planet=%ld corneriaRepeat=%ld",
+            (long) gGameFrameCount, name, (long) oldValue, (long) newValue, func, branch, (long) sMapState,
+            (long) sMapSubState, (long) D_menu_801CD95C, (long) sMapTimer1, (long) sMapTimer2,
+            (long) sMapTimer3, (long) D_menu_801CEB34, (long) D_menu_801CEB38, (double) D_menu_801CEB40,
+            (double) sMapCorneriaExplosionScale, (long) sCurrentPlanetId,
+            (long) sPlanetExplosions[EXPLOSIONS_CORNERIA]);
+    PspPlatform_LogLine(line);
+}
+
+static void Map_StateTrace_LogF32(const char* name, f32 oldValue, f32 newValue, const char* func,
+                                  const char* branch) {
+    char line[512];
+
+    if (oldValue == newValue) {
+        return;
+    }
+    sprintf(line,
+            "[map-state] frame=%ld %s %.3f->%.3f at %s:%s state=%ld sub=%ld timer95C=%ld timer1=%ld timer2=%ld "
+            "timer3=%ld D34=%ld D38=%ld D40=%.3f scale=%.3f planet=%ld corneriaRepeat=%ld",
+            (long) gGameFrameCount, name, (double) oldValue, (double) newValue, func, branch,
+            (long) sMapState, (long) sMapSubState, (long) D_menu_801CD95C, (long) sMapTimer1,
+            (long) sMapTimer2, (long) sMapTimer3, (long) D_menu_801CEB34, (long) D_menu_801CEB38,
+            (double) D_menu_801CEB40, (double) sMapCorneriaExplosionScale, (long) sCurrentPlanetId,
+            (long) sPlanetExplosions[EXPLOSIONS_CORNERIA]);
+    PspPlatform_LogLine(line);
+}
+
+#define MAP_TRACE_SET_S32(var, value, branch) \
+    do {                                      \
+        s32 oldTraceValue = (var);            \
+        (var) = (value);                      \
+        Map_StateTrace_LogS32(#var, oldTraceValue, (var), __func__, branch); \
+    } while (0)
+
+#define MAP_TRACE_SET_F32(var, value, branch) \
+    do {                                      \
+        f32 oldTraceValue = (var);            \
+        (var) = (value);                      \
+        Map_StateTrace_LogF32(#var, oldTraceValue, (var), __func__, branch); \
+    } while (0)
+
+static void Map_StateTrace_BeginEmissionFrame(void) {
+    if (sMapStateTraceEmissionFrame.frame == gGameFrameCount) {
+        return;
+    }
+    if ((sMapStateTraceEmissionFrame.frame >= 0) &&
+        (sMapStateTraceEmissionFrame.emitted != sMapStateTraceLastEmissionCount)) {
+        Map_StateTrace_LogS32("explosionDlEmissions", sMapStateTraceLastEmissionCount,
+                              sMapStateTraceEmissionFrame.emitted, "Map_Draw", "frame-total");
+        sMapStateTraceLastEmissionCount = sMapStateTraceEmissionFrame.emitted;
+    }
+    if ((sMapStateTraceEmissionFrame.frame >= 0) &&
+        (sMapStateTraceEmissionFrame.repeatDrawCalls != sMapStateTraceLastRepeatDrawCount)) {
+        Map_StateTrace_LogS32("planetRepeatDrawCalls", sMapStateTraceLastRepeatDrawCount,
+                              sMapStateTraceEmissionFrame.repeatDrawCalls, "Map_Draw", "frame-total");
+        sMapStateTraceLastRepeatDrawCount = sMapStateTraceEmissionFrame.repeatDrawCalls;
+    }
+    sMapStateTraceEmissionFrame.frame = gGameFrameCount;
+    sMapStateTraceEmissionFrame.emitted = 0;
+    sMapStateTraceEmissionFrame.repeatDrawCalls = 0;
+}
+
+static void Map_StateTrace_RecordExplosionDl(const char* func, const char* branch) {
+    s32 oldValue;
+
+    Map_StateTrace_BeginEmissionFrame();
+    oldValue = sMapStateTraceEmissionFrame.emitted;
+    sMapStateTraceEmissionFrame.emitted++;
+    Map_StateTrace_LogS32("explosionDlEmissions", oldValue, sMapStateTraceEmissionFrame.emitted, func, branch);
+}
+
+static void Map_StateTrace_RecordRepeatDraw(void) {
+    Map_StateTrace_BeginEmissionFrame();
+    sMapStateTraceEmissionFrame.repeatDrawCalls++;
+}
+#else
+#define MAP_TRACE_SET_S32(var, value, branch) ((var) = (value))
+#define MAP_TRACE_SET_F32(var, value, branch) ((var) = (value))
+#define Map_StateTrace_BeginEmissionFrame() ((void) 0)
+#define Map_StateTrace_RecordExplosionDl(func, branch) ((void) 0)
+#define Map_StateTrace_RecordRepeatDraw() ((void) 0)
+#endif
+
 s32 D_menu_801CEEA0;
 s32 D_menu_801CEEA4;
 s32 D_menu_801CEEA8;
@@ -1263,9 +1379,9 @@ void Map_Setup(void) {
     D_menu_801CD994 = 0;
     sRestartLevelStates = 0;
 
-    sPlanetExplosions[EXPLOSIONS_CORNERIA] = false;
-    sPlanetExplosions[EXPLOSIONS_KATINA] = false;
-    sPlanetExplosions[EXPLOSIONS_SECTOR_Y] = false;
+    MAP_TRACE_SET_S32(sPlanetExplosions[EXPLOSIONS_CORNERIA], false, "setup-clear-corneria-repeat");
+    MAP_TRACE_SET_S32(sPlanetExplosions[EXPLOSIONS_KATINA], false, "setup-clear-katina-repeat");
+    MAP_TRACE_SET_S32(sPlanetExplosions[EXPLOSIONS_SECTOR_Y], false, "setup-clear-sector-y-repeat");
 
     for (i = 0; i < 10; i++) {
         D_menu_801CEB58[1][i] = 0;
@@ -1396,7 +1512,7 @@ void Map_Setup(void) {
 
     gMapState = 2;
 
-    sMapSubState = 0;
+    MAP_TRACE_SET_S32(sMapSubState, 0, "setup-reset-substate");
     D_menu_801CEEC4 = 0;
     D_menu_801CEEC8 = 5;
     D_menu_801CEFF4 = 255.0f;
@@ -1407,7 +1523,7 @@ void Map_Setup(void) {
     D_menu_801CEEA4 = 0;
     D_menu_801CEEA8 = 255;
     D_menu_801CEEAC = 255;
-    D_menu_801CEB34 = -1;
+    MAP_TRACE_SET_S32(D_menu_801CEB34, -1, "setup-corneria-explosion-idle");
 }
 
 void Map_Setup_Play(void) {
@@ -1490,7 +1606,7 @@ void Map_Setup_Play(void) {
     gHitCount = 0;
 
     D_menu_801CD94C = 0;
-    sMapState = MAP_ZOOM_PLANET_PATH;
+    MAP_TRACE_SET_S32(sMapState, MAP_ZOOM_PLANET_PATH, "setup-play-zoom-path");
 }
 
 void Map_Setup_GameOver(void) {
@@ -1533,9 +1649,9 @@ void Map_Setup_GameOver(void) {
 
     AUDIO_SET_SPEC(SFX_LAYOUT_DEFAULT, AUDIOSPEC_GAME_OVER);
 
-    sMapSubState = 0;
+    MAP_TRACE_SET_S32(sMapSubState, 0, "setup-game-over-reset-substate");
     D_menu_801CD94C = 0;
-    sMapState = MAP_GAME_OVER;
+    MAP_TRACE_SET_S32(sMapState, MAP_GAME_OVER, "setup-game-over-state");
 }
 
 void Map_Setup_Menu(void) {
@@ -1670,16 +1786,16 @@ void Map_PlanetExplosions_Setup(void) {
     s32 i;
 
     if (gMissionNumber != PLANET_METEO) {
-        sPlanetExplosions[EXPLOSIONS_KATINA] = true;
-        sPlanetExplosions[EXPLOSIONS_SECTOR_Y] = true;
+        MAP_TRACE_SET_S32(sPlanetExplosions[EXPLOSIONS_KATINA], true, "repeat-setup-katina");
+        MAP_TRACE_SET_S32(sPlanetExplosions[EXPLOSIONS_SECTOR_Y], true, "repeat-setup-sector-y");
     }
 
     for (i = 0; i < ARRAY_COUNT(gMissionPlanet); i++) {
         if (gMissionPlanet[i] == PLANET_KATINA) {
-            sPlanetExplosions[EXPLOSIONS_KATINA] = false;
+            MAP_TRACE_SET_S32(sPlanetExplosions[EXPLOSIONS_KATINA], false, "repeat-clear-played-katina");
         }
         if (gMissionPlanet[i] == PLANET_SECTOR_Y) {
-            sPlanetExplosions[EXPLOSIONS_SECTOR_Y] = false;
+            MAP_TRACE_SET_S32(sPlanetExplosions[EXPLOSIONS_SECTOR_Y], false, "repeat-clear-played-sector-y");
         }
     }
 }
@@ -2423,11 +2539,11 @@ void Map_ZoomPlanet_Update(void) {
             D_menu_801CEA84 = 0.05f;
             D_menu_801CEA94 = 0.0f;
             D_menu_801CEA98 = 0;
-            D_menu_801CD95C = 10;
+            MAP_TRACE_SET_S32(D_menu_801CD95C, 10, "zoom-setup-default-timer");
             D_menu_801CD97C = 0;
 
             if (sCurrentPlanetId == PLANET_CORNERIA) {
-                D_menu_801CD95C = 5;
+                MAP_TRACE_SET_S32(D_menu_801CD95C, 5, "zoom-setup-corneria-timer");
             }
 
             D_menu_801CD9D8 = 0;
@@ -2442,37 +2558,37 @@ void Map_ZoomPlanet_Update(void) {
             gFillScreenBlue = 255;
             gFillScreenAlpha = 0;
 
-            sMapCorneriaExplosionScale = 0.0f;
-            D_menu_801CEB38 = 255;
+            MAP_TRACE_SET_F32(sMapCorneriaExplosionScale, 0.0f, "zoom-setup-corneria-explosion-scale");
+            MAP_TRACE_SET_S32(D_menu_801CEB38, 255, "zoom-setup-corneria-explosion-alpha");
 
-            sMapSubState++;
+            MAP_TRACE_SET_S32(sMapSubState, sMapSubState + 1, "zoom-setup-complete");
             break;
 
         case 1:
             if (D_menu_801CD95C == 0) {
                 if (sCurrentPlanetId == PLANET_CORNERIA) {
                     gFillScreenAlpha = 0;
-                    sMapSubState = 10;
+                    MAP_TRACE_SET_S32(sMapSubState, 10, "corneria-flash-complete");
                     AUDIO_PLAY_SFX(NA_SE_BACKUP_CLEAR, gDefaultSfxSource, 4);
                 } else {
                     AUDIO_PLAY_SFX(NA_SE_MAP_ZOOM_START, gDefaultSfxSource, 4);
-                    sMapSubState++;
+                    MAP_TRACE_SET_S32(sMapSubState, sMapSubState + 1, "non-corneria-zoom-start");
                 }
             } else {
                 if (sCurrentPlanetId == PLANET_CORNERIA) {
                     gFillScreenAlpha ^= 0xFF;
                     if (D_menu_801CD95C == 2) {
-                        D_menu_801CEB34 = 0;
+                        MAP_TRACE_SET_S32(D_menu_801CEB34, 0, "corneria-flash-trigger-explosion");
                     }
                 }
-                D_menu_801CD95C--;
+                MAP_TRACE_SET_S32(D_menu_801CD95C, D_menu_801CD95C - 1, "zoom-flash-countdown");
             }
             break;
 
         case 10:
             if (D_menu_801CEB34 == 4) {
                 AUDIO_PLAY_SFX(NA_SE_MAP_ZOOM_START, gDefaultSfxSource, 4);
-                sMapSubState = 2;
+                MAP_TRACE_SET_S32(sMapSubState, 2, "corneria-explosion-finished");
             }
             break;
 
@@ -2482,7 +2598,7 @@ void Map_ZoomPlanet_Update(void) {
                 AUDIO_PLAY_SFX(NA_SE_MAP_ZOOM_END, gDefaultSfxSource, 4);
                 D_menu_801CD9D8 = 1;
                 if (sCurrentPlanetId == PLANET_CORNERIA) {
-                    sPlanetExplosions[EXPLOSIONS_CORNERIA] = true;
+                    MAP_TRACE_SET_S32(sPlanetExplosions[EXPLOSIONS_CORNERIA], true, "corneria-repeat-activate");
                     for (i = 0; i < 10; i++) {
                         D_menu_801CEB58[0][i] = RAND_INT(3.0f);
                         D_menu_801CEBD0[0][i] = 255;
@@ -2505,14 +2621,14 @@ void Map_ZoomPlanet_Update(void) {
                 D_menu_801CD970 = 0;
 
                 if (Map_GralPepper_Talk()) {
-                    sMapSubState = 3;
+                    MAP_TRACE_SET_S32(sMapSubState, 3, "briefing-talk-complete");
                 }
             }
             break;
 
         case 20:
             if (gControllerPress[gMainController].button & START_BUTTON) {
-                sMapSubState = 21;
+                MAP_TRACE_SET_S32(sMapSubState, 21, "debug-skip-start");
             }
 
             if (gControllerHold[gMainController].button & R_TRIG) {
@@ -2535,13 +2651,13 @@ void Map_ZoomPlanet_Update(void) {
             D_menu_801CD970 = 0;
 
             if (Map_GralPepper_Talk()) {
-                sMapSubState = 3;
+                MAP_TRACE_SET_S32(sMapSubState, 3, "debug-briefing-talk-complete");
             }
             break;
 
         case 3:
-            sMapSubState = 0;
-            sMapState = MAP_LEVEL_START;
+            MAP_TRACE_SET_S32(sMapSubState, 0, "level-start-transition-reset-substate");
+            MAP_TRACE_SET_S32(sMapState, MAP_LEVEL_START, "level-start-transition");
             break;
     }
     D_menu_801CD9C4++;
@@ -3955,7 +4071,7 @@ void Map_LevelStart_Update(void) {
             if (sWipeHeight < 120) {
                 sWipeHeight += 15;
                 if (sCurrentPlanetId == PLANET_CORNERIA) {
-                    sPlanetExplosions[EXPLOSIONS_CORNERIA] = false;
+                    MAP_TRACE_SET_S32(sPlanetExplosions[EXPLOSIONS_CORNERIA], false, "level-start-wipe-clear-repeat");
                 }
             } else {
                 sMapTimer1 = 5;
@@ -4248,8 +4364,8 @@ void Map_SetState_ZoomPlanet(void) {
     }
 
     D_menu_801CEFC8 = 0;
-    sMapState = MAP_ZOOM_PLANET;
-    sMapSubState = 0;
+    MAP_TRACE_SET_S32(sMapState, MAP_ZOOM_PLANET, "set-state-zoom-planet");
+    MAP_TRACE_SET_S32(sMapSubState, 0, "set-state-zoom-planet-reset-substate");
 }
 
 void Map_PlayLevel(void) {
@@ -4935,6 +5051,7 @@ void Map_PlanetMedal_Draw(PlanetId planetId) {
 }
 
 void Map_CorneriaExplosion_Draw(void) {
+    Map_StateTrace_BeginEmissionFrame();
     if (D_menu_801CEB34 >= 0) {
         RCP_SetupDL(&gMasterDisp, SETUPDL_67);
 
@@ -4942,32 +5059,34 @@ void Map_CorneriaExplosion_Draw(void) {
 
         switch (D_menu_801CEB34) {
             case 0:
-                sMapCorneriaExplosionScale += 0.15f;
+                MAP_TRACE_SET_F32(sMapCorneriaExplosionScale, sMapCorneriaExplosionScale + 0.15f,
+                                  "corneria-explosion-grow");
                 if (sMapCorneriaExplosionScale >= 0.7f) {
-                    sMapCorneriaExplosionScale = 0.8f;
-                    D_menu_801CEB34 = 2;
-                    D_menu_801CEB40 = 2.0f;
+                    MAP_TRACE_SET_F32(sMapCorneriaExplosionScale, 0.8f, "corneria-explosion-grow-clamp");
+                    MAP_TRACE_SET_S32(D_menu_801CEB34, 2, "corneria-explosion-hold-start");
+                    MAP_TRACE_SET_F32(D_menu_801CEB40, 2.0f, "corneria-explosion-hold-timer");
                 }
                 break;
 
             case 2:
-                D_menu_801CEB40--;
+                MAP_TRACE_SET_F32(D_menu_801CEB40, D_menu_801CEB40 - 1.0f, "corneria-explosion-hold-countdown");
                 if (D_menu_801CEB40 <= 0.0f) {
-                    D_menu_801CEB34 = 3;
-                    sMapCorneriaExplosionScale = 0.7f;
+                    MAP_TRACE_SET_S32(D_menu_801CEB34, 3, "corneria-explosion-fade-start");
+                    MAP_TRACE_SET_F32(sMapCorneriaExplosionScale, 0.7f, "corneria-explosion-fade-scale");
                 }
                 break;
 
             case 3:
-                D_menu_801CEB38 -= 8;
-                sMapCorneriaExplosionScale -= 0.001f;
+                MAP_TRACE_SET_S32(D_menu_801CEB38, D_menu_801CEB38 - 8, "corneria-explosion-alpha-fade");
+                MAP_TRACE_SET_F32(sMapCorneriaExplosionScale, sMapCorneriaExplosionScale - 0.001f,
+                                  "corneria-explosion-scale-fade");
 
                 if (D_menu_801CEB38 < 0) {
-                    D_menu_801CEB38 = 0;
+                    MAP_TRACE_SET_S32(D_menu_801CEB38, 0, "corneria-explosion-alpha-clamp");
                 }
 
                 if (D_menu_801CEB38 == 0) {
-                    D_menu_801CEB34 = 4;
+                    MAP_TRACE_SET_S32(D_menu_801CEB34, 4, "corneria-explosion-complete");
                 }
                 break;
         }
@@ -4984,6 +5103,7 @@ void Map_CorneriaExplosion_Draw(void) {
 
         Matrix_SetGfxMtx(&gMasterDisp);
 
+        Map_StateTrace_RecordExplosionDl(__func__, "corneria-one-shot");
         gSPDisplayList(gMasterDisp++, aMapPlanetExplosionDL);
 
         Matrix_Pop(&gGfxMatrix);
@@ -4995,6 +5115,8 @@ void Map_PlanetExplosions_Draw(PlanetId planetId, PlanetExplosions explosionIdx)
     s32 maxExplosions;
     f32 temp;
 
+    Map_StateTrace_BeginEmissionFrame();
+    Map_StateTrace_RecordRepeatDraw();
     if (sPlanets[planetId].alpha == 0) {
         return;
     }
@@ -5070,6 +5192,7 @@ void Map_PlanetExplosions_Draw(PlanetId planetId, PlanetExplosions explosionIdx)
 
         Matrix_SetGfxMtx(&gMasterDisp);
 
+        Map_StateTrace_RecordExplosionDl(__func__, "planet-repeat");
         gSPDisplayList(gMasterDisp++, aMapPlanetExplosionDL);
 
         Matrix_Pop(&gGfxMatrix);
