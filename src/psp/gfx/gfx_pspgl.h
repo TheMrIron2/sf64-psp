@@ -138,6 +138,12 @@ int PspGfxPspgl_FindIa8EnvBlendTexture(const u8* pixels, u32 width, u32 height, 
 u32 PspGfxPspgl_CreateIa8EnvBlendTexture(const u8* pixels, u32 width, u32 height, u32 primitiveColor,
                                          u32 environmentColor, u32* uploadWidth, u32* uploadHeight,
                                          PspGfxPspglTextureRef* textureRef);
+int PspGfxPspgl_FindIa8DiagnosticTexture(const u8* pixels, u32 width, u32 height, int diagnosticMode,
+                                         u32* textureId, u32* uploadWidth, u32* uploadHeight,
+                                         PspGfxPspglTextureRef* textureRef);
+u32 PspGfxPspgl_CreateIa8DiagnosticTexture(const u8* pixels, u32 width, u32 height, int diagnosticMode,
+                                           u32* uploadWidth, u32* uploadHeight,
+                                           PspGfxPspglTextureRef* textureRef);
 int PspGfxPspgl_FindIa16Texture(const u16* pixels, u32 width, u32 height, u32* textureId, u32* uploadWidth,
                                 u32* uploadHeight, PspGfxPspglTextureRef* textureRef);
 u32 PspGfxPspgl_CreateIa16Texture(const u16* pixels, u32 width, u32 height, u32* uploadWidth, u32* uploadHeight,
@@ -150,7 +156,7 @@ void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u3
                                       PspGfxPspglTextureWrap wrapT, int alphaTest, int blend, int premultiplied,
                                       int depthTest, int depthWrite, int fog, const float* fogColor, float fogStart,
                                       float fogEnd,
-                                      const float* projectionMatrix, int pretransformed);
+                                      const float* projectionMatrix, int pretransformed, int pointFilter);
 void PspGfxPspgl_DrawSolidRect(float ulx, float uly, float lrx, float lry, u32 color, int blend);
 
 #endif
