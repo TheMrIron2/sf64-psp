@@ -65,6 +65,20 @@ static u32 sPspGfxDlBackgroundFeedbackSeedColor = 0xFF000000u;
 #include "assets/ast_map.h"
 
 extern Gfx gMapVenomCloudRuntimeDL[];
+extern u16 aPlCloudsTex[];
+
+typedef enum {
+    PSP_GFX_DL_DIAG_TARGET_NONE,
+    PSP_GFX_DL_DIAG_TARGET_CLOUD,
+} PspGfxDlDiagTarget;
+
+static PspGfxDlDiagTarget sPspGfxDlDiagActiveTarget;
+static int sPspGfxDlDiagMaterialLogged[2];
+static u32 sPspGfxDlDiagVertexLogCount[2];
+static u32 sPspGfxDlDiagLastSetTileW0;
+static u32 sPspGfxDlDiagLastSetTileW1;
+static u32 sPspGfxDlDiagLastSetTileSizeW0;
+static u32 sPspGfxDlDiagLastSetTileSizeW1;
 #endif
 
 #ifndef SF64_PSP_DIRECT_TRI_FASTPATH
@@ -565,6 +579,65 @@ static float psp_gfx_dl_fog_distance(const float projection[4][4], float ndcZ) {
     return (projection[3][2] - (ndcZ * projection[3][3])) / denominator;
 }
 
+#ifndef SF64_PSP_CLOUD_IA16_SWAP_EXPERIMENT
+#define SF64_PSP_CLOUD_IA16_SWAP_EXPERIMENT 0
+#endif
+
+#ifndef SF64_PSP_CLOUD_ALPHA_FLOOR_EXPERIMENT
+#define SF64_PSP_CLOUD_ALPHA_FLOOR_EXPERIMENT 0
+#endif
+
+#ifndef SF64_PSP_CLOUD_POINT_FILTER_EXPERIMENT
+#define SF64_PSP_CLOUD_POINT_FILTER_EXPERIMENT 0
+#endif
+
+#if SF64_PSP_CLOUD_IA16_SWAP_EXPERIMENT || SF64_PSP_CLOUD_ALPHA_FLOOR_EXPERIMENT ||                              \
+    SF64_PSP_CLOUD_POINT_FILTER_EXPERIMENT || PSP_RENDERER_DIAGNOSTICS
+static int psp_gfx_dl_ptr_matches(const void* a, const void* b) {
+    return (a != NULL) && (((uintptr_t) a) & 0x3FFFFFFFu) == (((uintptr_t) b) & 0x3FFFFFFFu);
+}
+#endif
+
+#if SF64_PSP_CLOUD_IA16_SWAP_EXPERIMENT || SF64_PSP_CLOUD_ALPHA_FLOOR_EXPERIMENT || \
+    SF64_PSP_CLOUD_POINT_FILTER_EXPERIMENT
+extern u16 aPlCloudsTex[];
+#endif
+
+#if SF64_PSP_CLOUD_IA16_SWAP_EXPERIMENT || SF64_PSP_CLOUD_ALPHA_FLOOR_EXPERIMENT
+static const u16* psp_gfx_dl_diag_maybe_transform_cloud_ia16(const void* textureImage, u32 width, u32 height) {
+    static u16 sTransformBuffer[64 * 32];
+    static const void* sTransformSource;
+    const u16* src;
+    u32 count;
+    u32 i;
+
+    if (!psp_gfx_dl_ptr_matches(textureImage, aPlCloudsTex)) {
+        return (const u16*) textureImage;
+    }
+    count = width * height;
+    if (count > (64U * 32U)) {
+        return (const u16*) textureImage;
+    }
+    if (sTransformSource != textureImage) {
+        src = (const u16*) textureImage;
+        for (i = 0; i < count; i++) {
+            u16 raw = src[i];
+#if SF64_PSP_CLOUD_IA16_SWAP_EXPERIMENT
+            raw = (u16) (((raw & 0xFFU) << 8) | (raw >> 8));
+#endif
+#if SF64_PSP_CLOUD_ALPHA_FLOOR_EXPERIMENT
+            if ((raw & 0xFFU) < SF64_PSP_CLOUD_ALPHA_FLOOR_EXPERIMENT) {
+                raw = (u16) (raw & 0xFF00U);
+            }
+#endif
+            sTransformBuffer[i] = raw;
+        }
+        sTransformSource = textureImage;
+    }
+    return sTransformBuffer;
+}
+#endif
+
 static PspGfxPspglTextureWrap psp_gfx_dl_texture_wrap(u32 mode, u32 mask) {
     if ((mode & G_TX_CLAMP) != 0) {
         return PSP_GFX_PSPGL_WRAP_CLAMP;
@@ -588,22 +661,57 @@ static float psp_gfx_dl_normalize_s10_5_scaled(s16 coord, u32 uploadSize, u32 ti
     return (scaledCoord - ((float) tileOrigin * 8.0f)) / (32.0f * (float) uploadSize);
 }
 
+#if PSP_RENDERER_DIAGNOSTICS
+static void psp_gfx_dl_diag_log_normalize(PspGfxDlDiagTarget target, const char* path, char axis, float rawCoord,
+                                          u32 uploadSize, u32 tileOrigin, u32 scale, float normalized) {
+    char line[224];
+
+    if ((target == PSP_GFX_DL_DIAG_TARGET_NONE) || (sPspGfxDlDiagVertexLogCount[target] >= 8)) {
+        return;
+    }
+    sPspGfxDlDiagVertexLogCount[target]++;
+    snprintf(line, sizeof(line),
+             "[water-cloud-uv] target=%s path=%s axis=%c rawx1000=%ld uploadSize=%lu tileOrigin=%lu scale=%lu "
+             "normx1000=%ld",
+             "cloud", path, axis, (long) (rawCoord * 1000.0f), (unsigned long) uploadSize,
+             (unsigned long) tileOrigin, (unsigned long) scale, (long) (normalized * 1000.0f));
+    PspPlatform_LogLine(line);
+}
+#endif
+
 static float psp_gfx_dl_normalize_s10_5_s(const PspGfxDlContext* ctx, s16 coord, u32 uploadSize, u32 tileOrigin) {
-    return psp_gfx_dl_normalize_s10_5_scaled(coord, uploadSize, tileOrigin, ctx->textureScaleS);
+    float result = psp_gfx_dl_normalize_s10_5_scaled(coord, uploadSize, tileOrigin, ctx->textureScaleS);
+#if PSP_RENDERER_DIAGNOSTICS
+    psp_gfx_dl_diag_log_normalize(sPspGfxDlDiagActiveTarget, "tri", 'S', (float) coord, uploadSize, tileOrigin,
+                                  ctx->textureScaleS, result);
+#endif
+    return result;
 }
 
 static float psp_gfx_dl_normalize_s10_5_t(const PspGfxDlContext* ctx, s16 coord, u32 uploadSize, u32 tileOrigin) {
-    return psp_gfx_dl_normalize_s10_5_scaled(coord, uploadSize, tileOrigin, ctx->textureScaleT);
+    float result = psp_gfx_dl_normalize_s10_5_scaled(coord, uploadSize, tileOrigin, ctx->textureScaleT);
+#if PSP_RENDERER_DIAGNOSTICS
+    psp_gfx_dl_diag_log_normalize(sPspGfxDlDiagActiveTarget, "tri", 'T', (float) coord, uploadSize, tileOrigin,
+                                  ctx->textureScaleT, result);
+#endif
+    return result;
 }
 
 static float psp_gfx_dl_normalize_texel_coord(const PspGfxDlContext* ctx, float coord, u32 uploadSize,
                                               u32 tileOrigin) {
-    (void) ctx;
+    float result;
 
+    (void) ctx;
     if (uploadSize == 0) {
-        return 0.0f;
+        result = 0.0f;
+    } else {
+        result = (coord - ((float) tileOrigin * 0.25f)) / (float) uploadSize;
     }
-    return (coord - ((float) tileOrigin * 0.25f)) / (float) uploadSize;
+#if PSP_RENDERER_DIAGNOSTICS
+    psp_gfx_dl_diag_log_normalize(sPspGfxDlDiagActiveTarget, "rect", 'U', coord, uploadSize, tileOrigin, 0,
+                                  result);
+#endif
+    return result;
 }
 
 static void psp_gfx_dl_apply_depth_bias(PspGfxDlContext* ctx, float* z) {
@@ -630,6 +738,16 @@ static int psp_gfx_dl_alpha_test_enabled(PspGfxDlContext* ctx) {
     }
     return ctx->combineUsesTextureAlpha &&
            (((ctx->otherModeL & 3U) != G_AC_NONE) || ((ctx->otherModeL & CVG_X_ALPHA) != 0));
+}
+
+static int psp_gfx_dl_effective_point_filter(PspGfxDlContext* ctx) {
+    int pointFilter = psp_gfx_dl_rgba16_coverage_alpha_enabled(ctx);
+#if SF64_PSP_CLOUD_POINT_FILTER_EXPERIMENT
+    if (psp_gfx_dl_ptr_matches(ctx->textureImage, aPlCloudsTex)) {
+        pointFilter = 1;
+    }
+#endif
+    return pointFilter;
 }
 
 static int psp_gfx_dl_blend_enabled(PspGfxDlContext* ctx) {
@@ -2222,7 +2340,7 @@ static int psp_gfx_dl_resolve_effective_material_state(PspGfxDlContext* ctx) {
      * boundary. Keep decoding, blending and UVs unchanged, but sample this
      * material class with point filtering.
      */
-    material->pointFilter = psp_gfx_dl_rgba16_coverage_alpha_enabled(ctx);
+    material->pointFilter = psp_gfx_dl_effective_point_filter(ctx);
     material->valid = 1;
     material->dirty = 0;
     return 1;
@@ -2789,7 +2907,7 @@ static int psp_gfx_dl_try_emit_tri2_direct_pair(PspGfxDlContext* ctx, u8 a0, u8 
                                  psp_gfx_dl_texture_wrap(ctx->textureCmt, ctx->textureMaskT),
                                  psp_gfx_dl_alpha_test_enabled(ctx), psp_gfx_dl_blend_enabled(ctx),
                                  psp_gfx_dl_premultiplied_blend_enabled(ctx),
-                                 psp_gfx_dl_rgba16_coverage_alpha_enabled(ctx));
+                                 psp_gfx_dl_effective_point_filter(ctx));
     psp_gfx_dl_set_batch_depth(ctx, (ctx->geometryMode & G_ZBUFFER) != 0, (ctx->otherModeL & Z_UPD) != 0,
                                psp_gfx_dl_depth_bias_enabled(ctx));
     psp_gfx_dl_set_batch_fog(ctx, !pretransformed0 && ((ctx->otherModeL >> 30) == G_BL_CLR_FOG), va0->projection);
@@ -3309,7 +3427,7 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
                                  psp_gfx_dl_texture_wrap(ctx->textureCmt, ctx->textureMaskT),
                                  psp_gfx_dl_alpha_test_enabled(ctx), psp_gfx_dl_blend_enabled(ctx),
                                  psp_gfx_dl_premultiplied_blend_enabled(ctx),
-                                 psp_gfx_dl_rgba16_coverage_alpha_enabled(ctx));
+                                 psp_gfx_dl_effective_point_filter(ctx));
     psp_gfx_dl_set_batch_depth(ctx, depthTest, depthWrite, psp_gfx_dl_depth_bias_enabled(ctx));
     psp_gfx_dl_set_batch_fog(ctx, !pretransformed && ((ctx->otherModeL >> 30) == G_BL_CLR_FOG), va->projection);
 #endif
@@ -3470,7 +3588,7 @@ static void psp_gfx_dl_handle_texture_rectangle(PspGfxDlContext* ctx, const Gfx*
         psp_gfx_dl_texture_wrap(ctx->textureCms, ctx->textureMaskS),
         psp_gfx_dl_texture_wrap(ctx->textureCmt, ctx->textureMaskT),
         psp_gfx_dl_alpha_test_enabled(ctx), psp_gfx_dl_blend_enabled(ctx),
-        psp_gfx_dl_premultiplied_blend_enabled(ctx), psp_gfx_dl_rgba16_coverage_alpha_enabled(ctx));
+        psp_gfx_dl_premultiplied_blend_enabled(ctx), psp_gfx_dl_effective_point_filter(ctx));
     psp_gfx_dl_set_batch_depth(ctx, 0, 0, 0);
     psp_gfx_dl_set_batch_fog(ctx, 0, ctx->projection);
     psp_gfx_dl_set_batch_transform(ctx, 1, 0, NULL);
@@ -4155,7 +4273,214 @@ static void psp_gfx_dl_handle_set_tile(PspGfxDlContext* ctx, const Gfx* gfx) {
     ctx->textureMaskS = (gfx->words.w1 >> 4) & 0xF;
     ctx->textureUploadAttempted = 0;
     psp_gfx_dl_mark_effective_material_dirty(ctx);
+#if PSP_RENDERER_DIAGNOSTICS
+    sPspGfxDlDiagLastSetTileW0 = gfx->words.w0;
+    sPspGfxDlDiagLastSetTileW1 = gfx->words.w1;
+#endif
 }
+
+#if PSP_RENDERER_DIAGNOSTICS
+static u8 psp_gfx_dl_diag_ia16_alpha(u16 raw, int alphaIsLowByte) {
+    return alphaIsLowByte ? (u8) raw : (u8) (raw >> 8);
+}
+
+static u8 psp_gfx_dl_diag_ia16_intensity(u16 raw, int alphaIsLowByte) {
+    return alphaIsLowByte ? (u8) (raw >> 8) : (u8) raw;
+}
+
+static void psp_gfx_dl_diag_log_ia16_interpretation(const u16* texels, u32 width, u32 height, const char* label,
+                                                    const char* interp, int alphaIsLowByte) {
+    u32 x;
+    u32 y;
+    u32 minAlpha = 255;
+    u32 maxAlpha = 0;
+    u32 nonzero = 0;
+    u32 bucket1_15 = 0;
+    u32 bucket16_63 = 0;
+    u32 bucket64_127 = 0;
+    u32 bucket128_255 = 0;
+    u32 edgeRowNonzero = 0;
+    u32 edgeColNonzero = 0;
+    u32 alphaHash = 2166136261u;
+    u32 intensityHash = 2166136261u;
+    char line[320];
+
+    for (y = 0; y < height; y++) {
+        for (x = 0; x < width; x++) {
+            u16 raw = texels[(y * width) + x];
+            u8 alpha = psp_gfx_dl_diag_ia16_alpha(raw, alphaIsLowByte);
+            u8 intensity = psp_gfx_dl_diag_ia16_intensity(raw, alphaIsLowByte);
+
+            if (alpha < minAlpha) {
+                minAlpha = alpha;
+            }
+            if (alpha > maxAlpha) {
+                maxAlpha = alpha;
+            }
+            if (alpha != 0) {
+                nonzero++;
+                if (alpha <= 15) {
+                    bucket1_15++;
+                } else if (alpha <= 63) {
+                    bucket16_63++;
+                } else if (alpha <= 127) {
+                    bucket64_127++;
+                } else {
+                    bucket128_255++;
+                }
+            }
+            if (((y == 0) || (y == (height - 1))) && (alpha != 0)) {
+                edgeRowNonzero++;
+            }
+            if (((x == 0) || (x == (width - 1))) && (alpha != 0)) {
+                edgeColNonzero++;
+            }
+            alphaHash ^= alpha;
+            alphaHash *= 16777619u;
+            intensityHash ^= intensity;
+            intensityHash *= 16777619u;
+        }
+    }
+    snprintf(line, sizeof(line),
+             "[water-cloud-alpha2] label=%s interp=%s minA=%lu maxA=%lu nonzero=%lu total=%lu b1_15=%lu "
+             "b16_63=%lu b64_127=%lu b128_255=%lu edgeRowNZ=%lu edgeColNZ=%lu cornerTL=%u cornerTR=%u "
+             "cornerBL=%u cornerBR=%u center=%u alphaHash=%08lx intensityHash=%08lx",
+             label, interp, (unsigned long) minAlpha, (unsigned long) maxAlpha, (unsigned long) nonzero,
+             (unsigned long) (width * height), (unsigned long) bucket1_15, (unsigned long) bucket16_63,
+             (unsigned long) bucket64_127, (unsigned long) bucket128_255, (unsigned long) edgeRowNonzero,
+             (unsigned long) edgeColNonzero,
+             (unsigned) psp_gfx_dl_diag_ia16_alpha(texels[0], alphaIsLowByte),
+             (unsigned) psp_gfx_dl_diag_ia16_alpha(texels[width - 1], alphaIsLowByte),
+             (unsigned) psp_gfx_dl_diag_ia16_alpha(texels[(height - 1) * width], alphaIsLowByte),
+             (unsigned) psp_gfx_dl_diag_ia16_alpha(texels[((height - 1) * width) + (width - 1)], alphaIsLowByte),
+             (unsigned) psp_gfx_dl_diag_ia16_alpha(texels[((height / 2) * width) + (width / 2)], alphaIsLowByte),
+             (unsigned long) alphaHash, (unsigned long) intensityHash);
+    PspPlatform_LogLine(line);
+}
+
+static void psp_gfx_dl_diag_log_texel_alpha(PspGfxDlContext* ctx, const char* label) {
+    const u16* texels = (const u16*) ctx->textureImage;
+    u32 width = ctx->textureWidth;
+    u32 height = ctx->textureHeight;
+
+    if ((texels == NULL) || (width == 0) || (height == 0)) {
+        return;
+    }
+    psp_gfx_dl_diag_log_ia16_interpretation(texels, width, height, label, "A_cur_hiIntensity_loAlpha", 1);
+    psp_gfx_dl_diag_log_ia16_interpretation(texels, width, height, label, "B_swap_hiAlpha_loIntensity", 0);
+}
+
+static const char* psp_gfx_dl_diag_wrap_reason(u32 mode, u32 mask) {
+    if ((mode & G_TX_CLAMP) != 0) {
+        return "clamp-bit";
+    }
+    if (mask == G_TX_NOMASK) {
+        return "nomask->clamp";
+    }
+    return "repeat";
+}
+
+static void psp_gfx_dl_diag_log_material(PspGfxDlContext* ctx, const char* label) {
+    char line[352];
+    u32 shiftS = sPspGfxDlDiagLastSetTileW1 & 0xF;
+    u32 shiftT = (sPspGfxDlDiagLastSetTileW1 >> 10) & 0xF;
+    PspGfxPspglTextureWrap finalWrapS = psp_gfx_dl_texture_wrap(ctx->textureCms, ctx->textureMaskS);
+    PspGfxPspglTextureWrap finalWrapT = psp_gfx_dl_texture_wrap(ctx->textureCmt, ctx->textureMaskT);
+
+    snprintf(line, sizeof(line),
+             "[water-cloud-mat] label=%s fmt=%lu siz=%lu w=%lu h=%lu upW=%lu upH=%lu uls=%lu ult=%lu "
+             "scaleS=%lu scaleT=%lu cms=%lu cmt=%lu maskS=%lu maskT=%lu shiftS=%lu shiftT=%lu "
+             "settileW0=%08lx settileW1=%08lx settilesizeW0=%08lx settilesizeW1=%08lx "
+             "wrapS=%d(%s) wrapT=%d(%s) combine=%d usesTexA=%d otherL=%08lx otherH=%08lx "
+             "alphaTest=%d blend=%d pointFilter=%d",
+             label, (unsigned long) ctx->textureFormat, (unsigned long) ctx->textureSize,
+             (unsigned long) ctx->textureWidth, (unsigned long) ctx->textureHeight,
+             (unsigned long) ctx->textureUploadWidth, (unsigned long) ctx->textureUploadHeight,
+             (unsigned long) ctx->textureTileUls, (unsigned long) ctx->textureTileUlt,
+             (unsigned long) ctx->textureScaleS, (unsigned long) ctx->textureScaleT,
+             (unsigned long) ctx->textureCms, (unsigned long) ctx->textureCmt,
+             (unsigned long) ctx->textureMaskS, (unsigned long) ctx->textureMaskT,
+             (unsigned long) shiftS, (unsigned long) shiftT,
+             (unsigned long) sPspGfxDlDiagLastSetTileW0, (unsigned long) sPspGfxDlDiagLastSetTileW1,
+             (unsigned long) sPspGfxDlDiagLastSetTileSizeW0, (unsigned long) sPspGfxDlDiagLastSetTileSizeW1,
+             (int) finalWrapS, psp_gfx_dl_diag_wrap_reason(ctx->textureCms, ctx->textureMaskS), (int) finalWrapT,
+             psp_gfx_dl_diag_wrap_reason(ctx->textureCmt, ctx->textureMaskT), (int) ctx->combineMode,
+             ctx->combineUsesTextureAlpha, (unsigned long) ctx->otherModeL, (unsigned long) ctx->otherModeH,
+             psp_gfx_dl_alpha_test_enabled(ctx), psp_gfx_dl_blend_enabled(ctx),
+             psp_gfx_dl_effective_point_filter(ctx));
+    PspPlatform_LogLine(line);
+}
+
+static void psp_gfx_dl_diag_log_cloud_ascii_alpha_map(PspGfxDlContext* ctx) {
+    const u16* texels = (const u16*) ctx->textureImage;
+    u32 width = ctx->textureWidth;
+    u32 height = ctx->textureHeight;
+    u32 x;
+    u32 y;
+    char line[80];
+
+    if ((texels == NULL) || (width == 0) || (height == 0) || (width >= sizeof(line))) {
+        return;
+    }
+    PspPlatform_LogLine("[water-cloud-alpha-map] label=cloud begin");
+    for (y = 0; y < height; y++) {
+        for (x = 0; x < width; x++) {
+            u8 alpha = (u8) texels[(y * width) + x];
+            char c;
+
+            if (alpha == 0) {
+                c = '.';
+            } else if (alpha <= 15) {
+                c = '1';
+            } else if (alpha <= 63) {
+                c = '2';
+            } else if (alpha <= 127) {
+                c = '3';
+            } else {
+                c = '4';
+            }
+            line[x] = c;
+        }
+        line[width] = '\0';
+        PspPlatform_LogLine(line);
+    }
+    PspPlatform_LogLine("[water-cloud-alpha-map] label=cloud end");
+}
+
+static void psp_gfx_dl_diag_log_cloud_blend_audit(PspGfxDlContext* ctx) {
+    char line[256];
+    int blend = psp_gfx_dl_blend_enabled(ctx);
+    int premultiplied = psp_gfx_dl_premultiplied_blend_enabled(ctx);
+    PspGfxPspglTextureEnv env = psp_gfx_dl_texture_env_for_combine(ctx);
+    const char* blendSrc = !blend ? "n/a" : (premultiplied ? "GL_ONE" : "GL_SRC_ALPHA");
+    const char* blendDst = !blend ? "n/a" : "GL_ONE_MINUS_SRC_ALPHA";
+    const char* envName = (env == PSP_GFX_PSPGL_TEX_BLEND) ? "GL_BLEND"
+                          : (env == PSP_GFX_PSPGL_TEX_MODULATE) ? "GL_MODULATE" : "GL_REPLACE";
+
+    snprintf(line, sizeof(line),
+             "[water-cloud-blend-audit] label=cloud combine=%d blend=%d premultiplied=%d blendFunc=%s,%s "
+             "texEnv=%s texEnvColor=%08lx primColor=%08lx envColor=%08lx",
+             (int) ctx->combineMode, blend, premultiplied, blendSrc, blendDst, envName,
+             (unsigned long) psp_gfx_dl_texture_env_color_for_combine(ctx),
+             (unsigned long) psp_gfx_dl_primitive_color(ctx), (unsigned long) psp_gfx_dl_environment_color(ctx));
+    PspPlatform_LogLine(line);
+}
+
+static void psp_gfx_dl_diag_track_water_cloud_texture(PspGfxDlContext* ctx) {
+    if (psp_gfx_dl_same_address(ctx->textureImage, aPlCloudsTex)) {
+        sPspGfxDlDiagActiveTarget = PSP_GFX_DL_DIAG_TARGET_CLOUD;
+        if (!sPspGfxDlDiagMaterialLogged[PSP_GFX_DL_DIAG_TARGET_CLOUD]) {
+            sPspGfxDlDiagMaterialLogged[PSP_GFX_DL_DIAG_TARGET_CLOUD] = 1;
+            psp_gfx_dl_diag_log_material(ctx, "cloud");
+            psp_gfx_dl_diag_log_texel_alpha(ctx, "cloud");
+            psp_gfx_dl_diag_log_cloud_ascii_alpha_map(ctx);
+            psp_gfx_dl_diag_log_cloud_blend_audit(ctx);
+        }
+    } else {
+        sPspGfxDlDiagActiveTarget = PSP_GFX_DL_DIAG_TARGET_NONE;
+    }
+}
+#endif
 
 static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int premultiply) {
     int result;
@@ -4272,20 +4597,28 @@ static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int pr
             }
         }
     } else if ((ctx->textureFormat == G_IM_FMT_IA) && (ctx->textureSize == G_IM_SIZ_16b)) {
-        hit = PspGfxPspgl_FindIa16Texture((const u16*) ctx->textureImage, ctx->textureWidth, ctx->textureHeight,
-                                          &ctx->textureId, &ctx->textureUploadWidth, &ctx->textureUploadHeight,
-                                          &ctx->textureRef);
+#if SF64_PSP_CLOUD_IA16_SWAP_EXPERIMENT || SF64_PSP_CLOUD_ALPHA_FLOOR_EXPERIMENT
+        const u16* ia16Source =
+            psp_gfx_dl_diag_maybe_transform_cloud_ia16(ctx->textureImage, ctx->textureWidth, ctx->textureHeight);
+#else
+        const u16* ia16Source = (const u16*) ctx->textureImage;
+#endif
+        hit = PspGfxPspgl_FindIa16Texture(ia16Source, ctx->textureWidth, ctx->textureHeight, &ctx->textureId,
+                                          &ctx->textureUploadWidth, &ctx->textureUploadHeight, &ctx->textureRef);
         if (!hit) {
             psp_gfx_dl_flush_texture_change(ctx, PSP_PROFILE_TEXTURE_FLUSH_CACHE_MISS_UPLOAD);
-            ctx->textureId = PspGfxPspgl_CreateIa16Texture((const u16*) ctx->textureImage, ctx->textureWidth,
-                                                           ctx->textureHeight, &ctx->textureUploadWidth,
-                                                           &ctx->textureUploadHeight, &ctx->textureRef);
+            ctx->textureId = PspGfxPspgl_CreateIa16Texture(ia16Source, ctx->textureWidth, ctx->textureHeight,
+                                                           &ctx->textureUploadWidth, &ctx->textureUploadHeight,
+                                                           &ctx->textureRef);
         }
     } else {
         supported = 0;
     }
 
     if (supported && (ctx->textureId != 0)) {
+#if PSP_RENDERER_DIAGNOSTICS
+        psp_gfx_dl_diag_track_water_cloud_texture(ctx);
+#endif
         ctx->stats.textureCount++;
         if (deferred) {
             ctx->stats.deferredTextureCount++;
@@ -4337,8 +4670,6 @@ static void psp_gfx_dl_handle_set_tile_size(PspGfxDlContext* ctx, const Gfx* gfx
     u32 ult;
     u32 lrs;
     u32 lrt;
-    u32 widthQuarters;
-    u32 heightQuarters;
 
     if (tile != G_TX_RENDERTILE) {
         return;
@@ -4348,13 +4679,24 @@ static void psp_gfx_dl_handle_set_tile_size(PspGfxDlContext* ctx, const Gfx* gfx
     ult = gfx->words.w0 & 0xFFF;
     lrs = (gfx->words.w1 >> 12) & 0xFFF;
     lrt = gfx->words.w1 & 0xFFF;
-    widthQuarters = (lrs >= uls) ? (lrs - uls) : 0;
-    heightQuarters = (lrt >= ult) ? (lrt - ult) : 0;
     ctx->textureTileUls = uls;
     ctx->textureTileUlt = ult;
-    ctx->textureWidth = (widthQuarters >> G_TEXTURE_IMAGE_FRAC) + 1;
-    ctx->textureHeight = (heightQuarters >> G_TEXTURE_IMAGE_FRAC) + 1;
+    /*
+     * textureWidth/Height intentionally ignore uls/ult: for the ground/water
+     * scroll technique (fox_bg.c gDPSetupTile) and the fox_end2.c ending
+     * scroll, lrs/lrt are held constant at (width-1)<<2 while uls/ult alone
+     * carry the scroll phase, so (lrs-uls) is not the tile's real pixel
+     * width -- it would shrink toward zero as the scroll phase advances.
+     * Every static asset in the codebase issues G_SETTILESIZE with
+     * uls=ult=0, so this is equivalent to (lrs-uls) for all of them anyway.
+     */
+    ctx->textureWidth = (lrs >> G_TEXTURE_IMAGE_FRAC) + 1;
+    ctx->textureHeight = (lrt >> G_TEXTURE_IMAGE_FRAC) + 1;
     ctx->textureUploadAttempted = 0;
+#if PSP_RENDERER_DIAGNOSTICS
+    sPspGfxDlDiagLastSetTileSizeW0 = gfx->words.w0;
+    sPspGfxDlDiagLastSetTileSizeW1 = gfx->words.w1;
+#endif
     psp_gfx_dl_prepare_texture(ctx, 0, psp_gfx_dl_premultiplied_blend_enabled(ctx));
     psp_gfx_dl_mark_effective_material_dirty(ctx);
 }
