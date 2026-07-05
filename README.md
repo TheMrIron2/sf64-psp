@@ -7,19 +7,21 @@ A work-in-progress port of **Star Fox 64** to PSP, based on the SF64 decomp proj
 This port has a few key goals:
 
 - **Reference quality** codebase
-- **GPU acceleration** with two renderers - OpenGL initially, followed by a native sceGu implementation
+- **GPU acceleration** with two renderers - PSPGL first, followed by native sceGu
 - Optional **Media Engine** audio
 - Experimental implementation of **Virtual Mobile Engine** (VME)
 
 Contributions are welcome! This is an educational project that welcomes other contributors and aims to be a high quality port that can serve other PSP developers well in the long term.
 
-If you'd like to contribute, aim for the most native code possible, and don't be afraid to collaborate or ask for help! We'd love to work together to make this port a benchmark for the PSP scene.
+If you'd like to contribute, aim for good native code as much as possible, and don't be afraid to collaborate or ask for help! We'd love to work together to make this port a benchmark for the PSP scene.
 
 You can find us on the [PSP Homebrew Community](https://discord.gg/bePrj9W) on Discord for real-time updates and collaboration!
 
 Special thanks:
 - z2442: N64 porting assistance
 - sonicdcer: Original decompilation & guidance
+- Falco Girgis: Guidance based on sf64-dc
+- jnmartin84: sf64-dc, used as reference and initial `ultra_reimpl.c`
 
 The original README continues below. Follow the build instructions and compile with `make psp`.
 

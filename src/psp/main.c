@@ -12,7 +12,7 @@
 void bootproc(void);
 #endif
 
-PSP_MODULE_INFO("Star Fox 64 PSP", PSP_MODULE_USER, 1, 0);
+PSP_MODULE_INFO("Star Fox 64", PSP_MODULE_USER, 1, 0);
 PSP_MAIN_THREAD_ATTR(PSP_THREAD_ATTR_USER | PSP_THREAD_ATTR_VFPU);
 PSP_HEAP_SIZE_KB(-1024);
 
@@ -68,7 +68,7 @@ int main(int argc, char* argv[]) {
     scePowerSetClockFrequency(333, 333, 166);
 
 #ifdef PSP_FULL
-    pspDebugScreenPrintf("Star Fox 64 PSP\n");
+    pspDebugScreenPrintf("Star Fox 64\n");
     pspDebugScreenPrintf("Booting native game loop...\n\n");
     pspDebugScreenPrintf("Select+Start exits\n");
     pspDebugScreenPrintf("Select+L starts profile, Select+R saves\n");
@@ -113,7 +113,7 @@ int main(int argc, char* argv[]) {
         }
     }
 #else
-    pspDebugScreenPrintf("Star Fox 64 PSP\n");
+    pspDebugScreenPrintf("Star Fox 64\n");
     pspDebugScreenPrintf("PSP build pipeline OK\n\n");
     pspDebugScreenPrintf("Press X to exit\n");
 
