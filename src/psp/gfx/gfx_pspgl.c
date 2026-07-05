@@ -113,6 +113,8 @@ typedef enum {
     PSP_GFX_TEXTURE_CI4,
     PSP_GFX_TEXTURE_IA8,
     PSP_GFX_TEXTURE_IA16,
+    PSP_GFX_TEXTURE_IA8_SOFT_COVERAGE,
+    PSP_GFX_TEXTURE_IA16_SOFT_COVERAGE,
 } PspGfxConvertedTextureFormat;
 
 typedef struct {
@@ -765,6 +767,25 @@ static u32 psp_gfx_pspgl_next_power_of_two(u32 value) {
     return result;
 }
 
+static int psp_gfx_pspgl_converted_format_is_ia8(PspGfxConvertedTextureFormat format) {
+    return (format == PSP_GFX_TEXTURE_IA8) || (format == PSP_GFX_TEXTURE_IA8_SOFT_COVERAGE);
+}
+
+static int psp_gfx_pspgl_converted_format_is_ia16(PspGfxConvertedTextureFormat format) {
+    return (format == PSP_GFX_TEXTURE_IA16) || (format == PSP_GFX_TEXTURE_IA16_SOFT_COVERAGE);
+}
+
+static int psp_gfx_pspgl_converted_format_soft_coverage(PspGfxConvertedTextureFormat format) {
+    return (format == PSP_GFX_TEXTURE_IA8_SOFT_COVERAGE) || (format == PSP_GFX_TEXTURE_IA16_SOFT_COVERAGE);
+}
+
+static u8 psp_gfx_pspgl_soft_coverage_alpha(u8 alpha) {
+    if (alpha <= 32U) {
+        return 0;
+    }
+    return (u8) ((((u32) (alpha - 32U) * 255U) + 111U) / 223U);
+}
+
 #if SF64_PSP_PSPGL_VBO_STREAM
 static const GLvoid* psp_gfx_pspgl_vertex_offset(u32 offset) {
     return (const GLvoid*) offset;
@@ -959,11 +980,14 @@ static u32 psp_gfx_pspgl_create_converted_texture(const void* pixels, const u16*
                 u8 index = (srcIndex & 1) ? (packed & 0xF) : (packed >> 4);
 
                 psp_gfx_pspgl_rgba16_to_rgba8(psp_gfx_pspgl_read_u16(palette, index), out);
-            } else if (format == PSP_GFX_TEXTURE_IA8) {
+            } else if (psp_gfx_pspgl_converted_format_is_ia8(format)) {
                 u8 packed = ((const u8*) pixels)[srcIndex];
                 u8 intensity = psp_gfx_color_transfer_u8((packed >> 4) * 17);
                 u8 alpha = (packed & 0xF) * 17;
 
+                if (psp_gfx_pspgl_converted_format_soft_coverage(format)) {
+                    alpha = psp_gfx_pspgl_soft_coverage_alpha(alpha);
+                }
                 if (envBlend) {
                     u8 pr = (u8) (primitiveColor & 0xFFU);
                     u8 pg = (u8) ((primitiveColor >> 8) & 0xFFU);
@@ -983,14 +1007,23 @@ static u32 psp_gfx_pspgl_create_converted_texture(const void* pixels, const u16*
                     out[2] = intensity;
                     out[3] = alpha;
                 }
-            } else {
+            } else if (psp_gfx_pspgl_converted_format_is_ia16(format)) {
                 u16 packed = psp_gfx_pspgl_read_u16(pixels, srcIndex);
                 u8 intensity = psp_gfx_color_transfer_u8((u8) (packed >> 8));
+                u8 alpha = (u8) packed;
 
+                if (psp_gfx_pspgl_converted_format_soft_coverage(format)) {
+                    alpha = psp_gfx_pspgl_soft_coverage_alpha(alpha);
+                }
                 out[0] = intensity;
                 out[1] = intensity;
                 out[2] = intensity;
-                out[3] = (u8) packed;
+                out[3] = alpha;
+            } else {
+                out[0] = 0;
+                out[1] = 0;
+                out[2] = 0;
+                out[3] = 0;
             }
         }
     }
@@ -1662,6 +1695,19 @@ u32 PspGfxPspgl_CreateIa8Texture(const u8* pixels, u32 width, u32 height, u32* u
                                                   uploadWidth, uploadHeight, textureRef);
 }
 
+int PspGfxPspgl_FindIa8SoftCoverageTexture(const u8* pixels, u32 width, u32 height, u32* textureId,
+                                           u32* uploadWidth, u32* uploadHeight,
+                                           PspGfxPspglTextureRef* textureRef) {
+    return psp_gfx_pspgl_find_converted_texture(pixels, NULL, width, height, PSP_GFX_TEXTURE_IA8_SOFT_COVERAGE,
+                                                textureId, textureRef, uploadWidth, uploadHeight, 0, 0, 0, 1);
+}
+
+u32 PspGfxPspgl_CreateIa8SoftCoverageTexture(const u8* pixels, u32 width, u32 height, u32* uploadWidth,
+                                             u32* uploadHeight, PspGfxPspglTextureRef* textureRef) {
+    return psp_gfx_pspgl_create_converted_texture(pixels, NULL, width, height, PSP_GFX_TEXTURE_IA8_SOFT_COVERAGE,
+                                                  0, 0, 0, uploadWidth, uploadHeight, textureRef);
+}
+
 u32 PspGfxPspgl_GetIa8Texture(const u8* pixels, u32 width, u32 height, u32* uploadWidth, u32* uploadHeight,
                               PspGfxPspglTextureRef* textureRef) {
     return psp_gfx_pspgl_get_converted_texture(pixels, NULL, width, height, PSP_GFX_TEXTURE_IA8, uploadWidth,
@@ -1694,6 +1740,19 @@ u32 PspGfxPspgl_CreateIa16Texture(const u16* pixels, u32 width, u32 height, u32*
                                   PspGfxPspglTextureRef* textureRef) {
     return psp_gfx_pspgl_create_converted_texture(pixels, NULL, width, height, PSP_GFX_TEXTURE_IA16, 0, 0, 0,
                                                   uploadWidth, uploadHeight, textureRef);
+}
+
+int PspGfxPspgl_FindIa16SoftCoverageTexture(const u16* pixels, u32 width, u32 height, u32* textureId,
+                                            u32* uploadWidth, u32* uploadHeight,
+                                            PspGfxPspglTextureRef* textureRef) {
+    return psp_gfx_pspgl_find_converted_texture(pixels, NULL, width, height, PSP_GFX_TEXTURE_IA16_SOFT_COVERAGE,
+                                                textureId, textureRef, uploadWidth, uploadHeight, 0, 0, 0, 1);
+}
+
+u32 PspGfxPspgl_CreateIa16SoftCoverageTexture(const u16* pixels, u32 width, u32 height, u32* uploadWidth,
+                                              u32* uploadHeight, PspGfxPspglTextureRef* textureRef) {
+    return psp_gfx_pspgl_create_converted_texture(pixels, NULL, width, height, PSP_GFX_TEXTURE_IA16_SOFT_COVERAGE,
+                                                  0, 0, 0, uploadWidth, uploadHeight, textureRef);
 }
 
 u32 PspGfxPspgl_GetIa16Texture(const u16* pixels, u32 width, u32 height, u32* uploadWidth, u32* uploadHeight,

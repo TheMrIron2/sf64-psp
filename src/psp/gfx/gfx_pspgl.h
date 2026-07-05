@@ -130,6 +130,11 @@ int PspGfxPspgl_FindIa8Texture(const u8* pixels, u32 width, u32 height, u32* tex
                                u32* uploadHeight, PspGfxPspglTextureRef* textureRef);
 u32 PspGfxPspgl_CreateIa8Texture(const u8* pixels, u32 width, u32 height, u32* uploadWidth, u32* uploadHeight,
                                  PspGfxPspglTextureRef* textureRef);
+int PspGfxPspgl_FindIa8SoftCoverageTexture(const u8* pixels, u32 width, u32 height, u32* textureId,
+                                           u32* uploadWidth, u32* uploadHeight,
+                                           PspGfxPspglTextureRef* textureRef);
+u32 PspGfxPspgl_CreateIa8SoftCoverageTexture(const u8* pixels, u32 width, u32 height, u32* uploadWidth,
+                                             u32* uploadHeight, PspGfxPspglTextureRef* textureRef);
 u32 PspGfxPspgl_GetIa8Texture(const u8* pixels, u32 width, u32 height, u32* uploadWidth, u32* uploadHeight,
                               PspGfxPspglTextureRef* textureRef);
 int PspGfxPspgl_FindIa8EnvBlendTexture(const u8* pixels, u32 width, u32 height, u32 primitiveColor,
@@ -142,6 +147,11 @@ int PspGfxPspgl_FindIa16Texture(const u16* pixels, u32 width, u32 height, u32* t
                                 u32* uploadHeight, PspGfxPspglTextureRef* textureRef);
 u32 PspGfxPspgl_CreateIa16Texture(const u16* pixels, u32 width, u32 height, u32* uploadWidth, u32* uploadHeight,
                                   PspGfxPspglTextureRef* textureRef);
+int PspGfxPspgl_FindIa16SoftCoverageTexture(const u16* pixels, u32 width, u32 height, u32* textureId,
+                                            u32* uploadWidth, u32* uploadHeight,
+                                            PspGfxPspglTextureRef* textureRef);
+u32 PspGfxPspgl_CreateIa16SoftCoverageTexture(const u16* pixels, u32 width, u32 height, u32* uploadWidth,
+                                              u32* uploadHeight, PspGfxPspglTextureRef* textureRef);
 u32 PspGfxPspgl_GetIa16Texture(const u16* pixels, u32 width, u32 height, u32* uploadWidth, u32* uploadHeight,
                                PspGfxPspglTextureRef* textureRef);
 void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u32 vertexCount, u32 textureId,
