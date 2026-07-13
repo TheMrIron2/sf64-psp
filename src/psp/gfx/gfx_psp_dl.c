@@ -1951,6 +1951,65 @@ static void psp_gfx_dl_handle_movemem(PspGfxDlContext* ctx, const Gfx* gfx) {
     }
 }
 
+/*
+ * Backdrop seam weld. The sky panorama (Background_DrawBackdrop) draws the
+ * same backdrop DL twice, at x-translations differing by exactly one
+ * panorama period; the two instances' abutting edge vertices are
+ * mathematically equal but reach the GE through different float expressions
+ * (edge = +x*m00 + t1 vs -x*m00 + t2), which differ by ~1 ulp (~1/16 px on
+ * screen). The N64 RSP quantizes all screen coordinates to s13.2
+ * quarter-pixels, welding such edges shut; the PSP GE rasterizes full
+ * floats and leaves a one-pixel unpainted column at the seam (the Corneria
+ * intro's vertical streak: background fill color showing through the sky).
+ * Weld: in small, flat (constant view-z), non-pretransformed batches --
+ * the backdrop wrap pair's signature -- snap any vertex within ~1/8 px
+ * screen tolerance of an earlier vertex onto that vertex. UVs are left
+ * alone (each strip keeps sampling its own edge texel).
+ */
+static void psp_gfx_dl_weld_flat_batch_seams(PspGfxDlContext* ctx) {
+    float minZ;
+    float maxZ;
+    float eps;
+    u32 i;
+    u32 j;
+
+    if (ctx->batchPretransformed || (ctx->batchCount < 12) || (ctx->batchCount > 48)) {
+        return;
+    }
+    minZ = maxZ = sPspGfxDlBatch[0].z;
+    for (i = 1; i < ctx->batchCount; i++) {
+        float z = sPspGfxDlBatch[i].z;
+
+        if (z < minZ) {
+            minZ = z;
+        }
+        if (z > maxZ) {
+            maxZ = z;
+        }
+    }
+    /* Flat and in front of the eye only (view z < 0, constant across batch). */
+    if ((maxZ >= 0.0f) || ((maxZ - minZ) > (0.001f * -minZ))) {
+        return;
+    }
+    /* ~1/8 pixel at this depth: dx_view = (1/8)/240 ndc * |z| / P00(=1.811). */
+    eps = 3.0e-4f * -minZ;
+    for (i = 1; i < ctx->batchCount; i++) {
+        PspGfxPspglColorVertex* b = &sPspGfxDlBatch[i];
+
+        for (j = 0; j < i; j++) {
+            const PspGfxPspglColorVertex* a = &sPspGfxDlBatch[j];
+            float dx = b->x - a->x;
+            float dy = b->y - a->y;
+
+            if (((dx != 0.0f) || (dy != 0.0f)) && (dx < eps) && (dx > -eps) && (dy < eps) && (dy > -eps)) {
+                b->x = a->x;
+                b->y = a->y;
+                break;
+            }
+        }
+    }
+}
+
 static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason reason) {
 #if SF64_PSP_PROFILE_COMPONENTS
     u32 ownerComponent;
@@ -1977,6 +2036,7 @@ static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason 
                                                 sPspGfxDlBatchProvenance, ctx->batchProvenanceCount);
 #endif
     (void) reason;
+    psp_gfx_dl_weld_flat_batch_seams(ctx);
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_BATCH_FLUSH);
     PspGfxPspgl_DrawColoredTriangles(sPspGfxDlBatch, ctx->batchCount, ctx->batchTextureId, ctx->batchTextureRef,
                                      ctx->batchTextureEnv, ctx->batchTextureEnvColor, ctx->batchWrapS,
