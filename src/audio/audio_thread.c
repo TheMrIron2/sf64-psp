@@ -1,6 +1,10 @@
 #include "sys.h"
 #include "sf64audio.h"
 #include "audiothread_cmd.h"
+#ifdef TARGET_PSP
+#include "src/psp/platform.h"
+u64 sceKernelGetSystemTimeWide(void);
+#endif
 
 OSMesgQueue sAudioTaskStartQueue;
 OSMesgQueue sThreadCmdProcQueue;
@@ -18,6 +22,28 @@ OSMesgQueue* gAudioTaskStartQueue = &sAudioTaskStartQueue;
 OSMesgQueue* gThreadCmdProcQueue = &sThreadCmdProcQueue;
 OSMesgQueue* gAudioSpecQueue = &sAudioSpecQueue;
 OSMesgQueue* gAudioResetQueue = &sAudioResetQueue;
+#if defined(TARGET_PSP) && PSP_LOG_ENABLED
+u32 gPspAudioRequestedVoiceId;
+#endif
+
+#if defined(TARGET_PSP) && PSP_LOG_ENABLED
+static void AudioThread_ValidateSpecQueue(void) {
+    if ((gAudioSpecQueue->msg == sAudioSpecMsg) && (gAudioSpecQueue->msgCount == 1) &&
+        (gAudioSpecQueue->validCount >= 0) && (gAudioSpecQueue->validCount <= 1) &&
+        (gAudioSpecQueue->first == 0)) {
+        return;
+    }
+
+    PspPlatform_LogValue("audio spec queue valid", gAudioSpecQueue->validCount);
+    PspPlatform_LogValue("audio spec queue first", gAudioSpecQueue->first);
+    PspPlatform_LogValue("audio spec queue count", gAudioSpecQueue->msgCount);
+    PspPlatform_LogValue("audio spec queue messages", (u32) gAudioSpecQueue->msg);
+    osCreateMesgQueue(gAudioSpecQueue, sAudioSpecMsg, 1);
+    PspPlatform_LogLine("[psp-audio] repaired audio spec queue");
+}
+#else
+#define AudioThread_ValidateSpecQueue() ((void) 0)
+#endif
 
 static const char devstr0[] = "DAC:Lost 1 Frame.\n";
 static const char devstr1[] = "DMA: Request queue over.( %d )\n";
@@ -48,6 +74,15 @@ SPTask* AudioThread_CreateTask(void) {
     u32 specId;
     u32 msg;
     s32 pad30;
+#if defined(TARGET_PSP) && PSP_LOG_ENABLED
+    static u32 sSynthCount;
+    static u64 sSynthPeriodTotalUs;
+    static u32 sSynthPeriodMaxUs;
+    static u32 sSynthPeriodOverBudget;
+    u64 synthStartUs;
+    u32 synthElapsedUs;
+    u32 synthBudgetUs;
+#endif
 
     gAudioTaskCountQ++;
     if ((gAudioTaskCountQ % gAudioBufferParams.numBuffers) != 0) {
@@ -73,6 +108,7 @@ SPTask* AudioThread_CreateTask(void) {
     AudioLoad_DecreaseSampleDmaTtls();
     AudioLoad_ProcessLoads(gAudioResetStep);
 
+    AudioThread_ValidateSpecQueue();
     if (MQ_GET_MESG(gAudioSpecQueue, &specId)) {
         if (gAudioResetStep == 0) {
             gAudioResetStep = 5;
@@ -116,9 +152,32 @@ SPTask* AudioThread_CreateTask(void) {
         memset(aiBuffer, 0, gAiBuffLengths[aiBuffIndex] * 4);
         abiCmdCount = 0;
     #else
+#if defined(TARGET_PSP) && PSP_LOG_ENABLED
+        synthStartUs = sceKernelGetSystemTimeWide();
+#endif
         gCurAbiCmdBuffer =
             AudioSynth_Update(gCurAbiCmdBuffer, &abiCmdCount,
                             aiBuffer, gAiBuffLengths[aiBuffIndex]);
+#if defined(TARGET_PSP) && PSP_LOG_ENABLED
+        synthElapsedUs = (u32) (sceKernelGetSystemTimeWide() - synthStartUs);
+        synthBudgetUs = (gAiBuffLengths[aiBuffIndex] * 1000000U) / gAudioBufferParams.samplingFrequency;
+        sSynthCount++;
+        sSynthPeriodTotalUs += synthElapsedUs;
+        if (synthElapsedUs > sSynthPeriodMaxUs) {
+            sSynthPeriodMaxUs = synthElapsedUs;
+        }
+        if (synthElapsedUs > synthBudgetUs) {
+            sSynthPeriodOverBudget++;
+        }
+        if ((sSynthCount % 256) == 0) {
+            PspPlatform_LogValue("audio synth average us", (u32) (sSynthPeriodTotalUs / 256));
+            PspPlatform_LogValue("audio synth maximum us", sSynthPeriodMaxUs);
+            PspPlatform_LogValue("audio synth over budget", sSynthPeriodOverBudget);
+            sSynthPeriodTotalUs = 0;
+            sSynthPeriodMaxUs = 0;
+            sSynthPeriodOverBudget = 0;
+        }
+#endif
     #endif
     
     gAudioRandom = osGetCount() * (gAudioRandom + gAudioTaskCountQ);
@@ -168,6 +227,9 @@ SPTask* AudioThread_CreateTask(void) {
 // Original name: Nap_AudioSysProcess
 void AudioThread_ProcessGlobalCmd(AudioCmd* cmd) {
     s32 i;
+#if defined(TARGET_PSP) && PSP_LOG_ENABLED
+    static s32 sLoggedSequenceStart;
+#endif
 
     switch (cmd->op) {
         case AUDIOCMD_OP_GLOBAL_SYNC_LOAD_SEQ_PARTS:
@@ -175,8 +237,22 @@ void AudioThread_ProcessGlobalCmd(AudioCmd* cmd) {
             break;
         case AUDIOCMD_OP_GLOBAL_INIT_SEQPLAYER:
         case AUDIOCMD_OP_GLOBAL_INIT_SEQPLAYER_ALT:
+#if defined(TARGET_PSP) && PSP_LOG_ENABLED
+            if (!sLoggedSequenceStart) {
+                sLoggedSequenceStart = true;
+                PspPlatform_LogValue("audio first sequence player", cmd->arg0);
+                PspPlatform_LogValue("audio first sequence id", cmd->arg1);
+            }
+#endif
             AudioLoad_SyncInitSeqPlayer(cmd->arg0, cmd->arg1, cmd->arg2);
             AudioThread_SetFadeInTimer(cmd->arg0, cmd->data);
+#if defined(TARGET_PSP) && PSP_LOG_ENABLED
+            if (sLoggedSequenceStart == true) {
+                PspPlatform_LogValue("audio first sequence enabled", gSeqPlayers[cmd->arg0].enabled);
+                PspPlatform_LogValue("audio first sequence data", (u32) gSeqPlayers[cmd->arg0].seqData);
+                sLoggedSequenceStart = 2;
+            }
+#endif
             break;
         case AUDIOCMD_OP_GLOBAL_DISABLE_SEQPLAYER:
             if (gSeqPlayers[cmd->arg0].enabled) {
@@ -292,7 +368,11 @@ void AudioThread_QueueCmdS32(u32 opArgs, u32 val) {
 
 // Original name: Nap_SetS8
 void AudioThread_QueueCmdS8(u32 opArgs, s8 val) {
+#ifdef TARGET_PSP
+    s32 data = val;
+#else
     s32 data = val << 0x18;
+#endif
 
     AudioThread_QueueCmd(opArgs, (void**) &data);
 }
@@ -301,11 +381,22 @@ void AudioThread_QueueCmdS8(u32 opArgs, s8 val) {
 void AudioThread_ScheduleProcessCmds(void) {
     static s32 sMaxPendingAudioCmds = 0;
     s32 msg;
+#if defined(TARGET_PSP) && PSP_LOG_ENABLED
+    static s32 sLoggedCommandSchedule;
+    u8 pendingAudioCmds;
+#endif
 
     if (sMaxPendingAudioCmds < (u8) (gThreadCmdWritePos - gThreadCmdReadPos + 0x100)) {
         sMaxPendingAudioCmds = (u8) (gThreadCmdWritePos - gThreadCmdReadPos + 0x100);
     }
     msg = (((gThreadCmdReadPos & 0xFF) << 8) | (gThreadCmdWritePos & 0xFF));
+#if defined(TARGET_PSP) && PSP_LOG_ENABLED
+    pendingAudioCmds = (u8) (gThreadCmdWritePos - gThreadCmdReadPos);
+    if (!sLoggedCommandSchedule && (pendingAudioCmds != 0)) {
+        sLoggedCommandSchedule = true;
+        PspPlatform_LogValue("audio first scheduled commands", pendingAudioCmds);
+    }
+#endif
     osSendMesg(gThreadCmdProcQueue, (OSMesg) msg, OS_MESG_NOBLOCK);
     gThreadCmdReadPos = gThreadCmdWritePos;
 }
@@ -323,11 +414,23 @@ void AudioThread_ProcessCmds(u32 msg) {
     SequenceChannel* channel;
     SequencePlayer* player;
     u8 writePos;
+#if defined(TARGET_PSP) && PSP_LOG_ENABLED
+    static s32 sLoggedCommandBatch;
+    static s32 sLoggedVoiceRequest;
+    static u8 sVoiceBank;
+    static u8 sVoiceIdHi;
+#endif
 
     if (!gThreadCmdQueueFinished) {
         gCurCmdReadPos = (msg >> 8) & 0xFF;
     }
     writePos = msg & 0xFF;
+#if defined(TARGET_PSP) && PSP_LOG_ENABLED
+    if (!sLoggedCommandBatch && (gCurCmdReadPos != writePos)) {
+        sLoggedCommandBatch = true;
+        PspPlatform_LogValue("audio first processed commands", (u8) (writePos - gCurCmdReadPos));
+    }
+#endif
     while (true) {
         if (gCurCmdReadPos == writePos) {
             gThreadCmdQueueFinished = 0;
@@ -399,6 +502,23 @@ void AudioThread_ProcessCmds(u32 msg) {
                         case AUDIOCMD_OP_CHANNEL_SET_IO:
                             if (cmd->arg2 < 8) {
                                 channel->seqScriptIO[cmd->arg2] = cmd->asSbyte;
+#if defined(TARGET_PSP) && PSP_LOG_ENABLED
+                                if ((cmd->arg0 == 3) && (cmd->arg1 == 15)) {
+                                    if (cmd->arg2 == 4) {
+                                        sVoiceBank = (u8) cmd->asSbyte;
+                                    } else if (cmd->arg2 == 5) {
+                                        sVoiceIdHi = (u8) cmd->asSbyte;
+                                    } else if (cmd->arg2 == 6) {
+                                        gPspAudioRequestedVoiceId = (sVoiceBank * 1000) + (sVoiceIdHi * 256) +
+                                                                    (u8) cmd->asSbyte;
+                                        if (!sLoggedVoiceRequest && (gPspAudioRequestedVoiceId >= 4)) {
+                                            sLoggedVoiceRequest = true;
+                                            PspPlatform_LogValue("audio first requested voice id",
+                                                                 gPspAudioRequestedVoiceId);
+                                        }
+                                    }
+                                }
+#endif
                             }
                             break;
                         case AUDIOCMD_OP_CHANNEL_SET_MUTE:
@@ -446,6 +566,7 @@ void AudioThread_ResetAudioHeap(s32 specId) {
     MQ_CLEAR_QUEUE(gAudioResetQueue);
 
     AudioThread_ResetCmdQueue();
+    AudioThread_ValidateSpecQueue();
     osSendMesg(gAudioSpecQueue, (OSMesg) specId, OS_MESG_NOBLOCK);
 }
 

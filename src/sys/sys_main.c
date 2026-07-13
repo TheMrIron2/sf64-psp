@@ -149,10 +149,14 @@ void Audio_ThreadEntry(void* arg0) {
     PspPlatform_LogLine("[psp-audio] first synthesis complete");
 #endif
     if (task != NULL) {
+#if defined(TARGET_PSP) && PSP_AUDIO_OUTPUT
+        // PSP scalar synthesis completes inline
+#else
         task->mesgQueue = &gAudioTaskMesgQueue;
         task->msg = (OSMesg) TASK_MESG_1;
         osWritebackDCacheAll();
         osSendMesg(&gTaskMesgQueue, task, OS_MESG_NOBLOCK);
+#endif
     }
 
     while (true) {
@@ -164,16 +168,24 @@ void Audio_ThreadEntry(void* arg0) {
         PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_AUDIO_SYNTHESIS);
 #endif
         if (task != NULL) {
+#if defined(TARGET_PSP) && PSP_AUDIO_OUTPUT
+            // Output queue backpressure paces PSP synthesis
+#else
             task->mesgQueue = &gAudioTaskMesgQueue;
             task->msg = (OSMesg) TASK_MESG_1;
             osWritebackDCacheAll();
+#endif
         }
+#if defined(TARGET_PSP) && PSP_AUDIO_OUTPUT
+        continue;
+#else
         MQ_GET_MESG(&gAudioTaskMesgQueue, NULL);
 
         if (task != NULL) {
             osSendMesg(&gTaskMesgQueue, task, OS_MESG_NOBLOCK);
         }
         MQ_WAIT_FOR_MESG(&gAudioVImesgQueue, NULL);
+#endif
     }
 }
 
@@ -554,6 +566,8 @@ void Main_ThreadEntry(void* arg0) {
     u8 mesg;
 
 #ifdef TARGET_PSP
+    // Allow scalar audio to preempt synchronous rendering
+    osSetThreadPri(NULL, 70);
     Main_InitMesgQueues();
 #endif
 

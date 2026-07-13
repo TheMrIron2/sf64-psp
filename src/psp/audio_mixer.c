@@ -7,6 +7,7 @@
 #include <macros.h>
 
 #include "src/psp/audio_mixer.h"
+#include "src/psp/platform.h"
 
 static void* psp_audio_memset(void* dst, s32 value, size_t size) {
     u8* out = dst;
@@ -101,6 +102,7 @@ static __m128i m256i_clamp_to_m128i(m256i a) {
 #define ROUND_DOWN_16(v) ((v) & ~0xf)
 
 #define DMEM_BUF_SIZE (0x1B90) // 7056 B
+#define DMEM_GUARD_VALUE 0x41554449
 #define BUF_U8(a) (rspa.buf + ((a) -0x450))
 #define BUF_S16(a) (int16_t*) BUF_U8(a)
 
@@ -123,8 +125,27 @@ static struct {
     uint16_t filter_count;
     int16_t filter[8];
 
+    uint32_t guard_before;
     uint8_t buf[DMEM_BUF_SIZE];
-} rspa;
+    uint32_t guard_after;
+} rspa = {
+    .guard_before = DMEM_GUARD_VALUE,
+    .guard_after = DMEM_GUARD_VALUE,
+};
+
+s32 PspAudioMixer_ValidateState(void) {
+    s32 valid = (rspa.guard_before == DMEM_GUARD_VALUE) && (rspa.guard_after == DMEM_GUARD_VALUE);
+
+#if PSP_LOG_ENABLED
+    if (!valid) {
+        PspPlatform_LogValue("audio mixer guard before", rspa.guard_before);
+        PspPlatform_LogValue("audio mixer guard after", rspa.guard_after);
+    }
+#endif
+    rspa.guard_before = DMEM_GUARD_VALUE;
+    rspa.guard_after = DMEM_GUARD_VALUE;
+    return valid;
+}
 
 static int16_t resample_table[64][4] = {
     { 0x0c39, 0x66ad, 0x0d46, 0xffdf }, { 0x0b39, 0x6696, 0x0e5f, 0xffd8 }, { 0x0a44, 0x6669, 0x0f83, 0xffd0 },
@@ -169,6 +190,47 @@ static inline int32_t clamp32(int64_t v) {
     return (int32_t) v;
 }
 
+#if PSP_LOG_ENABLED
+typedef struct {
+    u32 calls;
+    s32 loggedSignal;
+} PspAudioSignalProbe;
+
+static u32 psp_audio_sample_peak(const int16_t* samples, s32 count) {
+    u32 peak = 0;
+    s32 i;
+
+    for (i = 0; i < count; i++) {
+        s32 sample = samples[i];
+        u32 magnitude = sample < 0 ? (u32) -sample : (u32) sample;
+
+        if (magnitude > peak) {
+            peak = magnitude;
+        }
+    }
+    return peak;
+}
+
+u32 PspAudioMixer_GetPeak(u16 addr, s32 samples) {
+    return psp_audio_sample_peak(BUF_S16(addr), samples);
+}
+
+static void psp_audio_probe_signal(PspAudioSignalProbe* probe, const char* firstLabel, const char* signalLabel,
+                                   const int16_t* samples, s32 count) {
+    u32 peak = psp_audio_sample_peak(samples, count);
+
+    probe->calls++;
+    if (probe->calls == 1) {
+        PspPlatform_LogValue(firstLabel, peak);
+    }
+    if (!probe->loggedSignal && (peak != 0)) {
+        probe->loggedSignal = true;
+        PspPlatform_LogValue(signalLabel, peak);
+        PspPlatform_LogValue("audio signal probe calls", probe->calls);
+    }
+}
+#endif
+
 void aClearBufferImpl(uint16_t addr, int nbytes) {
     nbytes = ROUND_UP_16(nbytes);
     memset(BUF_U8(addr), 0, nbytes);
@@ -209,11 +271,14 @@ void aSetBufferImpl(uint8_t flags, uint16_t in, uint16_t out, uint16_t nbytes) {
 
 void aInterleaveImpl(uint16_t left, uint16_t right, uint16_t center, uint16_t lfe, uint16_t surround_left,
                      uint16_t surround_right, uint16_t num_channels) {
+#if PSP_LOG_ENABLED
+    static PspAudioSignalProbe sInterleaveProbe;
+#endif
     if (rspa.nbytes == 0) {
         return;
     }
 
-    int count = rspa.nbytes / (num_channels * sizeof(int16_t));
+    int count = rspa.nbytes / sizeof(int16_t);
 
     int16_t* l = BUF_S16(left);
     int16_t* r = BUF_S16(right);
@@ -239,6 +304,10 @@ void aInterleaveImpl(uint16_t left, uint16_t right, uint16_t center, uint16_t lf
             *d++ = *sr++;
         }
     }
+#if PSP_LOG_ENABLED
+    psp_audio_probe_signal(&sInterleaveProbe, "audio first interleave peak", "audio interleave signal peak",
+                           BUF_S16(rspa.out), count * num_channels);
+#endif
 }
 
 void aDMEMMoveImpl(uint16_t in_addr, uint16_t out_addr, int nbytes) {
@@ -259,9 +328,20 @@ void aSetLoopImpl(ADPCM_STATE* adpcm_loop_state) {
 #ifndef SSE2_AVAILABLE
 
 void aADPCMdecImpl(uint8_t flags, ADPCM_STATE state) {
+#if PSP_LOG_ENABLED
+    static s32 sLoggedAdpcmDecode;
+    static PspAudioSignalProbe sAdpcmProbe;
+#endif
     uint8_t* in = BUF_U8(rspa.in);
     int16_t* out = BUF_S16(rspa.out);
     int nbytes = ROUND_UP_32(rspa.nbytes);
+#if PSP_LOG_ENABLED
+    if (!sLoggedAdpcmDecode) {
+        sLoggedAdpcmDecode = true;
+        PspPlatform_LogValue("audio first ADPCM decode bytes", nbytes);
+        PspPlatform_LogValue("audio first ADPCM header", *in);
+    }
+#endif
     if (flags & A_INIT) {
         memset(out, 0, 16 * sizeof(int16_t));
     } else if (flags & A_LOOP) {
@@ -307,6 +387,10 @@ void aADPCMdecImpl(uint8_t flags, ADPCM_STATE state) {
         nbytes -= 16 * sizeof(int16_t);
     }
     memcpy(state, out - 16, 16 * sizeof(int16_t));
+#if PSP_LOG_ENABLED
+    psp_audio_probe_signal(&sAdpcmProbe, "audio first ADPCM peak", "audio ADPCM signal peak",
+                           BUF_S16(rspa.out) + 16, ROUND_UP_32(rspa.nbytes) / sizeof(int16_t));
+#endif
 }
 
 #else
@@ -437,6 +521,9 @@ void aADPCMdecImpl(uint8_t flags, ADPCM_STATE state) {
 #ifndef SSE2_AVAILABLE
 
 void aResampleImpl(uint8_t flags, uint16_t pitch, RESAMPLE_STATE state) {
+#if PSP_LOG_ENABLED
+    static PspAudioSignalProbe sResampleProbe;
+#endif
     int16_t tmp[16];
     int16_t* in_initial = BUF_S16(rspa.in);
     int16_t* in = in_initial;
@@ -483,6 +570,10 @@ void aResampleImpl(uint8_t flags, uint16_t pitch, RESAMPLE_STATE state) {
     }
     state[5] = i;
     memcpy(state + 8, in, 8 * sizeof(int16_t));
+#if PSP_LOG_ENABLED
+    psp_audio_probe_signal(&sResampleProbe, "audio first resample peak", "audio resample signal peak",
+                           BUF_S16(rspa.out), ROUND_UP_16(rspa.nbytes) / sizeof(int16_t));
+#endif
 }
 
 #else
@@ -652,6 +743,15 @@ void aResampleImpl(uint8_t flags, uint16_t pitch, RESAMPLE_STATE state) {
 
 void aEnvSetup1Impl(uint8_t initial_vol_wet, uint16_t rate_wet, uint16_t rate_left, uint16_t rate_right,
                     uint16_t rate_center, uint16_t rate_lfe, uint16_t rate_rear_left, uint16_t rate_rear_right) {
+#if PSP_LOG_ENABLED
+    static s32 sLoggedEnvelopeRates;
+
+    if (!sLoggedEnvelopeRates && ((rate_left != 0) || (rate_right != 0))) {
+        sLoggedEnvelopeRates = true;
+        PspPlatform_LogValue("audio first envelope left rate", rate_left);
+        PspPlatform_LogValue("audio first envelope right rate", rate_right);
+    }
+#endif
     rspa.vol_wet = (uint16_t) (initial_vol_wet << 8);
     rspa.rate_wet = rate_wet;
     rspa.rate[0] = rate_left;
@@ -664,6 +764,15 @@ void aEnvSetup1Impl(uint8_t initial_vol_wet, uint16_t rate_wet, uint16_t rate_le
 
 void aEnvSetup2Impl(uint16_t initial_vol_left, uint16_t initial_vol_right, int16_t initial_vol_center,
                     int16_t initial_vol_lfe, int16_t initial_vol_rear_left, int16_t initial_vol_rear_right) {
+#if PSP_LOG_ENABLED
+    static s32 sLoggedEnvelopeVolumes;
+
+    if (!sLoggedEnvelopeVolumes && ((initial_vol_left != 0) || (initial_vol_right != 0))) {
+        sLoggedEnvelopeVolumes = true;
+        PspPlatform_LogValue("audio first nonzero left vol", initial_vol_left);
+        PspPlatform_LogValue("audio first nonzero right vol", initial_vol_right);
+    }
+#endif
     rspa.vol[0] = initial_vol_left;
     rspa.vol[1] = initial_vol_right;
     rspa.vol[2] = initial_vol_center;
@@ -673,7 +782,35 @@ void aEnvSetup2Impl(uint16_t initial_vol_left, uint16_t initial_vol_right, int16
 }
 
 void aEnvMixerImpl(uint16_t in_addr, uint16_t n_samples, bool swap_reverb, bool neg_left, bool neg_right,
-                   uint32_t wet_dry_addr, uint32_t haas_temp_addr, uint32_t num_channels, uint32_t cutoff_freq_lfe) {
+                   uint32_t destinations, uint32_t num_channels, uint32_t cutoff_freq_lfe) {
+#if PSP_LOG_ENABLED
+    static s32 sLoggedEnvelopeMix;
+    static s32 sLoggedEnvelopeSignalContext;
+    static PspAudioSignalProbe sEnvelopeInputProbe;
+    static PspAudioSignalProbe sEnvelopeOutputProbe;
+    u32 envelopeInputPeak;
+
+    if (!sLoggedEnvelopeMix) {
+        sLoggedEnvelopeMix = true;
+        PspPlatform_LogValue("audio first envelope samples", n_samples);
+        PspPlatform_LogValue("audio first envelope left vol", rspa.vol[0]);
+        PspPlatform_LogValue("audio first envelope right vol", rspa.vol[1]);
+        PspPlatform_LogValue("audio first envelope destinations", destinations);
+    }
+    envelopeInputPeak = psp_audio_sample_peak(BUF_S16(in_addr), ROUND_UP_16(n_samples));
+    if (!sLoggedEnvelopeSignalContext && (envelopeInputPeak != 0)) {
+        sLoggedEnvelopeSignalContext = true;
+        PspPlatform_LogValue("audio signal envelope left vol", rspa.vol[0]);
+        PspPlatform_LogValue("audio signal envelope right vol", rspa.vol[1]);
+        PspPlatform_LogValue("audio signal envelope left rate", rspa.rate[0]);
+        PspPlatform_LogValue("audio signal envelope right rate", rspa.rate[1]);
+        PspPlatform_LogValue("audio signal envelope destinations", destinations);
+        PspPlatform_LogValue("audio signal envelope flags",
+                             ((u32) swap_reverb << 2) | ((u32) neg_left << 1) | neg_right);
+    }
+    psp_audio_probe_signal(&sEnvelopeInputProbe, "audio first envelope input peak", "audio envelope input signal peak",
+                           BUF_S16(in_addr), ROUND_UP_16(n_samples));
+#endif
     // Note: max number of samples is 192 (192 * 2 = 384 bytes = 0x180)
     int max_num_samples = 192;
 
@@ -686,16 +823,12 @@ void aEnvMixerImpl(uint16_t in_addr, uint16_t n_samples, bool swap_reverb, bool 
     uint16_t rate_wet = rspa.rate_wet;
     uint16_t vol_wet = rspa.vol_wet;
 
-    // All speakers
-    int dry_addr_start = wet_dry_addr & 0xFFFF;
-    int wet_addr_start = wet_dry_addr >> 16;
-
     int16_t* dry[6];
     int16_t* wet[6];
-    for (int i = 0; i < 6; i++) {
-        dry[i] = BUF_S16(dry_addr_start + max_num_samples * i * sizeof(int16_t));
-        wet[i] = BUF_S16(wet_addr_start + max_num_samples * i * sizeof(int16_t));
-    }
+    dry[0] = BUF_S16(((destinations >> 24) & 0xFF) << 4);
+    dry[1] = BUF_S16(((destinations >> 16) & 0xFF) << 4);
+    wet[0] = BUF_S16(((destinations >> 8) & 0xFF) << 4);
+    wet[1] = BUF_S16((destinations & 0xFF) << 4);
 
     uint16_t vols[6] = { rspa.vol[0], rspa.vol[1], rspa.vol[2], rspa.vol[3], rspa.vol[4], rspa.vol[5] };
     int swapped[2] = { swap_reverb ? 1 : 0, swap_reverb ? 0 : 1 };
@@ -752,18 +885,6 @@ void aEnvMixerImpl(uint16_t in_addr, uint16_t n_samples, bool swap_reverb, bool 
             vol_wet += rate_wet;
         }
     } else {
-        // Account for haas effect
-        int haas_addr_left = haas_temp_addr >> 16;
-        int haas_addr_right = haas_temp_addr & 0xFFFF;
-
-        if (haas_addr_left) {
-            dry[0] = BUF_S16(haas_addr_left);
-        } else if (haas_addr_right) {
-            dry[1] = BUF_S16(haas_addr_right);
-        }
-
-        int16_t negs[2] = { neg_left ? 0 : 0xFFFF, neg_right ? 0 : 0xFFFF };
-
         for (int i = 0; i < n / 8; i++) {
             for (int k = 0; k < 8; k++) {
                 int16_t samples[2] = { 0 };
@@ -774,7 +895,13 @@ void aEnvMixerImpl(uint16_t in_addr, uint16_t n_samples, bool swap_reverb, bool 
 
                 // Apply volume
                 for (int j = 0; j < 2; j++) {
-                    samples[j] = (samples[j] * vols[j] >> 16) & negs[j];
+                    samples[j] = samples[j] * vols[j] >> 16;
+                }
+                if (neg_left) {
+                    samples[0] = clamp16(-(s32) samples[0]);
+                }
+                if (neg_right) {
+                    samples[1] = clamp16(-(s32) samples[1]);
                 }
 
                 // Mix dry and wet signals
@@ -794,6 +921,18 @@ void aEnvMixerImpl(uint16_t in_addr, uint16_t n_samples, bool swap_reverb, bool 
             vol_wet += rate_wet;
         }
     }
+#if PSP_LOG_ENABLED
+    if (sLoggedEnvelopeSignalContext == true) {
+        PspPlatform_LogValue("audio signal envelope dry left",
+                             psp_audio_sample_peak(BUF_S16(((destinations >> 24) & 0xFF) << 4), n));
+        PspPlatform_LogValue("audio signal envelope dry right",
+                             psp_audio_sample_peak(BUF_S16(((destinations >> 16) & 0xFF) << 4), n));
+        sLoggedEnvelopeSignalContext = 2;
+    }
+    psp_audio_probe_signal(&sEnvelopeOutputProbe, "audio first envelope output peak",
+                           "audio envelope output signal peak",
+                           BUF_S16(((destinations >> 24) & 0xFF) << 4), n);
+#endif
 }
 
 #ifndef SSE2_AVAILABLE
@@ -894,6 +1033,12 @@ void aS8DecImpl(uint8_t flags, ADPCM_STATE state) {
     uint8_t* in = BUF_U8(rspa.in);
     int16_t* out = BUF_S16(rspa.out);
     int nbytes = ROUND_UP_32(rspa.nbytes);
+#if PSP_LOG_ENABLED
+    static s32 sLoggedS8Decode;
+    uint8_t* inputStart = in;
+    int16_t* outputStart = out + 16;
+    int outputSamples = nbytes / (s32) sizeof(int16_t);
+#endif
     if (flags & A_INIT) {
         memset(out, 0, 16 * sizeof(int16_t));
     } else if (flags & A_LOOP) {
@@ -925,6 +1070,14 @@ void aS8DecImpl(uint8_t flags, ADPCM_STATE state) {
     }
 
     memcpy(state, out - 16, 16 * sizeof(int16_t));
+#if PSP_LOG_ENABLED
+    if (!sLoggedS8Decode) {
+        sLoggedS8Decode = true;
+        PspPlatform_LogValue("audio first S8 decode bytes", nbytes);
+        PspPlatform_LogValue("audio first S8 input", *inputStart);
+        PspPlatform_LogValue("audio first S8 peak", psp_audio_sample_peak(outputStart, outputSamples));
+    }
+#endif
 }
 
 void aAddMixerImpl(uint16_t count, uint16_t in_addr, uint16_t out_addr) {

@@ -55,8 +55,7 @@ void aEnvSetup1Impl(uint8_t initial_vol_wet, uint16_t rate_wet, uint16_t rate_le
 void aEnvSetup2Impl(uint16_t initial_vol_left, uint16_t initial_vol_right, int16_t initial_vol_center,
     int16_t initial_vol_lfe, int16_t initial_vol_rear_left, int16_t initial_vol_rear_right);
 void aEnvMixerImpl(uint16_t in_addr, uint16_t n_samples, bool swap_reverb, bool neg_left,
-                   bool neg_right, uint32_t wet_dry_addr, uint32_t haas_temp_addr, uint32_t num_channels,
-                   uint32_t cutoff_freq_lfe);
+                   bool neg_right, uint32_t destinations, uint32_t num_channels, uint32_t cutoff_freq_lfe);
 void aMixImpl(uint16_t count, int16_t gain, uint16_t in_addr, uint16_t out_addr);
 void aS8DecImpl(uint8_t flags, ADPCM_STATE state);
 void aAddMixerImpl(uint16_t count, uint16_t in_addr, uint16_t out_addr);
@@ -67,6 +66,10 @@ void aFilterImpl(uint8_t flags, uint16_t count_or_buf, int16_t* state_or_filter)
 void aHiLoGainImpl(uint8_t g, uint16_t count, uint16_t addr);
 void aUnkCmd3Impl(uint16_t a, uint16_t b, uint16_t c);
 void aUnkCmd19Impl(uint8_t f, uint16_t count, uint16_t out_addr, uint16_t in_addr);
+s32 PspAudioMixer_ValidateState(void);
+#if PSP_LOG_ENABLED
+u32 PspAudioMixer_GetPeak(u16 addr, s32 samples);
+#endif
 
 #define aSegment(pkt, s, b) \
     do {                    \
@@ -85,8 +88,8 @@ void aUnkCmd19Impl(uint8_t f, uint16_t count, uint16_t out_addr, uint16_t in_add
     aEnvSetup1Impl(initialVolReverb, rampReverb, rampLeft, rampRight, 0, 0, 0, 0)
 #define aEnvSetup2(pkt, initialVolLeft, initialVolRight) \
     aEnvSetup2Impl(initialVolLeft, initialVolRight, 0, 0, 0, 0)
-#define aEnvMixer(pkt, inAddr, nSamples, swapReverb, negLeft, negRight, wetDryAddr, haasTempAddr, numChannels) \
-    aEnvMixerImpl(inAddr, nSamples, swapReverb, negLeft, negRight, wetDryAddr, haasTempAddr, numChannels, 0)
+#define aEnvMixer(pkt, inAddr, nSamples, swapLR, x0, swapReverb, negLeft, negRight, destinations) \
+    aEnvMixerImpl(inAddr, nSamples, swapReverb, negLeft, negRight, destinations, 2, 0)
 #define aMix(pkt, c, g, i, o) aMixImpl(c, g, i, o)
 #define aS8Dec(pkt, f, s) aS8DecImpl(f, s)
 #define aAddMixer(pkt, count, inAddr, outAddr, gain) aAddMixerImpl(count, inAddr, outAddr)

@@ -2,6 +2,10 @@
 #include "sf64audio.h"
 #ifdef TARGET_PSP
 #include "src/psp/audio_mixer.h"
+#include "src/psp/platform.h"
+#if PSP_LOG_ENABLED
+extern u32 gPspAudioRequestedVoiceId;
+#endif
 #endif
 
 #ifdef TARGET_PSP
@@ -772,6 +776,9 @@ Acmd* AudioSynth_ProcessSamples(s16* aiBuf, s32 aiBufLen, Acmd* aList, s32 updat
     s16 reverbIndex = 0;
     s16 noteCount = 0;
     s32 j;
+#if defined(TARGET_PSP) && PSP_LOG_ENABLED
+    static s32 sLoggedActiveNotes;
+#endif
 
     if (gNumSynthReverbs == 0) {
         if (gSynthReverbs[reverbIndex].useReverb) {} // fake?
@@ -799,6 +806,13 @@ Acmd* AudioSynth_ProcessSamples(s16* aiBuf, s32 aiBufLen, Acmd* aList, s32 updat
             }
         }
     }
+
+#if defined(TARGET_PSP) && PSP_LOG_ENABLED
+    if (!sLoggedActiveNotes && (noteCount != 0)) {
+        sLoggedActiveNotes = true;
+        PspPlatform_LogValue("audio first active notes", noteCount);
+    }
+#endif
 
     aClearBuffer(aList++, DMEM_LEFT_CH, DMEM_2CH_SIZE);
 
@@ -834,6 +848,9 @@ Acmd* AudioSynth_ProcessSamples(s16* aiBuf, s32 aiBufLen, Acmd* aList, s32 updat
     aSetBuffer(aList++, 0, 0, DMEM_TEMP, j);
     aInterleave(aList++, DMEM_LEFT_CH, DMEM_RIGHT_CH);
     aSaveBuffer(aList++, DMEM_TEMP, AUDIO_RAM_ADDRESS(aiBuf), j * 2);
+#ifdef TARGET_PSP
+    PspAudioMixer_ValidateState();
+#endif
     return aList;
 }
 
@@ -893,10 +910,27 @@ Acmd* AudioSynth_ProcessSample(s32 noteIndex, NoteSampleState* sampleState, Note
     s16 addr;
     s32 samplesRemaining;
     s32 numSamplesToDecode;
+#if defined(TARGET_PSP) && PSP_LOG_ENABLED
+    bool isVoiceNote;
+    static s32 sLoggedActiveVoiceSample;
+    static s32 sLoggedVoiceSignal;
+#endif
 
     currentBook = NULL;
     note = &gNotes[noteIndex];
     flags = A_CONTINUE;
+#if defined(TARGET_PSP) && PSP_LOG_ENABLED
+    isVoiceNote = (note->playbackState.parentLayer != NULL) && (note->playbackState.parentLayer != NO_LAYER) &&
+                  (note->playbackState.parentLayer->channel != NULL) &&
+                  (note->playbackState.parentLayer->channel->seqPlayer == &gSeqPlayers[3]);
+    if (isVoiceNote && !sLoggedActiveVoiceSample && (sampleState->resampleRate != 0) &&
+        ((sampleState->panVolLeft != 0) || (sampleState->panVolRight != 0))) {
+        sLoggedActiveVoiceSample = true;
+        PspPlatform_LogValue("audio active voice resample rate", sampleState->resampleRate);
+        PspPlatform_LogValue("audio active voice left volume", sampleState->panVolLeft);
+        PspPlatform_LogValue("audio active voice right volume", sampleState->panVolRight);
+    }
+#endif
 
     // Initialize the synthesis state
     if (sampleState->bitField0.needsInit == 1) {
@@ -939,6 +973,27 @@ Acmd* AudioSynth_ProcessSample(s32 noteIndex, NoteSampleState* sampleState, Note
     } else {
         bookSample = *((Sample**) sampleState->waveSampleAddr);
         loopInfo = bookSample->loop;
+#if defined(TARGET_PSP) && PSP_LOG_ENABLED
+        {
+            static s32 sLoggedVoiceSample;
+            SequenceLayer* parentLayer = note->playbackState.parentLayer;
+
+            if (!sLoggedVoiceSample && (gPspAudioRequestedVoiceId >= 4) && (parentLayer != NULL) &&
+                (parentLayer != NO_LAYER) &&
+                (parentLayer->channel != NULL) && (parentLayer->channel->seqPlayer == &gSeqPlayers[3])) {
+                sLoggedVoiceSample = true;
+                PspPlatform_LogValue("audio sampled voice id", gPspAudioRequestedVoiceId);
+                PspPlatform_LogValue("audio first voice playback priority", note->playbackState.priority);
+                PspPlatform_LogValue("audio first voice channel priority", parentLayer->channel->notePriority);
+                PspPlatform_LogValue("audio first voice adsr state", note->playbackState.adsr.state);
+                PspPlatform_LogValue("audio first voice codec", bookSample->codec);
+                PspPlatform_LogValue("audio first voice sample size", bookSample->size);
+                PspPlatform_LogValue("audio first voice resample rate", sampleState->resampleRate);
+                PspPlatform_LogValue("audio first voice left volume", sampleState->panVolLeft);
+                PspPlatform_LogValue("audio first voice right volume", sampleState->panVolRight);
+            }
+        }
+#endif
 
 #ifdef TARGET_PSP
         endPos = __builtin_bswap32(loopInfo->end);
@@ -1239,6 +1294,16 @@ Acmd* AudioSynth_ProcessSample(s32 noteIndex, NoteSampleState* sampleState, Note
     // Resample the decompressed mono-signal to the correct pitch
     aList = AudioSynth_FinalResample(aList, synthState, aiBufLen * SAMPLE_SIZE, resampleRateFixedPoint,
                                      noteSamplesDmemAddrBeforeResampling, flags);
+#if defined(TARGET_PSP) && PSP_LOG_ENABLED
+    if (isVoiceNote && !sLoggedVoiceSignal && (resampleRateFixedPoint != 0)) {
+        u32 voicePeak = PspAudioMixer_GetPeak(DMEM_TEMP, aiBufLen);
+
+        if (voicePeak != 0) {
+            sLoggedVoiceSignal = true;
+            PspPlatform_LogValue("audio voice resample peak", voicePeak);
+        }
+    }
+#endif
 
     if (flags & A_INIT) {
         flags = A_INIT;

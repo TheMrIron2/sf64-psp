@@ -416,6 +416,8 @@ void PspPlatform_RunGfxTask(SPTask* task) {
 void PspPlatform_RunAudioTask(SPTask* task) {
     sAudioTaskCount++;
     (void) task;
+    // PSP audio ABI macros execute inline during synthesis
+    // The scalar task only acknowledges completion
     if (sEvents[OS_EVENT_SP].mq != NULL) {
         PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_AUDIO_TASK_DISPATCH);
         osSendMesg(sEvents[OS_EVENT_SP].mq, sEvents[OS_EVENT_SP].msg, OS_MESG_NOBLOCK);

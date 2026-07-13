@@ -67,6 +67,17 @@ DATE ?= date
 PSPSDK ?= $(shell $(PSP_CONFIG) --pspsdk-path 2>/dev/null)
 PSPDEV ?= $(shell $(PSP_CONFIG) --psp-prefix 2>/dev/null | sed 's,/psp$$,,')
 
+ifneq ($(PSP_AUDIO_SYNTH),0)
+ifneq ($(PSP_AUDIO_SYNTH),1)
+$(error PSP_AUDIO_SYNTH must be 0 or 1)
+endif
+endif
+ifneq ($(PSP_AUDIO_OUTPUT),0)
+ifneq ($(PSP_AUDIO_OUTPUT),1)
+$(error PSP_AUDIO_OUTPUT must be 0 or 1)
+endif
+endif
+
 CC := psp-gcc
 OBJDUMP := psp-objdump
 OBJCOPY := psp-objcopy

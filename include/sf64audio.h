@@ -800,10 +800,17 @@ typedef struct {
     /* 0x0 */ union {
         u32 opArgs;
         struct {
+#ifdef TARGET_PSP
+            u8 arg2;
+            u8 arg1;
+            u8 arg0;
+            u8 op;
+#else
             u8 op;
             u8 arg0;
             u8 arg1;
             u8 arg2;
+#endif
         };
     };
     /* 0x4 */ union {
