@@ -5,17 +5,8 @@
 
 PSP_BOOTSTRAP_C_FILES := src/psp/main.c
 
-PSP_N64PSP_C_FILES :=
-
-ifeq ($(USE_N64PSP_QUEUES),1)
-PSP_N64PSP_C_FILES += \
+PSP_N64PSP_C_FILES := \
     src/psp/n64psp_integration.c
-endif
-ifeq ($(N64PSP_QUEUE_SELFTEST),1)
-PSP_N64PSP_C_FILES += \
-    src/psp/n64psp_platform_selftest.c \
-    src/psp/n64psp_queue_selftest.c
-endif
 
 # Active PSP renderer architecture:
 #   Star Fox 64 / Fast3D display-list frontend in gfx_psp_dl.c

@@ -1,6 +1,6 @@
 #include "sys.h"
 
-#if defined(TARGET_PSP) && (USE_N64PSP_SINCOS + 0)
+#if defined(TARGET_PSP)
 #include <n64psp/trig.h>
 
 #define SF64_MATRIX_SINCOS(angle, outSn, outCs) \

@@ -11,10 +11,6 @@
 #define SF64_PSP_PROFILE_TRIVIAL_REJECTS 0
 #endif
 
-#ifndef SF64_PSP_PROFILE_VERTEX_REUSE
-#define SF64_PSP_PROFILE_VERTEX_REUSE 0
-#endif
-
 typedef enum {
     PSP_PROFILE_VERTEX_REUSE_SOURCE_DIRECT,
     PSP_PROFILE_VERTEX_REUSE_SOURCE_GENERIC_UNCLIPPED,
@@ -216,13 +212,6 @@ void PspProfiler_CountTrivialRejectCost(PspProfileTrivialRejectCost cost, u32 co
 void PspProfiler_CountTrivialRejectFlush(PspProfileFlushReason reason, u32 submittedVertices);
 void PspProfiler_CountTrivialRejectStateTransition(PspProfileTrivialRejectStateField field);
 void PspProfiler_CountTrivialRejectRenderState(PspProfileTrivialRejectRenderState state);
-#endif
-#if SF64_PSP_PROFILE_VERTEX_REUSE
-void PspProfiler_AnalyzeAllPspglDrawVertexReuse(const void* packets, u32 packetCount);
-void PspProfiler_AnalyzeRendererBatchVertexReuse(const void* packets, u32 packetCount, u32 ownerComponentId,
-                                                 u32 componentMask,
-                                                 const PspProfileVertexReuseSource* provenance,
-                                                 u32 provenanceCount);
 #endif
 #else
 #define PspProfiler_PhaseBegin(phase) ((void) 0)

@@ -73,28 +73,12 @@ int main(int argc, char* argv[]) {
     pspDebugScreenPrintf("Select+Start exits\n");
     pspDebugScreenPrintf("Select+L starts profile, Select+R saves\n");
 
-#if USE_N64PSP_QUEUES
     if (!PspN64psp_Init()) {
         pspDebugScreenPrintf("[psp] n64psp init failed; boot aborted\n");
         while (1) {
             sceDisplayWaitVblankStart();
         }
     }
-#if N64PSP_QUEUE_SELFTEST
-    if (!PspN64psp_RunPlatformSelfTest()) {
-        pspDebugScreenPrintf("[psp] n64psp platform self-test failed; boot aborted\n");
-        while (1) {
-            sceDisplayWaitVblankStart();
-        }
-    }
-    if (!PspN64psp_RunQueueSelfTest()) {
-        pspDebugScreenPrintf("[psp] n64psp queue self-test failed; boot aborted\n");
-        while (1) {
-            sceDisplayWaitVblankStart();
-        }
-    }
-#endif
-#endif
 
     pspDebugScreenPrintf("[psp] platform init\n");
     PspPlatform_Init();

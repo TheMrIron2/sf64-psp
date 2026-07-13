@@ -53,16 +53,6 @@ void PspPlatform_LogLine(const char* line);
 #define PSP_GFX_PSPGL_SCREEN_MARGIN 8.0f
 #define PSP_GFX_PSPGL_BLACK 0xFF000000u
 
-#ifndef SF64_PSP_PSPGL_VBO_STREAM
-#define SF64_PSP_PSPGL_VBO_STREAM 1
-#endif
-#ifndef SF64_PSP_TEXTURE_WRAP_CACHE
-#define SF64_PSP_TEXTURE_WRAP_CACHE 1
-#endif
-#ifndef SF64_PSP_PROFILE_VERTEX_REUSE
-#define SF64_PSP_PROFILE_VERTEX_REUSE 0
-#endif
-
 struct PspGfxPspglTextureParameterState {
     GLuint texture;
     GLint wrapS;
@@ -183,20 +173,16 @@ typedef struct {
     GLfloat textureEnvColor[4];
 } PspGfxPspglStateCache;
 
-#if SF64_PSP_PSPGL_VBO_STREAM
 typedef struct {
     GLuint buffer;
 } PspGfxVertexStreamPage;
-#endif
 
 static PspGfxTextureCacheEntry sTextureCache[PSP_GFX_PSPGL_CI8_TEXTURE_CACHE_SIZE];
 static PspGfxRgba16TextureCacheEntry sRgba16TextureCache[PSP_GFX_PSPGL_RGBA16_TEXTURE_CACHE_SIZE];
 static PspGfxRgba32TextureCacheEntry sRgba32TextureCache[PSP_GFX_PSPGL_RGBA32_TEXTURE_CACHE_SIZE];
 static PspGfxConvertedTextureCacheEntry sConvertedTextureCache[PSP_GFX_PSPGL_CONVERTED_TEXTURE_CACHE_SIZE];
-#if SF64_PSP_PSPGL_VBO_STREAM
 static PspGfxVertexStreamPage sVertexStreamSmallArenas[PSP_GFX_PSPGL_VERTEX_STREAM_SETS];
 static PspGfxVertexStreamPage sVertexStreamLargePages[PSP_GFX_PSPGL_VERTEX_STREAM_LARGE_PAGE_COUNT];
-#endif
 static u8 sTextureUpload[PSP_GFX_PSPGL_MAX_TEXTURE_PIXELS * 4];
 static u32 sTextureCacheCount;
 static u32 sRgba16TextureCacheCount;
@@ -215,7 +201,6 @@ static u32 sTextureParameterGeneration;
 #if PSP_RENDERER_DIAGNOSTICS
 static u32 sInvalidTextureRefDiagCount;
 #endif
-#if SF64_PSP_TEXTURE_WRAP_CACHE
 /*
  * Resident texture cache entries own the authoritative wrap state for their
  * PSPGL texture object. The fallback cache only covers unexpected external
@@ -224,12 +209,9 @@ static u32 sInvalidTextureRefDiagCount;
  */
 static PspGfxPspglTextureParameterState
     sTextureParameterFallbackCache[PSP_GFX_PSPGL_TEXTURE_PARAMETER_FALLBACK_CACHE_SIZE];
-#endif
-#if SF64_PSP_PSPGL_VBO_STREAM
 static void* sVertexStreamSmallArenaMapped;
 static u32 sVertexStreamSmallArenaMappedSet;
 static int sVertexStreamSmallArenaExhausted;
-#endif
 static PspGfxPspglStateCache sStateCache;
 
 static void psp_gfx_pspgl_invalidate_state_cache(void) {
@@ -287,11 +269,9 @@ static void psp_gfx_pspgl_init_texture_parameter_state(PspGfxPspglTextureParamet
 }
 
 static void psp_gfx_pspgl_invalidate_texture_parameter_state(PspGfxPspglTextureParameterState* state) {
-#if SF64_PSP_TEXTURE_WRAP_CACHE
     if (state->valid) {
         PspProfiler_CountTextureParameterCacheReplacement();
     }
-#endif
     state->texture = 0;
     state->wrapS = GL_CLAMP_TO_EDGE;
     state->wrapT = GL_CLAMP_TO_EDGE;
@@ -299,7 +279,6 @@ static void psp_gfx_pspgl_invalidate_texture_parameter_state(PspGfxPspglTextureP
     state->valid = 0;
 }
 
-#if SF64_PSP_TEXTURE_WRAP_CACHE
 static void psp_gfx_pspgl_invalidate_fallback_texture_parameter_state(GLuint texture) {
     u32 slot = texture % PSP_GFX_PSPGL_TEXTURE_PARAMETER_FALLBACK_CACHE_SIZE;
     PspGfxPspglTextureParameterState* state = &sTextureParameterFallbackCache[slot];
@@ -359,15 +338,6 @@ static void psp_gfx_pspgl_set_texture_wrap(GLuint texture, GLint wrapS, GLint wr
         PspProfiler_CountTextureWrapSkip(0, 1);
     }
 }
-#else
-static void psp_gfx_pspgl_set_texture_wrap(GLuint texture, GLint wrapS, GLint wrapT) {
-    (void) texture;
-    PspProfiler_CountTextureWrapRequest(1, 1);
-    PspProfiler_CountTextureWrapCall(1, 1);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrapS);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrapT);
-}
-#endif
 
 static void psp_gfx_pspgl_set_texture_filter(GLuint texture, GLint minFilter, GLint magFilter) {
     PspGfxPspglTextureParameterState* state = NULL;
@@ -786,11 +756,9 @@ static u8 psp_gfx_pspgl_soft_coverage_alpha(u8 alpha) {
     return (u8) ((((u32) (alpha - 32U) * 255U) + 111U) / 223U);
 }
 
-#if SF64_PSP_PSPGL_VBO_STREAM
 static const GLvoid* psp_gfx_pspgl_vertex_offset(u32 offset) {
     return (const GLvoid*) offset;
 }
-#endif
 
 static void psp_gfx_pspgl_bind_client_arrays(const PspGfxPspglColorVertex* vertices) {
     glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -799,7 +767,6 @@ static void psp_gfx_pspgl_bind_client_arrays(const PspGfxPspglColorVertex* verti
     glVertexPointer(3, GL_FLOAT, sizeof(PspGfxPspglColorVertex), &vertices[0].x);
 }
 
-#if SF64_PSP_PSPGL_VBO_STREAM
 static void psp_gfx_pspgl_bind_vbo_arrays(GLuint buffer) {
     glBindBuffer(GL_ARRAY_BUFFER, buffer);
     glTexCoordPointer(2, GL_FLOAT, sizeof(PspGfxPspglColorVertex),
@@ -818,7 +785,6 @@ static void psp_gfx_pspgl_unmap_small_arena(void) {
     glUnmapBuffer(GL_ARRAY_BUFFER);
     sVertexStreamSmallArenaMapped = NULL;
 }
-#endif
 
 static void psp_gfx_pspgl_init_vertex_stream(void) {
     u32 i;
@@ -827,7 +793,6 @@ static void psp_gfx_pspgl_init_vertex_stream(void) {
         return;
     }
     sVertexStreamInitialized = 1;
-#if SF64_PSP_PSPGL_VBO_STREAM
     sVertexStreamAvailable = 1;
     glGenBuffers(PSP_GFX_PSPGL_VERTEX_STREAM_SETS, &sVertexStreamSmallArenas[0].buffer);
     for (i = 0; i < PSP_GFX_PSPGL_VERTEX_STREAM_SETS; i++) {
@@ -862,25 +827,17 @@ static void psp_gfx_pspgl_init_vertex_stream(void) {
             }
         }
     }
-#else
-    (void) i;
-    sVertexStreamAvailable = 0;
-#endif
 }
 
 static void psp_gfx_pspgl_reset_vertex_stream(void) {
     if (!sVertexStreamAvailable) {
         return;
     }
-#if SF64_PSP_PSPGL_VBO_STREAM
     psp_gfx_pspgl_unmap_small_arena();
-#endif
     sVertexStreamSetIndex = (sVertexStreamSetIndex + 1) % PSP_GFX_PSPGL_VERTEX_STREAM_SETS;
     sVertexStreamSmallArenaVertexIndex = 0;
     sVertexStreamLargePageIndex = 0;
-#if SF64_PSP_PSPGL_VBO_STREAM
     sVertexStreamSmallArenaExhausted = 0;
-#endif
 }
 
 static int psp_gfx_pspgl_find_converted_texture(const void* pixels, const u16* palette, u32 width, u32 height,
@@ -1042,9 +999,7 @@ static u32 psp_gfx_pspgl_create_converted_texture(const void* pixels, const u16*
                                              entry->environmentColor));
 #endif
         psp_gfx_pspgl_invalidate_bound_texture();
-#if SF64_PSP_TEXTURE_WRAP_CACHE
         psp_gfx_pspgl_invalidate_fallback_texture_parameter_state(entry->texture);
-#endif
         psp_gfx_pspgl_invalidate_texture_parameter_state(&entry->parameterState);
         glDeleteTextures(1, &entry->texture);
     }
@@ -1180,9 +1135,7 @@ void PspGfxPspgl_Flush(void) {
      * before glDrawArrays returns, and submits internally when its GE list
      * fills. Keep explicit submission at the frame/task boundary.
      */
-#if SF64_PSP_PSPGL_VBO_STREAM
     psp_gfx_pspgl_unmap_small_arena();
-#endif
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_GL_FLUSH);
     glFlush();
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_GL_FLUSH);
@@ -1283,9 +1236,7 @@ u32 PspGfxPspgl_CreateCi8Texture(const u8* indices, const u16* palette, u32 widt
             psp_gfx_pspgl_ci8_key_hash(entry->indices, entry->palette, entry->width, entry->height));
 #endif
         psp_gfx_pspgl_invalidate_bound_texture();
-#if SF64_PSP_TEXTURE_WRAP_CACHE
         psp_gfx_pspgl_invalidate_fallback_texture_parameter_state(entry->texture);
-#endif
         psp_gfx_pspgl_invalidate_texture_parameter_state(&entry->parameterState);
         glDeleteTextures(1, &entry->texture);
     }
@@ -1456,9 +1407,7 @@ u32 PspGfxPspgl_CreateRgba16Texture(const u16* pixels, u32 width, u32 height, in
             psp_gfx_pspgl_rgba16_key_hash(entry->pixels, entry->width, entry->height, entry->premultiplied));
 #endif
         psp_gfx_pspgl_invalidate_bound_texture();
-#if SF64_PSP_TEXTURE_WRAP_CACHE
         psp_gfx_pspgl_invalidate_fallback_texture_parameter_state(entry->texture);
-#endif
         psp_gfx_pspgl_invalidate_texture_parameter_state(&entry->parameterState);
         glDeleteTextures(1, &entry->texture);
     }
@@ -1647,9 +1596,7 @@ static u32 psp_gfx_pspgl_create_rgba32_texture(const void* pixels, u32 width, u3
                                           entry->envBlend, entry->primitiveColor, entry->environmentColor));
 #endif
         psp_gfx_pspgl_invalidate_bound_texture();
-#if SF64_PSP_TEXTURE_WRAP_CACHE
         psp_gfx_pspgl_invalidate_fallback_texture_parameter_state(entry->texture);
-#endif
         psp_gfx_pspgl_invalidate_texture_parameter_state(&entry->parameterState);
         glDeleteTextures(1, &entry->texture);
     }
@@ -1836,9 +1783,7 @@ static void psp_gfx_pspgl_draw_client_arrays(const PspGfxPspglColorVertex* verti
     u32 smallDraw = psp_gfx_pspgl_is_small_draw(vertexCount);
     u32 largeDraw = psp_gfx_pspgl_is_large_draw(vertexCount);
 
-#if SF64_PSP_PSPGL_VBO_STREAM
     psp_gfx_pspgl_unmap_small_arena();
-#endif
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
     psp_gfx_pspgl_bind_client_arrays(vertices);
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
@@ -1855,7 +1800,6 @@ static void psp_gfx_pspgl_draw_client_arrays(const PspGfxPspglColorVertex* verti
 }
 
 static int psp_gfx_pspgl_draw_vbo_stream(const PspGfxPspglColorVertex* vertices, u32 vertexCount) {
-#if SF64_PSP_PSPGL_VBO_STREAM
     PspGfxVertexStreamPage* page;
     void* mapped;
     u32 pageIndex;
@@ -1965,11 +1909,6 @@ static int psp_gfx_pspgl_draw_vbo_stream(const PspGfxPspglColorVertex* vertices,
                                   highWater, smallDraw, largeDraw, smallDraw ? vertexCount : 0,
                                   largeDraw ? vertexCount : 0);
     return 1;
-#else
-    (void) vertices;
-    (void) vertexCount;
-    return 0;
-#endif
 }
 
 void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u32 vertexCount,
@@ -1985,10 +1924,6 @@ void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u3
     if ((vertices == NULL) || (vertexCount == 0)) {
         return;
     }
-
-#if SF64_PSP_PROFILE_VERTEX_REUSE
-    PspProfiler_AnalyzeAllPspglDrawVertexReuse(vertices, vertexCount);
-#endif
 
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
 
