@@ -981,11 +981,33 @@ Acmd* AudioSynth_ProcessSample(s32 noteIndex, NoteSampleState* sampleState, Note
             if (!sLoggedVoiceSample && (gPspAudioRequestedVoiceId >= 4) && (parentLayer != NULL) &&
                 (parentLayer != NO_LAYER) &&
                 (parentLayer->channel != NULL) && (parentLayer->channel->seqPlayer == &gSeqPlayers[3])) {
+                union {
+                    f32 f;
+                    u32 u;
+                } value;
+
                 sLoggedVoiceSample = true;
                 PspPlatform_LogValue("audio sampled voice id", gPspAudioRequestedVoiceId);
                 PspPlatform_LogValue("audio first voice playback priority", note->playbackState.priority);
                 PspPlatform_LogValue("audio first voice channel priority", parentLayer->channel->notePriority);
                 PspPlatform_LogValue("audio first voice adsr state", note->playbackState.adsr.state);
+                PspPlatform_LogValue("audio first voice layer delay", parentLayer->delay);
+                value.f = parentLayer->freqMod;
+                PspPlatform_LogValue("audio first voice layer frequency bits", value.u);
+                value.f = parentLayer->channel->freqMod;
+                PspPlatform_LogValue("audio first voice channel frequency bits", value.u);
+                value.f = parentLayer->noteFreqMod;
+                PspPlatform_LogValue("audio first voice note frequency bits", value.u);
+                value.f = parentLayer->velocitySquare;
+                PspPlatform_LogValue("audio first voice velocity square bits", value.u);
+                value.f = parentLayer->channel->appliedVolume;
+                PspPlatform_LogValue("audio first voice channel volume bits", value.u);
+                value.f = parentLayer->noteVelocity;
+                PspPlatform_LogValue("audio first voice note velocity bits", value.u);
+                value.f = note->playbackState.vibratoFreqMod;
+                PspPlatform_LogValue("audio first voice vibrato bits", value.u);
+                value.f = note->playbackState.portamentoFreqMod;
+                PspPlatform_LogValue("audio first voice portamento bits", value.u);
                 PspPlatform_LogValue("audio first voice codec", bookSample->codec);
                 PspPlatform_LogValue("audio first voice sample size", bookSample->size);
                 PspPlatform_LogValue("audio first voice resample rate", sampleState->resampleRate);

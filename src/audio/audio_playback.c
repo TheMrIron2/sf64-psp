@@ -261,7 +261,7 @@ void AudioPlayback_ProcessNotes(void) {
 
         playbackState = &note->playbackState;
         if ((playbackState->parentLayer != NO_LAYER)) {
-            if ((u32) playbackState->parentLayer < 0x7FFFFFFF) {
+            if (playbackState->parentLayer == NULL) {
                 continue;
             }
 
