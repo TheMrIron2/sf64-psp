@@ -96,6 +96,8 @@ typedef struct {
 void PspGfxPspgl_Init(void);
 void PspGfxPspgl_BeginFrame(void);
 void PspGfxPspgl_Flush(void);
+void PspGfxPspgl_SetScissor(float ulx, float uly, float lrx, float lry);
+void PspGfxPspgl_ClearScissor(void);
 int PspGfxPspgl_FindCi8Texture(const u8* indices, const u16* palette, u32 width, u32 height, u32* textureId,
                                PspGfxPspglTextureRef* textureRef, u32* uploadWidth, u32* uploadHeight);
 u32 PspGfxPspgl_CreateCi8Texture(const u8* indices, const u16* palette, u32 width, u32 height, u32* uploadWidth,

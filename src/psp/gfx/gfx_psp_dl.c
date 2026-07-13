@@ -3647,6 +3647,16 @@ static void psp_gfx_dl_handle_fill_rectangle(PspGfxDlContext* ctx, const Gfx* gf
     ctx->stats.fillRectangleCount++;
 }
 
+static void psp_gfx_dl_handle_set_scissor(PspGfxDlContext* ctx, const Gfx* gfx) {
+    float ulx = (float) ((gfx->words.w0 >> 12) & 0xFFF) * 0.25f;
+    float uly = (float) (gfx->words.w0 & 0xFFF) * 0.25f;
+    float lrx = (float) ((gfx->words.w1 >> 12) & 0xFFF) * 0.25f;
+    float lry = (float) (gfx->words.w1 & 0xFFF) * 0.25f;
+
+    psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+    PspGfxPspgl_SetScissor(ulx, uly, lrx, lry);
+}
+
 static void psp_gfx_dl_handle_set_fog_color(PspGfxDlContext* ctx, const Gfx* gfx) {
     if (ctx->batchCount != 0) {
         psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
@@ -4617,6 +4627,11 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
             continue;
         }
 
+        if (opcode == G_SETSCISSOR) {
+            psp_gfx_dl_handle_set_scissor(ctx, cmd);
+            continue;
+        }
+
         if (opcode == PSP_GFX_OP_F3D_TRI1) {
             u32 w1 = cmd->words.w1;
             PspProfiler_CountTriangleCommand(1, 1, 0);
@@ -4719,6 +4734,7 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
     psp_gfx_dl_trivial_reject_scope_clear_for_task(ctx);
 #endif
     psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_END_OF_TASK);
+    PspGfxPspgl_ClearScissor();
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_DL_TRAVERSAL);
 
     if (outStats != NULL) {

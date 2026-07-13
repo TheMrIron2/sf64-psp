@@ -12,6 +12,12 @@
 #ifndef PSP_RENDERER_DIAGNOSTICS
 #define PSP_RENDERER_DIAGNOSTICS 0
 #endif
+#ifndef PSP_DIAG_SKIP_DEPTH_CLEAR
+#define PSP_DIAG_SKIP_DEPTH_CLEAR 0
+#endif
+#ifndef PSP_DIAG_SKIP_TEX24_DRAW_ORDINAL
+#define PSP_DIAG_SKIP_TEX24_DRAW_ORDINAL 0
+#endif
 
 #if PSP_RENDERER_DIAGNOSTICS
 /*
@@ -212,6 +218,7 @@ static u32 sVertexStreamLargePageIndex;
 static int sVertexStreamInitialized;
 static int sVertexStreamAvailable;
 static u32 sTextureParameterGeneration;
+static u32 sPspGfxPspglTex24DrawOrdinal;
 #if PSP_RENDERER_DIAGNOSTICS
 static u32 sInvalidTextureRefDiagCount;
 #endif
@@ -1117,8 +1124,35 @@ void PspGfxPspgl_Init(void) {
     psp_gfx_pspgl_invalidate_state_cache();
 }
 
+void PspGfxPspgl_SetScissor(float ulx, float uly, float lrx, float lry) {
+    float scaleX = (float) PspGfx_GetWidth() / PSP_GFX_PSPGL_N64_WIDTH;
+    float scaleY = (float) PspGfx_GetHeight() / PSP_GFX_PSPGL_N64_HEIGHT;
+    GLint x0;
+    GLint y0Top;
+    GLint x1;
+    GLint y1Bottom;
+
+    if (ulx < 0.0f) ulx = 0.0f;
+    if (uly < 0.0f) uly = 0.0f;
+    if (lrx > PSP_GFX_PSPGL_N64_WIDTH) lrx = PSP_GFX_PSPGL_N64_WIDTH;
+    if (lry > PSP_GFX_PSPGL_N64_HEIGHT) lry = PSP_GFX_PSPGL_N64_HEIGHT;
+    if ((lrx <= ulx) || (lry <= uly)) return;
+    x0 = (GLint) (ulx * scaleX);
+    y0Top = (GLint) (uly * scaleY);
+    x1 = (GLint) ((lrx * scaleX) + 0.5f);
+    y1Bottom = (GLint) ((lry * scaleY) + 0.5f);
+    glScissor(x0, PspGfx_GetHeight() - y1Bottom, x1 - x0, y1Bottom - y0Top);
+    glEnable(GL_SCISSOR_TEST);
+}
+
+void PspGfxPspgl_ClearScissor(void) {
+    glDisable(GL_SCISSOR_TEST);
+}
+
 void PspGfxPspgl_BeginFrame(void) {
     glViewport(0, 0, PspGfx_GetWidth(), PspGfx_GetHeight());
+    PspGfxPspgl_ClearScissor();
+    sPspGfxPspglTex24DrawOrdinal = 0;
 
     glDisable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
@@ -1131,7 +1165,9 @@ void PspGfxPspgl_BeginFrame(void) {
     glLoadIdentity();
 
     psp_gfx_pspgl_reset_vertex_stream();
+#if !PSP_DIAG_SKIP_DEPTH_CLEAR
     glClear(GL_DEPTH_BUFFER_BIT);
+#endif
     glDepthMask(GL_FALSE);
     psp_gfx_pspgl_invalidate_state_cache();
     PspGfxPspgl_DrawSolidRect(0.0f, 0.0f, PSP_GFX_PSPGL_N64_WIDTH, PSP_GFX_PSPGL_SCREEN_MARGIN,
@@ -1958,6 +1994,15 @@ void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u3
 
     if ((vertices == NULL) || (vertexCount == 0)) {
         return;
+    }
+
+    if ((textureId != 0) && (vertexCount == 24)) {
+        sPspGfxPspglTex24DrawOrdinal++;
+#if PSP_DIAG_SKIP_TEX24_DRAW_ORDINAL
+        if (sPspGfxPspglTex24DrawOrdinal == PSP_DIAG_SKIP_TEX24_DRAW_ORDINAL) {
+            return;
+        }
+#endif
     }
 
 #if SF64_PSP_PROFILE_VERTEX_REUSE
