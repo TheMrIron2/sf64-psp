@@ -2,14 +2,10 @@
 
 ## Status
 
-The PSP build now links the real Star Fox 64 audio driver, a portable scalar
-audio-ABI mixer, the original US revision 1 audio data, and a dedicated PSP
-PCM output thread.
-
-This is a build-complete first production path. BGM, SFX, radio voice
-playback, timing, underrun behavior, real-PSP cost, and Vita compatibility
-remain runtime-untested as of June 15, 2026. Do not infer support from a
-successful EBOOT build.
+The CPU scalar audio path is complete and validated on real PSP hardware.
+BGM, SFX, radio voices, percussion, sequence transitions, and PCM output are
+working with the original US revision 1 audio data. Vita compatibility and
+optional acceleration paths remain untested.
 
 ## Driver Basis
 
@@ -84,6 +80,7 @@ N64 asset byte order. PSP-only corrections cover:
 
 * sequence-to-font table offsets;
 * sound-font pointer relocation;
+* sample codec, medium, preload, and relocation flags;
 * sample size and sample-bank addresses;
 * envelope points and tuning floats;
 * ADPCM loop positions and loop predictor state;
@@ -140,7 +137,7 @@ The former PSP audio stubs were removed. `Audio_PlayVoice`,
 resolve to SF64's real implementations and sequence-player state. There are
 no message-specific timers, permanent silence values, or dialogue gates.
 
-Whether radio samples load and complete correctly is pending runtime testing.
+Radio samples load, play, and complete correctly on real PSP hardware.
 
 ## Diagnostics
 
@@ -149,14 +146,13 @@ The first queued PCM frame count is logged once. Output-ring overruns are
 logged for the first four occurrences and then at powers of two, avoiding
 per-buffer spam.
 
-Future measured diagnostics should add synthesis duration, active notes and
-players, DMA/load backlog, underruns, and current voice state after the first
-runtime pass identifies where bounded instrumentation is most useful.
+Synthesis duration and bounded output health counters remain available for
+performance work without sequence-specific logging.
 
 ## Acceleration Plan
 
 The scalar mixer is the permanent correctness and compatibility baseline.
-After PPSSPP and real-PSP correctness:
+Real-PSP correctness is established; acceleration work should:
 
 1. Profile ADPCM decode, resampling, envelope mixing, reverb, and copies.
 2. Add optional VFPU replacements behind the same mixer boundary.

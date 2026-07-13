@@ -203,7 +203,11 @@ Drum* AudioPlayback_GetDrum(s32 fontId, s32 drumId) {
         return NULL;
     }
 
+#ifdef TARGET_PSP
+    if (gSoundFontList[fontId].drums == NULL) {
+#else
     if ((u32) gSoundFontList[fontId].drums < AUDIO_RELOCATED_ADDRESS_START) {
+#endif
         return NULL;
     }
 

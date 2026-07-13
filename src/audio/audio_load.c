@@ -1388,6 +1388,19 @@ void AudioLoad_RelocateSample(TunedSample* tSample, uintptr_t fontDataAddr, Samp
 
     sample = tSample->sample = reloc = sampleOffset + fontDataAddr;
 
+#ifdef TARGET_PSP
+    {
+        u8 header = *(u8*) sample;
+
+        if (!(header & 0x80)) {
+            sample->codec = (header >> 4) & 0xF;
+            sample->medium = (header >> 2) & 3;
+            sample->unk_bit26 = (header >> 1) & 1;
+            sample->isRelocated = header & 1;
+        }
+    }
+#endif
+
     // If the sample exists and has not already been relocated
     // Note: this is important, as the same sample can be used by different drums, sound effects, instruments
     if (sample->size == 0) {

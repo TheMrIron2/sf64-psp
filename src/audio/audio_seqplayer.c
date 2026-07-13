@@ -573,7 +573,7 @@ void AudioSeq_SeqLayerProcessScript(SequenceLayer* layer) {
                 case 0x80:
                     cmdArg16 = layer->lastDelay;
                     vel = *state->pc++;
-                    layer->gateTime = *(state->pc)++;
+                    layer->gateTime = *state->pc++;
                     break;
             }
 
