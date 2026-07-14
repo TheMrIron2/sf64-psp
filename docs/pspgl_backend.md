@@ -12,6 +12,15 @@ src/psp/gfx/gfx_pspgl.c
 src/psp/renderer_pspgl.c
 ```
 
+An indexed-geometry experiment regressed GFX time; menu rendering rose from 7.0
+to 13.6 ms and map rendering from 32.4 to 49.6 ms. 
+
+A follow-up non-indexed strip experiment also regressed every tested scene.
+Title rose from 42.5 to 49.3 ms, menu from 6.9 to 9.5 ms and map from 31.7 to
+34.9 ms. Its costs were not recovered by reduced vertex counts, so that path was
+also removed. A future strip path should be formed during display-list interpretation
+and limited to known long 3D runs.
+
 The backend has progressed well beyond its original clear-screen and triangle
 probe. It now consumes the real `Gfx*` task pointer, traverses nested display
 lists with safety limits, interprets a growing Fast3D/RDP subset, converts and
