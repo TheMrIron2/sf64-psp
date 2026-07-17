@@ -2940,6 +2940,7 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
     }
 #endif
 
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_G_VTX_UNPACK);
     {
         for (i = 0; i < count; i++) {
             const Vtx* in = &src[i];
@@ -2956,9 +2957,13 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
             sPspGfxDlTransformInput[i].w = 1.0f;
         }
 
+        PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_G_VTX_UNPACK);
+        PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_G_VTX_MATRIX_PREPARE);
         psp_gfx_dl_prepare_batch_matrices(ctx);
+        PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_G_VTX_MATRIX_PREPARE);
     }
 
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_G_VTX_TRANSFORM);
     {
         n64psp_mat4f_transform_vec4_chain2_batch(
             sPspGfxDlTransformOutput,
@@ -2968,7 +2973,9 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
             count
         );
     }
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_G_VTX_TRANSFORM);
 
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_G_VTX_POST_TRANSFORM);
     for (i = 0; i < count; i++) {
         PspGfxDlVertex* out = &ctx->vertices[v0 + i];
 
@@ -3027,10 +3034,16 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
             }
         }
     }
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_G_VTX_POST_TRANSFORM);
 
     if ((ctx->geometryMode & G_LIGHTING) != 0) {
+        PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_G_VTX_LIGHTING_STAGE);
         psp_gfx_dl_stage_lighting_batch(ctx, src, count);
+        PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_G_VTX_LIGHTING_STAGE);
+        PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_G_VTX_MATRIX_PREPARE);
         psp_gfx_dl_prepare_batch_matrices(ctx);
+        PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_G_VTX_MATRIX_PREPARE);
+        PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_G_VTX_LIGHTING_KERNEL);
         n64psp_directional_light_snorm8_batch(
             sPspGfxDlLightingOutput,
             &ctx->alignedModelview,
@@ -3040,8 +3053,10 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
             ctx->lightCount,
             count
         );
+        PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_G_VTX_LIGHTING_KERNEL);
     }
 
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_G_VTX_ATTRIBUTE_COPY);
     for (i = 0; i < count; i++) {
         const Vtx* in = &src[i];
         PspGfxDlVertex* out = &ctx->vertices[v0 + i];
@@ -3095,6 +3110,7 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
         out->s = in->v.tc[0];
         out->t = in->v.tc[1];
     }
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_G_VTX_ATTRIBUTE_COPY);
 
     ctx->stats.vertexCount += count;
     PspProfiler_CountTransformWork(count,

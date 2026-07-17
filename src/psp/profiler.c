@@ -684,6 +684,13 @@ static const char* psp_profiler_phase_name(PspProfilePhase phase) {
         "graphics task total",
         "display-list traversal and dispatch",
         "G_VTX processing total",
+        "G_VTX position unpack",
+        "G_VTX matrix preparation",
+        "G_VTX transform kernel",
+        "G_VTX post-transform processing",
+        "G_VTX lighting staging",
+        "G_VTX lighting kernel",
+        "G_VTX attribute copy",
         "triangle processing total",
         "software clipping/subdivision",
         "texture lookup/decode/preparation",
@@ -898,6 +905,13 @@ static const char* psp_profiler_component_name(u32 component) {
 static int psp_profiler_component_phase_supported(PspProfilePhase phase) {
     switch (phase) {
         case PSP_PROFILE_PHASE_G_VTX:
+        case PSP_PROFILE_PHASE_G_VTX_UNPACK:
+        case PSP_PROFILE_PHASE_G_VTX_MATRIX_PREPARE:
+        case PSP_PROFILE_PHASE_G_VTX_TRANSFORM:
+        case PSP_PROFILE_PHASE_G_VTX_POST_TRANSFORM:
+        case PSP_PROFILE_PHASE_G_VTX_LIGHTING_STAGE:
+        case PSP_PROFILE_PHASE_G_VTX_LIGHTING_KERNEL:
+        case PSP_PROFILE_PHASE_G_VTX_ATTRIBUTE_COPY:
         case PSP_PROFILE_PHASE_TRIANGLE:
         case PSP_PROFILE_PHASE_CLIPPING:
         case PSP_PROFILE_PHASE_TEXTURE_PREPARE:
@@ -1236,6 +1250,8 @@ static void psp_profiler_write_frame_summary(u32 slot) {
         const PspProfileFrameRecord* r = &sFrameTrace[i];
         u64 vertexUs = psp_profiler_frame_phase_adjusted(r, PSP_PROFILE_PHASE_G_VTX) +
                        psp_profiler_frame_phase_adjusted(r, PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD);
+        u64 lightingUs = psp_profiler_frame_phase_adjusted(r, PSP_PROFILE_PHASE_G_VTX_LIGHTING_STAGE) +
+                         psp_profiler_frame_phase_adjusted(r, PSP_PROFILE_PHASE_G_VTX_LIGHTING_KERNEL);
         u64 textureUs = psp_profiler_frame_phase_adjusted(r, PSP_PROFILE_PHASE_TEXTURE_PREPARE) +
                         psp_profiler_frame_phase_adjusted(r, PSP_PROFILE_PHASE_TEXTURE_DECODE) +
                         psp_profiler_frame_phase_adjusted(r, PSP_PROFILE_PHASE_TEXTURE_UPLOAD);
@@ -1264,8 +1280,7 @@ static void psp_profiler_write_frame_summary(u32 slot) {
         psp_profiler_csv_append_u64(line, sizeof(line), &offset,
                                     psp_profiler_frame_phase_adjusted(r, PSP_PROFILE_PHASE_BATCH_FLUSH));
         psp_profiler_csv_append_u64(line, sizeof(line), &offset, vertexUs);
-        psp_profiler_csv_append_u64(line, sizeof(line), &offset,
-                                    psp_profiler_frame_phase_adjusted(r, PSP_PROFILE_PHASE_G_VTX));
+        psp_profiler_csv_append_u64(line, sizeof(line), &offset, lightingUs);
         psp_profiler_csv_append_u64(line, sizeof(line), &offset,
                                     psp_profiler_frame_phase_adjusted(r, PSP_PROFILE_PHASE_CLIPPING));
         psp_profiler_csv_append_u64(line, sizeof(line), &offset, textureUs);
