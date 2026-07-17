@@ -146,7 +146,7 @@ SPTask* AudioThread_CreateTask(void) {
     while (MQ_GET_MESG(gThreadCmdProcQueue, &msg)) {
         AudioThread_ProcessCmds(msg);
     }
-    #if defined(TARGET_PSP) && defined(PSP_AUDIO_SYNTH) && (PSP_AUDIO_SYNTH == 0)
+    #if defined(TARGET_PSP) && defined(PSP_AUDIO) && (PSP_AUDIO == 0)
         
         // preserve audio behaviour, but skip software synthesis
         memset(aiBuffer, 0, gAiBuffLengths[aiBuffIndex] * 4);

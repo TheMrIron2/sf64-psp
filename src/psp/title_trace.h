@@ -3,11 +3,11 @@
 
 #include "PR/ultratypes.h"
 
-#ifndef SF64_PSP_PROFILE_FRAME_TRACE
-#define SF64_PSP_PROFILE_FRAME_TRACE 0
+#ifndef PROFILE_FRAME_TRACE
+#define PROFILE_FRAME_TRACE 0
 #endif
 
-#if SF64_PSP_PROFILE_FRAME_TRACE
+#if PROFILE_FRAME_TRACE
 typedef struct {
     s32 valid;
     s32 title_state;

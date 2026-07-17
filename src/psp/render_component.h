@@ -4,8 +4,8 @@
 #include "PR/gbi.h"
 #include "PR/ultratypes.h"
 
-#ifndef SF64_PSP_PROFILE_COMPONENTS
-#define SF64_PSP_PROFILE_COMPONENTS 0
+#ifndef PROFILE_COMPONENTS
+#define PROFILE_COMPONENTS 0
 #endif
 
 typedef enum {
@@ -34,7 +34,7 @@ typedef enum {
 #define PSP_PROFILE_DL_COMPONENT_TAG_ID(tag) \
     ((u32) ((tag) & PSP_PROFILE_DL_COMPONENT_ID_MASK))
 
-#if SF64_PSP_PROFILE_COMPONENTS
+#if PROFILE_COMPONENTS
 #define PSP_PROFILE_DL_COMPONENT(pkt_expr, component) do { \
         Gfx* pspProfileDlComponentPkt = (pkt_expr); \
         gDPNoOpTag(pspProfileDlComponentPkt, PSP_PROFILE_DL_COMPONENT_TAG(component)); \

@@ -53,7 +53,7 @@ Perfect Dark reference SHA
 compiler
 optimisation flags
 PROFILE_PSP
-SF64_PSP_PROFILE_PHASES
+PROFILE_PHASES
 CPU clock
 bus clock
 capture slot

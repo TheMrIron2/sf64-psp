@@ -149,7 +149,7 @@ void Audio_ThreadEntry(void* arg0) {
     PspPlatform_LogLine("[psp-audio] first synthesis complete");
 #endif
     if (task != NULL) {
-#if defined(TARGET_PSP) && PSP_AUDIO_OUTPUT
+#if defined(TARGET_PSP) && PSP_AUDIO
         // PSP scalar synthesis completes inline
 #else
         task->mesgQueue = &gAudioTaskMesgQueue;
@@ -168,7 +168,7 @@ void Audio_ThreadEntry(void* arg0) {
         PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_AUDIO_SYNTHESIS);
 #endif
         if (task != NULL) {
-#if defined(TARGET_PSP) && PSP_AUDIO_OUTPUT
+#if defined(TARGET_PSP) && PSP_AUDIO
             // Output queue backpressure paces PSP synthesis
 #else
             task->mesgQueue = &gAudioTaskMesgQueue;
@@ -176,7 +176,7 @@ void Audio_ThreadEntry(void* arg0) {
             osWritebackDCacheAll();
 #endif
         }
-#if defined(TARGET_PSP) && PSP_AUDIO_OUTPUT
+#if defined(TARGET_PSP) && PSP_AUDIO
         continue;
 #else
         MQ_GET_MESG(&gAudioTaskMesgQueue, NULL);

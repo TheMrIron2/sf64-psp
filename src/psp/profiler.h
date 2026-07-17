@@ -3,12 +3,12 @@
 
 #include "PR/ultratypes.h"
 
-#ifndef SF64_PSP_PROFILE_COMPONENTS
-#define SF64_PSP_PROFILE_COMPONENTS 0
+#ifndef PROFILE_COMPONENTS
+#define PROFILE_COMPONENTS 0
 #endif
 
-#ifndef SF64_PSP_PROFILE_TRIVIAL_REJECTS
-#define SF64_PSP_PROFILE_TRIVIAL_REJECTS 0
+#ifndef PROFILE_TRIVIAL_REJECTS
+#define PROFILE_TRIVIAL_REJECTS 0
 #endif
 
 typedef enum {
@@ -96,7 +96,7 @@ typedef enum {
     PSP_PROFILE_TEXTURE_CACHE_COUNT
 } PspProfileTextureCacheClass;
 
-#if SF64_PSP_PROFILE_TRIVIAL_REJECTS
+#if PROFILE_TRIVIAL_REJECTS
 typedef enum {
     PSP_PROFILE_TRI_OUTCOME_DIRECT,
     PSP_PROFILE_TRI_OUTCOME_TRIVIAL_REJECT,
@@ -167,7 +167,7 @@ void PspProfiler_DrawStatus(void);
 void PspProfiler_RequestExit(void);
 int PspProfiler_ExitRequested(void);
 
-#if SF64_PSP_PROFILE_PHASES
+#if PROFILE_PHASES
 void PspProfiler_PhaseBegin(PspProfilePhase phase);
 void PspProfiler_PhaseEnd(PspProfilePhase phase);
 u64 PspProfiler_RenderPhaseBegin(void);
@@ -215,7 +215,7 @@ void PspProfiler_CountTextureParameterCacheMiss(void);
 void PspProfiler_CountTextureParameterCacheReplacement(void);
 void PspProfiler_CountGlFlush(void);
 void PspProfiler_CountSync(void);
-#if SF64_PSP_PROFILE_TRIVIAL_REJECTS
+#if PROFILE_TRIVIAL_REJECTS
 void PspProfiler_CountTri2OutcomeMatrix(PspProfileTriOutcome first, PspProfileTriOutcome second);
 void PspProfiler_CountTrivialRejectCost(PspProfileTrivialRejectCost cost, u32 count);
 void PspProfiler_CountTrivialRejectFlush(PspProfileFlushReason reason, u32 submittedVertices);
@@ -268,7 +268,7 @@ void PspProfiler_CountTrivialRejectRenderState(PspProfileTrivialRejectRenderStat
 #define PspProfiler_CountSync() ((void) 0)
 #endif
 
-#if SF64_PSP_PROFILE_PHASES && SF64_PSP_PROFILE_COMPONENTS
+#if PROFILE_PHASES && PROFILE_COMPONENTS
 void PspProfiler_ComponentTaskBegin(void);
 void PspProfiler_ComponentTaskEnd(void);
 void PspProfiler_ComponentMarker(u32 componentId);

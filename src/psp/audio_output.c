@@ -13,14 +13,14 @@
 #define PSP_AUDIO_BYTES_PER_FRAME (PSP_AUDIO_CHANNELS * sizeof(short))
 #define PSP_AUDIO_SUMMARY_INTERVAL 256
 
-#ifndef PSP_AUDIO_OUTPUT
-#define PSP_AUDIO_OUTPUT 1
+#ifndef PSP_AUDIO
+#define PSP_AUDIO 1
 #endif
 #ifndef PSP_LOG_ENABLED
 #define PSP_LOG_ENABLED 0
 #endif
 
-#if PSP_AUDIO_OUTPUT
+#if PSP_AUDIO
 typedef struct {
     unsigned int frames;
     short samples[PSP_AUDIO_MAX_FRAMES * PSP_AUDIO_CHANNELS];
@@ -272,7 +272,7 @@ static int psp_audio_output_thread(SceSize args, void* argp) {
 #endif
 
 int PspAudioOutput_Init(void) {
-#if !PSP_AUDIO_OUTPUT
+#if !PSP_AUDIO
     return 0;
 #else
     int result;
@@ -322,7 +322,7 @@ int PspAudioOutput_Init(void) {
 }
 
 int PspAudioOutput_Submit(const void* samples, unsigned int size) {
-#if !PSP_AUDIO_OUTPUT
+#if !PSP_AUDIO
     (void) samples;
     (void) size;
     return 0;
@@ -459,7 +459,7 @@ int PspAudioOutput_Submit(const void* samples, unsigned int size) {
 }
 
 unsigned int PspAudioOutput_GetQueuedBytes(void) {
-#if !PSP_AUDIO_OUTPUT
+#if !PSP_AUDIO
     return 0;
 #else
     return sQueuedBytes;

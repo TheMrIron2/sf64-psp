@@ -10,7 +10,7 @@
 #include "fox_title.h"
 #include "assets/ast_title.h"
 #include "assets/ast_text.h"
-#if defined(TARGET_PSP) && SF64_PSP_PROFILE_COMPONENTS
+#if defined(TARGET_PSP) && PROFILE_COMPONENTS
 #include "src/psp/render_component.h"
 #endif
 #ifdef TARGET_PSP
@@ -55,7 +55,7 @@ static f32 PspTitle_CosApprox(f32 angle) {
 }
 #endif
 
-#if defined(TARGET_PSP) && SF64_PSP_PROFILE_COMPONENTS
+#if defined(TARGET_PSP) && PROFILE_COMPONENTS
 static PspProfileComponent Title_PspProfileComponentForTeam(TitleTeam team) {
     switch (team) {
         case TEAM_FOX:
@@ -206,7 +206,7 @@ f32 D_menu_801B907C;
 f32 D_menu_801B9080;
 f32 D_menu_801B9084;
 
-#if defined(TARGET_PSP) && SF64_PSP_PROFILE_FRAME_TRACE
+#if defined(TARGET_PSP) && PROFILE_FRAME_TRACE
 static f32 sPspTraceTeamLightDirX;
 static f32 sPspTraceTeamLightDirY;
 static f32 sPspTraceTeamLightDirZ;
@@ -1059,7 +1059,7 @@ void Title_Screen_Draw(void) {
     Title_SetLightRot(D_menu_801B86C8, D_menu_801B86CC, 100.0f,
                       &D_menu_801B82E0, &D_menu_801B82E4, &D_menu_801B82E8);
 
-#if defined(TARGET_PSP) && SF64_PSP_PROFILE_FRAME_TRACE
+#if defined(TARGET_PSP) && PROFILE_FRAME_TRACE
     sPspTraceTeamLightDirX = D_menu_801B82E0;
     sPspTraceTeamLightDirY = D_menu_801B82E4;
     sPspTraceTeamLightDirZ = D_menu_801B82E8;
@@ -3568,7 +3568,7 @@ void Title_ScreenFade_Update(void) {
     }
 }
 
-#if defined(TARGET_PSP) && SF64_PSP_PROFILE_FRAME_TRACE
+#if defined(TARGET_PSP) && PROFILE_FRAME_TRACE
 void Title_PspGetTraceMarkers(PspTitleTraceMarkers* markers) {
     s32 i;
 
