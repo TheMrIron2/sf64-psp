@@ -170,6 +170,8 @@ int PspProfiler_ExitRequested(void);
 #if SF64_PSP_PROFILE_PHASES
 void PspProfiler_PhaseBegin(PspProfilePhase phase);
 void PspProfiler_PhaseEnd(PspProfilePhase phase);
+u64 PspProfiler_RenderPhaseBegin(void);
+void PspProfiler_RenderPhaseEnd(PspProfilePhase phase, u64 startUs);
 void PspProfiler_OnGfxTaskComplete(void);
 void PspProfiler_CountDisplayListTask(void);
 void PspProfiler_CountOpcode(u8 opcode);
@@ -223,6 +225,8 @@ void PspProfiler_CountTrivialRejectRenderState(PspProfileTrivialRejectRenderStat
 #else
 #define PspProfiler_PhaseBegin(phase) ((void) 0)
 #define PspProfiler_PhaseEnd(phase) ((void) 0)
+#define PspProfiler_RenderPhaseBegin() 0
+#define PspProfiler_RenderPhaseEnd(phase, startUs) ((void) (startUs))
 #define PspProfiler_OnGfxTaskComplete() ((void) 0)
 #define PspProfiler_CountDisplayListTask() ((void) 0)
 #define PspProfiler_CountOpcode(opcode) ((void) 0)

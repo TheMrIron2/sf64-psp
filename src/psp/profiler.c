@@ -2244,6 +2244,51 @@ void PspProfiler_PhaseEnd(PspProfilePhase phase) {
     psp_profiler_unlock(lockState);
 }
 
+u64 PspProfiler_RenderPhaseBegin(void) {
+    if (!sCaptureActive) {
+        return 0;
+    }
+    return psp_profiler_now_us();
+}
+
+void PspProfiler_RenderPhaseEnd(PspProfilePhase phase, u64 startUs) {
+    u64 now;
+    u64 delta;
+    int lockState;
+
+    if ((startUs == 0) || !sCaptureActive || (phase >= PSP_PROFILE_PHASE_COUNT)) {
+        return;
+    }
+
+    now = psp_profiler_now_us();
+    delta = (now >= startUs) ? (now - startUs) : 0;
+    lockState = psp_profiler_lock();
+
+    if (!sCaptureActive) {
+        psp_profiler_unlock(lockState);
+        return;
+    }
+
+    sPhase[phase].totalUs += delta;
+    sPhase[phase].calls++;
+
+#if SF64_PSP_PROFILE_COMPONENTS
+    if (sComponentTaskActive && psp_profiler_component_phase_supported(phase)) {
+        u32 component = psp_profiler_component_current_index();
+
+        sComponent[component].phases[phase].totalUs += delta;
+        sComponent[component].phases[phase].calls++;
+    }
+#endif
+
+#if SF64_PSP_PROFILE_FRAME_TRACE
+    sFramePhase[phase].totalUs += delta;
+    sFramePhase[phase].calls++;
+#endif
+
+    psp_profiler_unlock(lockState);
+}
+
 void PspProfiler_OnGfxTaskComplete(void) {
     int lockState;
     u32 frames;
