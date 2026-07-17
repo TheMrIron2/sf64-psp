@@ -618,10 +618,12 @@ PSP_PROFILE_ATTR static int psp_profiler_write_all(SceUID fd, const char* text) 
 }
 #endif
 
+#if PROFILE_GPROF || PROFILE_PHASES
 PSP_PROFILE_ATTR static void psp_profiler_set_status(PspProfilerStatus status, u32 slot) {
     sStatus = status;
     sStatusSlot = slot;
 }
+#endif
 
 #if PROFILE_PHASES
 PSP_PROFILE_ATTR static void psp_profiler_reset_phase_capture(void) {

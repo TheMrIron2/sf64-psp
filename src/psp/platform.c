@@ -375,7 +375,9 @@ void PspPlatform_PollInput(OSContPad* pads) {
 }
 
 void PspPlatform_RunGfxTask(SPTask* task) {
+#if PSP_LOG_ENABLED
     s32 result;
+#endif
 
     sGfxTaskCount++;
 
@@ -391,24 +393,28 @@ void PspPlatform_RunGfxTask(SPTask* task) {
 #endif
 
     if (sEvents[OS_EVENT_SP].mq != NULL) {
+#if PSP_LOG_ENABLED
         result = osSendMesg(sEvents[OS_EVENT_SP].mq,
                             sEvents[OS_EVENT_SP].msg,
                             OS_MESG_NOBLOCK);
-#if PSP_LOG_ENABLED
         if (result != 0) {
             PspPlatform_LogLine("[psp-gfx] SP event enqueue failed");
         }
+#else
+        osSendMesg(sEvents[OS_EVENT_SP].mq, sEvents[OS_EVENT_SP].msg, OS_MESG_NOBLOCK);
 #endif
     }
 
     if (sEvents[OS_EVENT_DP].mq != NULL) {
+#if PSP_LOG_ENABLED
         result = osSendMesg(sEvents[OS_EVENT_DP].mq,
                             sEvents[OS_EVENT_DP].msg,
                             OS_MESG_NOBLOCK);
-#if PSP_LOG_ENABLED
         if (result != 0) {
             PspPlatform_LogLine("[psp-gfx] DP event enqueue failed");
         }
+#else
+        osSendMesg(sEvents[OS_EVENT_DP].mq, sEvents[OS_EVENT_DP].msg, OS_MESG_NOBLOCK);
 #endif
     }
 }
