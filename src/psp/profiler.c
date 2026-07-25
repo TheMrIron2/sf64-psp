@@ -2012,6 +2012,9 @@ void PspProfiler_StartCapture(void) {
         psp_profiler_set_status(PSP_PROF_STATUS_ERROR, sStatusSlot);
         return;
     }
+#if PROFILE_PHASES
+    psp_profiler_reset_phase_capture();
+#endif
     sCaptureStarted = 1;
     sCaptureActive = 1;
     psp_profiler_set_status(PSP_PROF_STATUS_REC, sStatusSlot);

@@ -16,7 +16,7 @@
 #include <stdio.h>
 
 #define PSPGL_STARFIELD_CAP 1000
-#define PSPGL_STARFIELD_VERTICES_PER_STAR 6
+#define PSPGL_STARFIELD_VERTICES_PER_STAR 2
 #define PSPGL_STARFIELD_CHUNK_STARS 512
 
 typedef struct {
@@ -27,9 +27,6 @@ typedef struct {
 
 static PspGlStar sStarfieldStars[PSPGL_STARFIELD_CAP];
 static PspGfxPspglColorVertex sStarfieldVertices[PSPGL_STARFIELD_CHUNK_STARS * PSPGL_STARFIELD_VERTICES_PER_STAR];
-static const u8 sStarfieldCorners[PSPGL_STARFIELD_VERTICES_PER_STAR][2] = {
-    { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 0 }, { 1, 1 }, { 0, 1 },
-};
 static u32 sStarfieldCount;
 static int sStarfieldReady;
 
@@ -211,23 +208,28 @@ static void psp_renderer_draw_starfield(void) {
             float y0 = 1.0f - ((float) star->y / 120.0f);
             float x1 = ((float) (star->x + 1) / 160.0f) - 1.0f;
             float y1 = 1.0f - ((float) (star->y + 1) / 120.0f);
-            u32 corner;
+            PspGfxPspglColorVertex* vertex = &sStarfieldVertices[out];
 
-            for (corner = 0; corner < PSPGL_STARFIELD_VERTICES_PER_STAR; corner++) {
-                PspGfxPspglColorVertex* vertex = &sStarfieldVertices[out++];
+            vertex[0].x = x0;
+            vertex[0].y = y0;
+            vertex[0].z = 0.0f;
+            vertex[0].color = star->color;
+            vertex[0].u = 0.0f;
+            vertex[0].v = 0.0f;
 
-                vertex->x = sStarfieldCorners[corner][0] ? x1 : x0;
-                vertex->y = sStarfieldCorners[corner][1] ? y1 : y0;
-                vertex->z = 0.0f;
-                vertex->color = star->color;
-                vertex->u = 0.0f;
-                vertex->v = 0.0f;
-            }
+            vertex[1].x = x1;
+            vertex[1].y = y1;
+            vertex[1].z = 0.0f;
+            vertex[1].color = star->color;
+            vertex[1].u = 0.0f;
+            vertex[1].v = 0.0f;
+            out += PSPGL_STARFIELD_VERTICES_PER_STAR;
         }
 
-        PspGfxPspgl_DrawColoredTriangles(sStarfieldVertices, out, 0, (PspGfxPspglTextureRef) { 0 },
-                                         PSP_GFX_PSPGL_TEX_REPLACE, 0, PSP_GFX_PSPGL_WRAP_CLAMP,
-                                         PSP_GFX_PSPGL_WRAP_CLAMP, 0, 0, 0, 0, 0, 0, NULL, 0.0f, 0.0f, NULL, 1, 0);
+        PspGfxPspgl_DrawColoredSprites(sStarfieldVertices, out, 0, (PspGfxPspglTextureRef) { 0 },
+                                       PSP_GFX_PSPGL_TEX_REPLACE, 0, PSP_GFX_PSPGL_WRAP_CLAMP,
+                                       PSP_GFX_PSPGL_WRAP_CLAMP, 0, 0, 0, 0, 0, 0, NULL, 0.0f, 0.0f, NULL, 0, 1,
+                                       0);
 #if PSP_RENDERER_DIAGNOSTICS
         chunks++;
 #endif

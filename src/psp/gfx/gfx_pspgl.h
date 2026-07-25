@@ -162,7 +162,15 @@ void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u3
                                       PspGfxPspglTextureWrap wrapT, int alphaTest, int blend, int premultiplied,
                                       int depthTest, int depthWrite, int fog, const float* fogColor, float fogStart,
                                       float fogEnd,
-                                      const float* projectionMatrix, int pretransformed, int pointFilter);
+                                      const float* projectionMatrix, u32 projectionSerial, int pretransformed,
+                                      int pointFilter);
+void PspGfxPspgl_DrawColoredSprites(const PspGfxPspglColorVertex* vertices, u32 vertexCount, u32 textureId,
+                                    PspGfxPspglTextureRef textureRef, PspGfxPspglTextureEnv textureEnv,
+                                    u32 textureEnvColor, PspGfxPspglTextureWrap wrapS, PspGfxPspglTextureWrap wrapT,
+                                    int alphaTest, int blend, int premultiplied, int depthTest, int depthWrite, int fog,
+                                    const float* fogColor, float fogStart, float fogEnd,
+                                    const float* projectionMatrix, u32 projectionSerial, int pretransformed,
+                                    int pointFilter);
 void PspGfxPspgl_DrawSolidRect(float ulx, float uly, float lrx, float lry, u32 color, int blend);
 
 #endif
