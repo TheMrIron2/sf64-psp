@@ -6,7 +6,8 @@
 PSP_BOOTSTRAP_C_FILES := src/psp/main.c
 
 PSP_N64PSP_C_FILES := \
-    src/psp/n64psp_integration.c
+    src/psp/n64psp_integration.c \
+    src/psp/hw_counter_profile.c
 
 # Active PSP renderer architecture:
 #   Star Fox 64 / Fast3D display-list frontend in gfx_psp_dl.c

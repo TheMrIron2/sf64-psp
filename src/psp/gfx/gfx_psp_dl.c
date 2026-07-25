@@ -4,6 +4,7 @@
 #include "macros.h"
 #include "sf64thread.h"
 #include "src/psp/gfx/gfx_pspgl.h"
+#include "src/psp/hw_counter_profile.h"
 #include "src/psp/platform.h"
 #include "src/psp/profiler.h"
 #include "src/psp/renderer.h"
@@ -2577,7 +2578,9 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
     const PspGfxDlVertex* va;
     const PspGfxDlVertex* vb;
     const PspGfxDlVertex* vc;
+#if PSP_GFX_DL_HOT_STATS
     float area;
+#endif
     u8 combinedClipCode;
     u8 sharedClipCode;
     u32 emittedTriangles;
@@ -2632,10 +2635,12 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
     } else if ((va->clipW < 0.0f) || (vb->clipW < 0.0f) || (vc->clipW < 0.0f)) {
         ctx->stats.eyePlaneCrossingTriangleCount++;
     }
+#if PSP_GFX_DL_HOT_STATS
     area = ((vb->x - va->x) * (vc->y - va->y)) - ((vb->y - va->y) * (vc->x - va->x));
     if ((area > -0.000001f) && (area < 0.000001f)) {
         ctx->stats.degenerateTriangleCount++;
     }
+#endif
 
 #if PROFILE_TRIVIAL_REJECTS
     if (sharedClipCode != 0) {
@@ -3204,7 +3209,8 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
 
         directOutput.view = &firstOutput->viewX;
         directOutput.clip = &firstOutput->clipX;
-        directOutput.projected = &firstOutput->x;
+        directOutput.projected =
+            PspHwCounterProfile_UseProjectedOutput() ? &firstOutput->x : NULL;
         directOutput.lighting = sPspGfxDlLightingOutput;
         directOutput.clip_code = &firstOutput->clipCode;
         directOutput.valid = &firstOutput->valid;
@@ -3404,9 +3410,7 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
     }
     PspProfiler_RenderPhaseEnd(PSP_PROFILE_PHASE_G_VTX_ATTRIBUTE_COPY, phaseStartUs);
 
-#if PSP_GFX_DL_HOT_STATS
     ctx->stats.vertexCount += count;
-#endif
     PspProfiler_CountTransformWork(count,
                                    (ctx->geometryMode & G_LIGHTING) != 0 ? count : 0,
                                    (ctx->geometryMode & G_LIGHTING) != 0 ? count : 0,
@@ -4302,4 +4306,18 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
 #endif
 
     return ctx->stats.commandCount > 0;
+}
+
+void PspGfxDl_GetLastWork(u32* commands, u32* loadedVertices, u32* submittedVertices) {
+    const PspGfxDlStats* stats = &sPspGfxDlContext.stats;
+
+    if (commands != NULL) {
+        *commands = stats->commandCount;
+    }
+    if (loadedVertices != NULL) {
+        *loadedVertices = stats->vertexCount;
+    }
+    if (submittedVertices != NULL) {
+        *submittedVertices = stats->drawVertexCount;
+    }
 }

@@ -3,6 +3,7 @@
 #include "src/psp/gfx/gfx_psp_dl.h"
 #include "src/psp/gfx/gfx_psp.h"
 #include "src/psp/gfx/gfx_pspgl.h"
+#include "src/psp/hw_counter_profile.h"
 #include "src/psp/platform.h"
 #include "src/psp/profiler.h"
 #include "src/psp/renderer.h"
@@ -261,6 +262,9 @@ void PspRenderer_Init(void) {
 
 void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
     const Gfx* dl;
+    u32 commands = 0;
+    u32 loadedVertices = 0;
+    u32 submittedVertices = 0;
 
     #if PSP_FPS_OVERLAY
         SceInt64 renderStart;
@@ -279,6 +283,7 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
         renderStart = sceKernelGetSystemTimeWide();
     #endif
 
+        PspHwCounterProfile_BeginFrame();
         PspProfiler_ComponentTaskBegin();
         PspGfx_BeginFrame();
         PspGfxPspgl_BeginFrame();
@@ -289,6 +294,8 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
         }
 
         PspGfxPspgl_Flush();
+        PspGfxDl_GetLastWork(&commands, &loadedVertices, &submittedVertices);
+        PspHwCounterProfile_EndFrame(commands, loadedVertices, submittedVertices);
 
     #if PSP_FPS_OVERLAY
         renderEnd = sceKernelGetSystemTimeWide();
@@ -306,6 +313,7 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
     #endif
 
         PspProfiler_DrawStatus();
+        PspHwCounterProfile_DrawStatus();
 }
 
 void PspRenderer_BeginStarfield(void) {

@@ -1,6 +1,7 @@
 #include <pspctrl.h>
 
 #include "src/psp/input.h"
+#include "src/psp/hw_counter_profile.h"
 #include "src/psp/profiler.h"
 
 static s8 psp_input_scale_axis(u8 value, int invert) {
@@ -102,7 +103,9 @@ int PspInput_Poll(OSContPad* pads) {
     }
 
     if (sceCtrlPeekBufferPositive(&pad, 1) > 0) {
-        if (PspProfiler_PollControls(pad.Buttons)) {
+        if (PspHwCounterProfile_PollControls(pad.Buttons)) {
+            pad.Buttons = 0;
+        } else if (PspProfiler_PollControls(pad.Buttons)) {
             pad.Buttons &= ~(PSP_CTRL_SELECT | PSP_CTRL_LTRIGGER | PSP_CTRL_RTRIGGER);
         }
         psp_input_map_buttons(&pad, &pads[0]);
