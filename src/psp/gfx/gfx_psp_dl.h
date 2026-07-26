@@ -67,6 +67,5 @@ typedef struct {
 } PspGfxDlStats;
 
 int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats);
-void PspGfxDl_GetLastWork(u32* commands, u32* loadedVertices, u32* submittedVertices);
 
 #endif
