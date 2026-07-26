@@ -377,6 +377,47 @@ typedef struct {
 
 static PspGfxDlContext sPspGfxDlContext;
 
+#if PSP_RENDERER_DIAGNOSTICS
+// SF64 material corpus capture; measures how finite the effective material set is
+// Storage is file static so it accumulates across tasks rather than per-task reset
+#define PSP_GFX_DL_MATERIAL_CORPUS_ENTRIES 96
+#define PSP_GFX_DL_MATERIAL_CORPUS_NONE 0xFFFFFFFFU
+
+// geometry-mode bits this renderer actually consults
+#define PSP_GFX_DL_MATERIAL_GEOMETRY_MASK \
+    (G_ZBUFFER | G_SHADE | G_SHADING_SMOOTH | G_CULL_BOTH | G_FOG | G_LIGHTING | G_TEXTURE_GEN)
+
+typedef struct {
+    u32 key;
+    u32 combineMode;
+    u32 otherModeH;
+    u32 otherModeL;
+    u32 geometryMode;
+    u32 textureFormat;
+    u32 textureSize;
+    u32 applyCount;
+    u32 triangleCount;
+    u8 textured;
+    u8 textureEnv;
+    u8 wrapS;
+    u8 wrapT;
+    u8 alphaTest;
+    u8 blend;
+    u8 premultiplied;
+    u8 pointFilter;
+    u8 depthTest;
+    u8 depthWrite;
+    u8 fog;
+} PspGfxDlMaterialCorpusEntry;
+
+static PspGfxDlMaterialCorpusEntry sPspGfxDlMaterialCorpus[PSP_GFX_DL_MATERIAL_CORPUS_ENTRIES];
+static u32 sPspGfxDlMaterialCorpusCount;
+static u32 sPspGfxDlMaterialCorpusOverflow;
+static u32 sPspGfxDlMaterialCorpusCurrent = PSP_GFX_DL_MATERIAL_CORPUS_NONE;
+static u32 sPspGfxDlMaterialCorpusTriangles;
+static u32 sPspGfxDlMaterialCorpusUnattributed;
+#endif
+
 static PspGfxPspglColorVertex
     sPspGfxDlBatch[PSP_GFX_DL_BATCH_VERTICES]
     __attribute__((aligned(16)));
@@ -1709,6 +1750,90 @@ static void psp_gfx_dl_resolve_effective_state(PspGfxDlContext* ctx, const PspGf
     *fogResolved = psp_gfx_dl_resolve_effective_fog_state(ctx, vertex, pretransformed);
 }
 
+#if PSP_RENDERER_DIAGNOSTICS
+// records the effective material tuple and returns nothing; triangles are
+// attributed separately so corpus totals reconcile with stats.triangleCount
+static void psp_gfx_dl_material_corpus_note_state(const PspGfxDlContext* ctx) {
+    const PspGfxDlEffectiveMaterialState* material = &ctx->effectiveMaterial;
+    u32 geometryMode = ctx->geometryMode & PSP_GFX_DL_MATERIAL_GEOMETRY_MASK;
+    u32 textured = material->textureId != 0;
+    u32 textureFormat = textured ? ctx->textureFormat : 0;
+    u32 textureSize = textured ? ctx->textureSize : 0;
+    u32 key;
+    u32 i;
+
+    // FNV-1a over the N64-level inputs plus the resolved booleans
+    key = 2166136261U;
+    key = (key ^ (u32) ctx->combineMode) * 16777619U;
+    key = (key ^ ctx->otherModeH) * 16777619U;
+    key = (key ^ ctx->otherModeL) * 16777619U;
+    key = (key ^ geometryMode) * 16777619U;
+    key = (key ^ textureFormat) * 16777619U;
+    key = (key ^ textureSize) * 16777619U;
+    key = (key ^ (textured | ((u32) material->textureEnv << 1) | ((u32) material->wrapS << 5) |
+                  ((u32) material->wrapT << 7) | ((u32) (material->alphaTest != 0) << 9) |
+                  ((u32) (material->blend != 0) << 10) | ((u32) (material->premultiplied != 0) << 11) |
+                  ((u32) (material->pointFilter != 0) << 12) |
+                  ((u32) (ctx->effectiveDepth.depthTest != 0) << 13) |
+                  ((u32) (ctx->effectiveDepth.depthWrite != 0) << 14) |
+                  ((u32) (ctx->effectiveFog.fog != 0) << 15))) *
+          16777619U;
+
+    for (i = 0; i < sPspGfxDlMaterialCorpusCount; i++) {
+        if (sPspGfxDlMaterialCorpus[i].key == key) {
+            sPspGfxDlMaterialCorpus[i].applyCount++;
+            sPspGfxDlMaterialCorpusCurrent = i;
+            return;
+        }
+    }
+
+    if (sPspGfxDlMaterialCorpusCount >= PSP_GFX_DL_MATERIAL_CORPUS_ENTRIES) {
+        sPspGfxDlMaterialCorpusOverflow++;
+        sPspGfxDlMaterialCorpusCurrent = PSP_GFX_DL_MATERIAL_CORPUS_NONE;
+        return;
+    }
+
+    i = sPspGfxDlMaterialCorpusCount++;
+    sPspGfxDlMaterialCorpus[i].key = key;
+    sPspGfxDlMaterialCorpus[i].combineMode = (u32) ctx->combineMode;
+    sPspGfxDlMaterialCorpus[i].otherModeH = ctx->otherModeH;
+    sPspGfxDlMaterialCorpus[i].otherModeL = ctx->otherModeL;
+    sPspGfxDlMaterialCorpus[i].geometryMode = geometryMode;
+    sPspGfxDlMaterialCorpus[i].textureFormat = textureFormat;
+    sPspGfxDlMaterialCorpus[i].textureSize = textureSize;
+    sPspGfxDlMaterialCorpus[i].applyCount = 1;
+    sPspGfxDlMaterialCorpus[i].triangleCount = 0;
+    sPspGfxDlMaterialCorpus[i].textured = (u8) textured;
+    sPspGfxDlMaterialCorpus[i].textureEnv = (u8) material->textureEnv;
+    sPspGfxDlMaterialCorpus[i].wrapS = (u8) material->wrapS;
+    sPspGfxDlMaterialCorpus[i].wrapT = (u8) material->wrapT;
+    sPspGfxDlMaterialCorpus[i].alphaTest = material->alphaTest != 0;
+    sPspGfxDlMaterialCorpus[i].blend = material->blend != 0;
+    sPspGfxDlMaterialCorpus[i].premultiplied = material->premultiplied != 0;
+    sPspGfxDlMaterialCorpus[i].pointFilter = material->pointFilter != 0;
+    sPspGfxDlMaterialCorpus[i].depthTest = ctx->effectiveDepth.depthTest != 0;
+    sPspGfxDlMaterialCorpus[i].depthWrite = ctx->effectiveDepth.depthWrite != 0;
+    sPspGfxDlMaterialCorpus[i].fog = ctx->effectiveFog.fog != 0;
+    sPspGfxDlMaterialCorpusCurrent = i;
+}
+
+static void psp_gfx_dl_material_corpus_add_triangles(u32 count) {
+    sPspGfxDlMaterialCorpusTriangles += count;
+    if (sPspGfxDlMaterialCorpusCurrent < sPspGfxDlMaterialCorpusCount) {
+        sPspGfxDlMaterialCorpus[sPspGfxDlMaterialCorpusCurrent].triangleCount += count;
+    } else {
+        sPspGfxDlMaterialCorpusUnattributed += count;
+    }
+}
+
+// triangles rejected before any material was applied; never charge them to the
+// previous triangle's material
+static void psp_gfx_dl_material_corpus_add_rejected(u32 count) {
+    sPspGfxDlMaterialCorpusTriangles += count;
+    sPspGfxDlMaterialCorpusUnattributed += count;
+}
+#endif
+
 static u32 psp_gfx_dl_apply_effective_batch_state(PspGfxDlContext* ctx, const PspGfxDlVertex* vertex,
                                                   int pretransformed) {
     int materialResolved;
@@ -1720,6 +1845,10 @@ static u32 psp_gfx_dl_apply_effective_batch_state(PspGfxDlContext* ctx, const Ps
     resolved = materialResolved || depthResolved || fogResolved;
     PspProfiler_CountEffectiveState(resolved ? 1 : 0, resolved ? 0 : 1, materialResolved, depthResolved,
                                     fogResolved);
+#if PSP_RENDERER_DIAGNOSTICS
+    // note on every call, cache hit or miss, so triangles attribute to the material in force
+    psp_gfx_dl_material_corpus_note_state(ctx);
+#endif
 #if PROFILE_TRIVIAL_REJECTS
     if (ctx->trivialRejectDiagnosticActive) {
         PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_EFFECTIVE_STATE_CALLS, 1);
@@ -2255,6 +2384,9 @@ static int psp_gfx_dl_try_emit_tri2_direct_pair(PspGfxDlContext* ctx, u8 a0, u8 
                                       0
     );
     (void) bufferPreflush;
+#if PSP_RENDERER_DIAGNOSTICS
+    psp_gfx_dl_material_corpus_add_triangles(2);
+#endif
 #if PSP_GFX_DL_HOT_STATS
     ctx->stats.triangleCount += 2;
     if (textureId != 0) {
@@ -2662,6 +2794,9 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
         }
         ctx->stats.clipRejectedTriangleCount++;
         ctx->stats.triangleCount++;
+#if PSP_RENDERER_DIAGNOSTICS
+        psp_gfx_dl_material_corpus_add_rejected(1);
+#endif
         PspProfiler_CountTriangleResult(0, 1, 0, 0, 0);
         PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_BATCH_CONSTRUCTION);
         return;
@@ -2752,6 +2887,9 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
         PspProfiler_CountTriangleResult(1, 0, 0, 0, 1);
     }
     ctx->stats.triangleCount++;
+#if PSP_RENDERER_DIAGNOSTICS
+    psp_gfx_dl_material_corpus_add_triangles(1);
+#endif
     if ((textureId != 0) && (emittedTriangles != 0)) {
         ctx->stats.texturedTriangleCount++;
         if (ctx->batchAlphaTest) {
@@ -4108,6 +4246,77 @@ static void psp_gfx_dl_reset_context(PspGfxDlContext* ctx) {
 #endif
 }
 
+#if PSP_RENDERER_DIAGNOSTICS
+// reports the accumulated corpus ranked by triangle coverage, since coverage by
+// triangle count is what decides whether a template path is worth having
+#define PSP_GFX_DL_MATERIAL_CORPUS_REPORT_TOP 24
+
+static u8 sPspGfxDlMaterialCorpusReported[PSP_GFX_DL_MATERIAL_CORPUS_ENTRIES];
+
+static void psp_gfx_dl_material_corpus_report(u32 taskIndex) {
+    char line[768];
+    u32 total = sPspGfxDlMaterialCorpusTriangles;
+    u32 cumulative = 0;
+    u32 rank;
+    u32 i;
+
+    snprintf(line, sizeof(line),
+             "[pspgl-material-corpus] task=%lu keys=%lu overflow=%lu tris=%lu unattributed=%lu",
+             (unsigned long) taskIndex, (unsigned long) sPspGfxDlMaterialCorpusCount,
+             (unsigned long) sPspGfxDlMaterialCorpusOverflow, (unsigned long) total,
+             (unsigned long) sPspGfxDlMaterialCorpusUnattributed);
+    PspPlatform_LogLine(line);
+
+    if (total == 0) {
+        return;
+    }
+
+    for (i = 0; i < sPspGfxDlMaterialCorpusCount; i++) {
+        sPspGfxDlMaterialCorpusReported[i] = 0;
+    }
+
+    for (rank = 0; rank < PSP_GFX_DL_MATERIAL_CORPUS_REPORT_TOP; rank++) {
+        const PspGfxDlMaterialCorpusEntry* entry;
+        u32 best = PSP_GFX_DL_MATERIAL_CORPUS_NONE;
+        u32 bestTriangles = 0;
+        u32 permille;
+
+        for (i = 0; i < sPspGfxDlMaterialCorpusCount; i++) {
+            if (sPspGfxDlMaterialCorpusReported[i]) {
+                continue;
+            }
+            if ((best == PSP_GFX_DL_MATERIAL_CORPUS_NONE) ||
+                (sPspGfxDlMaterialCorpus[i].triangleCount > bestTriangles)) {
+                best = i;
+                bestTriangles = sPspGfxDlMaterialCorpus[i].triangleCount;
+            }
+        }
+        if (best == PSP_GFX_DL_MATERIAL_CORPUS_NONE) {
+            break;
+        }
+        sPspGfxDlMaterialCorpusReported[best] = 1;
+        entry = &sPspGfxDlMaterialCorpus[best];
+        cumulative += entry->triangleCount;
+        // permille avoids relying on float formatting in log output
+        permille = (u32) (((u64) entry->triangleCount * 1000U) / total);
+
+        snprintf(line, sizeof(line),
+                 "[pspgl-material-key] rank=%lu key=0x%08lx tris=%lu permille=%lu cumPermille=%lu applies=%lu "
+                 "combine=%lu omH=0x%08lx omL=0x%08lx geom=0x%08lx tex=%u fmt=%lu size=%lu env=%u wrap=%u,%u "
+                 "aTest=%u blend=%u premul=%u point=%u zTest=%u zWrite=%u fog=%u",
+                 (unsigned long) rank, (unsigned long) entry->key, (unsigned long) entry->triangleCount,
+                 (unsigned long) permille, (unsigned long) (((u64) cumulative * 1000U) / total),
+                 (unsigned long) entry->applyCount, (unsigned long) entry->combineMode,
+                 (unsigned long) entry->otherModeH, (unsigned long) entry->otherModeL,
+                 (unsigned long) entry->geometryMode, entry->textured, (unsigned long) entry->textureFormat,
+                 (unsigned long) entry->textureSize, entry->textureEnv, entry->wrapS, entry->wrapT,
+                 entry->alphaTest, entry->blend, entry->premultiplied, entry->pointFilter, entry->depthTest,
+                 entry->depthWrite, entry->fog);
+        PspPlatform_LogLine(line);
+    }
+}
+#endif
+
 int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
     PspGfxDlContext* ctx = &sPspGfxDlContext;
 #if PSP_LOG_ENABLED || PSP_RENDERER_DIAGNOSTICS
@@ -4289,6 +4498,11 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
         PspPlatform_LogLine(line);
     }
 #endif
+
+    // accumulated corpus, reported sparsely since it grows across tasks
+    if ((taskIndex != 0) && ((taskIndex % 300) == 0)) {
+        psp_gfx_dl_material_corpus_report(taskIndex);
+    }
 
     if (!sLoggedFirstDrawableTask && (ctx->stats.triangleCount != 0)) {
         snprintf(line, sizeof(line),
