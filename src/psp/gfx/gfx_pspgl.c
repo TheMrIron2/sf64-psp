@@ -637,23 +637,6 @@ static void psp_gfx_pspgl_rgba16_to_rgba8(u16 color, u8* out) {
     out[3] = (color & 1) ? 255 : 0;
 }
 
-static u16 psp_gfx_pspgl_rgba16_to_rgba5551(u16 color, int premultiply) {
-    u32 r = psp_gfx_color_transfer_u8((u8) (((color >> 11) & 0x1F) * 255 / 31));
-    u32 g = psp_gfx_color_transfer_u8((u8) (((color >> 6) & 0x1F) * 255 / 31));
-    u32 b = psp_gfx_color_transfer_u8((u8) (((color >> 1) & 0x1F) * 255 / 31));
-    u32 a = color & 1U;
-
-    if (premultiply && !a) {
-        r = 0;
-        g = 0;
-        b = 0;
-    }
-    r = (r * 31U + 127U) / 255U;
-    g = (g * 31U + 127U) / 255U;
-    b = (b * 31U + 127U) / 255U;
-    return (u16) ((r << 11) | (g << 6) | (b << 1) | a);
-}
-
 static u16 psp_gfx_pspgl_read_u16(const void* base, u32 index) {
     const u8* bytes = (const u8*) base + (index * 2);
 
@@ -1415,21 +1398,20 @@ u32 PspGfxPspgl_CreateRgba16Texture(const u16* pixels, u32 width, u32 height, in
             u32 srcX = (x < width) ? x : (width - 1);
             u32 srcIndex = (srcY * width) + srcX;
             u32 dstIndex = (y * finalWidth) + x;
-            u16 source = psp_gfx_pspgl_read_u16(pixels, srcIndex);
 
+            u8* out = &sTextureUpload[dstIndex * 4];
+
+            psp_gfx_pspgl_rgba16_to_rgba8(psp_gfx_pspgl_read_u16(pixels, srcIndex), out);
             if (softenAlpha) {
-                u8* out = &sTextureUpload[dstIndex * 4];
-
-                psp_gfx_pspgl_rgba16_to_rgba8(source, out);
                 out[0] = 0;
                 out[1] = 0;
                 out[2] = 0;
                 out[3] = psp_gfx_pspgl_filtered_rgba16_alpha(pixels, width, height, srcX, srcY);
+            }
+            if (premultiply) {
                 out[0] = (u8) (((u32) out[0] * out[3] + 127U) / 255U);
                 out[1] = (u8) (((u32) out[1] * out[3] + 127U) / 255U);
                 out[2] = (u8) (((u32) out[2] * out[3] + 127U) / 255U);
-            } else {
-                ((u16*) sTextureUpload)[dstIndex] = psp_gfx_pspgl_rgba16_to_rgba5551(source, premultiply);
             }
         }
     }
@@ -1474,10 +1456,9 @@ u32 PspGfxPspgl_CreateRgba16Texture(const u16* pixels, u32 width, u32 height, in
     psp_gfx_pspgl_init_texture_parameter_state(&entry->parameterState, entry->texture);
     *textureRef = psp_gfx_pspgl_texture_ref(&entry->parameterState);
     psp_gfx_pspgl_note_bound_texture(entry->texture, *textureRef);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, finalWidth, finalHeight, 0, GL_RGBA,
-                 softenAlpha ? GL_UNSIGNED_BYTE : GL_UNSIGNED_SHORT_5_5_5_1, sTextureUpload);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, finalWidth, finalHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, sTextureUpload);
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TEXTURE_UPLOAD);
-    PspProfiler_CountTextureEvent(0, 0, 1, 1, finalPixelCount * (softenAlpha ? 4U : 2U));
+    PspProfiler_CountTextureEvent(0, 0, 1, 1, finalPixelCount * 4);
     *uploadWidth = finalWidth;
     *uploadHeight = finalHeight;
     return entry->texture;
