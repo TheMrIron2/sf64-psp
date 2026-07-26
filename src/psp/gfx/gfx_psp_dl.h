@@ -13,9 +13,13 @@ typedef struct {
     u32 unsupportedCount;
     u32 firstUnsupportedOpcode;
     u32 mtxCount;
+    u32 mtxFloatCount;
     u32 mtxPushCount;
     u32 mtxPopCount;
     u32 mtxStackRejected;
+    u32 mtxElidedCount;
+    u32 mtxUnexpectedFlags;
+    u32 mtxMaxStackDepth;
     u32 viewportCount;
     u32 invalidVertexCount;
     u32 outsideVertexCount;

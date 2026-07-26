@@ -61,7 +61,7 @@ extern Gfx gMapVenomCloudRuntimeDL[];
 #define PSP_GFX_DL_MAX_NESTED_COMMANDS 2048
 #define PSP_GFX_DL_MAX_VERTICES 64
 #define PSP_GFX_DL_BATCH_VERTICES 3072
-#define PSP_GFX_DL_MTX_STACK_DEPTH 32
+#define PSP_GFX_DL_MTX_STACK_DEPTH 4
 #define PSP_GFX_DL_CLIP_PLANES 6
 #define PSP_GFX_DL_MAX_CLIP_VERTICES 12
 /* One spare snapshot allows acquisition before overwritten vertices release theirs */
@@ -74,6 +74,7 @@ extern Gfx gMapVenomCloudRuntimeDL[];
 
 #define PSP_GFX_OP_F3D_SPNOOP 0x00
 #define PSP_GFX_OP_F3D_MTX 0x01
+#define PSP_GFX_OP_PORT_MTXF PSP_RENDERER_DL_OP_MTXF
 #define PSP_GFX_OP_F3D_MOVEMEM 0x03
 #define PSP_GFX_OP_F3D_VTX 0x04
 #define PSP_GFX_OP_F3D_DL 0x06
@@ -1065,19 +1066,37 @@ static int __attribute__((used)) psp_gfx_dl_store_transformed_vertex(
     return 1;
 }
 
-static void psp_gfx_dl_handle_mtx(PspGfxDlContext* ctx, const Gfx* gfx) {
-    const Mtx* src = (const Mtx*) psp_gfx_dl_resolve_ptr(ctx, gfx->words.w1);
-    u32 flags = (gfx->words.w0 >> 16) & 0xFF;
+// the only G_MTX flag bits this GBI defines
+#define PSP_GFX_DL_MTX_FLAG_MASK ((u32) (G_MTX_PROJECTION | G_MTX_LOAD | G_MTX_PUSH))
+
+static void psp_gfx_dl_push_modelview(PspGfxDlContext* ctx) {
+    if (ctx->modelviewStackDepth >= PSP_GFX_DL_MTX_STACK_DEPTH) {
+        ctx->stats.mtxStackRejected++;
+        return;
+    }
+
+    psp_gfx_dl_mtx_copy(ctx->modelviewStack[ctx->modelviewStackDepth], ctx->modelview);
+    ctx->modelviewStackDepth++;
+    ctx->stats.mtxPushCount++;
+    if (ctx->modelviewStackDepth > ctx->stats.mtxMaxStackDepth) {
+        ctx->stats.mtxMaxStackDepth = ctx->modelviewStackDepth;
+    }
+}
+
+static void psp_gfx_dl_note_matrix_changed(PspGfxDlContext* ctx, int projection) {
+    if (projection) {
+        psp_gfx_dl_bump_serial(&ctx->projectionSerial);
+        ctx->currentProjectionSnapshot = PSP_GFX_DL_NO_PROJECTION_SNAPSHOT;
+        psp_gfx_dl_mark_effective_fog_dirty(ctx);
+    } else {
+        psp_gfx_dl_bump_serial(&ctx->modelviewSerial);
+    }
+}
+
+static void psp_gfx_dl_handle_mtx_generic(PspGfxDlContext* ctx, const void* src, u32 flags, int floating) {
     float loaded[4][4];
     float (*target)[4];
     int* hasTarget;
-
-    ctx->stats.mtxCount++;
-    ctx->matrixFlagsSeen |= flags;
-    if (src == NULL) {
-        ctx->stats.matrixPointerRejected++;
-        return;
-    }
 
     if ((flags & G_MTX_PROJECTION) != 0) {
         target = ctx->projection;
@@ -1086,34 +1105,79 @@ static void psp_gfx_dl_handle_mtx(PspGfxDlContext* ctx, const Gfx* gfx) {
         target = ctx->modelview;
         hasTarget = &ctx->hasModelview;
         if ((flags & G_MTX_PUSH) != 0) {
-            if (ctx->modelviewStackDepth < PSP_GFX_DL_MTX_STACK_DEPTH) {
-                psp_gfx_dl_mtx_copy(ctx->modelviewStack[ctx->modelviewStackDepth], ctx->modelview);
-                ctx->modelviewStackDepth++;
-                ctx->stats.mtxPushCount++;
-            } else {
-                ctx->stats.mtxStackRejected++;
-            }
+            psp_gfx_dl_push_modelview(ctx);
         }
     }
     PspProfiler_CountMatrixCommand((flags & G_MTX_PROJECTION) != 0,
                                    ((flags & G_MTX_LOAD) == 0) && *hasTarget);
 
-    psp_gfx_dl_mtx_l2f(loaded, src);
-    if ((flags & G_MTX_LOAD) != 0) {
-        psp_gfx_dl_mtx_copy(target, loaded);
-    } else if (*hasTarget) {
-        psp_gfx_dl_mtx_mul(target, loaded, target);
+    if (floating) {
+        psp_gfx_dl_mtx_copy(loaded, (const float (*)[4]) src);
     } else {
+        psp_gfx_dl_mtx_l2f(loaded, (const Mtx*) src);
+    }
+    if (((flags & G_MTX_LOAD) != 0) || !*hasTarget) {
         psp_gfx_dl_mtx_copy(target, loaded);
+    } else {
+        psp_gfx_dl_mtx_mul(target, loaded, target);
     }
     *hasTarget = 1;
-    if ((flags & G_MTX_PROJECTION) != 0) {
-        psp_gfx_dl_bump_serial(&ctx->projectionSerial);
-        ctx->currentProjectionSnapshot = PSP_GFX_DL_NO_PROJECTION_SNAPSHOT;
-        psp_gfx_dl_mark_effective_fog_dirty(ctx);
-    } else {
-        psp_gfx_dl_bump_serial(&ctx->modelviewSerial);
+    psp_gfx_dl_note_matrix_changed(ctx, (flags & G_MTX_PROJECTION) != 0);
+}
+
+static void psp_gfx_dl_handle_mtx(PspGfxDlContext* ctx, const Gfx* gfx, int floating) {
+    const void* src = psp_gfx_dl_resolve_ptr(ctx, gfx->words.w1);
+    u32 flags = (gfx->words.w0 >> 16) & 0xFF;
+    float decoded[4][4];
+    const float (*loaded)[4];
+    float (*target)[4];
+    int* hasTarget;
+    int projection;
+    int load;
+
+    ctx->stats.mtxCount++;
+    if (floating) {
+        ctx->stats.mtxFloatCount++;
     }
+    ctx->matrixFlagsSeen |= flags;
+    if ((src == NULL) || (floating && ((((uintptr_t) src) & 0xF) != 0))) {
+        ctx->stats.matrixPointerRejected++;
+        return;
+    }
+
+    if ((flags & ~PSP_GFX_DL_MTX_FLAG_MASK) != 0) {
+        ctx->stats.mtxUnexpectedFlags++;
+        psp_gfx_dl_handle_mtx_generic(ctx, src, flags, floating);
+        return;
+    }
+
+    projection = (flags & G_MTX_PROJECTION) != 0;
+    load = (flags & G_MTX_LOAD) != 0;
+    if (projection) {
+        target = ctx->projection;
+        hasTarget = &ctx->hasProjection;
+    } else {
+        target = ctx->modelview;
+        hasTarget = &ctx->hasModelview;
+        if ((flags & G_MTX_PUSH) != 0) {
+            psp_gfx_dl_push_modelview(ctx);
+        }
+    }
+    PspProfiler_CountMatrixCommand(projection, !load && *hasTarget);
+
+    if (floating) {
+        loaded = (const float (*)[4]) src;
+    } else {
+        psp_gfx_dl_mtx_l2f(decoded, (const Mtx*) src);
+        loaded = decoded;
+    }
+    if (load || !*hasTarget) {
+        psp_gfx_dl_mtx_copy(target, loaded);
+    } else {
+        psp_gfx_dl_mtx_mul(target, loaded, target);
+    }
+    *hasTarget = 1;
+    psp_gfx_dl_note_matrix_changed(ctx, projection);
 }
 
 static void psp_gfx_dl_handle_pop_mtx(PspGfxDlContext* ctx) {
@@ -4026,7 +4090,12 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
         }
 
         if (opcode == PSP_GFX_OP_F3D_MTX) {
-            psp_gfx_dl_handle_mtx(ctx, cmd);
+            psp_gfx_dl_handle_mtx(ctx, cmd, 0);
+            continue;
+        }
+
+        if (opcode == PSP_GFX_OP_PORT_MTXF) {
+            psp_gfx_dl_handle_mtx(ctx, cmd, 1);
             continue;
         }
 
