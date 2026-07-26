@@ -12,26 +12,22 @@ void PspPlatform_LogLine(const char* line);
 #endif
 
 #ifdef TARGET_PSP
-static void Psp_SetMtxElement(Mtx* m, s32 row, s32 col, f32 value) {
-    s32 fixed = (s32) (value * 65536.0f);
-
-    m->u.i[row][col] = (u16) ((fixed >> 16) & 0xFFFF);
-    m->u.f[row][col] = (u16) (fixed & 0xFFFF);
+static void Psp_SetMtxElement(Matrix* m, s32 row, s32 col, f32 value) {
+    m->m[row][col] = value;
 }
 
-static void Psp_MtxZero(Mtx* m) {
+static void Psp_MtxZero(Matrix* m) {
     s32 row;
     s32 col;
 
     for (row = 0; row < 4; row++) {
         for (col = 0; col < 4; col++) {
-            m->u.i[row][col] = 0;
-            m->u.f[row][col] = 0;
+            m->m[row][col] = 0.0f;
         }
     }
 }
 
-static void Psp_MtxIdentity(Mtx* m) {
+static void Psp_MtxIdentity(Matrix* m) {
     Psp_MtxZero(m);
     Psp_SetMtxElement(m, 0, 0, 1.0f);
     Psp_SetMtxElement(m, 1, 1, 1.0f);
@@ -39,7 +35,7 @@ static void Psp_MtxIdentity(Mtx* m) {
     Psp_SetMtxElement(m, 3, 3, 1.0f);
 }
 
-static void Psp_GuPerspective(Mtx* m, u16* perspNorm, f32 fovy, f32 aspect, f32 near, f32 far, f32 scale) {
+static void Psp_GuPerspective(Matrix* m, u16* perspNorm, f32 fovy, f32 aspect, f32 near, f32 far, f32 scale) {
     f32 cot;
 
     (void) fovy;
@@ -69,7 +65,7 @@ static void Psp_GuPerspective(Mtx* m, u16* perspNorm, f32 fovy, f32 aspect, f32 
     PSP_TRACE("perspective: psp filled");
 }
 
-static void Psp_GuOrtho(Mtx* m, f32 left, f32 right, f32 bottom, f32 top, f32 near, f32 far, f32 scale) {
+static void Psp_GuOrtho(Matrix* m, f32 left, f32 right, f32 bottom, f32 top, f32 near, f32 far, f32 scale) {
     Psp_MtxZero(m);
     Psp_SetMtxElement(m, 0, 0, (2.0f / (right - left)) * scale);
     Psp_SetMtxElement(m, 1, 1, (2.0f / (top - bottom)) * scale);
@@ -164,25 +160,37 @@ void Lib_QuickSort(u8* first, u32 length, u32 size, CompareFunc cFunc) {
 
 void Lib_InitPerspective(Gfx** dList) {
     u16 norm;
+#ifdef TARGET_PSP
+    Matrix projection;
+#endif
 
     PSP_TRACE("perspective: guPerspective");
 #ifdef TARGET_PSP
-    Psp_GuPerspective(gGfxMtx, &norm, gFovY, (f32) SCREEN_WIDTH / SCREEN_HEIGHT, gProjectNear, gProjectFar, 1.0f);
+    Psp_GuPerspective(&projection, &norm, gFovY, (f32) SCREEN_WIDTH / SCREEN_HEIGHT, gProjectNear, gProjectFar,
+                      1.0f);
 #else
     guPerspective(gGfxMtx, &norm, gFovY, (f32) SCREEN_WIDTH / SCREEN_HEIGHT, gProjectNear, gProjectFar, 1.0f);
 #endif
     PSP_TRACE("perspective: persp normalize");
     gSPPerspNormalize((*dList)++, norm);
     PSP_TRACE("perspective: matrix 0");
+#ifdef TARGET_PSP
+    Matrix_SetGfxMtxFromMatrix(dList, &projection, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);
+#else
     gSPMatrix((*dList)++, gGfxMtx++, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);
+#endif
     PSP_TRACE("perspective: guLookAt");
 #ifdef TARGET_PSP
-    Psp_MtxIdentity(gGfxMtx);
+    Psp_MtxIdentity(&projection);
 #else
     guLookAt(gGfxMtx, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, -12800.0f, 0.0f, 1.0f, 0.0f);
 #endif
     PSP_TRACE("perspective: matrix 1");
+#ifdef TARGET_PSP
+    Matrix_SetGfxMtxFromMatrix(dList, &projection, G_MTX_NOPUSH | G_MTX_MUL | G_MTX_PROJECTION);
+#else
     gSPMatrix((*dList)++, gGfxMtx++, G_MTX_NOPUSH | G_MTX_MUL | G_MTX_PROJECTION);
+#endif
     PSP_TRACE("perspective: matrix copy");
     Matrix_Copy(gGfxMatrix, &gIdentityMatrix);
     PSP_TRACE("perspective: done");
@@ -190,23 +198,33 @@ void Lib_InitPerspective(Gfx** dList) {
 
 void Lib_InitOrtho(Gfx** dList) {
 #ifdef TARGET_PSP
+    Matrix projection;
+
     /*
      * Orthographic UI meshes are commonly placed at z = 0. Include that
      * plane explicitly so PSPGL clipping does not reject them at the near edge.
      */
-    Psp_GuOrtho(gGfxMtx, -SCREEN_WIDTH / 2, SCREEN_WIDTH / 2, -SCREEN_HEIGHT / 2, SCREEN_HEIGHT / 2, 0.0f,
+    Psp_GuOrtho(&projection, -SCREEN_WIDTH / 2, SCREEN_WIDTH / 2, -SCREEN_HEIGHT / 2, SCREEN_HEIGHT / 2, 0.0f,
                 gProjectFar, 1.0f);
 #else
     guOrtho(gGfxMtx, -SCREEN_WIDTH / 2, SCREEN_WIDTH / 2, -SCREEN_HEIGHT / 2, SCREEN_HEIGHT / 2, gProjectNear,
             gProjectFar, 1.0f);
 #endif
-    gSPMatrix((*dList)++, gGfxMtx++, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);
 #ifdef TARGET_PSP
-    Psp_MtxIdentity(gGfxMtx);
+    Matrix_SetGfxMtxFromMatrix(dList, &projection, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);
+#else
+    gSPMatrix((*dList)++, gGfxMtx++, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);
+#endif
+#ifdef TARGET_PSP
+    Psp_MtxIdentity(&projection);
 #else
     guLookAt(gGfxMtx, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, -12800.0f, 0.0f, 1.0f, 0.0f);
 #endif
+#ifdef TARGET_PSP
+    Matrix_SetGfxMtxFromMatrix(dList, &projection, G_MTX_NOPUSH | G_MTX_MUL | G_MTX_PROJECTION);
+#else
     gSPMatrix((*dList)++, gGfxMtx++, G_MTX_NOPUSH | G_MTX_MUL | G_MTX_PROJECTION);
+#endif
     Matrix_Copy(gGfxMatrix, &gIdentityMatrix);
 }
 

@@ -63,7 +63,11 @@ void* sTimerTaskMsgBuff[16];
 OSMesgQueue gTimerWaitMesgQueue;
 void* sTimerWaitMsgBuff[1];
 
+#ifdef TARGET_PSP
+GfxPool gGfxPools[2] __attribute__((aligned(16)));
+#else
 GfxPool gGfxPools[2];
+#endif
 
 GfxPool* gGfxPool;
 SPTask* gGfxTask;

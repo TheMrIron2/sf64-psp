@@ -17,6 +17,10 @@
 #define PSP_RENDERER_DL_STARFIELD_MARKER(pkt) \
     gDPNoOpTag((pkt), PSP_RENDERER_DL_MARKER(PSP_RENDERER_DL_MARKER_STARFIELD))
 
+#define PSP_RENDERER_DL_OP_MTXF G_RESERVED0
+#define PSP_RENDERER_DL_MTXF(pkt, m, p) \
+    gDma1p((pkt), PSP_RENDERER_DL_OP_MTXF, (m), sizeof(Mtx), (p))
+
 void PspRenderer_Init(void);
 void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex);
 

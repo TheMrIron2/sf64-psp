@@ -738,6 +738,9 @@ f32 Math_RadToDeg(f32 rAngle) {
 u16* Graphics_SetupTextureRender(Gfx** gfxPtr, u8 width, u8 height) {
     u16* texture;
     u16 norm;
+#ifdef TARGET_PSP
+    Matrix projection;
+#endif
 
     width += 0xF;
     width &= 0x70;
@@ -768,11 +771,21 @@ u16* Graphics_SetupTextureRender(Gfx** gfxPtr, u8 width, u8 height) {
     gDPSetFillColor((*gfxPtr)++, FILL_COLOR(gBgColor | 1));
     gDPFillRectangle((*gfxPtr)++, 0, 0, width - 1, height - 1);
     gDPPipeSync((*gfxPtr)++);
+#ifdef TARGET_PSP
+    guPerspectiveF(projection.m, &norm, gFovY, (f32) width / height, 10.0f, 12800.0f, 1.0f);
+#else
     guPerspective(gGfxMtx, &norm, gFovY, (f32) width / height, 10.0f, 12800.0f, 1.0f);
+#endif
     gSPPerspNormalize((*gfxPtr)++, norm);
+#ifdef TARGET_PSP
+    Matrix_SetGfxMtxFromMatrix(gfxPtr, &projection, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);
+    guLookAtF(projection.m, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, -12800.0f, 0.0f, 1.0f, 0.0f);
+    Matrix_SetGfxMtxFromMatrix(gfxPtr, &projection, G_MTX_NOPUSH | G_MTX_MUL | G_MTX_PROJECTION);
+#else
     gSPMatrix((*gfxPtr)++, gGfxMtx++, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);
     guLookAt(gGfxMtx, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, -12800.0f, 0.0f, 1.0f, 0.0f);
     gSPMatrix((*gfxPtr)++, gGfxMtx++, G_MTX_NOPUSH | G_MTX_MUL | G_MTX_PROJECTION);
+#endif
     Matrix_Copy(gGfxMatrix, &gIdentityMatrix);
 
     return texture;

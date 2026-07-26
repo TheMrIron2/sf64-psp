@@ -376,8 +376,7 @@ void Ground_801B58AC(Gfx** dList, f32 arg1) {
         gDPLoadTileTexture((*dList)++, aTiGroundTex1, G_IM_FMT_RGBA, G_IM_SIZ_16b, 32, 32);
         gSPMatrix((*dList)++, &gIdentityMtx, G_MTX_PUSH | G_MTX_MUL | G_MTX_MODELVIEW);
         Matrix_Translate(gGfxMatrix, D_i5_801C62D8.x, D_i5_801C62D8.y, D_i5_801C62D8.z + D_i5_801C5C10, MTXF_NEW);
-        Matrix_ToMtx(gGfxMtx);
-        gSPMatrix((*dList)++, gGfxMtx++, G_MTX_NOPUSH | G_MTX_MUL | G_MTX_MODELVIEW);
+        Matrix_SetGfxMtxFlags(dList, G_MTX_NOPUSH | G_MTX_MUL | G_MTX_MODELVIEW);
         gSPDisplayList((*dList)++, D_i5_801BA950);
         gSPPopMatrix((*dList)++, G_MTX_MODELVIEW);
         Ground_801B4AA8(NULL, &spC4);
@@ -566,8 +565,7 @@ void Ground_801B68A8(Gfx** dlist, s32 arg1, s32 arg2) {
                  G_TX_MIRROR | G_TX_WRAP, 5, 5, G_TX_NOLOD, G_TX_NOLOD);
     gDPLoadTileTexture((*dlist)++, aTiGroundTex1, G_IM_FMT_RGBA, G_IM_SIZ_16b, 32, 32);
     Matrix_Translate(gGfxMatrix, D_i5_801C62D8.x, D_i5_801C62D8.y, D_i5_801C62D8.z + D_i5_801C5C10, MTXF_NEW);
-    Matrix_ToMtx(gGfxMtx);
-    gSPMatrix((*dlist)++, gGfxMtx++, G_MTX_NOPUSH | G_MTX_MUL | G_MTX_MODELVIEW);
+    Matrix_SetGfxMtxFlags(dlist, G_MTX_NOPUSH | G_MTX_MUL | G_MTX_MODELVIEW);
 
     var = 1;
     j = (arg1 + 25) % 27;

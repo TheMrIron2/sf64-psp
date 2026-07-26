@@ -52,6 +52,9 @@ extern int gDrawMode;
 #ifndef VTX_FUSED_TNL
 #define VTX_FUSED_TNL 1
 #endif
+#ifndef PSP_FLOAT_MTX
+#define PSP_FLOAT_MTX 1
+#endif
 #ifndef SF64_GIT_SHA
 #define SF64_GIT_SHA "unknown"
 #endif
@@ -1693,11 +1696,11 @@ static void psp_profiler_write_phase_files(u32 slot) {
     }
 
     snprintf(line, sizeof(line),
-             "SF64 git SHA: %s\nn64psp submodule SHA: %s\nPSPGL source mode: %s\nPSPGL git SHA: %s\nPSPGL worktree: %s\nPerfect Dark reference SHA: %s\ncompiler: %s\noptimisation flags: %s\nPROFILE_PSP: %d\nPROFILE_PHASES: %d\nPROFILE_TRIVIAL_REJECTS: %d\nBATCH_STATE_CACHE: %d\nVTX_FUSED_TNL: %d\nCPU clock: %lu\nbus clock: %lu\ncapture slot: %lu\nrequested frame count: %d\nactual frame count: %lu\ntimer overhead us: %llu\n\n",
+             "SF64 git SHA: %s\nn64psp submodule SHA: %s\nPSPGL source mode: %s\nPSPGL git SHA: %s\nPSPGL worktree: %s\nPerfect Dark reference SHA: %s\ncompiler: %s\noptimisation flags: %s\nPROFILE_PSP: %d\nPROFILE_PHASES: %d\nPROFILE_TRIVIAL_REJECTS: %d\nBATCH_STATE_CACHE: %d\nVTX_FUSED_TNL: %d\nPSP_FLOAT_MTX: %d\nCPU clock: %lu\nbus clock: %lu\ncapture slot: %lu\nrequested frame count: %d\nactual frame count: %lu\ntimer overhead us: %llu\n\n",
              SF64_GIT_SHA, N64PSP_GIT_SHA, PSPGL_SOURCE_MODE, PSPGL_GIT_SHA, PSPGL_GIT_DIRTY,
              PERFECT_DARK_PSP_SHA, BUILD_COMPILER, BUILD_OPT_FLAGS,
              PROFILE_GPROF, PROFILE_PHASES, PROFILE_TRIVIAL_REJECTS,
-             BATCH_STATE_CACHE, VTX_FUSED_TNL,
+             BATCH_STATE_CACHE, VTX_FUSED_TNL, PSP_FLOAT_MTX,
              (unsigned long) scePowerGetCpuClockFrequency(),
              (unsigned long) scePowerGetBusClockFrequency(), (unsigned long) slot, PROFILE_CAPTURE_FRAMES,
              (unsigned long) sCaptureFrames, sTimerReadPairOverheadUs);

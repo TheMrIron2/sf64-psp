@@ -135,6 +135,10 @@ void Matrix_LookAt(Matrix* mtx, f32 xEye, f32 yEye, f32 zEye, f32 xAt, f32 yAt, 
 
 // Converts the current Gfx matrix to a Mtx and sets it to the display list
 void Matrix_SetGfxMtx(Gfx** gfx);
+void Matrix_SetGfxMtxFlags(Gfx** gfx, u32 flags);
+#ifdef TARGET_PSP
+void Matrix_SetGfxMtxFromMatrix(Gfx** gfx, const Matrix* src, u32 flags);
+#endif
 
 f32 Math_FAtanF(f32);
 f32 Math_FAtan2F(f32, f32);
