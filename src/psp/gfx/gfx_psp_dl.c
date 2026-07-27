@@ -4,6 +4,7 @@
 #include "macros.h"
 #include "sf64thread.h"
 #include "src/psp/gfx/gfx_pspgl.h"
+#include "src/psp/hw_counter_profile.h"
 #include "src/psp/platform.h"
 #include "src/psp/profiler.h"
 #include "src/psp/renderer.h"
@@ -1502,6 +1503,7 @@ static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason 
 #endif
     (void) reason;
     psp_gfx_dl_weld_flat_batch_seams(ctx);
+    PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_SUBMIT);
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_BATCH_FLUSH);
     PspGfxPspgl_DrawColoredTriangles(sPspGfxDlBatch, ctx->batchCount, ctx->batchTextureId, ctx->batchTextureRef,
                                      ctx->batchTextureEnv, ctx->batchTextureEnvColor, ctx->batchWrapS,
@@ -1512,6 +1514,7 @@ static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason 
                                      &ctx->batchProjection[0][0], ctx->batchProjectionSerial,
                                      ctx->batchPretransformed, ctx->batchPointFilter);
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_BATCH_FLUSH);
+    PspHwCounterProfile_InnerScopeEnd(PSP_HW_SCOPE_SUBMIT);
     PspProfiler_CountBatchFlush(reason, ctx->batchCount);
 #if PROFILE_TRIVIAL_REJECTS
     if (ctx->trivialRejectDiagnosticActive) {
@@ -3349,6 +3352,7 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
         return;
     }
 
+    PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_VERTEX);
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_G_VTX);
     PspProfiler_CountGvtx(count, (ctx->geometryMode & G_LIGHTING) != 0);
 
@@ -3606,7 +3610,8 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
     }
     PspProfiler_RenderPhaseEnd(PSP_PROFILE_PHASE_G_VTX_ATTRIBUTE_COPY, phaseStartUs);
 
-#if PSP_GFX_DL_HOT_STATS
+#if PSP_GFX_DL_HOT_STATS || PROFILE_HW_COUNTERS
+    /* Loaded vertices normalise counter captures so this add survives without hot stats */
     ctx->stats.vertexCount += count;
 #endif
     PspProfiler_CountTransformWork(count,
@@ -3616,6 +3621,7 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
                                    count,
                                    ctx->hasProjection ? count : 0);
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_G_VTX);
+    PspHwCounterProfile_InnerScopeEnd(PSP_HW_SCOPE_VERTEX);
 }
 
 static void psp_gfx_dl_handle_move_word(PspGfxDlContext* ctx, const Gfx* gfx) {
@@ -3793,6 +3799,7 @@ static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int pr
     }
 
     ctx->textureUploadAttempted = 1;
+    PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_TEXTURE);
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TEXTURE_PREPARE);
     if ((ctx->textureFormat == G_IM_FMT_CI) && (ctx->textureSize == G_IM_SIZ_8b)) {
         hit = PspGfxPspgl_FindCi8Texture((const u8*) ctx->textureImage, ctx->texturePalette, ctx->textureWidth,
@@ -3956,6 +3963,7 @@ static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int pr
     }
 #endif
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TEXTURE_PREPARE);
+    PspHwCounterProfile_InnerScopeEnd(PSP_HW_SCOPE_TEXTURE);
     return result;
 }
 
@@ -4568,10 +4576,12 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
     }
 #endif
 
+#if PSP_RENDERER_DIAGNOSTICS
     // accumulated corpus, reported sparsely since it grows across tasks
     if ((taskIndex != 0) && ((taskIndex % 300) == 0)) {
         psp_gfx_dl_material_corpus_report(taskIndex);
     }
+#endif
 
     if (!sLoggedFirstDrawableTask && (ctx->stats.triangleCount != 0)) {
         snprintf(line, sizeof(line),
@@ -4587,3 +4597,19 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
 
     return ctx->stats.commandCount > 0;
 }
+
+#if PROFILE_HW_COUNTERS
+void PspGfxDl_GetLastWork(u32* commands, u32* loadedVertices, u32* submittedVertices) {
+    const PspGfxDlStats* stats = &sPspGfxDlContext.stats;
+
+    if (commands != NULL) {
+        *commands = stats->commandCount;
+    }
+    if (loadedVertices != NULL) {
+        *loadedVertices = stats->vertexCount;
+    }
+    if (submittedVertices != NULL) {
+        *submittedVertices = stats->drawVertexCount;
+    }
+}
+#endif

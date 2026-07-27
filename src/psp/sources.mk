@@ -8,6 +8,12 @@ PSP_BOOTSTRAP_C_FILES := src/psp/main.c
 PSP_N64PSP_C_FILES := \
     src/psp/n64psp_integration.c
 
+# Hardware-counter capture (PSP_Hardware_Audit.md, Primary Finding 1).
+# Only built for a counter capture; every hook compiles away otherwise.
+ifeq ($(PROFILE_HW_COUNTERS),1)
+PSP_N64PSP_C_FILES += src/psp/hw_counter_profile.c
+endif
+
 # Active PSP renderer architecture:
 #   Star Fox 64 / Fast3D display-list frontend in gfx_psp_dl.c
 #       -> backend-neutral draw state and batches

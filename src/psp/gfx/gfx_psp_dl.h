@@ -3,6 +3,7 @@
 
 #include "PR/ultratypes.h"
 #include "libultra/ultra64.h"
+#include "src/psp/hw_counter_profile.h"
 
 typedef struct {
     u32 commandCount;
@@ -71,5 +72,10 @@ typedef struct {
 } PspGfxDlStats;
 
 int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats);
+
+#if PROFILE_HW_COUNTERS
+/* Work totals for the task that just ran, normalises counter captures */
+void PspGfxDl_GetLastWork(u32* commands, u32* loadedVertices, u32* submittedVertices);
+#endif
 
 #endif

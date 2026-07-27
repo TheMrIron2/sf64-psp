@@ -5,6 +5,7 @@
 #include <psppower.h>
 
 #ifdef PSP_FULL
+#include "src/psp/hw_counter_profile.h"
 #include "src/psp/n64psp_integration.h"
 #include "src/psp/platform.h"
 #include "src/psp/profiler.h"
@@ -72,6 +73,10 @@ int main(int argc, char* argv[]) {
     pspDebugScreenPrintf("Booting native game loop...\n\n");
     pspDebugScreenPrintf("Select+Start exits\n");
     pspDebugScreenPrintf("Select+L starts profile, Select+R saves\n");
+#if PROFILE_HW_COUNTERS
+    pspDebugScreenPrintf("Select+Left/Right selects the capture scene\n");
+    pspDebugScreenPrintf("Counters need PSPLINK profmode t; else timings only\n");
+#endif
 
     if (!PspN64psp_Init()) {
         pspDebugScreenPrintf("[psp] n64psp init failed; boot aborted\n");
@@ -82,17 +87,20 @@ int main(int argc, char* argv[]) {
 
     pspDebugScreenPrintf("[psp] platform init\n");
     PspPlatform_Init();
+    PspHwCounterProfile_Init();
     pspDebugScreenPrintf("[psp] bootproc enter\n");
     bootproc();
     pspDebugScreenPrintf("[psp] bootproc returned\n");
 #if !PROFILE_GPROF
     PspProfiler_Shutdown();
 #endif
+    PspHwCounterProfile_Shutdown();
 
     while (1) {
         sceDisplayWaitVblankStart();
         if (PspProfiler_ExitRequested()) {
             PspProfiler_Shutdown();
+            PspHwCounterProfile_Shutdown();
             sceKernelExitGame();
         }
     }

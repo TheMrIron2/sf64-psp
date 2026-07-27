@@ -35,7 +35,9 @@ void pspDebugScreenSetXY(int x, int y);
 void pspDebugScreenPrintf(const char* fmt, ...);
 float sqrtf(float x);
 
-#define PSP_LOG_PATH "ms0:/sf64_psp.log"
+#define PSP_LOG_PATH_MS0 "ms0:/sf64_psp.log"
+#define PSP_LOG_PATH_EF0 "ef0:/sf64_psp.log"
+#define PSP_LOG_PATH_HOST0 "host0:/sf64_psp.log"
 #ifndef PSP_LOG_ENABLED
 #define PSP_LOG_ENABLED 0
 #endif
@@ -211,6 +213,33 @@ static char* psp_append_u32(char* out, u32 value) {
     return out;
 }
 
+#if PSP_LOG_ENABLED
+/* ms0 is absent on a PSP Go without an M2 card, ef0 is its internal flash
+ * host0 is the PSPLINK host directory and catches both refusing writes */
+static const char* psp_log_path(void) {
+    static const char* sLogPath;
+    static const char* const sCandidates[3] = { PSP_LOG_PATH_MS0, PSP_LOG_PATH_EF0, PSP_LOG_PATH_HOST0 };
+    SceUID fd;
+    int i;
+
+    if (sLogPath != NULL) {
+        return sLogPath;
+    }
+
+    for (i = 0; i < 3; i++) {
+        fd = sceIoOpen(sCandidates[i], PSP_O_WRONLY | PSP_O_CREAT | PSP_O_APPEND, 0777);
+        if (fd >= 0) {
+            sceIoClose(fd);
+            sLogPath = sCandidates[i];
+            return sLogPath;
+        }
+    }
+
+    sLogPath = PSP_LOG_PATH_MS0;
+    return sLogPath;
+}
+#endif
+
 void PspPlatform_LogLine(const char* line) {
 #if PSP_LOG_ENABLED
     SceUID fd;
@@ -224,7 +253,7 @@ void PspPlatform_LogLine(const char* line) {
         sceKernelWaitSema(sLogSemaId, 1, NULL);
     }
 
-    fd = sceIoOpen(PSP_LOG_PATH, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_APPEND, 0777);
+    fd = sceIoOpen(psp_log_path(), PSP_O_WRONLY | PSP_O_CREAT | PSP_O_APPEND, 0777);
     if (fd >= 0) {
         if (!sLogReady) {
             sLogReady = 1;
@@ -275,7 +304,7 @@ void PspPlatform_Init(void) {
     if (sLogSemaId < 0) {
         sLogSemaId = sceKernelCreateSema("sf64_log", 0, 1, 1, NULL);
     }
-    sceIoRemove(PSP_LOG_PATH);
+    sceIoRemove(psp_log_path());
     PspPlatform_LogLine("[psp] log start");
 #endif
     PspInput_Init();

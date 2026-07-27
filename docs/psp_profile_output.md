@@ -6,7 +6,13 @@ PSP profiling captures are written under:
 ms0:/PSP/GAME/SF64PROFILE/
 ```
 
+The storage root is resolved at runtime by probing `ms0:`, then `ef0:` (PSP Go internal flash, which has no `ms0:` unless an M2 card is fitted), then `host0:` (the PSPLINK host directory). `PSP_LOG` output resolves the same way. Captures land in the first writable root.
+
+Run a phase capture with `make psp-profile-phases`. Reach the scene, let it settle, then `Select`+`L` to start; it auto-saves after `PROFILE_CAPTURE_FRAMES` (300) frames, or `Select`+`R` to stop early. There is no warm-up, unlike the hardware-counter capture.
+
 Capture slots are zero-padded decimal numbers and are never silently overwritten.
+
+Hardware-counter captures (`hw-NNN-<scene>.csv`) are a separate build mode with its own schema and procedure; see `docs/psp_hw_counter_profiling.md`.
 
 ## Gprof
 

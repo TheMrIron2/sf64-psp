@@ -25,6 +25,10 @@ PROFILE_FRAME_TRACE ?= 0
 PROFILE_FRAME_TRACE_FRAMES ?= 240
 PROFILE_COMPONENTS ?= 0
 PROFILE_TRIVIAL_REJECTS ?= 0
+PROFILE_HW_COUNTERS ?= 0
+PROFILE_HW_COUNTER_SCOPES ?= 0
+PROFILE_HW_COUNTER_FRAMES ?= 300
+PROFILE_HW_COUNTER_WARMUP_FRAMES ?= 120
 BATCH_STATE_CACHE ?= 1
 VTX_FUSED_TNL ?= 1
 PSP_FLOAT_MTX ?= 1
@@ -187,6 +191,27 @@ ifneq ($(PROFILE_PHASES),1)
 $(error PROFILE_TRIVIAL_REJECTS=1 requires PROFILE_PHASES=1.)
 endif
 endif
+ifneq ($(PROFILE_HW_COUNTERS),0)
+ifneq ($(PROFILE_HW_COUNTERS),1)
+$(error PROFILE_HW_COUNTERS must be 0 or 1)
+endif
+endif
+ifeq ($(PROFILE_HW_COUNTER_SCOPES),1)
+ifneq ($(PROFILE_HW_COUNTERS),1)
+$(error PROFILE_HW_COUNTER_SCOPES=1 requires PROFILE_HW_COUNTERS=1.)
+endif
+endif
+ifeq ($(PROFILE_HW_COUNTERS),1)
+ifeq ($(PROFILE_HW_COUNTER_FRAMES),0)
+$(error PROFILE_HW_COUNTER_FRAMES must be at least 1.)
+endif
+ifneq ($(shell test "$(PROFILE_HW_COUNTER_FRAMES)" -le 3600 2>/dev/null && echo ok),ok)
+$(error PROFILE_HW_COUNTER_FRAMES=$(PROFILE_HW_COUNTER_FRAMES) is unreasonable; use 1..3600.)
+endif
+ifneq ($(shell test "$(PROFILE_HW_COUNTER_WARMUP_FRAMES)" -le 3600 2>/dev/null && echo ok),ok)
+$(error PROFILE_HW_COUNTER_WARMUP_FRAMES=$(PROFILE_HW_COUNTER_WARMUP_FRAMES) is unreasonable; use 0..3600.)
+endif
+endif
 ifeq ($(PROFILE_PSP),1)
 ifeq ($(PROFILE_PHASES),1)
 PSP_PROFILE_MODE := combined
@@ -199,7 +224,11 @@ else
 PSP_PROFILE_MODE := release
 endif
 
-ifeq ($(filter 1,$(PROFILE_PSP) $(PROFILE_PHASES)),)
+# Counter captures reuse the release renderer and the release n64psp archives, so
+# PSP_PROFILE_MODE stays "release"; only the reported label records the capture.
+PSP_PROFILE_LABEL := $(PSP_PROFILE_MODE)$(if $(filter 1,$(PROFILE_HW_COUNTERS)),+hw-counters,)
+
+ifeq ($(filter 1,$(PROFILE_PSP) $(PROFILE_PHASES) $(PROFILE_HW_COUNTERS)),)
 PROFILE_OUTPUTS :=
 else
 PROFILE_OUTPUTS := $(PROFILE_METADATA) $(PROFILE_BUILD_COMMANDS) $(PROFILE_SHA256SUMS)
@@ -221,11 +250,21 @@ CFLAGS += -DPROFILE_FRAME_TRACE=$(if $(filter 1,$(PROFILE_FRAME_TRACE)),1,0)
 CFLAGS += -DPROFILE_FRAME_TRACE_FRAMES=$(PROFILE_FRAME_TRACE_FRAMES)
 CFLAGS += -DPROFILE_COMPONENTS=$(if $(filter 1,$(PROFILE_COMPONENTS)),1,0)
 CFLAGS += -DPROFILE_TRIVIAL_REJECTS=$(if $(filter 1,$(PROFILE_TRIVIAL_REJECTS)),1,0)
+CFLAGS += -DPROFILE_HW_COUNTERS=$(if $(filter 1,$(PROFILE_HW_COUNTERS)),1,0)
+CFLAGS += -DPROFILE_HW_COUNTER_SCOPES=$(if $(filter 1,$(PROFILE_HW_COUNTER_SCOPES)),1,0)
+CFLAGS += -DPROFILE_HW_COUNTER_FRAMES=$(PROFILE_HW_COUNTER_FRAMES)
+CFLAGS += -DPROFILE_HW_COUNTER_WARMUP_FRAMES=$(PROFILE_HW_COUNTER_WARMUP_FRAMES)
 CFLAGS += -DBATCH_STATE_CACHE=$(if $(filter 1,$(BATCH_STATE_CACHE)),1,0)
 CFLAGS += -DVTX_FUSED_TNL=$(if $(filter 1,$(VTX_FUSED_TNL)),1,0)
 CFLAGS += -DPSP_FLOAT_MTX=$(if $(filter 1,$(PSP_FLOAT_MTX)),1,0)
 CFLAGS += '-DSF64_GIT_SHA="$(SF64_GIT_SHA)"'
 CFLAGS += '-DN64PSP_GIT_SHA="$(N64PSP_GIT_SHA)"'
+# Only counter captures record tree cleanliness in the binary; keeping these out
+# of other builds avoids a full rebuild every time the tree flips clean/dirty.
+ifeq ($(PROFILE_HW_COUNTERS),1)
+CFLAGS += '-DSF64_GIT_DIRTY="$(SF64_GIT_DIRTY)"'
+CFLAGS += '-DN64PSP_GIT_DIRTY="$(N64PSP_GIT_DIRTY)"'
+endif
 CFLAGS += '-DPSPGL_GIT_SHA="$(PSPGL_PROFILE_GIT_SHA)"'
 CFLAGS += '-DPSPGL_GIT_DIRTY="$(PSPGL_PROFILE_GIT_DIRTY)"'
 CFLAGS += '-DPSPGL_SOURCE_MODE="$(PSPGL_SOURCE_MODE)"'
@@ -388,6 +427,16 @@ psp-profile-phases:
 psp-profile-combined:
 	$(MAKE) PROFILE_PSP=1 PROFILE_PHASES=1 BUILD_DIR=build/psp-profile-combined PSP_FPS_OVERLAY=$(PSP_FPS_OVERLAY) PSP_LOG=$(PSP_LOG) PSP_TRACE=$(PSP_TRACE) PSP_RENDERER_DIAGNOSTICS=$(PSP_RENDERER_DIAGNOSTICS) psp
 
+# Hardware-counter capture build (PSP_Hardware_Audit.md, Primary Finding 1).
+# Deliberately keeps phase profiling, the FPS overlay and renderer diagnostics
+# off so the capture measures the release renderer, not the instrumentation.
+psp-profile-hw-counters: PSP_FPS_OVERLAY=0
+psp-profile-hw-counters: PSP_LOG=0
+psp-profile-hw-counters: PSP_TRACE=0
+psp-profile-hw-counters: PSP_RENDERER_DIAGNOSTICS=0
+psp-profile-hw-counters:
+	$(MAKE) PROFILE_PSP=0 PROFILE_PHASES=0 PROFILE_COMPONENTS=0 PROFILE_HW_COUNTERS=1 PROFILE_HW_COUNTER_SCOPES=$(PROFILE_HW_COUNTER_SCOPES) PROFILE_HW_COUNTER_FRAMES=$(PROFILE_HW_COUNTER_FRAMES) PROFILE_HW_COUNTER_WARMUP_FRAMES=$(PROFILE_HW_COUNTER_WARMUP_FRAMES) BUILD_DIR=build/psp-profile-hw-counters PSP_FPS_OVERLAY=$(PSP_FPS_OVERLAY) PSP_LOG=$(PSP_LOG) PSP_TRACE=$(PSP_TRACE) PSP_RENDERER_DIAGNOSTICS=$(PSP_RENDERER_DIAGNOSTICS) PSP_AUDIO=$(PSP_AUDIO) USE_LOCAL_PSPGL=$(USE_LOCAL_PSPGL) psp
+
 psp-profile-builds: psp-profile-gprof psp-profile-phases
 
 psp-profile-artifacts: psp-profile-builds
@@ -429,8 +478,8 @@ $(PROFILE_METADATA): $(PSP_EBOOT) $(PSP_ELF) $(PSP_MAP) Makefile
 	@mkdir -p $(dir $@)
 	$(call print,Writing profile metadata:,$(PSP_PROFILE_MODE),$@)
 	$(V){ \
-		printf 'profile_mode=%s\n' '$(PSP_PROFILE_MODE)'; \
-		printf 'build_id=%s-%s-%s-sf64_%s-n64psp_%s\n' '$(PSP_PROFILE_MODE)' '$(SF64_GIT_SHA)' '$(N64PSP_GIT_SHA)' '$(SF64_GIT_DIRTY)' '$(N64PSP_GIT_DIRTY)'; \
+		printf 'profile_mode=%s\n' '$(PSP_PROFILE_LABEL)'; \
+		printf 'build_id=%s-%s-%s-sf64_%s-n64psp_%s\n' '$(PSP_PROFILE_LABEL)' '$(SF64_GIT_SHA)' '$(N64PSP_GIT_SHA)' '$(SF64_GIT_DIRTY)' '$(N64PSP_GIT_DIRTY)'; \
 		printf 'sf64_commit=%s\n' '$(SF64_GIT_SHA)'; \
 		printf 'sf64_worktree=%s\n' '$(SF64_GIT_DIRTY)'; \
 		printf 'n64psp_commit=%s\n' '$(N64PSP_GIT_SHA)'; \
@@ -450,6 +499,10 @@ $(PROFILE_METADATA): $(PSP_EBOOT) $(PSP_ELF) $(PSP_MAP) Makefile
 		printf 'PROFILE_FRAME_TRACE_FRAMES=%s\n' '$(PROFILE_FRAME_TRACE_FRAMES)'; \
 		printf 'PROFILE_COMPONENTS=%s\n' '$(PROFILE_COMPONENTS)'; \
 		printf 'PROFILE_TRIVIAL_REJECTS=%s\n' '$(PROFILE_TRIVIAL_REJECTS)'; \
+		printf 'PROFILE_HW_COUNTERS=%s\n' '$(PROFILE_HW_COUNTERS)'; \
+		printf 'PROFILE_HW_COUNTER_SCOPES=%s\n' '$(PROFILE_HW_COUNTER_SCOPES)'; \
+		printf 'PROFILE_HW_COUNTER_FRAMES=%s\n' '$(PROFILE_HW_COUNTER_FRAMES)'; \
+		printf 'PROFILE_HW_COUNTER_WARMUP_FRAMES=%s\n' '$(PROFILE_HW_COUNTER_WARMUP_FRAMES)'; \
 		printf 'USE_LOCAL_PSPGL=%s\n' '$(USE_LOCAL_PSPGL)'; \
 		printf 'BATCH_STATE_CACHE=%s\n' '$(BATCH_STATE_CACHE)'; \
 		printf 'VTX_FUSED_TNL=%s\n' '$(VTX_FUSED_TNL)'; \
@@ -461,7 +514,7 @@ $(PROFILE_METADATA): $(PSP_EBOOT) $(PSP_ELF) $(PSP_MAP) Makefile
 		printf 'PSP_RENDERER_DIAGNOSTICS=%s\n' '$(PSP_RENDERER_DIAGNOSTICS)'; \
 		printf 'cpu_clock_runtime=recorded in profile-NNN.txt on PSP\n'; \
 		printf 'bus_clock_runtime=recorded in profile-NNN.txt on PSP\n'; \
-		printf 'build_command=make %s BUILD_DIR=%s PROFILE_PSP=%s PROFILE_PHASES=%s PROFILE_CAPTURE_FRAMES=%s PROFILE_FRAME_TRACE=%s PROFILE_FRAME_TRACE_FRAMES=%s PROFILE_COMPONENTS=%s PROFILE_TRIVIAL_REJECTS=%s USE_LOCAL_PSPGL=%s BATCH_STATE_CACHE=%s VTX_FUSED_TNL=%s PSP_FLOAT_MTX=%s PSP_AUDIO=%s PSP_FPS_OVERLAY=%s PSP_LOG=%s PSP_TRACE=%s PSP_RENDERER_DIAGNOSTICS=%s psp\n' '$(MAKECMDGOALS)' '$(BUILD_DIR)' '$(PROFILE_PSP)' '$(PROFILE_PHASES)' '$(PROFILE_CAPTURE_FRAMES)' '$(PROFILE_FRAME_TRACE)' '$(PROFILE_FRAME_TRACE_FRAMES)' '$(PROFILE_COMPONENTS)' '$(PROFILE_TRIVIAL_REJECTS)' '$(USE_LOCAL_PSPGL)' '$(BATCH_STATE_CACHE)' '$(VTX_FUSED_TNL)' '$(PSP_FLOAT_MTX)' '$(PSP_AUDIO)' '$(PSP_FPS_OVERLAY)' '$(PSP_LOG)' '$(PSP_TRACE)' '$(PSP_RENDERER_DIAGNOSTICS)'; \
+		printf 'build_command=make %s BUILD_DIR=%s PROFILE_PSP=%s PROFILE_PHASES=%s PROFILE_CAPTURE_FRAMES=%s PROFILE_FRAME_TRACE=%s PROFILE_FRAME_TRACE_FRAMES=%s PROFILE_COMPONENTS=%s PROFILE_TRIVIAL_REJECTS=%s PROFILE_HW_COUNTERS=$(PROFILE_HW_COUNTERS) PROFILE_HW_COUNTER_SCOPES=$(PROFILE_HW_COUNTER_SCOPES) PROFILE_HW_COUNTER_FRAMES=$(PROFILE_HW_COUNTER_FRAMES) PROFILE_HW_COUNTER_WARMUP_FRAMES=$(PROFILE_HW_COUNTER_WARMUP_FRAMES) USE_LOCAL_PSPGL=%s BATCH_STATE_CACHE=%s VTX_FUSED_TNL=%s PSP_FLOAT_MTX=%s PSP_AUDIO=%s PSP_FPS_OVERLAY=%s PSP_LOG=%s PSP_TRACE=%s PSP_RENDERER_DIAGNOSTICS=%s psp\n' '$(MAKECMDGOALS)' '$(BUILD_DIR)' '$(PROFILE_PSP)' '$(PROFILE_PHASES)' '$(PROFILE_CAPTURE_FRAMES)' '$(PROFILE_FRAME_TRACE)' '$(PROFILE_FRAME_TRACE_FRAMES)' '$(PROFILE_COMPONENTS)' '$(PROFILE_TRIVIAL_REJECTS)' '$(USE_LOCAL_PSPGL)' '$(BATCH_STATE_CACHE)' '$(VTX_FUSED_TNL)' '$(PSP_FLOAT_MTX)' '$(PSP_AUDIO)' '$(PSP_FPS_OVERLAY)' '$(PSP_LOG)' '$(PSP_TRACE)' '$(PSP_RENDERER_DIAGNOSTICS)'; \
 	} > $@
 
 $(PROFILE_BUILD_COMMANDS): $(PROFILE_METADATA)
@@ -552,4 +605,4 @@ resolve-queue-trace:
 
 -include $(DEP_FILES)
 
-.PHONY: tools-init toolchain torch init decompress extract assets clean-generated resolve-queue-trace psp-profile-gprof psp-profile-phases psp-profile-combined psp-profile-builds psp-profile-artifacts psp-profile-report FORCE
+.PHONY: tools-init toolchain torch init decompress extract assets clean-generated resolve-queue-trace psp-profile-gprof psp-profile-phases psp-profile-combined psp-profile-builds psp-profile-artifacts psp-profile-report psp-profile-hw-counters FORCE

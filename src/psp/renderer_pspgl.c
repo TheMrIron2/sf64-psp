@@ -3,6 +3,7 @@
 #include "src/psp/gfx/gfx_psp_dl.h"
 #include "src/psp/gfx/gfx_psp.h"
 #include "src/psp/gfx/gfx_pspgl.h"
+#include "src/psp/hw_counter_profile.h"
 #include "src/psp/platform.h"
 #include "src/psp/profiler.h"
 #include "src/psp/renderer.h"
@@ -262,6 +263,12 @@ void PspRenderer_Init(void) {
 void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
     const Gfx* dl;
 
+    #if PROFILE_HW_COUNTERS
+        u32 hwCommands = 0;
+        u32 hwLoadedVertices = 0;
+        u32 hwSubmittedVertices = 0;
+    #endif
+
     #if PSP_FPS_OVERLAY
         SceInt64 renderStart;
         SceInt64 renderEnd;
@@ -279,6 +286,9 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
         renderStart = sceKernelGetSystemTimeWide();
     #endif
 
+        PspHwCounterProfile_FrameBegin();
+        PspHwCounterProfile_ScopeBegin(PSP_HW_SCOPE_TASK);
+        PspHwCounterProfile_ScopeBegin(PSP_HW_SCOPE_FRONTEND);
         PspProfiler_ComponentTaskBegin();
         PspGfx_BeginFrame();
         PspGfxPspgl_BeginFrame();
@@ -286,16 +296,30 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
         if ((task != NULL) && (task->task.t.data_ptr != NULL)) {
             dl = (const Gfx*) task->task.t.data_ptr;
             PspGfxDl_Run(dl, taskIndex, NULL);
+    #if PROFILE_HW_COUNTERS
+            /* Only after a run, the context still holds the previous task otherwise */
+            PspGfxDl_GetLastWork(&hwCommands, &hwLoadedVertices, &hwSubmittedVertices);
+    #endif
         }
 
+        PspHwCounterProfile_ScopeEnd(PSP_HW_SCOPE_FRONTEND);
+        PspHwCounterProfile_ScopeBegin(PSP_HW_SCOPE_FLUSH);
         PspGfxPspgl_Flush();
+        PspHwCounterProfile_ScopeEnd(PSP_HW_SCOPE_FLUSH);
+        PspHwCounterProfile_ScopeEnd(PSP_HW_SCOPE_TASK);
 
     #if PSP_FPS_OVERLAY
         renderEnd = sceKernelGetSystemTimeWide();
     #endif
 
+        PspHwCounterProfile_ScopeBegin(PSP_HW_SCOPE_PRESENT);
         PspGfx_EndFrame();
+        PspHwCounterProfile_ScopeEnd(PSP_HW_SCOPE_PRESENT);
         PspProfiler_ComponentTaskEnd();
+
+    #if PROFILE_HW_COUNTERS
+        PspHwCounterProfile_FrameEnd(hwCommands, hwLoadedVertices, hwSubmittedVertices);
+    #endif
 
     #if PSP_FPS_OVERLAY
         psp_renderer_perf_frame_complete(
@@ -306,6 +330,7 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
     #endif
 
         PspProfiler_DrawStatus();
+        PspHwCounterProfile_DrawStatus();
 }
 
 void PspRenderer_BeginStarfield(void) {

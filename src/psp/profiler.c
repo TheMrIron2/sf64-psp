@@ -83,7 +83,9 @@ extern int gDrawMode;
 #define PROFILE_CAPTURE_FRAMES 300
 #endif
 
-#define PSP_PROFILE_DIR "ms0:/PSP/GAME/SF64PROFILE"
+#define PSP_PROFILE_DIR_MS0 "ms0:/PSP/GAME/SF64PROFILE"
+#define PSP_PROFILE_DIR_EF0 "ef0:/PSP/GAME/SF64PROFILE"
+#define PSP_PROFILE_DIR_HOST0 "host0:"
 #define PSP_PROFILE_MAX_SLOT 999
 #define PSP_PROFILE_MAX_THREADS 8
 #define PSP_PROFILE_TIMER_SAMPLES 128
@@ -582,10 +584,50 @@ PSP_PROFILE_ATTR static PspProfileThreadState* psp_profiler_get_thread_state_loc
 #endif
 
 #if PROFILE_GPROF || PROFILE_PHASES
+static char sProfileDir[64];
+
+/* ms0 is absent on a PSP Go without an M2 card, ef0 is its internal flash
+ * host0 is the PSPLINK host directory and catches both refusing writes */
+PSP_PROFILE_ATTR static int psp_profiler_try_dir(const char* dir, const char* parent1, const char* parent2) {
+    char probe[112];
+    SceUID fd;
+
+    if (parent1 != NULL) {
+        sceIoMkdir(parent1, 0777);
+        sceIoMkdir(parent2, 0777);
+        sceIoMkdir(dir, 0777);
+    }
+
+    snprintf(probe, sizeof(probe), "%s/.sf64probe", dir);
+    fd = sceIoOpen(probe, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0666);
+    if (fd < 0) {
+        return 0;
+    }
+    sceIoClose(fd);
+    sceIoRemove(probe);
+    return 1;
+}
+
+PSP_PROFILE_ATTR static const char* psp_profiler_dir(void) {
+    if (sProfileDir[0] != '\0') {
+        return sProfileDir;
+    }
+
+    if (psp_profiler_try_dir(PSP_PROFILE_DIR_MS0, "ms0:/PSP", "ms0:/PSP/GAME")) {
+        snprintf(sProfileDir, sizeof(sProfileDir), "%s", PSP_PROFILE_DIR_MS0);
+    } else if (psp_profiler_try_dir(PSP_PROFILE_DIR_EF0, "ef0:/PSP", "ef0:/PSP/GAME")) {
+        snprintf(sProfileDir, sizeof(sProfileDir), "%s", PSP_PROFILE_DIR_EF0);
+    } else if (psp_profiler_try_dir(PSP_PROFILE_DIR_HOST0, NULL, NULL)) {
+        snprintf(sProfileDir, sizeof(sProfileDir), "%s", PSP_PROFILE_DIR_HOST0);
+    } else {
+        /* nothing writable, keep the default so the failure is reported as usual */
+        snprintf(sProfileDir, sizeof(sProfileDir), "%s", PSP_PROFILE_DIR_MS0);
+    }
+    return sProfileDir;
+}
+
 PSP_PROFILE_ATTR static void psp_profiler_mkdir(void) {
-    sceIoMkdir("ms0:/PSP", 0777);
-    sceIoMkdir("ms0:/PSP/GAME", 0777);
-    sceIoMkdir(PSP_PROFILE_DIR, 0777);
+    (void) psp_profiler_dir();
 }
 
 PSP_PROFILE_ATTR static int psp_profiler_exists(const char* path) {
@@ -602,7 +644,7 @@ PSP_PROFILE_ATTR static int psp_profiler_open_unique(const char* prefix, const c
 
     psp_profiler_mkdir();
     for (slot = sNextSlot; slot <= PSP_PROFILE_MAX_SLOT; slot++) {
-        snprintf(path, pathSize, "%s/%s-%03lu.%s", PSP_PROFILE_DIR, prefix, (unsigned long) slot, suffix);
+        snprintf(path, pathSize, "%s/%s-%03lu.%s", psp_profiler_dir(), prefix, (unsigned long) slot, suffix);
         if (!psp_profiler_exists(path)) {
             *slotOut = slot;
             sNextSlot = slot + 1;
@@ -1246,7 +1288,7 @@ static void psp_profiler_write_frame_summary(u32 slot) {
     SceUID fd;
     u32 i;
 
-    snprintf(path, sizeof(path), "%s/profile-%03lu-frames.csv", PSP_PROFILE_DIR, (unsigned long) slot);
+    snprintf(path, sizeof(path), "%s/profile-%03lu-frames.csv", psp_profiler_dir(), (unsigned long) slot);
     fd = sceIoOpen(path, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_EXCL, 0666);
     if (fd < 0) {
         psp_profiler_set_status(PSP_PROF_STATUS_ERROR, slot);
@@ -1389,7 +1431,7 @@ static void psp_profiler_write_frame_phases(u32 slot) {
     u32 frame;
     u32 phase;
 
-    snprintf(path, sizeof(path), "%s/profile-%03lu-phases.csv", PSP_PROFILE_DIR, (unsigned long) slot);
+    snprintf(path, sizeof(path), "%s/profile-%03lu-phases.csv", psp_profiler_dir(), (unsigned long) slot);
     fd = sceIoOpen(path, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_EXCL, 0666);
     if (fd < 0) {
         psp_profiler_set_status(PSP_PROF_STATUS_ERROR, slot);
@@ -1416,7 +1458,7 @@ static void psp_profiler_write_frame_categories(u32 slot) {
     u32 frame;
     u32 i;
 
-    snprintf(path, sizeof(path), "%s/profile-%03lu-frame-categories.csv", PSP_PROFILE_DIR, (unsigned long) slot);
+    snprintf(path, sizeof(path), "%s/profile-%03lu-frame-categories.csv", psp_profiler_dir(), (unsigned long) slot);
     fd = sceIoOpen(path, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_EXCL, 0666);
     if (fd < 0) {
         psp_profiler_set_status(PSP_PROF_STATUS_ERROR, slot);
@@ -1467,7 +1509,7 @@ static void psp_profiler_write_component_files(u32 slot) {
         adjustedTotal += psp_profiler_adjust_component_us(component);
     }
 
-    snprintf(path, sizeof(path), "%s/profile-%03lu-components.csv", PSP_PROFILE_DIR, (unsigned long) slot);
+    snprintf(path, sizeof(path), "%s/profile-%03lu-components.csv", psp_profiler_dir(), (unsigned long) slot);
     fd = sceIoOpen(path, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_EXCL, 0666);
     if (fd < 0) {
         psp_profiler_set_status(PSP_PROF_STATUS_ERROR, slot);
@@ -1513,7 +1555,7 @@ static void psp_profiler_write_component_files(u32 slot) {
     }
     sceIoClose(fd);
 
-    snprintf(path, sizeof(path), "%s/profile-%03lu-component-phases.csv", PSP_PROFILE_DIR, (unsigned long) slot);
+    snprintf(path, sizeof(path), "%s/profile-%03lu-component-phases.csv", psp_profiler_dir(), (unsigned long) slot);
     fd = sceIoOpen(path, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_EXCL, 0666);
     if (fd < 0) {
         psp_profiler_set_status(PSP_PROF_STATUS_ERROR, slot);
@@ -1535,7 +1577,7 @@ static void psp_profiler_write_component_files(u32 slot) {
     }
     sceIoClose(fd);
 
-    snprintf(path, sizeof(path), "%s/profile-%03lu-component-categories.csv", PSP_PROFILE_DIR, (unsigned long) slot);
+    snprintf(path, sizeof(path), "%s/profile-%03lu-component-categories.csv", psp_profiler_dir(), (unsigned long) slot);
     fd = sceIoOpen(path, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_EXCL, 0666);
     if (fd < 0) {
         psp_profiler_set_status(PSP_PROF_STATUS_ERROR, slot);
@@ -1651,7 +1693,7 @@ static void psp_profiler_write_trivial_reject_file(u32 slot) {
     u32 component;
 #endif
 
-    snprintf(path, sizeof(path), "%s/profile-%03lu-trivial-rejects.csv", PSP_PROFILE_DIR, (unsigned long) slot);
+    snprintf(path, sizeof(path), "%s/profile-%03lu-trivial-rejects.csv", psp_profiler_dir(), (unsigned long) slot);
     fd = sceIoOpen(path, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_EXCL, 0666);
     if (fd < 0) {
         psp_profiler_set_status(PSP_PROF_STATUS_ERROR, slot);
@@ -1675,7 +1717,7 @@ static void psp_profiler_write_phase_files(u32 slot) {
     SceUID fd;
     u32 i;
 
-    snprintf(path, sizeof(path), "%s/profile-%03lu.csv", PSP_PROFILE_DIR, (unsigned long) slot);
+    snprintf(path, sizeof(path), "%s/profile-%03lu.csv", psp_profiler_dir(), (unsigned long) slot);
     fd = sceIoOpen(path, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_EXCL, 0666);
     if (fd < 0) {
         psp_profiler_set_status(PSP_PROF_STATUS_ERROR, slot);
@@ -1688,7 +1730,7 @@ static void psp_profiler_write_phase_files(u32 slot) {
     }
     sceIoClose(fd);
 
-    snprintf(path, sizeof(path), "%s/profile-%03lu.txt", PSP_PROFILE_DIR, (unsigned long) slot);
+    snprintf(path, sizeof(path), "%s/profile-%03lu.txt", psp_profiler_dir(), (unsigned long) slot);
     fd = sceIoOpen(path, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_EXCL, 0666);
     if (fd < 0) {
         psp_profiler_set_status(PSP_PROF_STATUS_ERROR, slot);
@@ -2032,7 +2074,7 @@ void PspProfiler_StartCapture(void) {
 #if !PROFILE_GPROF
     psp_profiler_mkdir();
     while (slot <= PSP_PROFILE_MAX_SLOT) {
-        snprintf(sCapturePath, sizeof(sCapturePath), "%s/profile-%03lu.txt", PSP_PROFILE_DIR, (unsigned long) slot);
+        snprintf(sCapturePath, sizeof(sCapturePath), "%s/profile-%03lu.txt", psp_profiler_dir(), (unsigned long) slot);
         if (!psp_profiler_exists(sCapturePath)) {
             break;
         }
