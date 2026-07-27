@@ -3,6 +3,7 @@
 #include "buffers.h"
 #include "macros.h"
 #include "sf64thread.h"
+#include "src/psp/gfx/gfx_psp_merge.h"
 #include "src/psp/gfx/gfx_pspgl.h"
 #include "src/psp/hw_counter_profile.h"
 #include "src/psp/platform.h"
@@ -49,6 +50,23 @@ extern Gfx gMapVenomCloudRuntimeDL[];
 
 #ifndef VTX_FUSED_TNL
 #define VTX_FUSED_TNL 1
+#endif
+
+#ifndef PSP_MERGE_ANALYSIS
+#define PSP_MERGE_ANALYSIS 0
+#endif
+
+// Open batch pool, see docs/psp_counter_findings.md finding 9
+// Keeps one open batch per texture material so a texture change no longer forces
+// a draw, only the non material state changes do
+#ifndef PSP_BATCH_POOL
+#define PSP_BATCH_POOL 0
+#endif
+#ifndef PSP_BATCH_POOL_SLOTS
+#define PSP_BATCH_POOL_SLOTS 48
+#endif
+#ifndef PSP_BATCH_POOL_VERTICES
+#define PSP_BATCH_POOL_VERTICES 192
 #endif
 
 #if PSP_LOG_ENABLED || PSP_RENDERER_DIAGNOSTICS || PROFILE_GPROF || PROFILE_PHASES
@@ -423,6 +441,18 @@ static u32 sPspGfxDlMaterialCorpusUnattributed;
 static PspGfxPspglColorVertex
     sPspGfxDlBatch[PSP_GFX_DL_BATCH_VERTICES]
     __attribute__((aligned(16)));
+
+#if PSP_BATCH_POOL
+// the append sites write through these, so the current target is either a pool
+// slot or the standalone buffer used for geometry that must not be reordered
+static PspGfxPspglColorVertex* sPspGfxDlBatchCursor = sPspGfxDlBatch;
+static u32 sPspGfxDlBatchCapacity = PSP_GFX_DL_BATCH_VERTICES;
+#define PSP_GFX_DL_BATCH sPspGfxDlBatchCursor
+#define PSP_GFX_DL_BATCH_CAP sPspGfxDlBatchCapacity
+#else
+#define PSP_GFX_DL_BATCH sPspGfxDlBatch
+#define PSP_GFX_DL_BATCH_CAP PSP_GFX_DL_BATCH_VERTICES
+#endif
 
 static n64psp_vec4f
     sPspGfxDlTransformInput[PSP_GFX_DL_MAX_VERTICES]
@@ -1449,9 +1479,9 @@ static void psp_gfx_dl_weld_flat_batch_seams(PspGfxDlContext* ctx) {
     if (ctx->batchPretransformed || (ctx->batchCount < 12) || (ctx->batchCount > 48)) {
         return;
     }
-    minZ = maxZ = sPspGfxDlBatch[0].z;
+    minZ = maxZ = PSP_GFX_DL_BATCH[0].z;
     for (i = 1; i < ctx->batchCount; i++) {
-        float z = sPspGfxDlBatch[i].z;
+        float z = PSP_GFX_DL_BATCH[i].z;
 
         if (z < minZ) {
             minZ = z;
@@ -1467,10 +1497,10 @@ static void psp_gfx_dl_weld_flat_batch_seams(PspGfxDlContext* ctx) {
     /* ~1/8 pixel at this depth: dx_view = (1/8)/240 ndc * |z| / P00(=1.811). */
     eps = 3.0e-4f * -minZ;
     for (i = 1; i < ctx->batchCount; i++) {
-        PspGfxPspglColorVertex* b = &sPspGfxDlBatch[i];
+        PspGfxPspglColorVertex* b = &PSP_GFX_DL_BATCH[i];
 
         for (j = 0; j < i; j++) {
-            const PspGfxPspglColorVertex* a = &sPspGfxDlBatch[j];
+            const PspGfxPspglColorVertex* a = &PSP_GFX_DL_BATCH[j];
             float dx = b->x - a->x;
             float dy = b->y - a->y;
 
@@ -1482,6 +1512,48 @@ static void psp_gfx_dl_weld_flat_batch_seams(PspGfxDlContext* ctx) {
         }
     }
 }
+
+#if PSP_MERGE_ANALYSIS
+static u32 psp_gfx_dl_merge_hash(u32 hash, const void* data, u32 bytes) {
+    const u8* input = (const u8*) data;
+    u32 i;
+
+    for (i = 0; i < bytes; i++) {
+        hash ^= input[i];
+        hash *= 16777619u;
+    }
+    return hash;
+}
+
+// every value a merged draw would have to share, matching the arguments
+// psp_gfx_dl_flush_reason passes to PspGfxPspgl_DrawColoredTriangles
+static void psp_gfx_dl_merge_record(const PspGfxDlContext* ctx) {
+    u32 hash = 2166136261u;
+
+    hash = psp_gfx_dl_merge_hash(hash, &ctx->batchTextureId, sizeof(ctx->batchTextureId));
+    hash = psp_gfx_dl_merge_hash(hash, &ctx->batchTextureEnv, sizeof(ctx->batchTextureEnv));
+    hash = psp_gfx_dl_merge_hash(hash, &ctx->batchTextureEnvColor, sizeof(ctx->batchTextureEnvColor));
+    hash = psp_gfx_dl_merge_hash(hash, &ctx->batchWrapS, sizeof(ctx->batchWrapS));
+    hash = psp_gfx_dl_merge_hash(hash, &ctx->batchWrapT, sizeof(ctx->batchWrapT));
+    hash = psp_gfx_dl_merge_hash(hash, &ctx->batchAlphaTest, sizeof(ctx->batchAlphaTest));
+    hash = psp_gfx_dl_merge_hash(hash, &ctx->batchBlend, sizeof(ctx->batchBlend));
+    hash = psp_gfx_dl_merge_hash(hash, &ctx->batchPremultiplied, sizeof(ctx->batchPremultiplied));
+    hash = psp_gfx_dl_merge_hash(hash, &ctx->batchDepthTest, sizeof(ctx->batchDepthTest));
+    hash = psp_gfx_dl_merge_hash(hash, &ctx->batchDepthWrite, sizeof(ctx->batchDepthWrite));
+    hash = psp_gfx_dl_merge_hash(hash, &ctx->batchFog, sizeof(ctx->batchFog));
+    hash = psp_gfx_dl_merge_hash(hash, ctx->batchFogColor, sizeof(ctx->batchFogColor));
+    hash = psp_gfx_dl_merge_hash(hash, &ctx->batchFogStart, sizeof(ctx->batchFogStart));
+    hash = psp_gfx_dl_merge_hash(hash, &ctx->batchFogEnd, sizeof(ctx->batchFogEnd));
+    hash = psp_gfx_dl_merge_hash(hash, &ctx->batchProjectionSerial, sizeof(ctx->batchProjectionSerial));
+    hash = psp_gfx_dl_merge_hash(hash, &ctx->batchPretransformed, sizeof(ctx->batchPretransformed));
+    hash = psp_gfx_dl_merge_hash(hash, &ctx->batchPointFilter, sizeof(ctx->batchPointFilter));
+
+    // blended or depth unordered geometry cannot move relative to its neighbours
+    PspGfxMerge_AddBatch(hash, ctx->batchCount,
+                         (ctx->batchBlend != 0) || (ctx->batchDepthTest == 0) ||
+                             (ctx->batchDepthWrite == 0));
+}
+#endif
 
 static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason reason) {
 #if PROFILE_COMPONENTS
@@ -1503,9 +1575,12 @@ static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason 
 #endif
     (void) reason;
     psp_gfx_dl_weld_flat_batch_seams(ctx);
+#if PSP_MERGE_ANALYSIS
+    psp_gfx_dl_merge_record(ctx);
+#endif
     PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_SUBMIT);
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_BATCH_FLUSH);
-    PspGfxPspgl_DrawColoredTriangles(sPspGfxDlBatch, ctx->batchCount, ctx->batchTextureId, ctx->batchTextureRef,
+    PspGfxPspgl_DrawColoredTriangles(PSP_GFX_DL_BATCH, ctx->batchCount, ctx->batchTextureId, ctx->batchTextureRef,
                                      ctx->batchTextureEnv, ctx->batchTextureEnvColor, ctx->batchWrapS,
                                      ctx->batchWrapT, ctx->batchAlphaTest, ctx->batchBlend,
                                      ctx->batchPremultiplied, ctx->batchDepthTest,
@@ -1554,11 +1629,263 @@ static int psp_gfx_dl_texture_ref_equal(PspGfxPspglTextureRef a, PspGfxPspglText
     return (a.state == b.state) && (a.texture == b.texture) && (a.generation == b.generation);
 }
 
+#if PSP_BATCH_POOL
+// One open batch per texture material. Every non material state change (depth,
+// fog, transform, scissor, colour image, immediate draws, end of task) drains
+// the whole pool first, so all open slots always share that state by construction
+typedef struct {
+    PspGfxPspglColorVertex vertices[PSP_BATCH_POOL_VERTICES] __attribute__((aligned(16)));
+    u32 count;
+    u32 textureId;
+    PspGfxPspglTextureRef textureRef;
+    PspGfxPspglTextureEnv textureEnv;
+    u32 textureEnvColor;
+    PspGfxDlCombineMode combineMode;
+    u32 primitiveColor;
+    u32 environmentColor;
+    PspGfxPspglTextureWrap wrapS;
+    PspGfxPspglTextureWrap wrapT;
+    int alphaTest;
+    int blend;
+    int premultiplied;
+    int pointFilter;
+    u8 open;
+} PspGfxDlBatchSlot;
+
+static PspGfxDlBatchSlot sPspGfxDlPool[PSP_BATCH_POOL_SLOTS];
+static u8 sPspGfxDlPoolOrder[PSP_BATCH_POOL_SLOTS];
+static u32 sPspGfxDlPoolOpen;
+static int sPspGfxDlPoolCurrent = -1;
+
+static u32 sPspGfxDlPoolHits;
+static u32 sPspGfxDlPoolOpens;
+static u32 sPspGfxDlPoolEvictions;
+static u32 sPspGfxDlPoolCapacityFlushes;
+static u32 sPspGfxDlPoolDrained;
+static u32 sPspGfxDlPoolUnpooled;
+static u32 sPspGfxDlPoolPeakOpen;
+
+static void psp_gfx_dl_pool_store(PspGfxDlContext* ctx, u32 index) {
+    PspGfxDlBatchSlot* slot = &sPspGfxDlPool[index];
+
+    slot->count = ctx->batchCount;
+    slot->textureId = ctx->batchTextureId;
+    slot->textureRef = ctx->batchTextureRef;
+    slot->textureEnv = ctx->batchTextureEnv;
+    slot->textureEnvColor = ctx->batchTextureEnvColor;
+    slot->combineMode = ctx->batchCombineMode;
+    slot->primitiveColor = ctx->batchPrimitiveColor;
+    slot->environmentColor = ctx->batchEnvironmentColor;
+    slot->wrapS = ctx->batchWrapS;
+    slot->wrapT = ctx->batchWrapT;
+    slot->alphaTest = ctx->batchAlphaTest;
+    slot->blend = ctx->batchBlend;
+    slot->premultiplied = ctx->batchPremultiplied;
+    slot->pointFilter = ctx->batchPointFilter;
+}
+
+static void psp_gfx_dl_pool_load(PspGfxDlContext* ctx, u32 index) {
+    const PspGfxDlBatchSlot* slot = &sPspGfxDlPool[index];
+
+    ctx->batchCount = slot->count;
+    ctx->batchTextureId = slot->textureId;
+    ctx->batchTextureRef = slot->textureRef;
+    ctx->batchTextureEnv = slot->textureEnv;
+    ctx->batchTextureEnvColor = slot->textureEnvColor;
+    ctx->batchCombineMode = slot->combineMode;
+    ctx->batchPrimitiveColor = slot->primitiveColor;
+    ctx->batchEnvironmentColor = slot->environmentColor;
+    ctx->batchWrapS = slot->wrapS;
+    ctx->batchWrapT = slot->wrapT;
+    ctx->batchAlphaTest = slot->alphaTest;
+    ctx->batchBlend = slot->blend;
+    ctx->batchPremultiplied = slot->premultiplied;
+    ctx->batchPointFilter = slot->pointFilter;
+}
+
+static void psp_gfx_dl_pool_select(PspGfxDlContext* ctx, u32 index) {
+    (void) ctx;
+    sPspGfxDlPoolCurrent = (int) index;
+    PSP_GFX_DL_BATCH = sPspGfxDlPool[index].vertices;
+    PSP_GFX_DL_BATCH_CAP = PSP_BATCH_POOL_VERTICES;
+}
+
+// geometry that may not be reordered keeps the standalone buffer
+static void psp_gfx_dl_pool_use_direct(PspGfxDlContext* ctx) {
+    (void) ctx;
+    sPspGfxDlPoolCurrent = -1;
+    PSP_GFX_DL_BATCH = sPspGfxDlBatch;
+    PSP_GFX_DL_BATCH_CAP = PSP_GFX_DL_BATCH_VERTICES;
+}
+
+static void psp_gfx_dl_pool_park(PspGfxDlContext* ctx) {
+    if (sPspGfxDlPoolCurrent < 0) {
+        return;
+    }
+    psp_gfx_dl_pool_store(ctx, (u32) sPspGfxDlPoolCurrent);
+    sPspGfxDlPoolCurrent = -1;
+    ctx->batchCount = 0;
+}
+
+static void psp_gfx_dl_pool_release(u32 index) {
+    u32 i;
+
+    sPspGfxDlPool[index].open = 0;
+    sPspGfxDlPool[index].count = 0;
+    for (i = 0; i < sPspGfxDlPoolOpen; i++) {
+        if (sPspGfxDlPoolOrder[i] == (u8) index) {
+            for (; (i + 1) < sPspGfxDlPoolOpen; i++) {
+                sPspGfxDlPoolOrder[i] = sPspGfxDlPoolOrder[i + 1];
+            }
+            sPspGfxDlPoolOpen--;
+            return;
+        }
+    }
+}
+
+// emits one slot and closes it, leaving nothing selected
+static void psp_gfx_dl_pool_emit(PspGfxDlContext* ctx, u32 index, PspProfileFlushReason reason) {
+    psp_gfx_dl_pool_park(ctx);
+    psp_gfx_dl_pool_load(ctx, index);
+    psp_gfx_dl_pool_select(ctx, index);
+    psp_gfx_dl_flush_reason(ctx, reason);
+    psp_gfx_dl_pool_release(index);
+    psp_gfx_dl_pool_use_direct(ctx);
+}
+
+// drains every open slot in the order the slots were opened
+static void psp_gfx_dl_pool_drain(PspGfxDlContext* ctx, PspProfileFlushReason reason) {
+    if (sPspGfxDlPoolCurrent < 0) {
+        // pending standalone geometry was submitted first, so it draws first
+        psp_gfx_dl_flush_reason(ctx, reason);
+    } else {
+        psp_gfx_dl_pool_park(ctx);
+    }
+    while (sPspGfxDlPoolOpen != 0) {
+        psp_gfx_dl_pool_emit(ctx, sPspGfxDlPoolOrder[0], reason);
+        sPspGfxDlPoolDrained++;
+    }
+    psp_gfx_dl_pool_use_direct(ctx);
+}
+
+static int psp_gfx_dl_pool_material_matches(const PspGfxDlBatchSlot* slot, u32 textureId,
+                                            PspGfxPspglTextureRef textureRef,
+                                            PspGfxPspglTextureEnv textureEnv, u32 textureEnvColor,
+                                            PspGfxPspglTextureWrap wrapS, PspGfxPspglTextureWrap wrapT,
+                                            int alphaTest, int blend, int premultiplied, int pointFilter) {
+    return (slot->textureId == textureId) && psp_gfx_dl_texture_ref_equal(slot->textureRef, textureRef) &&
+           (slot->textureEnv == textureEnv) && (slot->textureEnvColor == textureEnvColor) &&
+           (slot->wrapS == wrapS) && (slot->wrapT == wrapT) && (slot->alphaTest == alphaTest) &&
+           (slot->blend == blend) && (slot->premultiplied == premultiplied) &&
+           (slot->pointFilter == pointFilter);
+}
+
+// takes a free slot, giving up the oldest open one when the pool is full
+static u32 psp_gfx_dl_pool_acquire(PspGfxDlContext* ctx) {
+    u32 i;
+
+    for (i = 0; i < PSP_BATCH_POOL_SLOTS; i++) {
+        if (!sPspGfxDlPool[i].open) {
+            break;
+        }
+    }
+    if (i == PSP_BATCH_POOL_SLOTS) {
+        i = sPspGfxDlPoolOrder[0];
+        psp_gfx_dl_pool_emit(ctx, i, PSP_PROFILE_FLUSH_OTHER);
+        sPspGfxDlPoolEvictions++;
+    }
+
+    sPspGfxDlPool[i].open = 1;
+    sPspGfxDlPool[i].count = 0;
+    sPspGfxDlPoolOrder[sPspGfxDlPoolOpen++] = (u8) i;
+    if (sPspGfxDlPoolOpen > sPspGfxDlPoolPeakOpen) {
+        sPspGfxDlPoolPeakOpen = sPspGfxDlPoolOpen;
+    }
+    sPspGfxDlPoolOpens++;
+    return i;
+}
+
+// the current slot filled up, emit it and continue the same material in a new one
+static void psp_gfx_dl_pool_rotate_full(PspGfxDlContext* ctx) {
+    u32 index;
+
+    if (sPspGfxDlPoolCurrent < 0) {
+        return;
+    }
+    psp_gfx_dl_pool_emit(ctx, (u32) sPspGfxDlPoolCurrent, PSP_PROFILE_FLUSH_BUFFER_FULL);
+    sPspGfxDlPoolCapacityFlushes++;
+    index = psp_gfx_dl_pool_acquire(ctx);
+    psp_gfx_dl_pool_select(ctx, index);
+    ctx->batchCount = 0;
+    psp_gfx_dl_pool_store(ctx, index);
+}
+#endif
+
+#if PSP_BATCH_POOL
+#define psp_gfx_dl_flush_all(ctx, reason) psp_gfx_dl_pool_drain((ctx), (reason))
+#else
+#define psp_gfx_dl_flush_all(ctx, reason) psp_gfx_dl_flush_reason((ctx), (reason))
+#endif
+
 static void psp_gfx_dl_set_batch_texture(PspGfxDlContext* ctx, u32 textureId, PspGfxPspglTextureRef textureRef,
                                          PspGfxPspglTextureEnv textureEnv, u32 textureEnvColor,
                                          PspGfxDlCombineMode combineMode, u32 primitiveColor, u32 environmentColor,
                                          PspGfxPspglTextureWrap wrapS, PspGfxPspglTextureWrap wrapT, int alphaTest,
                                          int blend, int premultiplied, int pointFilter) {
+#if PSP_BATCH_POOL
+    // only depth ordered opaque geometry may be regrouped, anything else keeps
+    // its position in the submission order
+    if ((blend == 0) && (ctx->batchDepthTest != 0) && (ctx->batchDepthWrite != 0)) {
+        u32 i;
+        u32 index;
+
+        if ((sPspGfxDlPoolCurrent < 0) && (ctx->batchCount != 0)) {
+            psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+        }
+
+        for (i = 0; i < sPspGfxDlPoolOpen; i++) {
+            index = sPspGfxDlPoolOrder[i];
+            if (psp_gfx_dl_pool_material_matches(&sPspGfxDlPool[index], textureId, textureRef, textureEnv,
+                                                 textureEnvColor, wrapS, wrapT, alphaTest, blend,
+                                                 premultiplied, pointFilter)) {
+                psp_gfx_dl_pool_park(ctx);
+                psp_gfx_dl_pool_load(ctx, index);
+                psp_gfx_dl_pool_select(ctx, index);
+                ctx->batchCombineMode = combineMode;
+                ctx->batchPrimitiveColor = primitiveColor;
+                ctx->batchEnvironmentColor = environmentColor;
+                sPspGfxDlPoolHits++;
+                return;
+            }
+        }
+
+        psp_gfx_dl_pool_park(ctx);
+        index = psp_gfx_dl_pool_acquire(ctx);
+        psp_gfx_dl_pool_select(ctx, index);
+        ctx->batchCount = 0;
+        ctx->batchTextureId = textureId;
+        ctx->batchTextureRef = textureRef;
+        ctx->batchTextureEnv = textureEnv;
+        ctx->batchTextureEnvColor = textureEnvColor;
+        ctx->batchCombineMode = combineMode;
+        ctx->batchPrimitiveColor = primitiveColor;
+        ctx->batchEnvironmentColor = environmentColor;
+        ctx->batchWrapS = wrapS;
+        ctx->batchWrapT = wrapT;
+        ctx->batchAlphaTest = alphaTest;
+        ctx->batchBlend = blend;
+        ctx->batchPremultiplied = premultiplied;
+        ctx->batchPointFilter = pointFilter;
+        psp_gfx_dl_pool_store(ctx, index);
+        return;
+    }
+
+    // unpoolable material, anything pooled was submitted earlier and draws first
+    if (sPspGfxDlPoolOpen != 0) {
+        psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+        sPspGfxDlPoolUnpooled++;
+    }
+#endif
     int textureIdChanged = (ctx->batchTextureId != textureId) ||
                            !psp_gfx_dl_texture_ref_equal(ctx->batchTextureRef, textureRef);
     int textureEnvChanged = ctx->batchTextureEnv != textureEnv;
@@ -1640,7 +1967,11 @@ static void psp_gfx_dl_set_batch_depth(PspGfxDlContext* ctx, int depthTest, int 
             }
         }
 #endif
-        psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+    #if PSP_BATCH_POOL
+    psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+#else
+    psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+#endif
     }
     ctx->batchDepthTest = depthTest;
     ctx->batchDepthWrite = depthWrite;
@@ -1722,7 +2053,7 @@ static void psp_gfx_dl_set_batch_transform(PspGfxDlContext* ctx, int pretransfor
                 PSP_PROFILE_TRIVIAL_REJECT_STATE_TRANSFORM_OR_PROJECTION);
         }
 #endif
-        psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_TRANSFORM_CHANGE);
+        psp_gfx_dl_flush_all(ctx, PSP_PROFILE_FLUSH_TRANSFORM_CHANGE);
     }
     if (!ctx->batchTransformSet || (ctx->batchPretransformed != pretransformed) ||
         (!pretransformed && (ctx->batchProjectionSerial != projectionSerial))) {
@@ -2059,11 +2390,16 @@ static void psp_gfx_dl_emit_clip_vertex_with_source(PspGfxDlContext* ctx, const 
 
     (void) source;
 
-    if (ctx->batchCount >= PSP_GFX_DL_BATCH_VERTICES) {
+    if (ctx->batchCount >= PSP_GFX_DL_BATCH_CAP) {
+#if PSP_BATCH_POOL
+        if (sPspGfxDlPoolCurrent >= 0) {
+            psp_gfx_dl_pool_rotate_full(ctx);
+        } else
+#endif
         psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_BUFFER_FULL);
     }
 
-    dst = &sPspGfxDlBatch[ctx->batchCount++];
+    dst = &PSP_GFX_DL_BATCH[ctx->batchCount++];
     psp_gfx_dl_mark_batch_component(ctx);
     psp_gfx_dl_mark_vertex_reuse_source(ctx, psp_gfx_dl_resolve_vertex_reuse_source(src, source));
 
@@ -2218,11 +2554,16 @@ static void psp_gfx_dl_emit_direct_vertex(PspGfxDlContext* ctx, const PspGfxDlVe
     u32 b;
     u32 a;
 
-    if (ctx->batchCount >= PSP_GFX_DL_BATCH_VERTICES) {
+    if (ctx->batchCount >= PSP_GFX_DL_BATCH_CAP) {
+#if PSP_BATCH_POOL
+        if (sPspGfxDlPoolCurrent >= 0) {
+            psp_gfx_dl_pool_rotate_full(ctx);
+        } else
+#endif
         psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_BUFFER_FULL);
     }
 
-    dst = &sPspGfxDlBatch[ctx->batchCount++];
+    dst = &PSP_GFX_DL_BATCH[ctx->batchCount++];
     psp_gfx_dl_mark_batch_component(ctx);
     psp_gfx_dl_mark_vertex_reuse_source(ctx, PSP_PROFILE_VERTEX_REUSE_SOURCE_DIRECT);
 
@@ -2291,7 +2632,7 @@ static void psp_gfx_dl_build_direct_vertex(PspGfxDlContext* ctx, const PspGfxDlV
 
 static void psp_gfx_dl_emit_direct_vertex_unchecked(PspGfxDlContext* ctx, const PspGfxDlVertex* src,
                                                     float uScale, float vScale) {
-    PspGfxPspglColorVertex* dst = &sPspGfxDlBatch[ctx->batchCount++];
+    PspGfxPspglColorVertex* dst = &PSP_GFX_DL_BATCH[ctx->batchCount++];
 
     psp_gfx_dl_mark_batch_component(ctx);
     psp_gfx_dl_mark_vertex_reuse_source(ctx, PSP_PROFILE_VERTEX_REUSE_SOURCE_DIRECT);
@@ -2427,11 +2768,11 @@ static int psp_gfx_dl_try_emit_tri2_direct_pair(PspGfxDlContext* ctx, u8 a0, u8 
         psp_gfx_dl_count_tri2_pair_fog_stats(ctx, vertices);
     }
 #endif
-    if (ctx->batchCount + 6 > PSP_GFX_DL_BATCH_VERTICES) {
+    if (ctx->batchCount + 6 > PSP_GFX_DL_BATCH_CAP) {
         bufferPreflush = 1;
         psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_BUFFER_FULL);
     }
-    psp_gfx_dl_build_direct_pair_colors(ctx, vertices, &sPspGfxDlBatch[ctx->batchCount]);
+    psp_gfx_dl_build_direct_pair_colors(ctx, vertices, &PSP_GFX_DL_BATCH[ctx->batchCount]);
     if (ctx->textureUploadWidth != 0) {
         uScale = 1.0f / (32.0f * (float) ctx->textureUploadWidth);
     }
@@ -2980,11 +3321,16 @@ static void psp_gfx_dl_emit_rect_vertex(PspGfxDlContext* ctx,
     u32 b;
     u32 a;
 
-    if (ctx->batchCount >= PSP_GFX_DL_BATCH_VERTICES) {
+    if (ctx->batchCount >= PSP_GFX_DL_BATCH_CAP) {
+#if PSP_BATCH_POOL
+        if (sPspGfxDlPoolCurrent >= 0) {
+            psp_gfx_dl_pool_rotate_full(ctx);
+        } else
+#endif
         psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_BUFFER_FULL);
     }
 
-    dst = &sPspGfxDlBatch[ctx->batchCount++];
+    dst = &PSP_GFX_DL_BATCH[ctx->batchCount++];
     psp_gfx_dl_mark_batch_component(ctx);
     psp_gfx_dl_mark_vertex_reuse_source(ctx, PSP_PROFILE_VERTEX_REUSE_SOURCE_RECTANGLE);
 
@@ -3183,7 +3529,7 @@ static void psp_gfx_dl_handle_fill_rectangle(PspGfxDlContext* ctx, const Gfx* gf
         return;
     }
 
-    psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+    psp_gfx_dl_flush_all(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
 #if PSP_RENDERER_DIAGNOSTICS
     if (activeBackgroundRect) {
         psp_gfx_dl_log_active_background_fill(ctx, color, primitiveFill, blend);
@@ -3207,14 +3553,18 @@ static void psp_gfx_dl_handle_set_scissor(PspGfxDlContext* ctx, const Gfx* gfx) 
     float lrx = (float) ((gfx->words.w1 >> 12) & 0xFFF) * 0.25f;
     float lry = (float) (gfx->words.w1 & 0xFFF) * 0.25f;
 
-    psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+    psp_gfx_dl_flush_all(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
     PspGfxPspgl_SetScissor(ulx, uly, lrx, lry);
 }
 
 static void psp_gfx_dl_handle_set_fog_color(PspGfxDlContext* ctx, const Gfx* gfx) {
+#if PSP_BATCH_POOL
+    psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+#else
     if (ctx->batchCount != 0) {
         psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
     }
+#endif
     ctx->fogR = psp_gfx_color_transfer_u8((u8) (gfx->words.w1 >> 24));
     ctx->fogG = psp_gfx_color_transfer_u8((u8) (gfx->words.w1 >> 16));
     ctx->fogB = psp_gfx_color_transfer_u8((u8) (gfx->words.w1 >> 8));
@@ -3638,9 +3988,13 @@ static void psp_gfx_dl_handle_move_word(PspGfxDlContext* ctx, const Gfx* gfx) {
         return;
     }
     if ((index == G_MW_FOG) && (offset == G_MWO_FOG)) {
-        if (ctx->batchCount != 0) {
-            psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
-        }
+    #if PSP_BATCH_POOL
+    psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+#else
+    if (ctx->batchCount != 0) {
+        psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+    }
+#endif
         ctx->fogMul = (s16) (gfx->words.w1 >> 16);
         ctx->fogOffset = (s16) gfx->words.w1;
         psp_gfx_dl_mark_effective_fog_dirty(ctx);
@@ -3674,7 +4028,11 @@ static void psp_gfx_dl_handle_other_mode_l(PspGfxDlContext* ctx, const Gfx* gfx)
     if ((ctx->batchCount != 0) &&
         (((ctx->otherModeL ^ gfx->words.w1) & mask &
           (0xC0000000U | 3U | CVG_X_ALPHA | FORCE_BL | Z_UPD)) != 0)) {
+    #if PSP_BATCH_POOL
+    psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+#else
         psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+#endif
     }
     ctx->otherModeL = (ctx->otherModeL & ~mask) | (gfx->words.w1 & mask);
     psp_gfx_dl_mark_effective_state_dirty(ctx);
@@ -3733,9 +4091,13 @@ static void psp_gfx_dl_handle_set_texture_image(PspGfxDlContext* ctx, const Gfx*
 static void psp_gfx_dl_handle_set_color_image(PspGfxDlContext* ctx, const Gfx* gfx) {
     const void* image = psp_gfx_dl_resolve_ptr(ctx, gfx->words.w1);
 
+#if PSP_BATCH_POOL
+    psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+#else
     if (ctx->batchCount != 0) {
         psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
     }
+#endif
     ctx->colorImageFormat = (gfx->words.w0 >> 21) & 0x7;
     ctx->colorImageSize = (gfx->words.w0 >> 19) & 0x3;
     ctx->colorImageWidth = (gfx->words.w0 & 0xFFF) + 1U;
@@ -4020,7 +4382,11 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
 
         if ((opcode == G_NOOP) && PSP_RENDERER_DL_MARKER_MATCH(cmd->words.w1)) {
             if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_STARFIELD) {
+            #if PSP_BATCH_POOL
+    psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+#else
                 psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+#endif
                 PspRenderer_DrawPendingStarfield();
                 continue;
             }
@@ -4394,6 +4760,22 @@ static void psp_gfx_dl_material_corpus_report(u32 taskIndex) {
 }
 #endif
 
+#if PSP_BATCH_POOL && PSP_LOG_ENABLED
+static void psp_gfx_dl_pool_report(u32 taskIndex) {
+    char line[320];
+
+    snprintf(line, sizeof(line),
+             "[pspgl-pool] task=%lu slots=%u cap=%u hits=%lu opens=%lu evictions=%lu capFlush=%lu "
+             "drained=%lu unpooled=%lu peakOpen=%lu",
+             (unsigned long) taskIndex, PSP_BATCH_POOL_SLOTS, PSP_BATCH_POOL_VERTICES,
+             (unsigned long) sPspGfxDlPoolHits, (unsigned long) sPspGfxDlPoolOpens,
+             (unsigned long) sPspGfxDlPoolEvictions, (unsigned long) sPspGfxDlPoolCapacityFlushes,
+             (unsigned long) sPspGfxDlPoolDrained, (unsigned long) sPspGfxDlPoolUnpooled,
+             (unsigned long) sPspGfxDlPoolPeakOpen);
+    PspPlatform_LogLine(line);
+}
+#endif
+
 int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
     PspGfxDlContext* ctx = &sPspGfxDlContext;
 #if PSP_LOG_ENABLED || PSP_RENDERER_DIAGNOSTICS
@@ -4403,6 +4785,9 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
 
     PspGfxPspgl_InitColorTransfer();
     psp_gfx_dl_reset_context(ctx);
+#if PSP_MERGE_ANALYSIS
+    PspGfxMerge_ResetTask();
+#endif
     ctx->taskIndex = taskIndex;
     PspProfiler_CountDisplayListTask();
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_DL_TRAVERSAL);
@@ -4410,9 +4795,21 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
 #if PROFILE_TRIVIAL_REJECTS
     psp_gfx_dl_trivial_reject_scope_clear_for_task(ctx);
 #endif
-    psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_END_OF_TASK);
+    psp_gfx_dl_flush_all(ctx, PSP_PROFILE_FLUSH_END_OF_TASK);
     PspGfxPspgl_ClearScissor();
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_DL_TRAVERSAL);
+
+#if PSP_BATCH_POOL && PSP_LOG_ENABLED
+    if ((taskIndex != 0) && ((taskIndex % 300) == 0)) {
+        psp_gfx_dl_pool_report(taskIndex);
+    }
+#endif
+#if PSP_MERGE_ANALYSIS
+    PspGfxMerge_AnalyseTask();
+    if ((taskIndex != 0) && ((taskIndex % 300) == 0)) {
+        PspGfxMerge_Report(taskIndex);
+    }
+#endif
 
     if (outStats != NULL) {
         *outStats = ctx->stats;
