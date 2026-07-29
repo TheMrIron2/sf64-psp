@@ -27,11 +27,6 @@ PSP_RENDERER_C_FILES := \
     src/psp/gfx/gfx_pspgl.c \
     src/psp/renderer_pspgl.c
 
-# Draw-merge potential analysis, only built for that diagnostic
-ifeq ($(PSP_MERGE_ANALYSIS),1)
-PSP_RENDERER_C_FILES += src/psp/gfx/gfx_psp_merge.c
-endif
-
 PSP_AUDIO_C_FILES := \
     src/audio/audio_context.c \
     src/audio/audio_effects.c \

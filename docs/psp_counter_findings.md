@@ -239,15 +239,9 @@ match the counter build — but none of its timings are usable.
 
 ## What this changes
 
-1. **Merge draws across texture binds.** The largest measured lever by a wide
-   margin: 174 of 177 draws per frame at the title exist only because the bound
-   texture changed, and no other batch state varies at all. Sorting an
-   order-safe run of geometry by texture, or atlasing, targets ~50 us per draw
-   removed. Halving title draw count is worth ~4.4 ms/frame.
-   Measure the merge potential first — count how many of the 174 breaks would
-   coalesce under a texture-sorted order within runs of uniform blend and depth
-   state — before building the sort. Wrap mode constrains atlasing, since 28% of
-   flushes carry a wrap difference.
+1. ~~**Merge draws across texture binds.**~~ **DONE, 2.25 ms/frame.** 174 of 177
+   draws per frame at the title existed only because the bound texture changed.
+   Shipped as the open batch pool; see Finding 9.
 2. **Raise the texture cache capacities.** Corneria's RGBA16 cache holds 96
    against 102 unique keys and the converted cache 64 against 117, with
    near-total reuse after eviction. Cheap, and it removes the only real upload
@@ -311,11 +305,43 @@ title frame and a largest group of 22, a pool of ~48 captures nearly all of the
 measured potential with bounded memory and no change to the interpreter's
 streaming structure.
 
-### Implementation result
+### Implementation result: ACCEPTED
 
-Built as `PSP_BATCH_POOL=1` (48 slots x 192 vertices by default,
-`PSP_BATCH_POOL_SLOTS` / `PSP_BATCH_POOL_VERTICES`). Release is byte-identical
-with it compiled out, verified against a pristine build.
+Shipped unconditionally, 64 slots x 192 vertices. The accepted release binary is
+byte-identical to the candidate that was measured.
+
+**Title frame time 24.2-24.3 ms -> 22.0 ms, a 2.25 ms improvement** — 22x the
+0.1 ms acceptance bar and 7x the noise band that reverted the two earlier
+candidates. Counters at the title, per frame:
+
+| counter | before | after | |
+| --- | ---: | ---: | --- |
+| `vfpu_inst` | 142,610 | 142,610 | identical, vertex work untouched |
+| `uncached_store` | 181,797 | 180,314 | -0.8%, same vertex bytes written |
+| **`i_miss`** | 28,898 | **16,741** | **-42%**, the predicted mechanism |
+| `memory_stall` | 3.02 M | 2.13 M | -30% |
+| `bus_access` | 3.64 M | 2.81 M | -23% |
+| `cpuck` | 8.21 M | 7.06 M | -14% (24.6 -> 21.2 ms) |
+
+The two unchanged counters are what make this conclusive. `vfpu_inst` matching
+to the digit proves the vertex workload is untouched, and flat `uncached_store`
+proves no data movement was removed. The entire saving is fewer draws, and the
+42% drop in instruction-cache misses is the ~85 misses per draw the counters
+predicted, multiplied by 88 fewer draws.
+
+`task` + `present` is unchanged at 33.2 ms, so the saving became headroom rather
+than framerate: still 30 fps, now with 11.5 ms idle in the swap instead of 7.9.
+
+The per-draw model predicted ~4.4 ms and delivered 2.25 ms, so it was optimistic
+by about half. Direction and mechanism are confirmed; treat the 50 us per draw
+as an upper bound in future estimates.
+
+Caveat for the record: the two counter captures carry different `sf64_commit`
+(`9506f34d` vs `32a9885f`), so the counter magnitudes are directional rather
+than a clean paired control. The 2.25 ms frame-time delta is same-tree and is
+the quotable result.
+
+#### The bug that nearly shipped
 
 The first hardware attempt rendered 3D correctly but lost most 2D: the drain
 path zeroed the standalone batch instead of emitting it, so every unpoolable
@@ -350,10 +376,10 @@ counter capture showing the cost actually fell.
   vertex). Merging removes draws, not vertices, so only the fixed part is
   recovered — which is what the estimates above use.
 
-## Measuring the merge potential
+## Appendix: how the merge potential was measured
 
-`make psp PSP_MERGE_ANALYSIS=1` builds the diagnostic that answers whether
-recommendation 1 is worth building. It records every batch flush's full material
+`PSP_MERGE_ANALYSIS` was a temporary diagnostic, removed once it had answered
+its question. It recorded every batch flush's full material
 key, partitions each task into runs that may safely be reordered, counts the
 distinct keys per run, and reports the draw count that would remain.
 
@@ -368,7 +394,7 @@ S/T, alpha test, blend, premultiply, depth test/write, fog and its colour and
 range, projection serial, pretransformed and point filter. Two batches merge
 only if all of it matches.
 
-It reports through the log every 300 tasks:
+It reported through the log every 300 tasks:
 
 ```text
 [pspgl-merge] task= tasks= flushes= potential= savedPermille= drawsPerTaskX1000=
@@ -377,7 +403,7 @@ It reports through the log every 300 tasks:
 [pspgl-merge-runs] len:count buckets, powers of two
 ```
 
-Read `savedPermille` first — it is the answer. `largestGroup` shows the best
+`savedPermille` was the answer. `largestGroup` shows the best
 case single merge, and the run histogram shows whether reorderable runs are long
 enough to be worth sorting. `PSP_MERGE_ANALYSIS=1` forces `PSP_LOG=1`, so output
 lands in `sf64_psp.log` on the first writable root.
@@ -388,10 +414,11 @@ estimate does not model that and will read slightly high. And batches past 512
 per task count as unmergeable, which biases the estimate low; `overflowTasks`
 reports whether that happened at all.
 
-The analysis lives in `src/psp/gfx/gfx_psp_merge.c`, separated from the renderer
-so it can be unit-tested on the host. Nine cases covering identical keys,
+The analysis lived in `src/psp/gfx/gfx_psp_merge.c`, separated from the renderer
+so it could be unit-tested on the host; nine cases covering identical keys,
 distinct keys, alternating pairs, leading/trailing/interior barriers, all
-barriers, the empty task and cap overflow all pass.
+barriers, the empty task and cap overflow all passed. Recoverable from git if a
+future batching question needs it.
 
 ## Caveats
 
