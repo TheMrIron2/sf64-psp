@@ -336,6 +336,35 @@ The per-draw model predicted ~4.4 ms and delivered 2.25 ms, so it was optimistic
 by about half. Direction and mechanism are confirmed; treat the 50 us per draw
 as an upper bound in future estimates.
 
+**Corneria confirms it independently**, on a section 1-3% *heavier* than the
+baseline capture (more commands, loaded and submitted vertices):
+
+| corneria, per frame | before | after | |
+| --- | ---: | ---: | --- |
+| task | 21.59 ms | 19.39 ms | **-2.19 ms** |
+| cpu cycles | 7.00 M | 6.29 M | -10.2% |
+| memory stall | 2.87 M | 2.13 M | -25.7% |
+| `i_miss` | 30,865 | 22,653 | -26.6% |
+| `bus_access` | 3.03 M | 2.35 M | -22.5% |
+
+Normalised for the heavier workload the controls are tighter still:
+**`vfpu_inst` per loaded vertex 56.58 -> 56.50 (-0.13%)** and **`uncached_store`
+per submitted vertex 27.48 -> 27.38 (-0.4%)**, while cycles per submitted vertex
+fall 11.8% and I-cache misses per submitted vertex fall 27.9%. Arithmetic and
+data movement per unit of work are unchanged to within a fraction of a percent;
+only the draw count moved.
+
+Stalls fall from 58.8% to 54.4% of cycles at corneria, memory alone from 41.0%
+to 33.9%. The task remains 97.4% CPU-bound, so the shape of the problem is
+unchanged — there is simply less of it.
+
+**The `light` menu scene is not comparable**: its pre-pool capture was taken on
+the scoped build, which inflates the frame, and the post-pool capture is
+unscoped. The merge analysis predicted ~0% for menu scenes because they are ~95%
+blend barriers, and nothing here contradicts that. Closing the gap would need a
+fresh unscoped capture of the pre-pool binary; the scene has 76% headroom, so it
+is not worth the run.
+
 Caveat for the record: the two counter captures carry different `sf64_commit`
 (`9506f34d` vs `32a9885f`), so the counter magnitudes are directional rather
 than a clean paired control. The 2.25 ms frame-time delta is same-tree and is
