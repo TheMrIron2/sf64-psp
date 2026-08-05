@@ -25,6 +25,7 @@ PROFILE_FRAME_TRACE ?= 0
 PROFILE_FRAME_TRACE_FRAMES ?= 240
 PROFILE_COMPONENTS ?= 0
 PROFILE_TRIVIAL_REJECTS ?= 0
+PROFILE_VERTEX_REUSE ?= 0
 PROFILE_HW_COUNTERS ?= 0
 PROFILE_HW_COUNTER_SCOPES ?= 0
 PROFILE_HW_COUNTER_FRAMES ?= 300
@@ -191,6 +192,11 @@ ifneq ($(PROFILE_PHASES),1)
 $(error PROFILE_TRIVIAL_REJECTS=1 requires PROFILE_PHASES=1.)
 endif
 endif
+ifeq ($(PROFILE_VERTEX_REUSE),1)
+ifneq ($(PROFILE_PHASES),1)
+$(error PROFILE_VERTEX_REUSE=1 requires PROFILE_PHASES=1.)
+endif
+endif
 ifneq ($(PROFILE_HW_COUNTERS),0)
 ifneq ($(PROFILE_HW_COUNTERS),1)
 $(error PROFILE_HW_COUNTERS must be 0 or 1)
@@ -252,6 +258,7 @@ CFLAGS += -DPROFILE_FRAME_TRACE=$(if $(filter 1,$(PROFILE_FRAME_TRACE)),1,0)
 CFLAGS += -DPROFILE_FRAME_TRACE_FRAMES=$(PROFILE_FRAME_TRACE_FRAMES)
 CFLAGS += -DPROFILE_COMPONENTS=$(if $(filter 1,$(PROFILE_COMPONENTS)),1,0)
 CFLAGS += -DPROFILE_TRIVIAL_REJECTS=$(if $(filter 1,$(PROFILE_TRIVIAL_REJECTS)),1,0)
+CFLAGS += -DPROFILE_VERTEX_REUSE=$(if $(filter 1,$(PROFILE_VERTEX_REUSE)),1,0)
 CFLAGS += -DPROFILE_HW_COUNTERS=$(if $(filter 1,$(PROFILE_HW_COUNTERS)),1,0)
 CFLAGS += -DPROFILE_HW_COUNTER_SCOPES=$(if $(filter 1,$(PROFILE_HW_COUNTER_SCOPES)),1,0)
 CFLAGS += -DPROFILE_HW_COUNTER_FRAMES=$(PROFILE_HW_COUNTER_FRAMES)
@@ -415,10 +422,10 @@ psp: $(PSP_EBOOT) $(PROFILE_OUTPUTS)
 bootstrap:
 	$(MAKE) PSP_FULL=0 BUILD_DIR=build/psp-bootstrap psp
 
-psp-profile-gprof psp-profile-phases psp-profile-combined psp-profile-builds psp-profile-artifacts: PSP_FPS_OVERLAY=0
-psp-profile-gprof psp-profile-phases psp-profile-combined psp-profile-builds psp-profile-artifacts: PSP_LOG=0
-psp-profile-gprof psp-profile-phases psp-profile-combined psp-profile-builds psp-profile-artifacts: PSP_TRACE=0
-psp-profile-gprof psp-profile-phases psp-profile-combined psp-profile-builds psp-profile-artifacts: PSP_RENDERER_DIAGNOSTICS=0
+psp-profile-gprof psp-profile-phases psp-profile-combined psp-profile-builds psp-profile-artifacts psp-profile-vertex-reuse: PSP_FPS_OVERLAY=0
+psp-profile-gprof psp-profile-phases psp-profile-combined psp-profile-builds psp-profile-artifacts psp-profile-vertex-reuse: PSP_LOG=0
+psp-profile-gprof psp-profile-phases psp-profile-combined psp-profile-builds psp-profile-artifacts psp-profile-vertex-reuse: PSP_TRACE=0
+psp-profile-gprof psp-profile-phases psp-profile-combined psp-profile-builds psp-profile-artifacts psp-profile-vertex-reuse: PSP_RENDERER_DIAGNOSTICS=0
 
 psp-profile-gprof:
 	$(MAKE) PROFILE_PSP=1 PROFILE_PHASES=0 BUILD_DIR=build/psp-profile-gprof PSP_FPS_OVERLAY=$(PSP_FPS_OVERLAY) PSP_LOG=$(PSP_LOG) PSP_TRACE=$(PSP_TRACE) PSP_RENDERER_DIAGNOSTICS=$(PSP_RENDERER_DIAGNOSTICS) psp
@@ -428,6 +435,9 @@ psp-profile-phases:
 
 psp-profile-combined:
 	$(MAKE) PROFILE_PSP=1 PROFILE_PHASES=1 BUILD_DIR=build/psp-profile-combined PSP_FPS_OVERLAY=$(PSP_FPS_OVERLAY) PSP_LOG=$(PSP_LOG) PSP_TRACE=$(PSP_TRACE) PSP_RENDERER_DIAGNOSTICS=$(PSP_RENDERER_DIAGNOSTICS) psp
+
+psp-profile-vertex-reuse:
+	$(MAKE) PROFILE_PSP=0 PROFILE_PHASES=1 PROFILE_COMPONENTS=0 PROFILE_VERTEX_REUSE=1 BUILD_DIR=build/psp-profile-vertex-reuse PSP_FPS_OVERLAY=$(PSP_FPS_OVERLAY) PSP_LOG=$(PSP_LOG) PSP_TRACE=$(PSP_TRACE) PSP_RENDERER_DIAGNOSTICS=$(PSP_RENDERER_DIAGNOSTICS) PSP_AUDIO=$(PSP_AUDIO) psp
 
 # Hardware-counter capture build (PSP_Hardware_Audit.md, Primary Finding 1).
 # Deliberately keeps phase profiling, the FPS overlay and renderer diagnostics
@@ -501,6 +511,7 @@ $(PROFILE_METADATA): $(PSP_EBOOT) $(PSP_ELF) $(PSP_MAP) Makefile
 		printf 'PROFILE_FRAME_TRACE_FRAMES=%s\n' '$(PROFILE_FRAME_TRACE_FRAMES)'; \
 		printf 'PROFILE_COMPONENTS=%s\n' '$(PROFILE_COMPONENTS)'; \
 		printf 'PROFILE_TRIVIAL_REJECTS=%s\n' '$(PROFILE_TRIVIAL_REJECTS)'; \
+		printf 'PROFILE_VERTEX_REUSE=%s\n' '$(PROFILE_VERTEX_REUSE)'; \
 		printf 'PROFILE_HW_COUNTERS=%s\n' '$(PROFILE_HW_COUNTERS)'; \
 		printf 'PROFILE_HW_COUNTER_SCOPES=%s\n' '$(PROFILE_HW_COUNTER_SCOPES)'; \
 		printf 'PROFILE_HW_COUNTER_FRAMES=%s\n' '$(PROFILE_HW_COUNTER_FRAMES)'; \
@@ -516,7 +527,7 @@ $(PROFILE_METADATA): $(PSP_EBOOT) $(PSP_ELF) $(PSP_MAP) Makefile
 		printf 'PSP_RENDERER_DIAGNOSTICS=%s\n' '$(PSP_RENDERER_DIAGNOSTICS)'; \
 		printf 'cpu_clock_runtime=recorded in profile-NNN.txt on PSP\n'; \
 		printf 'bus_clock_runtime=recorded in profile-NNN.txt on PSP\n'; \
-		printf 'build_command=make %s BUILD_DIR=%s PROFILE_PSP=%s PROFILE_PHASES=%s PROFILE_CAPTURE_FRAMES=%s PROFILE_FRAME_TRACE=%s PROFILE_FRAME_TRACE_FRAMES=%s PROFILE_COMPONENTS=%s PROFILE_TRIVIAL_REJECTS=%s PROFILE_HW_COUNTERS=$(PROFILE_HW_COUNTERS) PROFILE_HW_COUNTER_SCOPES=$(PROFILE_HW_COUNTER_SCOPES) PROFILE_HW_COUNTER_FRAMES=$(PROFILE_HW_COUNTER_FRAMES) PROFILE_HW_COUNTER_WARMUP_FRAMES=$(PROFILE_HW_COUNTER_WARMUP_FRAMES) USE_LOCAL_PSPGL=%s BATCH_STATE_CACHE=%s VTX_FUSED_TNL=%s PSP_FLOAT_MTX=%s PSP_AUDIO=%s PSP_FPS_OVERLAY=%s PSP_LOG=%s PSP_TRACE=%s PSP_RENDERER_DIAGNOSTICS=%s psp\n' '$(MAKECMDGOALS)' '$(BUILD_DIR)' '$(PROFILE_PSP)' '$(PROFILE_PHASES)' '$(PROFILE_CAPTURE_FRAMES)' '$(PROFILE_FRAME_TRACE)' '$(PROFILE_FRAME_TRACE_FRAMES)' '$(PROFILE_COMPONENTS)' '$(PROFILE_TRIVIAL_REJECTS)' '$(USE_LOCAL_PSPGL)' '$(BATCH_STATE_CACHE)' '$(VTX_FUSED_TNL)' '$(PSP_FLOAT_MTX)' '$(PSP_AUDIO)' '$(PSP_FPS_OVERLAY)' '$(PSP_LOG)' '$(PSP_TRACE)' '$(PSP_RENDERER_DIAGNOSTICS)'; \
+		printf 'build_command=make %s BUILD_DIR=%s PROFILE_PSP=%s PROFILE_PHASES=%s PROFILE_CAPTURE_FRAMES=%s PROFILE_FRAME_TRACE=%s PROFILE_FRAME_TRACE_FRAMES=%s PROFILE_COMPONENTS=%s PROFILE_TRIVIAL_REJECTS=%s PROFILE_VERTEX_REUSE=%s PROFILE_HW_COUNTERS=$(PROFILE_HW_COUNTERS) PROFILE_HW_COUNTER_SCOPES=$(PROFILE_HW_COUNTER_SCOPES) PROFILE_HW_COUNTER_FRAMES=$(PROFILE_HW_COUNTER_FRAMES) PROFILE_HW_COUNTER_WARMUP_FRAMES=$(PROFILE_HW_COUNTER_WARMUP_FRAMES) USE_LOCAL_PSPGL=%s BATCH_STATE_CACHE=%s VTX_FUSED_TNL=%s PSP_FLOAT_MTX=%s PSP_AUDIO=%s PSP_FPS_OVERLAY=%s PSP_LOG=%s PSP_TRACE=%s PSP_RENDERER_DIAGNOSTICS=%s psp\n' '$(MAKECMDGOALS)' '$(BUILD_DIR)' '$(PROFILE_PSP)' '$(PROFILE_PHASES)' '$(PROFILE_CAPTURE_FRAMES)' '$(PROFILE_FRAME_TRACE)' '$(PROFILE_FRAME_TRACE_FRAMES)' '$(PROFILE_COMPONENTS)' '$(PROFILE_TRIVIAL_REJECTS)' '$(PROFILE_VERTEX_REUSE)' '$(USE_LOCAL_PSPGL)' '$(BATCH_STATE_CACHE)' '$(VTX_FUSED_TNL)' '$(PSP_FLOAT_MTX)' '$(PSP_AUDIO)' '$(PSP_FPS_OVERLAY)' '$(PSP_LOG)' '$(PSP_TRACE)' '$(PSP_RENDERER_DIAGNOSTICS)'; \
 	} > $@
 
 $(PROFILE_BUILD_COMMANDS): $(PROFILE_METADATA)
@@ -607,4 +618,4 @@ resolve-queue-trace:
 
 -include $(DEP_FILES)
 
-.PHONY: tools-init toolchain torch init decompress extract assets clean-generated resolve-queue-trace psp-profile-gprof psp-profile-phases psp-profile-combined psp-profile-builds psp-profile-artifacts psp-profile-report psp-profile-hw-counters FORCE
+.PHONY: tools-init toolchain torch init decompress extract assets clean-generated resolve-queue-trace psp-profile-gprof psp-profile-phases psp-profile-combined psp-profile-builds psp-profile-artifacts psp-profile-report psp-profile-hw-counters psp-profile-vertex-reuse FORCE

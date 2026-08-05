@@ -43,6 +43,9 @@ extern int gDrawMode;
 #ifndef PROFILE_TRIVIAL_REJECTS
 #define PROFILE_TRIVIAL_REJECTS 0
 #endif
+#ifndef PROFILE_VERTEX_REUSE
+#define PROFILE_VERTEX_REUSE 0
+#endif
 #ifndef PROFILE_FRAME_TRACE_FRAMES
 #define PROFILE_FRAME_TRACE_FRAMES 240
 #endif
@@ -82,6 +85,9 @@ extern int gDrawMode;
 #ifndef PROFILE_CAPTURE_FRAMES
 #define PROFILE_CAPTURE_FRAMES 300
 #endif
+
+#define PSP_PROFILE_VERTEX_PACKET_BYTES 24
+#define PSP_PROFILE_VERTEX_REUSE_HASH_CAPACITY 8192
 
 #define PSP_PROFILE_DIR_MS0 "ms0:/PSP/GAME/SF64PROFILE"
 #define PSP_PROFILE_DIR_EF0 "ef0:/PSP/GAME/SF64PROFILE"
@@ -167,6 +173,48 @@ typedef struct {
     u32 currentEntries;
     u32 peakEntries;
 } PspProfileTextureCacheState;
+
+#if PROFILE_VERTEX_REUSE
+typedef struct {
+    u64 batches;
+    u64 vertices;
+    u64 uniqueVertices;
+    u64 duplicateVertices;
+    u64 identityVertices;
+    u64 uniqueIdentities;
+    u64 identityRepeats;
+    u64 identityExactRepeats;
+    u64 identityMismatchRepeats;
+    u64 directBytes;
+    u64 indexedBytes;
+    u64 hybridBytes;
+    u64 hybridSavings;
+    u64 indexedWinningBatches;
+    u64 tableOverflows;
+    u64 identityTableOverflows;
+    u32 maxBatchVertices;
+    u32 maxUniqueVertices;
+} PspProfileVertexReuseCounters;
+
+typedef struct {
+    u32 stamp;
+    u32 hash;
+    u32 firstIndex;
+} PspProfileVertexReuseHashEntry;
+
+typedef struct {
+    u32 stamp;
+    u32 identity;
+    u32 firstIndex;
+} PspProfileVertexReuseIdentityEntry;
+
+typedef enum {
+    PSP_PROFILE_VERTEX_REUSE_ALL,
+    PSP_PROFILE_VERTEX_REUSE_DIRECT_STREAM,
+    PSP_PROFILE_VERTEX_REUSE_STAGED,
+    PSP_PROFILE_VERTEX_REUSE_PATH_COUNT
+} PspProfileVertexReusePath;
+#endif
 
 typedef struct {
     u64 displayListTasks;
@@ -477,6 +525,12 @@ static u32 sTri2PairFirstMismatchSeen;
 static u32 sTri2PairFirstMismatchVertex;
 static u32 sTri2PairFirstMismatchFieldMask;
 static u32 sTri2PairFirstMismatchBatchDelta;
+#if PROFILE_VERTEX_REUSE
+static PspProfileVertexReuseCounters sVertexReuse[PSP_PROFILE_VERTEX_REUSE_PATH_COUNT];
+static PspProfileVertexReuseHashEntry sVertexReuseHash[PSP_PROFILE_VERTEX_REUSE_HASH_CAPACITY];
+static PspProfileVertexReuseIdentityEntry sVertexReuseIdentityHash[PSP_PROFILE_VERTEX_REUSE_HASH_CAPACITY];
+static u32 sVertexReuseHashStamp;
+#endif
 #if PROFILE_COMPONENTS
 static PspProfileComponentState sComponent[PSP_PROFILE_COMPONENT_COUNT];
 static u32 sComponentCurrent;
@@ -680,6 +734,9 @@ PSP_PROFILE_ATTR static void psp_profiler_reset_phase_capture(void) {
         sThreadPhase[i].threadId = -1;
     }
     psp_profiler_zero(&sCounters, sizeof(sCounters));
+#if PROFILE_VERTEX_REUSE
+    psp_profiler_zero(sVertexReuse, sizeof(sVertexReuse));
+#endif
     sTri2PairFirstMismatchSeen = 0;
     sTri2PairFirstMismatchVertex = 0;
     sTri2PairFirstMismatchFieldMask = 0;
@@ -1738,10 +1795,10 @@ static void psp_profiler_write_phase_files(u32 slot) {
     }
 
     snprintf(line, sizeof(line),
-             "SF64 git SHA: %s\nn64psp submodule SHA: %s\nPSPGL source mode: %s\nPSPGL git SHA: %s\nPSPGL worktree: %s\nPerfect Dark reference SHA: %s\ncompiler: %s\noptimisation flags: %s\nPROFILE_PSP: %d\nPROFILE_PHASES: %d\nPROFILE_TRIVIAL_REJECTS: %d\nBATCH_STATE_CACHE: %d\nVTX_FUSED_TNL: %d\nPSP_FLOAT_MTX: %d\nCPU clock: %lu\nbus clock: %lu\ncapture slot: %lu\nrequested frame count: %d\nactual frame count: %lu\ntimer overhead us: %llu\n\n",
+             "SF64 git SHA: %s\nn64psp submodule SHA: %s\nPSPGL source mode: %s\nPSPGL git SHA: %s\nPSPGL worktree: %s\nPerfect Dark reference SHA: %s\ncompiler: %s\noptimisation flags: %s\nPROFILE_PSP: %d\nPROFILE_PHASES: %d\nPROFILE_TRIVIAL_REJECTS: %d\nPROFILE_VERTEX_REUSE: %d\nBATCH_STATE_CACHE: %d\nVTX_FUSED_TNL: %d\nPSP_FLOAT_MTX: %d\nCPU clock: %lu\nbus clock: %lu\ncapture slot: %lu\nrequested frame count: %d\nactual frame count: %lu\ntimer overhead us: %llu\n\n",
              SF64_GIT_SHA, N64PSP_GIT_SHA, PSPGL_SOURCE_MODE, PSPGL_GIT_SHA, PSPGL_GIT_DIRTY,
              PERFECT_DARK_PSP_SHA, BUILD_COMPILER, BUILD_OPT_FLAGS,
-             PROFILE_GPROF, PROFILE_PHASES, PROFILE_TRIVIAL_REJECTS,
+             PROFILE_GPROF, PROFILE_PHASES, PROFILE_TRIVIAL_REJECTS, PROFILE_VERTEX_REUSE,
              BATCH_STATE_CACHE, VTX_FUSED_TNL, PSP_FLOAT_MTX,
              (unsigned long) scePowerGetCpuClockFrequency(),
              (unsigned long) scePowerGetBusClockFrequency(), (unsigned long) slot, PROFILE_CAPTURE_FRAMES,
@@ -1868,6 +1925,61 @@ static void psp_profiler_write_phase_files(u32 slot) {
              sCounters.vertexStreamPageSwitches, sCounters.vertexStreamCapacityBytes,
              sCounters.vertexStreamHighWaterBytes);
     psp_profiler_write_all(fd, line);
+#if PROFILE_VERTEX_REUSE
+    psp_profiler_write_all(fd,
+                           "\n[batch vertex reuse]\npath,batches,vertices,unique_vertices,duplicate_vertices,duplicate_permille,direct_bytes,u16_indexed_bytes,u16_hybrid_bytes,u16_hybrid_savings,savings_permille,indexed_winning_batches,max_batch_vertices,max_unique_vertices,table_overflows\n");
+    for (i = 0; i < PSP_PROFILE_VERTEX_REUSE_PATH_COUNT; i++) {
+        static const char* names[PSP_PROFILE_VERTEX_REUSE_PATH_COUNT] = {
+            "all", "direct_stream", "staged"
+        };
+        const PspProfileVertexReuseCounters* reuse = &sVertexReuse[i];
+        u64 duplicatePermille = reuse->vertices ? (reuse->duplicateVertices * 1000) / reuse->vertices : 0;
+        u64 savingsPermille = reuse->directBytes ? (reuse->hybridSavings * 1000) / reuse->directBytes : 0;
+
+        snprintf(line, sizeof(line), "%s,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%lu,%lu,%llu\n",
+                 names[i], reuse->batches, reuse->vertices, reuse->uniqueVertices,
+                 reuse->duplicateVertices, duplicatePermille, reuse->directBytes,
+                 reuse->indexedBytes, reuse->hybridBytes, reuse->hybridSavings,
+                 savingsPermille, reuse->indexedWinningBatches,
+                 (unsigned long) reuse->maxBatchVertices,
+                 (unsigned long) reuse->maxUniqueVertices, reuse->tableOverflows);
+        psp_profiler_write_all(fd, line);
+    }
+    psp_profiler_write_all(fd,
+                           "\n[batch source identity]\npath,identity_vertices,unique_identities,identity_repeats,exact_repeats,mismatch_repeats,exact_repeat_permille,duplicate_coverage_permille,table_overflows\n");
+    for (i = 0; i < PSP_PROFILE_VERTEX_REUSE_PATH_COUNT; i++) {
+        static const char* names[PSP_PROFILE_VERTEX_REUSE_PATH_COUNT] = {
+            "all", "direct_stream", "staged"
+        };
+        const PspProfileVertexReuseCounters* reuse = &sVertexReuse[i];
+        u64 exactRepeatPermille =
+            reuse->identityVertices ? (reuse->identityExactRepeats * 1000) / reuse->identityVertices : 0;
+        u64 duplicateCoveragePermille =
+            reuse->duplicateVertices ? (reuse->identityExactRepeats * 1000) / reuse->duplicateVertices : 0;
+
+        snprintf(line, sizeof(line), "%s,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu\n",
+                 names[i], reuse->identityVertices, reuse->uniqueIdentities, reuse->identityRepeats,
+                 reuse->identityExactRepeats, reuse->identityMismatchRepeats, exactRepeatPermille,
+                 duplicateCoveragePermille, reuse->identityTableOverflows);
+        psp_profiler_write_all(fd, line);
+    }
+    snprintf(line, sizeof(line),
+             "\n[batch vertex reuse invariants]\nanalysed_batches,%llu\nbatch_flushes,%llu\nbatches_match,%lu\nanalysed_vertices,%llu\nsubmitted_vertices,%llu\nvertices_match,%lu\npath_batches_match,%lu\npath_vertices_match,%lu\nidentity_repeats_match,%lu\n",
+             sVertexReuse[PSP_PROFILE_VERTEX_REUSE_ALL].batches, sCounters.batchFlushes,
+             (unsigned long) (sVertexReuse[PSP_PROFILE_VERTEX_REUSE_ALL].batches == sCounters.batchFlushes),
+             sVertexReuse[PSP_PROFILE_VERTEX_REUSE_ALL].vertices, sCounters.verticesSubmitted,
+             (unsigned long) (sVertexReuse[PSP_PROFILE_VERTEX_REUSE_ALL].vertices == sCounters.verticesSubmitted),
+             (unsigned long) (sVertexReuse[PSP_PROFILE_VERTEX_REUSE_ALL].batches ==
+                              (sVertexReuse[PSP_PROFILE_VERTEX_REUSE_DIRECT_STREAM].batches +
+                               sVertexReuse[PSP_PROFILE_VERTEX_REUSE_STAGED].batches)),
+             (unsigned long) (sVertexReuse[PSP_PROFILE_VERTEX_REUSE_ALL].vertices ==
+                              (sVertexReuse[PSP_PROFILE_VERTEX_REUSE_DIRECT_STREAM].vertices +
+                               sVertexReuse[PSP_PROFILE_VERTEX_REUSE_STAGED].vertices)),
+             (unsigned long) (sVertexReuse[PSP_PROFILE_VERTEX_REUSE_ALL].identityRepeats ==
+                              (sVertexReuse[PSP_PROFILE_VERTEX_REUSE_ALL].identityExactRepeats +
+                               sVertexReuse[PSP_PROFILE_VERTEX_REUSE_ALL].identityMismatchRepeats)));
+    psp_profiler_write_all(fd, line);
+#endif
     snprintf(line, sizeof(line),
              "\n[clipping statistics]\ninput_triangles,%llu\ntrivially_accepted,%llu\ntrivially_rejected,%llu\npartially_clipped,%llu\ngenerated_vertices,%llu\noutput_triangles,%llu\n",
              sCounters.inputTriangles, sCounters.triviallyAcceptedTriangles, sCounters.triviallyRejectedTriangles,
@@ -2222,6 +2334,172 @@ int PspProfiler_ExitRequested(void) {
  * thread. Phase-time aggregation remains locked because phases can be opened
  * by audio, main, and graphics threads.
  */
+#if PROFILE_VERTEX_REUSE
+typedef struct {
+    u32 vertices;
+    u32 uniqueVertices;
+    u32 duplicateVertices;
+    u32 identityVertices;
+    u32 uniqueIdentities;
+    u32 identityRepeats;
+    u32 identityExactRepeats;
+    u32 identityMismatchRepeats;
+    u32 directBytes;
+    u32 indexedBytes;
+    u32 hybridBytes;
+    u32 tableOverflow;
+    u32 identityTableOverflow;
+} PspProfileVertexReuseResult;
+
+static u32 psp_profiler_vertex_packet_hash(const u8* bytes) {
+    u32 hash = 2166136261UL;
+    u32 i;
+
+    for (i = 0; i < PSP_PROFILE_VERTEX_PACKET_BYTES; i++) {
+        hash ^= bytes[i];
+        hash *= 16777619UL;
+    }
+    return hash;
+}
+
+static void psp_profiler_vertex_reuse_begin_batch(void) {
+    sVertexReuseHashStamp++;
+    if (sVertexReuseHashStamp == 0) {
+        psp_profiler_zero(sVertexReuseHash, sizeof(sVertexReuseHash));
+        psp_profiler_zero(sVertexReuseIdentityHash, sizeof(sVertexReuseIdentityHash));
+        sVertexReuseHashStamp = 1;
+    }
+}
+
+static void psp_profiler_measure_vertex_reuse(const void* vertices, const u32* sourceIdentities, u32 vertexCount,
+                                              PspProfileVertexReuseResult* result) {
+    const u8* bytes = (const u8*) vertices;
+    u32 i;
+
+    psp_profiler_zero(result, sizeof(*result));
+    result->vertices = vertexCount;
+    result->directBytes = vertexCount * PSP_PROFILE_VERTEX_PACKET_BYTES;
+    psp_profiler_vertex_reuse_begin_batch();
+
+    for (i = 0; i < vertexCount; i++) {
+        const u8* packet = bytes + (i * PSP_PROFILE_VERTEX_PACKET_BYTES);
+        u32 hash = psp_profiler_vertex_packet_hash(packet);
+        u32 slot = hash & (PSP_PROFILE_VERTEX_REUSE_HASH_CAPACITY - 1);
+        u32 probes = 0;
+
+        if ((sourceIdentities != NULL) && (sourceIdentities[i] != 0)) {
+            u32 identity = sourceIdentities[i];
+            u32 identitySlot = (identity * 2654435761UL) & (PSP_PROFILE_VERTEX_REUSE_HASH_CAPACITY - 1);
+            u32 identityProbes = 0;
+
+            result->identityVertices++;
+            while (identityProbes < PSP_PROFILE_VERTEX_REUSE_HASH_CAPACITY) {
+                PspProfileVertexReuseIdentityEntry* identityEntry = &sVertexReuseIdentityHash[identitySlot];
+
+                if (identityEntry->stamp != sVertexReuseHashStamp) {
+                    identityEntry->stamp = sVertexReuseHashStamp;
+                    identityEntry->identity = identity;
+                    identityEntry->firstIndex = i;
+                    result->uniqueIdentities++;
+                    break;
+                }
+                if (identityEntry->identity == identity) {
+                    result->identityRepeats++;
+                    if (memcmp(packet, bytes + (identityEntry->firstIndex * PSP_PROFILE_VERTEX_PACKET_BYTES),
+                               PSP_PROFILE_VERTEX_PACKET_BYTES) == 0) {
+                        result->identityExactRepeats++;
+                    } else {
+                        result->identityMismatchRepeats++;
+                    }
+                    break;
+                }
+                identitySlot = (identitySlot + 1) & (PSP_PROFILE_VERTEX_REUSE_HASH_CAPACITY - 1);
+                identityProbes++;
+            }
+            if (identityProbes == PSP_PROFILE_VERTEX_REUSE_HASH_CAPACITY) {
+                result->identityTableOverflow = 1;
+            }
+        }
+
+        while (probes < PSP_PROFILE_VERTEX_REUSE_HASH_CAPACITY) {
+            PspProfileVertexReuseHashEntry* entry = &sVertexReuseHash[slot];
+
+            if (entry->stamp != sVertexReuseHashStamp) {
+                entry->stamp = sVertexReuseHashStamp;
+                entry->hash = hash;
+                entry->firstIndex = i;
+                result->uniqueVertices++;
+                break;
+            }
+            if ((entry->hash == hash) &&
+                (memcmp(packet, bytes + (entry->firstIndex * PSP_PROFILE_VERTEX_PACKET_BYTES),
+                        PSP_PROFILE_VERTEX_PACKET_BYTES) == 0)) {
+                result->duplicateVertices++;
+                break;
+            }
+            slot = (slot + 1) & (PSP_PROFILE_VERTEX_REUSE_HASH_CAPACITY - 1);
+            probes++;
+        }
+        if (probes == PSP_PROFILE_VERTEX_REUSE_HASH_CAPACITY) {
+            result->tableOverflow = 1;
+            break;
+        }
+    }
+
+    if (result->tableOverflow) {
+        result->indexedBytes = result->directBytes;
+        result->hybridBytes = result->directBytes;
+        return;
+    }
+    result->indexedBytes =
+        (result->uniqueVertices * PSP_PROFILE_VERTEX_PACKET_BYTES) + (vertexCount * sizeof(u16));
+    result->hybridBytes =
+        (result->indexedBytes < result->directBytes) ? result->indexedBytes : result->directBytes;
+}
+
+static void psp_profiler_accumulate_vertex_reuse(PspProfileVertexReuseCounters* counters,
+                                                 const PspProfileVertexReuseResult* result) {
+    counters->batches++;
+    counters->vertices += result->vertices;
+    counters->uniqueVertices += result->uniqueVertices;
+    counters->duplicateVertices += result->duplicateVertices;
+    counters->identityVertices += result->identityVertices;
+    counters->uniqueIdentities += result->uniqueIdentities;
+    counters->identityRepeats += result->identityRepeats;
+    counters->identityExactRepeats += result->identityExactRepeats;
+    counters->identityMismatchRepeats += result->identityMismatchRepeats;
+    counters->directBytes += result->directBytes;
+    counters->indexedBytes += result->indexedBytes;
+    counters->hybridBytes += result->hybridBytes;
+    counters->hybridSavings += result->directBytes - result->hybridBytes;
+    if (result->indexedBytes < result->directBytes) {
+        counters->indexedWinningBatches++;
+    }
+    if (result->vertices > counters->maxBatchVertices) {
+        counters->maxBatchVertices = result->vertices;
+    }
+    if (result->uniqueVertices > counters->maxUniqueVertices) {
+        counters->maxUniqueVertices = result->uniqueVertices;
+    }
+    counters->tableOverflows += result->tableOverflow;
+    counters->identityTableOverflows += result->identityTableOverflow;
+}
+
+void PspProfiler_AnalyzeBatchVertexReuse(const void* vertices, const u32* sourceIdentities,
+                                         u32 vertexCount, int directStream) {
+    PspProfileVertexReuseResult result;
+    PspProfileVertexReusePath path = directStream ? PSP_PROFILE_VERTEX_REUSE_DIRECT_STREAM
+                                                  : PSP_PROFILE_VERTEX_REUSE_STAGED;
+
+    if (!sCaptureActive || (vertices == NULL) || (vertexCount == 0)) {
+        return;
+    }
+    psp_profiler_measure_vertex_reuse(vertices, sourceIdentities, vertexCount, &result);
+    psp_profiler_accumulate_vertex_reuse(&sVertexReuse[PSP_PROFILE_VERTEX_REUSE_ALL], &result);
+    psp_profiler_accumulate_vertex_reuse(&sVertexReuse[path], &result);
+}
+#endif
+
 void PspProfiler_PhaseBegin(PspProfilePhase phase) {
     int lockState;
     SceUID threadId;

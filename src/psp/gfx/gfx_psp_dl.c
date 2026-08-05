@@ -246,6 +246,9 @@ typedef struct {
     float modelviewStack[PSP_GFX_DL_MTX_STACK_DEPTH][4][4];
     float batchProjection[4][4];
     u32 batchCount;
+#if PROFILE_VERTEX_REUSE
+    u32 vertexReuseIdentity[PSP_GFX_DL_MAX_VERTICES];
+#endif
     u32 modelviewStackDepth;
     u32 projectionSerial;
     u32 currentProjectionSnapshot;
@@ -444,6 +447,12 @@ static PspGfxPspglColorVertex* sPspGfxDlBatchCursor = sPspGfxDlBatch;
 static u32 sPspGfxDlBatchCapacity = PSP_GFX_DL_BATCH_VERTICES;
 #define PSP_GFX_DL_BATCH sPspGfxDlBatchCursor
 #define PSP_GFX_DL_BATCH_CAP sPspGfxDlBatchCapacity
+#if PROFILE_VERTEX_REUSE
+static u32 sPspGfxDlBatchIdentity[PSP_GFX_DL_BATCH_VERTICES] __attribute__((aligned(16)));
+static u32* sPspGfxDlBatchIdentityCursor = sPspGfxDlBatchIdentity;
+static u32 sPspGfxDlVertexReuseIdentity;
+#define PSP_GFX_DL_BATCH_IDENTITY sPspGfxDlBatchIdentityCursor
+#endif
 
 static n64psp_vec4f
     sPspGfxDlTransformInput[PSP_GFX_DL_MAX_VERTICES]
@@ -1392,7 +1401,23 @@ static u32 psp_gfx_dl_batch_owner_component(const PspGfxDlContext* ctx) {
 #define psp_gfx_dl_mark_batch_component(ctx) ((void) 0)
 #endif
 
-#define psp_gfx_dl_mark_vertex_reuse_source(ctx, source) ((void) 0)
+#if PROFILE_VERTEX_REUSE
+static u32 psp_gfx_dl_vertex_reuse_identity(const PspGfxDlContext* ctx, const PspGfxDlVertex* src) {
+    u32 index = (u32) (src - ctx->vertices);
+
+    return (index < PSP_GFX_DL_MAX_VERTICES) ? ctx->vertexReuseIdentity[index] : 0;
+}
+
+#define psp_gfx_dl_mark_vertex_reuse_identity(ctx, identity)              \
+    do {                                                                  \
+        if ((ctx)->batchCount != 0) {                                     \
+            PSP_GFX_DL_BATCH_IDENTITY[(ctx)->batchCount - 1] = (identity); \
+        }                                                                 \
+    } while (0)
+#else
+#define psp_gfx_dl_vertex_reuse_identity(ctx, src) 0
+#define psp_gfx_dl_mark_vertex_reuse_identity(ctx, identity) ((void) 0)
+#endif
 #define psp_gfx_dl_clipped_vertex_source(src) 0
 #define psp_gfx_dl_resolve_vertex_reuse_source(src, source) 0
 #define psp_gfx_dl_reset_vertex_reuse_batch(ctx) ((void) 0)
@@ -1525,6 +1550,10 @@ static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason 
 #endif
     (void) reason;
     psp_gfx_dl_weld_flat_batch_seams(ctx);
+#if PROFILE_VERTEX_REUSE
+    PspProfiler_AnalyzeBatchVertexReuse(PSP_GFX_DL_BATCH, PSP_GFX_DL_BATCH_IDENTITY,
+                                        ctx->batchCount, ctx->batchReserved);
+#endif
     PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_SUBMIT);
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_BATCH_FLUSH);
     if (ctx->batchReserved) {
@@ -1582,6 +1611,9 @@ static int psp_gfx_dl_texture_ref_equal(PspGfxPspglTextureRef a, PspGfxPspglText
 // the whole pool first, so all open slots always share that state by construction
 typedef struct {
     PspGfxPspglColorVertex vertices[PSP_BATCH_POOL_VERTICES] __attribute__((aligned(16)));
+#if PROFILE_VERTEX_REUSE
+    u32 vertexReuseIdentity[PSP_BATCH_POOL_VERTICES] __attribute__((aligned(16)));
+#endif
     PspGfxPspglVertexReservation reservation;
     int reserved;
     u32 count;
@@ -1662,6 +1694,9 @@ static void psp_gfx_dl_pool_select(PspGfxDlContext* ctx, u32 index) {
     ctx->batchReserved = sPspGfxDlPool[index].reserved;
     PSP_GFX_DL_BATCH = ctx->batchReserved ? ctx->batchReservation.vertices : sPspGfxDlPool[index].vertices;
     PSP_GFX_DL_BATCH_CAP = PSP_BATCH_POOL_VERTICES;
+#if PROFILE_VERTEX_REUSE
+    PSP_GFX_DL_BATCH_IDENTITY = sPspGfxDlPool[index].vertexReuseIdentity;
+#endif
 }
 
 // geometry that may not be reordered keeps the standalone buffer
@@ -1670,6 +1705,9 @@ static void psp_gfx_dl_pool_use_direct(PspGfxDlContext* ctx) {
     ctx->batchReserved = 0;
     PSP_GFX_DL_BATCH = sPspGfxDlBatch;
     PSP_GFX_DL_BATCH_CAP = PSP_GFX_DL_BATCH_VERTICES;
+#if PROFILE_VERTEX_REUSE
+    PSP_GFX_DL_BATCH_IDENTITY = sPspGfxDlBatchIdentity;
+#endif
 }
 
 static void psp_gfx_dl_pool_park(PspGfxDlContext* ctx) {
@@ -2357,7 +2395,7 @@ static void psp_gfx_dl_emit_clip_vertex_with_source(PspGfxDlContext* ctx, const 
 
     dst = &PSP_GFX_DL_BATCH[ctx->batchCount++];
     psp_gfx_dl_mark_batch_component(ctx);
-    psp_gfx_dl_mark_vertex_reuse_source(ctx, psp_gfx_dl_resolve_vertex_reuse_source(src, source));
+    psp_gfx_dl_mark_vertex_reuse_identity(ctx, 0);
 
     if (ctx->batchPretransformed) {
         float inverseW = 1.0f / src->w;
@@ -2519,7 +2557,7 @@ static void psp_gfx_dl_emit_direct_vertex(PspGfxDlContext* ctx, const PspGfxDlVe
 
     dst = &PSP_GFX_DL_BATCH[ctx->batchCount++];
     psp_gfx_dl_mark_batch_component(ctx);
-    psp_gfx_dl_mark_vertex_reuse_source(ctx, PSP_PROFILE_VERTEX_REUSE_SOURCE_DIRECT);
+    psp_gfx_dl_mark_vertex_reuse_identity(ctx, psp_gfx_dl_vertex_reuse_identity(ctx, src));
 
     if (ctx->batchPretransformed) {
         float inverseW = 1.0f / src->clipW;
@@ -2591,7 +2629,7 @@ static void psp_gfx_dl_emit_direct_vertex_unchecked(PspGfxDlContext* ctx, const 
     PspGfxPspglColorVertex* dst = &PSP_GFX_DL_BATCH[ctx->batchCount++];
 
     psp_gfx_dl_mark_batch_component(ctx);
-    psp_gfx_dl_mark_vertex_reuse_source(ctx, PSP_PROFILE_VERTEX_REUSE_SOURCE_DIRECT);
+    psp_gfx_dl_mark_vertex_reuse_identity(ctx, psp_gfx_dl_vertex_reuse_identity(ctx, src));
     psp_gfx_dl_build_direct_vertex(ctx, src, uScale, vScale, dst);
 }
 
@@ -3304,7 +3342,7 @@ static void psp_gfx_dl_emit_rect_vertex(PspGfxDlContext* ctx,
 
     dst = &PSP_GFX_DL_BATCH[ctx->batchCount++];
     psp_gfx_dl_mark_batch_component(ctx);
-    psp_gfx_dl_mark_vertex_reuse_source(ctx, PSP_PROFILE_VERTEX_REUSE_SOURCE_RECTANGLE);
+    psp_gfx_dl_mark_vertex_reuse_identity(ctx, 0);
 
     dst->u = psp_gfx_dl_normalize_texel_coord(ctx, u, ctx->textureUploadWidth, ctx->textureTileUls);
     dst->v = psp_gfx_dl_normalize_texel_coord(ctx, v, ctx->textureUploadHeight, ctx->textureTileUlt);
@@ -3922,6 +3960,13 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
             out->a = in->v.cn[3];
             out->s = in->v.tc[0];
             out->t = in->v.tc[1];
+#if PROFILE_VERTEX_REUSE
+            sPspGfxDlVertexReuseIdentity++;
+            if (sPspGfxDlVertexReuseIdentity == 0) {
+                sPspGfxDlVertexReuseIdentity = 1;
+            }
+            ctx->vertexReuseIdentity[v0 + i] = sPspGfxDlVertexReuseIdentity;
+#endif
         }
     }
     PspProfiler_RenderPhaseEnd(PSP_PROFILE_PHASE_G_VTX_ATTRIBUTE_COPY, phaseStartUs);
