@@ -337,6 +337,8 @@ typedef struct {
     int batchDepthBias;
     int batchFog;
     int batchPointFilter;
+    PspGfxPspglVertexReservation batchReservation;
+    int batchReserved;
     float batchFogColor[4];
     float batchFogStart;
     float batchFogEnd;
@@ -1525,14 +1527,23 @@ static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason 
     psp_gfx_dl_weld_flat_batch_seams(ctx);
     PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_SUBMIT);
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_BATCH_FLUSH);
-    PspGfxPspgl_DrawColoredTriangles(PSP_GFX_DL_BATCH, ctx->batchCount, ctx->batchTextureId, ctx->batchTextureRef,
-                                     ctx->batchTextureEnv, ctx->batchTextureEnvColor, ctx->batchWrapS,
-                                     ctx->batchWrapT, ctx->batchAlphaTest, ctx->batchBlend,
-                                     ctx->batchPremultiplied, ctx->batchDepthTest,
-                                     ctx->batchDepthWrite, ctx->batchFog, ctx->batchFogColor, ctx->batchFogStart,
-                                     ctx->batchFogEnd,
-                                     &ctx->batchProjection[0][0], ctx->batchProjectionSerial,
-                                     ctx->batchPretransformed, ctx->batchPointFilter);
+    if (ctx->batchReserved) {
+        PspGfxPspgl_DrawReservedColoredTriangles(
+            &ctx->batchReservation, ctx->batchCount, ctx->batchTextureId, ctx->batchTextureRef,
+            ctx->batchTextureEnv, ctx->batchTextureEnvColor, ctx->batchWrapS, ctx->batchWrapT,
+            ctx->batchAlphaTest, ctx->batchBlend, ctx->batchPremultiplied, ctx->batchDepthTest,
+            ctx->batchDepthWrite, ctx->batchFog, ctx->batchFogColor, ctx->batchFogStart, ctx->batchFogEnd,
+            &ctx->batchProjection[0][0], ctx->batchProjectionSerial, ctx->batchPretransformed,
+            ctx->batchPointFilter);
+    } else {
+        PspGfxPspgl_DrawColoredTriangles(
+            PSP_GFX_DL_BATCH, ctx->batchCount, ctx->batchTextureId, ctx->batchTextureRef,
+            ctx->batchTextureEnv, ctx->batchTextureEnvColor, ctx->batchWrapS, ctx->batchWrapT,
+            ctx->batchAlphaTest, ctx->batchBlend, ctx->batchPremultiplied, ctx->batchDepthTest,
+            ctx->batchDepthWrite, ctx->batchFog, ctx->batchFogColor, ctx->batchFogStart, ctx->batchFogEnd,
+            &ctx->batchProjection[0][0], ctx->batchProjectionSerial, ctx->batchPretransformed,
+            ctx->batchPointFilter);
+    }
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_BATCH_FLUSH);
     PspHwCounterProfile_InnerScopeEnd(PSP_HW_SCOPE_SUBMIT);
     PspProfiler_CountBatchFlush(reason, ctx->batchCount);
@@ -1553,14 +1564,6 @@ static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason 
     psp_gfx_dl_reset_vertex_reuse_batch(ctx);
 }
 
-static void psp_gfx_dl_flush_texture_change(PspGfxDlContext* ctx, PspProfileTextureFlushSource source) {
-    (void) source;
-    if (ctx->batchCount != 0) {
-        PspProfiler_CountTextureFlushSource(source);
-    }
-    psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_TEXTURE_CHANGE);
-}
-
 static PspGfxPspglTextureRef psp_gfx_dl_null_texture_ref(void) {
     PspGfxPspglTextureRef ref;
 
@@ -1579,6 +1582,8 @@ static int psp_gfx_dl_texture_ref_equal(PspGfxPspglTextureRef a, PspGfxPspglText
 // the whole pool first, so all open slots always share that state by construction
 typedef struct {
     PspGfxPspglColorVertex vertices[PSP_BATCH_POOL_VERTICES] __attribute__((aligned(16)));
+    PspGfxPspglVertexReservation reservation;
+    int reserved;
     u32 count;
     u32 textureId;
     PspGfxPspglTextureRef textureRef;
@@ -1613,6 +1618,8 @@ static void psp_gfx_dl_pool_store(PspGfxDlContext* ctx, u32 index) {
     PspGfxDlBatchSlot* slot = &sPspGfxDlPool[index];
 
     slot->count = ctx->batchCount;
+    slot->reservation = ctx->batchReservation;
+    slot->reserved = ctx->batchReserved;
     slot->textureId = ctx->batchTextureId;
     slot->textureRef = ctx->batchTextureRef;
     slot->textureEnv = ctx->batchTextureEnv;
@@ -1632,6 +1639,8 @@ static void psp_gfx_dl_pool_load(PspGfxDlContext* ctx, u32 index) {
     const PspGfxDlBatchSlot* slot = &sPspGfxDlPool[index];
 
     ctx->batchCount = slot->count;
+    ctx->batchReservation = slot->reservation;
+    ctx->batchReserved = slot->reserved;
     ctx->batchTextureId = slot->textureId;
     ctx->batchTextureRef = slot->textureRef;
     ctx->batchTextureEnv = slot->textureEnv;
@@ -1648,16 +1657,17 @@ static void psp_gfx_dl_pool_load(PspGfxDlContext* ctx, u32 index) {
 }
 
 static void psp_gfx_dl_pool_select(PspGfxDlContext* ctx, u32 index) {
-    (void) ctx;
     sPspGfxDlPoolCurrent = (int) index;
-    PSP_GFX_DL_BATCH = sPspGfxDlPool[index].vertices;
+    ctx->batchReservation = sPspGfxDlPool[index].reservation;
+    ctx->batchReserved = sPspGfxDlPool[index].reserved;
+    PSP_GFX_DL_BATCH = ctx->batchReserved ? ctx->batchReservation.vertices : sPspGfxDlPool[index].vertices;
     PSP_GFX_DL_BATCH_CAP = PSP_BATCH_POOL_VERTICES;
 }
 
 // geometry that may not be reordered keeps the standalone buffer
 static void psp_gfx_dl_pool_use_direct(PspGfxDlContext* ctx) {
-    (void) ctx;
     sPspGfxDlPoolCurrent = -1;
+    ctx->batchReserved = 0;
     PSP_GFX_DL_BATCH = sPspGfxDlBatch;
     PSP_GFX_DL_BATCH_CAP = PSP_GFX_DL_BATCH_VERTICES;
 }
@@ -1676,6 +1686,7 @@ static void psp_gfx_dl_pool_release(u32 index) {
 
     sPspGfxDlPool[index].open = 0;
     sPspGfxDlPool[index].count = 0;
+    sPspGfxDlPool[index].reserved = 0;
     for (i = 0; i < sPspGfxDlPoolOpen; i++) {
         if (sPspGfxDlPoolOrder[i] == (u8) index) {
             for (; (i + 1) < sPspGfxDlPoolOpen; i++) {
@@ -1741,6 +1752,8 @@ static u32 psp_gfx_dl_pool_acquire(PspGfxDlContext* ctx) {
 
     sPspGfxDlPool[i].open = 1;
     sPspGfxDlPool[i].count = 0;
+    sPspGfxDlPool[i].reserved =
+        PspGfxPspgl_ReserveColoredVertices(PSP_BATCH_POOL_VERTICES, &sPspGfxDlPool[i].reservation);
     sPspGfxDlPoolOrder[sPspGfxDlPoolOpen++] = (u8) i;
     if (sPspGfxDlPoolOpen > sPspGfxDlPoolPeakOpen) {
         sPspGfxDlPoolPeakOpen = sPspGfxDlPoolOpen;
@@ -1765,6 +1778,18 @@ static void psp_gfx_dl_pool_rotate_full(PspGfxDlContext* ctx) {
 }
 
 #define psp_gfx_dl_flush_all(ctx, reason) psp_gfx_dl_pool_drain((ctx), (reason))
+
+static int psp_gfx_dl_texture_barrier_has_pending(const PspGfxDlContext* ctx) {
+    return (ctx->batchCount != 0) || (sPspGfxDlPoolOpen != 0);
+}
+
+static void psp_gfx_dl_flush_texture_change(PspGfxDlContext* ctx, PspProfileTextureFlushSource source) {
+    (void) source;
+    if (psp_gfx_dl_texture_barrier_has_pending(ctx)) {
+        PspProfiler_CountTextureFlushSource(source);
+    }
+    psp_gfx_dl_flush_all(ctx, PSP_PROFILE_FLUSH_TEXTURE_CHANGE);
+}
 
 static void psp_gfx_dl_set_batch_texture(PspGfxDlContext* ctx, u32 textureId, PspGfxPspglTextureRef textureRef,
                                          PspGfxPspglTextureEnv textureEnv, u32 textureEnvColor,
@@ -1924,7 +1949,7 @@ static void psp_gfx_dl_set_batch_fog_resolved(PspGfxDlContext* ctx, int fog, con
                 PSP_PROFILE_TRIVIAL_REJECT_STATE_FOG_ENABLE_OR_PARAMETERS);
         }
 #endif
-        psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+        psp_gfx_dl_flush_all(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
     }
     ctx->batchFog = fog;
     ctx->batchFogColor[0] = color[0];
@@ -2522,6 +2547,7 @@ static void psp_gfx_dl_emit_direct_triangle(PspGfxDlContext* ctx, const PspGfxDl
     float uScale = 0.0f;
     float vScale = 0.0f;
 
+    PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_BATCH);
     if ((ctx->textureUploadWidth != 0) && (ctx->textureUploadHeight != 0)) {
         uScale = 1.0f / (32.0f * (float) ctx->textureUploadWidth);
         vScale = 1.0f / (32.0f * (float) ctx->textureUploadHeight);
@@ -2530,6 +2556,7 @@ static void psp_gfx_dl_emit_direct_triangle(PspGfxDlContext* ctx, const PspGfxDl
     psp_gfx_dl_emit_direct_vertex(ctx, a, uScale, vScale);
     psp_gfx_dl_emit_direct_vertex(ctx, b, uScale, vScale);
     psp_gfx_dl_emit_direct_vertex(ctx, c, uScale, vScale);
+    PspHwCounterProfile_InnerScopeEnd(PSP_HW_SCOPE_BATCH);
 }
 
 static int psp_gfx_dl_triangle_pretransformed(const PspGfxDlContext* ctx, const PspGfxDlVertex* a,
@@ -2699,8 +2726,13 @@ static int psp_gfx_dl_try_emit_tri2_direct_pair(PspGfxDlContext* ctx, u8 a0, u8 
 #endif
     if (ctx->batchCount + 6 > PSP_GFX_DL_BATCH_CAP) {
         bufferPreflush = 1;
-        psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_BUFFER_FULL);
+        if (sPspGfxDlPoolCurrent >= 0) {
+            psp_gfx_dl_pool_rotate_full(ctx);
+        } else {
+            psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_BUFFER_FULL);
+        }
     }
+    PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_BATCH);
     psp_gfx_dl_build_direct_pair_colors(ctx, vertices, &PSP_GFX_DL_BATCH[ctx->batchCount]);
     if (ctx->textureUploadWidth != 0) {
         uScale = 1.0f / (32.0f * (float) ctx->textureUploadWidth);
@@ -2715,6 +2747,7 @@ static int psp_gfx_dl_try_emit_tri2_direct_pair(PspGfxDlContext* ctx, u8 a0, u8 
     psp_gfx_dl_emit_direct_vertex_unchecked(ctx, va1, uScale, vScale);
     psp_gfx_dl_emit_direct_vertex_unchecked(ctx, vb1, uScale, vScale);
     psp_gfx_dl_emit_direct_vertex_unchecked(ctx, vc1, uScale, vScale);
+    PspHwCounterProfile_InnerScopeEnd(PSP_HW_SCOPE_BATCH);
     PspProfiler_CountTriangleResult(2, 0, 0, 0, 2);
     PspProfiler_CountTrianglePath(2, 0, 0, 0, 6);
     PspProfiler_CountTri2PairFastpath(1, 0, 0, 0, 0, bufferPreflush,
@@ -2854,17 +2887,20 @@ static u32 psp_gfx_dl_emit_perspective_triangle(PspGfxDlContext* ctx, const PspG
 
 static u32 psp_gfx_dl_emit_textured_triangle(PspGfxDlContext* ctx, const PspGfxDlClipVertex* a,
                                              const PspGfxDlClipVertex* b, const PspGfxDlClipVertex* c, u32 source) {
-    if (ctx->batchPretransformed) {
-        u32 emitted;
+    u32 emitted;
 
+    PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_BATCH);
+    if (ctx->batchPretransformed) {
         emitted = psp_gfx_dl_emit_perspective_triangle(ctx, a, b, c, 0, source);
-        return emitted;
+    } else {
+        psp_gfx_dl_emit_clip_vertex_with_source(ctx, a, source);
+        psp_gfx_dl_emit_clip_vertex_with_source(ctx, b, source);
+        psp_gfx_dl_emit_clip_vertex_with_source(ctx, c, source);
+        ctx->stats.perspectiveTriangleCount++;
+        emitted = 1;
     }
-    psp_gfx_dl_emit_clip_vertex_with_source(ctx, a, source);
-    psp_gfx_dl_emit_clip_vertex_with_source(ctx, b, source);
-    psp_gfx_dl_emit_clip_vertex_with_source(ctx, c, source);
-    ctx->stats.perspectiveTriangleCount++;
-    return 1;
+    PspHwCounterProfile_InnerScopeEnd(PSP_HW_SCOPE_BATCH);
+    return emitted;
 }
 
 static u32 psp_gfx_dl_clip_polygon_plane(const PspGfxDlClipVertex* input, u32 inputCount,
@@ -2917,6 +2953,7 @@ static u32 psp_gfx_dl_emit_clipped_triangle(PspGfxDlContext* ctx, const PspGfxDl
     u32 plane;
     u32 i;
 
+    PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_CLIPPING);
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_CLIPPING);
     psp_gfx_dl_build_clip_vertex(ctx, a, &input[0]);
     psp_gfx_dl_build_clip_vertex(ctx, b, &input[1]);
@@ -2925,6 +2962,7 @@ static u32 psp_gfx_dl_emit_clipped_triangle(PspGfxDlContext* ctx, const PspGfxDl
         vertexCount = psp_gfx_dl_clip_polygon_plane(input, vertexCount, output, plane);
         if (vertexCount < 3) {
             PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_CLIPPING);
+            PspHwCounterProfile_InnerScopeEnd(PSP_HW_SCOPE_CLIPPING);
             return 0;
         }
         swap = input;
@@ -3028,6 +3066,10 @@ static u32 psp_gfx_dl_emit_clipped_triangle(PspGfxDlContext* ctx, const PspGfxDl
         ctx->stats.clipGeneratedVertexCount += generatedCount;
     }
 
+    PspHwCounterProfile_InnerScopeEnd(PSP_HW_SCOPE_CLIPPING);
+    if (!textured) {
+        PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_BATCH);
+    }
     for (i = 1; i + 1 < vertexCount; i++) {
         if (textured) {
             psp_gfx_dl_emit_textured_triangle(ctx, &input[0], &input[i], &input[i + 1],
@@ -3037,6 +3079,9 @@ static u32 psp_gfx_dl_emit_clipped_triangle(PspGfxDlContext* ctx, const PspGfxDl
             psp_gfx_dl_emit_clip_vertex(ctx, &input[i]);
             psp_gfx_dl_emit_clip_vertex(ctx, &input[i + 1]);
         }
+    }
+    if (!textured) {
+        PspHwCounterProfile_InnerScopeEnd(PSP_HW_SCOPE_BATCH);
     }
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_CLIPPING);
     return vertexCount - 2;
@@ -3978,7 +4023,7 @@ static void psp_gfx_dl_handle_geometry_mode(PspGfxDlContext* ctx, const Gfx* gfx
 static void psp_gfx_dl_handle_texture(PspGfxDlContext* ctx, const Gfx* gfx) {
     int enabled = (gfx->words.w0 & 0xFF) != G_OFF;
 
-    if ((ctx->batchCount != 0) && (ctx->textureEnabled != enabled)) {
+    if (psp_gfx_dl_texture_barrier_has_pending(ctx) && (ctx->textureEnabled != enabled)) {
         psp_gfx_dl_flush_texture_change(ctx, PSP_PROFILE_TEXTURE_FLUSH_TEXTURE_ENABLE);
     }
     ctx->textureEnabled = enabled;
@@ -4497,11 +4542,13 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
         if (opcode == PSP_GFX_OP_F3D_TRI1) {
             u32 w1 = cmd->words.w1;
             PspProfiler_CountTriangleCommand(1, 1, 0);
+            PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_TRIANGLE);
             PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TRIANGLE);
             psp_gfx_dl_emit_tri(ctx, psp_gfx_dl_decode_tri_index((w1 >> 16) & 0xFF),
                                 psp_gfx_dl_decode_tri_index((w1 >> 8) & 0xFF),
                                 psp_gfx_dl_decode_tri_index(w1 & 0xFF));
             PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TRIANGLE);
+            PspHwCounterProfile_InnerScopeEnd(PSP_HW_SCOPE_TRIANGLE);
             continue;
         }
 
@@ -4516,6 +4563,7 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
             u8 c1 = psp_gfx_dl_decode_tri_index(w1 & 0xFF);
 
             PspProfiler_CountTriangleCommand(2, 0, 1);
+            PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_TRIANGLE);
             PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TRIANGLE);
 #if PROFILE_TRIVIAL_REJECTS
             PspProfiler_CountTri2OutcomeMatrix(psp_gfx_dl_classify_triangle_outcome(ctx, a0, b0, c0),
@@ -4526,6 +4574,7 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
                 psp_gfx_dl_emit_tri(ctx, a1, b1, c1);
             }
             PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TRIANGLE);
+            PspHwCounterProfile_InnerScopeEnd(PSP_HW_SCOPE_TRIANGLE);
             continue;
         }
 

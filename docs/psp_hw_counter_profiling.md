@@ -16,7 +16,8 @@ and carries full build metadata, so captures are comparable across builds.
 make -j8 psp-profile-hw-counters
 ```
 
-Output lands in `build/psp-profile-hw-counters/`, alongside
+Output lands in `build/psp-profile-hw-counters/`, alongside the loadable
+`starfox64.psp.prx`,
 `profile_build_metadata.txt`, `PROFILE_BUILD_COMMANDS.txt` and `SHA256SUMS`.
 
 The target pins the audit's suggested configuration:
@@ -43,7 +44,7 @@ archives as a release build. The metadata records the mode as
 | `PROFILE_HW_COUNTERS` | `0` | Compiles the capture in. Everything below is inert without it. |
 | `PROFILE_HW_COUNTER_FRAMES` | `300` | Frames recorded before the capture auto-saves. |
 | `PROFILE_HW_COUNTER_WARMUP_FRAMES` | `120` | Frames discarded after the start press, matching the handoff's warm-up rule. |
-| `PROFILE_HW_COUNTER_SCOPES` | `0` | Adds the nested texture, vertex and submit scopes. Samples per texture upload, per `G_VTX` and per batch flush, so it perturbs the frame; use it to locate a cost, not to quote one. |
+| `PROFILE_HW_COUNTER_SCOPES` | `0` | Adds the nested texture, vertex, submit, triangle, clipping and batch scopes. The frequent samples perturb the frame; use them to locate a cost, not to quote release timing. |
 
 With `PROFILE_HW_COUNTERS=0` every hook is a macro that expands to nothing and
 `hw_counter_profile.c` is not built. Verified: `make psp` produces a
@@ -51,8 +52,9 @@ byte-identical `EBOOT.PBP` with the capture present in the tree.
 
 ## On hardware
 
-Copy `build/psp-profile-hw-counters/EBOOT.PBP` to the usual
-`ms0:/PSP/GAME/<folder>/`.
+For a standalone launch, copy `build/psp-profile-hw-counters/EBOOT.PBP` to the
+usual `ms0:/PSP/GAME/<folder>/`. PSPLINK loads PRX files, not packaged EBOOTs;
+use `build/psp-profile-hw-counters/starfox64.psp.prx` there.
 
 Controls, all held with `Select`:
 
@@ -77,18 +79,20 @@ slot, so repeated runs never overwrite each other.
 ### Counter availability
 
 Counters come from `sceKernelReferThreadProfiler()`, with
-`sceKernelReferGlobalProfiler()` as a fallback. Firmware exposes these only when
-the profiler mode was selected before ThreadMan initialised. In PSPLINK:
+`sceKernelReferGlobalProfiler()` as a fallback. Some firmware exposes them to a
+standalone EBOOT, so the on-screen `CTRS` status is authoritative and PSPLINK is
+not required in that case.
+
+When using PSPLINK:
 
 ```text
 profmode t
 reset
 ```
 
-then relaunch. **`profmode` is not persistent** — it is a shell setting, not an INI
-one, so it must be re-issued after every PSP boot, before `reset`. A capture that
-reads `TIME` when you expected `CTRS` almost always means the mode was lost to a
-power cycle. Both refer calls return NULL otherwise, which is safe.
+then relaunch the PRX. **`profmode` is not persistent** — it is a shell setting,
+not an INI one, so it must be re-issued after every PSP boot, before `reset`.
+Both refer calls return NULL when the counters are unavailable, which is safe.
 
 Never call `pspDebugProfilerEnable`, `Disable`, `Clear` or `GetRegs` from this
 EBOOT. They write the profiler MMIO at `0xBC400000` directly and fault in user
@@ -115,7 +119,7 @@ as they fill, from inside the display-list interpreter, so by the time the
 end-of-task flush runs there is almost nothing left to do. **Nearly all PSPGL
 cost is inside `frontend`, not `flush`.** Use the inner scopes to split it.
 
-`PROFILE_HW_COUNTER_SCOPES=1` adds three nested scopes, all counted inside
+`PROFILE_HW_COUNTER_SCOPES=1` adds six nested scopes, all counted inside
 `frontend` and therefore not additive with it:
 
 | Scope | Covers |
@@ -123,6 +127,13 @@ cost is inside `frontend`, not `flush`.** Use the inner scopes to split it.
 | `texture` | Texture cache lookup, conversion and upload — Primary Finding 2's path. |
 | `vertex` | `G_VTX`: transform, lighting and attribute assembly. |
 | `submit` | `PspGfxPspgl_DrawColoredTriangles` per batch flush — the real PSPGL submission cost. |
+| `triangle` | Complete `G_TRI1` and `G_TRI2` handling, including nested state, clipping, batch and submission work. |
+| `clipping` | Clip-code expansion and polygon clipping, ending before final fan vertices are emitted. |
+| `batch` | Conversion from software or clipped vertices into the final 24-byte GE vertex stream. |
+
+`clipping` and `batch` are nested within `triangle`; `texture` and `submit` can
+also occur there. Treat the scopes as a hierarchy, not columns to add together.
+The triangle-exclusive remainder is obtained by subtracting its nested work.
 
 Counters are per-thread, so they exclude other threads' work while the render
 thread is descheduled. Wall time does not. A scope where elapsed time is large

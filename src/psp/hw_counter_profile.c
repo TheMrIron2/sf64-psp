@@ -136,7 +136,7 @@ static const char* sPspHwCounterNames[PSP_HW_COUNTER_COUNT] = {
 };
 
 static const char* sPspHwScopeNames[PSP_HW_SCOPE_COUNT] = {
-    "task", "frontend", "flush", "present", "texture", "vertex", "submit"
+    "task", "frontend", "flush", "present", "texture", "vertex", "submit", "triangle", "clipping", "batch"
 };
 
 /* Scene tags for the audit standard workloads plus a free slot */

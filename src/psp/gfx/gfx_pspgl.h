@@ -73,6 +73,12 @@ typedef char PspGfxPspglColorVertexXOffsetCheck[(offsetof(PspGfxPspglColorVertex
 typedef char PspGfxPspglColorVertexYOffsetCheck[(offsetof(PspGfxPspglColorVertex, y) == 16) ? 1 : -1];
 typedef char PspGfxPspglColorVertexZOffsetCheck[(offsetof(PspGfxPspglColorVertex, z) == 20) ? 1 : -1];
 
+typedef struct {
+    PspGfxPspglColorVertex* vertices;
+    u32 firstVertex;
+    u32 capacity;
+} PspGfxPspglVertexReservation;
+
 typedef enum {
     PSP_GFX_PSPGL_TEX_REPLACE,
     PSP_GFX_PSPGL_TEX_MODULATE,
@@ -164,6 +170,15 @@ void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u3
                                       float fogEnd,
                                       const float* projectionMatrix, u32 projectionSerial, int pretransformed,
                                       int pointFilter);
+int PspGfxPspgl_ReserveColoredVertices(u32 vertexCapacity, PspGfxPspglVertexReservation* reservation);
+void PspGfxPspgl_DrawReservedColoredTriangles(const PspGfxPspglVertexReservation* reservation, u32 vertexCount,
+                                              u32 textureId, PspGfxPspglTextureRef textureRef,
+                                              PspGfxPspglTextureEnv textureEnv, u32 textureEnvColor,
+                                              PspGfxPspglTextureWrap wrapS, PspGfxPspglTextureWrap wrapT,
+                                              int alphaTest, int blend, int premultiplied, int depthTest,
+                                              int depthWrite, int fog, const float* fogColor, float fogStart,
+                                              float fogEnd, const float* projectionMatrix, u32 projectionSerial,
+                                              int pretransformed, int pointFilter);
 void PspGfxPspgl_DrawColoredSprites(const PspGfxPspglColorVertex* vertices, u32 vertexCount, u32 textureId,
                                     PspGfxPspglTextureRef textureRef, PspGfxPspglTextureEnv textureEnv,
                                     u32 textureEnvColor, PspGfxPspglTextureWrap wrapS, PspGfxPspglTextureWrap wrapT,

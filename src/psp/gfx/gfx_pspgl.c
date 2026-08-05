@@ -1803,6 +1803,58 @@ static void psp_gfx_pspgl_end_submit_phase(u32 smallDraw, u32 largeDraw) {
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_SUBMIT);
 }
 
+int PspGfxPspgl_ReserveColoredVertices(u32 vertexCapacity, PspGfxPspglVertexReservation* reservation) {
+    PspGfxVertexStreamPage* page;
+    void* mapped;
+
+    if (!sVertexStreamAvailable || (reservation == NULL) || (vertexCapacity == 0) ||
+        (vertexCapacity > PSP_GFX_PSPGL_VERTEX_STREAM_SMALL_PAGE_VERTICES) ||
+        sVertexStreamSmallArenaExhausted ||
+        (vertexCapacity >
+         (PSP_GFX_PSPGL_VERTEX_STREAM_SMALL_ARENA_VERTICES - sVertexStreamSmallArenaVertexIndex))) {
+        return 0;
+    }
+
+    page = &sVertexStreamSmallArenas[sVertexStreamSetIndex];
+    if (sVertexStreamSmallArenaMapped == NULL) {
+        psp_gfx_pspgl_bind_vbo_arrays(page->buffer);
+        mapped = glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
+        if (mapped == NULL) {
+            glBindBuffer(GL_ARRAY_BUFFER, 0);
+            sVertexStreamSmallArenaExhausted = 1;
+            return 0;
+        }
+        sVertexStreamSmallArenaMapped = mapped;
+        sVertexStreamSmallArenaMappedSet = sVertexStreamSetIndex;
+    }
+
+    reservation->vertices =
+        (PspGfxPspglColorVertex*) ((u8*) sVertexStreamSmallArenaMapped +
+                                   (sVertexStreamSmallArenaVertexIndex * sizeof(PspGfxPspglColorVertex)));
+    reservation->firstVertex = sVertexStreamSmallArenaVertexIndex;
+    reservation->capacity = vertexCapacity;
+    sVertexStreamSmallArenaVertexIndex += vertexCapacity;
+    return 1;
+}
+
+static void psp_gfx_pspgl_draw_reserved_stream(const PspGfxPspglVertexReservation* reservation,
+                                               u32 vertexCount, GLenum primitive) {
+    u32 smallDraw = psp_gfx_pspgl_is_small_draw(vertexCount);
+    u32 largeDraw = psp_gfx_pspgl_is_large_draw(vertexCount);
+    u32 highWater = (sVertexStreamSmallArenaVertexIndex * sizeof(PspGfxPspglColorVertex)) +
+                    (sVertexStreamLargePageIndex * PSP_GFX_PSPGL_VERTEX_STREAM_LARGE_PAGE_BYTES);
+
+    psp_gfx_pspgl_begin_submit_phase(smallDraw, largeDraw);
+    glDrawArrays(primitive, reservation->firstVertex, vertexCount);
+    psp_gfx_pspgl_end_submit_phase(smallDraw, largeDraw);
+    PspProfiler_CountDrawCall(vertexCount);
+    PspProfiler_CountPspglSubmitSplit(smallDraw, largeDraw, vertexCount);
+    PspProfiler_CountVertexStream(1, vertexCount, 0, 0, 0, 0, 0, PSP_GFX_PSPGL_VERTEX_STREAM_SET_BYTES,
+                                  highWater, smallDraw, largeDraw, smallDraw ? vertexCount : 0,
+                                  largeDraw ? vertexCount : 0);
+    (void) highWater;
+}
+
 static void psp_gfx_pspgl_draw_client_arrays(const PspGfxPspglColorVertex* vertices, u32 vertexCount,
                                              GLenum primitive) {
     u32 smallDraw = psp_gfx_pspgl_is_small_draw(vertexCount);
@@ -1945,7 +1997,8 @@ static void psp_gfx_pspgl_draw_colored(const PspGfxPspglColorVertex* vertices, u
     u32 textureId, PspGfxPspglTextureRef textureRef, PspGfxPspglTextureEnv textureEnv,
     u32 textureEnvColor, PspGfxPspglTextureWrap wrapS, PspGfxPspglTextureWrap wrapT, int alphaTest,
     int blend, int premultiplied, int depthTest, int depthWrite, int fog, const float* fogColor, float fogStart, float fogEnd,
-    const float* projectionMatrix, u32 projectionSerial, int pretransformed, int pointFilter
+    const float* projectionMatrix, u32 projectionSerial, int pretransformed, int pointFilter,
+    const PspGfxPspglVertexReservation* reservation
 ) {
     GLint glTextureEnv;
     GLint glWrapS;
@@ -2062,7 +2115,9 @@ static void psp_gfx_pspgl_draw_colored(const PspGfxPspglColorVertex* vertices, u
     }
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
 
-    if (!psp_gfx_pspgl_draw_vbo_stream(vertices, vertexCount, primitive)) {
+    if (reservation != NULL) {
+        psp_gfx_pspgl_draw_reserved_stream(reservation, vertexCount, primitive);
+    } else if (!psp_gfx_pspgl_draw_vbo_stream(vertices, vertexCount, primitive)) {
         psp_gfx_pspgl_draw_client_arrays(vertices, vertexCount, primitive);
     }
 }
@@ -2076,7 +2131,24 @@ void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u3
     psp_gfx_pspgl_draw_colored(vertices, vertexCount, GL_TRIANGLES, textureId, textureRef, textureEnv,
                                textureEnvColor, wrapS, wrapT, alphaTest, blend, premultiplied, depthTest,
                                depthWrite, fog, fogColor, fogStart, fogEnd, projectionMatrix, projectionSerial,
-                               pretransformed, pointFilter);
+                               pretransformed, pointFilter, NULL);
+}
+
+void PspGfxPspgl_DrawReservedColoredTriangles(const PspGfxPspglVertexReservation* reservation, u32 vertexCount,
+                                              u32 textureId, PspGfxPspglTextureRef textureRef,
+                                              PspGfxPspglTextureEnv textureEnv, u32 textureEnvColor,
+                                              PspGfxPspglTextureWrap wrapS, PspGfxPspglTextureWrap wrapT,
+                                              int alphaTest, int blend, int premultiplied, int depthTest,
+                                              int depthWrite, int fog, const float* fogColor, float fogStart,
+                                              float fogEnd, const float* projectionMatrix, u32 projectionSerial,
+                                              int pretransformed, int pointFilter) {
+    if ((reservation == NULL) || (reservation->vertices == NULL) || (vertexCount > reservation->capacity)) {
+        return;
+    }
+    psp_gfx_pspgl_draw_colored(reservation->vertices, vertexCount, GL_TRIANGLES, textureId, textureRef,
+                               textureEnv, textureEnvColor, wrapS, wrapT, alphaTest, blend, premultiplied,
+                               depthTest, depthWrite, fog, fogColor, fogStart, fogEnd, projectionMatrix,
+                               projectionSerial, pretransformed, pointFilter, reservation);
 }
 
 void PspGfxPspgl_DrawColoredSprites(const PspGfxPspglColorVertex* vertices, u32 vertexCount,
@@ -2088,7 +2160,7 @@ void PspGfxPspgl_DrawColoredSprites(const PspGfxPspglColorVertex* vertices, u32 
     psp_gfx_pspgl_draw_colored(vertices, vertexCount, PSP_GFX_PSPGL_GL_SPRITES, textureId, textureRef,
                                textureEnv, textureEnvColor, wrapS, wrapT, alphaTest, blend, premultiplied,
                                depthTest, depthWrite, fog, fogColor, fogStart, fogEnd, projectionMatrix,
-                               projectionSerial, pretransformed, pointFilter);
+                               projectionSerial, pretransformed, pointFilter, NULL);
 }
 
 void PspGfxPspgl_DrawSolidRect(float ulx, float uly, float lrx, float lry, u32 color, int blend) {

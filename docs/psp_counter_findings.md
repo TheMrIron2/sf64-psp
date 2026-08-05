@@ -405,6 +405,178 @@ counter capture showing the cost actually fell.
   vertex). Merging removes draws, not vertices, so only the fixed part is
   recovered — which is what the estimates above use.
 
+## Finding 10: the post-pool remainder is now the largest block
+
+A scoped post-pool capture on `adb38632` re-derived Finding 3 after the title
+fell from 177 to 108 sampled submissions per frame. Shares of frontend CPU
+cycles:
+
+| scope | title, standalone | title, PSPLINK | light, PSPLINK |
+| --- | ---: | ---: | ---: |
+| submit | 30.4% | 30.6% | 20.9% |
+| vertex | 15.8% | 15.9% | 13.7% |
+| texture | 4.4% | 4.4% | 2.9% |
+| **remainder** | **49.5%** | **49.1%** | **62.5%** |
+
+Submission is still expensive, but it is no longer the largest title block.
+The next measurement should split the remainder into triangle handling,
+clipping and final batch construction before another submission optimisation.
+
+The standalone and PSPLINK title captures saw identical commands and loaded
+vertices. Standalone CPU cycles were 0.85% higher, I-cache misses differed by
+less than 0.01%, and every scope share was within 0.4 percentage points. A
+standalone capture that reports `counter_source=thread_profiler` is suitable for
+future counter work and avoids PSPLINK setup.
+
+Corneria produced no capture. Both standalone and PSPLINK attempts crashed
+during warm-up; the PSPLINK exception address `0x001DFB10` resolves to
+`sceGeListEnQueue` in the scoped ELF. Warm-up does not arm scopes or sample
+counters, so this is a separate GE submission failure rather than evidence of a
+counter-read fault. The regular release EBOOT reproduced at the same symbol,
+excluding the counter build.
+
+The exception's command-buffer address resolves to PSPGL list 15. Its apparent
+stall address is at the end of a full 512-word list. This is not simple GE queue
+exhaustion: PSP firmware provides 64 list records and PSPGL permits at most 16
+outstanding lists.
+
+`make psp-dlist-diagnostics` builds a local-PSPGL PRX that validates each list
+and import stub immediately before enqueue. It completed Corneria without a
+failure log or PSPLINK exception. That rules out a consistently malformed list,
+but does not prove a fix because the guards change timing and layout.
+`make psp-local-pspgl` is the uninstrumented control. Its enqueue machine code is
+equivalent to the release path and it reproduced the crash, excluding
+local-library linkage. Its command buffer resolves to ring slot 8 rather than
+the earlier slot 15, but both failures use the same 511-word rollover shape.
+The failure is therefore not tied to one list object.
+
+`make psp-dlist-layout-control` retains the full diagnostic executable layout
+but disables its runtime work. Its `.text`, symbols and section sizes match the
+full diagnostic build; one initialised data byte selects the mode. It reproduced
+the crash, excluding layout. The live import stub still contained `jr $ra`
+followed by a valid syscall instruction after the exception, excluding stub
+corruption. `make psp-dlist-snapshot` is the next control: it records only list
+identity, length and addresses without scanning the ring, tail or import stub.
+The three modes have byte-identical `.text` and symbol addresses.
+
+The snapshot build also crashed. Its last coherent identity fields describe
+submission 17933, ring slot 12, a free 511-word list from `0x49A59900` through
+`0x49A5A0F8`. Minimal writes therefore do not mask the fault, and the same
+full-list rollover now appears on slots 8, 12 and 15. The phase and result words
+did not describe the faulting call coherently, so they cannot be used as an
+enqueue return value.
+
+The release regression starts with the open-batch pool. The earlier
+`build/psp-pool64` PRX is byte-identical to today's regular `build/psp` PRX, so
+making the already-tested candidate unconditional did not introduce a separate
+code change. The pool changes the GE command stream or its timing; enqueue is
+where that problem surfaces.
+
+The layout-identical 64-slot pool pair settled causality. The enabled control
+crashed at `sceGeListEnQueue`; the bypass completed Corneria. Their PRXs differ
+by one initialised selector byte while retaining identical code, symbols, pool
+allocation and PSPGL layout. The failure therefore requires pooled rendering,
+not its static allocation or the change that made it default.
+
+Transient queue pressure is excluded. The post-queue control reproduced the
+failure and the pre-queue candidate also crashed after limiting the transient
+outstanding peak from 16 lists to 15. The control surfaced as an interrupt in
+the normal matrix-command dispatcher; an interrupt PC and `BadVAddr` do not
+identify an access by that instruction. The candidate failed in
+`sceGeListEnQueue` like the earlier cases.
+
+The pool audit found a concrete texture-lifetime defect. On a texture-cache
+miss, the old path flushes only the selected batch before creating the texture.
+Creation may evict and delete a texture still referenced by a different parked
+pool slot. The slot is later submitted with a stale PSPGL texture reference.
+Texture-enable changes can likewise leave parked batches behind.
+
+The layout-identical texture-barrier pair confirmed the cause. The unsafe
+control crashed in `sceGeListEnQueue`; the safe candidate survived the Corneria
+test. Their packaged PRXs differed by one selector byte. Texture changes are now
+unconditional pool-wide barriers, so every parked reference is consumed before
+cache eviction. The temporary selectors and PSPGL queue diagnostics were
+removed after the result.
+
+The scoped counter build now records `triangle`, `clipping` and `batch` in
+addition to the original inner scopes. `triangle` covers full TRI command
+handling; `clipping` stops before fan emission; `batch` covers conversion into
+the final 24-byte GE vertices. A fresh title and Corneria capture can now split
+the post-pool remainder rather than infer it by subtraction alone.
+
+The clean release and scoped build subsequently completed title, menu and
+Corneria captures without a crash, verifying the unconditional texture barrier
+on hardware. The new 300-frame scoped captures split the frontend as follows.
+Scopes are nested, so the rows are not additive:
+
+| scope, frontend CPU cycles | title | corneria | light |
+| --- | ---: | ---: | ---: |
+| triangle, inclusive | 51.2% | 43.0% | 40.6% |
+| batch, inside triangle | 16.5% | 9.8% | 13.7% |
+| clipping, inside triangle | 0.1% | 5.2% | 0.0% |
+| submit | 21.9% | 21.1% | 16.0% |
+| vertex | 11.8% | 13.1% | 10.8% |
+| texture | 2.5% | 6.3% | 1.9% |
+
+The event attribution is more useful than the perturbed cycle shares. Batch
+construction owns 62.2% of scalar FPU instructions and 69.2% of coprocessor
+stalls at the title; the corresponding Corneria shares are 31.2% and 32.3%.
+Submission owns 87.7% and 92.0% of uncached stores. Batch construction performs
+the scalar conversion into cached 24-byte vertices, then submission reads them
+and writes the PSPGL stream through an uncached mapping. This confirms Primary
+Finding 3's two-stage data-movement target.
+
+Clipping is not a title optimisation: 1.31 samples per frame and 0.1% of cycles.
+It is real but secondary in Corneria at 64 samples and 5.2% per frame. The next
+candidate should reserve PSPGL stream space for pooled batches and construct the
+final vertices there, with the current cached staging path retained as the
+control and fallback.
+
+### Implementation result: ACCEPTED
+
+The direct-stream path is unconditional. A failed PSPGL reservation retains the
+old cached staging and copy path as a runtime fallback. The promoted release is
+byte-identical to the hardware-tested candidate:
+
+```text
+PRX SHA-256    35618c605ee45324f2e0eacc1548998d445b5d9d83984744825cdc5fc68bc5c8
+EBOOT SHA-256  f14add8b415c37b23e884179201d52adf24e8cacf19c9563747943c9ed768ee7
+```
+
+The first direct-stream smoke test measured 18.3-18.4 ms at the title against
+22.0-22.2 ms for the control, but showed corrupt triangles on the title and
+premature-looking edge geometry in Corneria. This was reserved-range reuse, not
+depth or clipping state: the TRI2 capacity preflush submitted a full slot and
+continued writing at offset zero. Cached staging was safe because PSPGL copied
+the slot; the direct path overwrote vertices before the GE consumed them. TRI2
+now rotates to a fresh pool slot like the other capacity paths. The corrected
+path fixed the title and Corneria geometry on hardware and averages 18.5 ms at
+the title, against 22.0-22.2 ms for the control: ~3.6 ms, or 16%.
+
+The first matched unscoped counter pair confirmed the gain in four scenes:
+
+| scene | control task | direct task | change |
+| --- | ---: | ---: | ---: |
+| title | 22.355 ms | 18.501 ms | -3.855 ms (-17.2%) |
+| light (menu) | 3.448 ms | 3.228 ms | -0.219 ms (-6.4%) |
+| other (training) | 7.917 ms | 7.529 ms | -0.389 ms (-4.9%) |
+| corneria | 19.146 ms | 17.889 ms | -1.258 ms (-6.6%) |
+
+Title and menu work matched; title submitted vertices differed by only 0.02%.
+Training and Corneria were slightly different gameplay windows, with 0.4% and
+1.4% more commands in the candidate. Normalised per submitted vertex, CPU cycles
+fell by 17.4% at title and 5.9-7.5% in gameplay. Uncached stores fell by 62.0%
+at title, 35.1% in training and 61.5% in Corneria; cached loads, D-cache misses
+and writebacks also fell in every scene. Title FPU work changed by +0.2% and
+VFPU work was identical. The only consistent regression was I-cache misses
+(+10.5% to +35.9%), which is outweighed by the data-side savings.
+
+This confirms that direct construction removes the predicted second read and
+stream copy rather than reducing geometry work. On 2026-08-05 the user accepted
+the result as an explicit exception to the usual three-title-pair rule: the set
+contains one matched pair in each of four scenes, all positive, with exact title
+and menu work plus the expected counter movement.
+
 ## Appendix: how the merge potential was measured
 
 `PSP_MERGE_ANALYSIS` was a temporary diagnostic, removed once it had answered
@@ -457,9 +629,10 @@ future batching question needs it.
   24-byte vertex, plus ~20 per draw call, consistent across all three scenes).
   Ratios and shares are safe; absolute bandwidth figures are not, and none are
   quoted here.
-- **The scoped build perturbs the frame** by ~4 ms at the title, ~3.7 us per
-  sample across ~1,100 samples per frame, landing inside the inner scopes. Read
-  proportions, not absolute milliseconds, from scoped captures.
+- **The scoped build perturbs the frame.** The original three inner scopes added
+  ~4 ms at the title. The triangle and batch scopes add about 2,200 high-frequency
+  samples per frame and raise the measured task to 37 ms. Read attribution, not
+  absolute milliseconds, from these captures.
 - **One capture per scene.** These are diagnostics, not A/B results. Any
   optimisation candidate still needs the handoff's three paired 300-frame runs
   on a clean build.

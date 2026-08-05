@@ -10,7 +10,7 @@
 #define PROFILE_HW_COUNTERS 0
 #endif
 
-/* Inner frontend scopes, sampled per texture upload and per G_VTX so not free */
+/* Inner frontend scopes are sampled at high frequency and are diagnostic only */
 #ifndef PROFILE_HW_COUNTER_SCOPES
 #define PROFILE_HW_COUNTER_SCOPES 0
 #endif
@@ -38,6 +38,9 @@ typedef enum {
     /* PSPGL draw submission, which happens per batch inside the frontend
      * not in the end of task flush, so it needs its own scope */
     PSP_HW_SCOPE_SUBMIT,
+    PSP_HW_SCOPE_TRIANGLE,
+    PSP_HW_SCOPE_CLIPPING,
+    PSP_HW_SCOPE_BATCH,
     PSP_HW_SCOPE_COUNT
 } PspHwCounterScope;
 

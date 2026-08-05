@@ -198,7 +198,9 @@ endif
 endif
 ifeq ($(PROFILE_HW_COUNTER_SCOPES),1)
 ifneq ($(PROFILE_HW_COUNTERS),1)
+ifneq ($(MAKECMDGOALS),psp-profile-hw-counters)
 $(error PROFILE_HW_COUNTER_SCOPES=1 requires PROFILE_HW_COUNTERS=1.)
+endif
 endif
 endif
 ifeq ($(PROFILE_HW_COUNTERS),1)
