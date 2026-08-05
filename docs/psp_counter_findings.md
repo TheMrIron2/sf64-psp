@@ -577,6 +577,39 @@ the result as an explicit exception to the usual three-title-pair rule: the set
 contains one matched pair in each of four scenes, all positive, with exact title
 and menu work plus the expected counter movement.
 
+### Finding 3 follow-up decision: CONCLUDED
+
+The post-direct-stream diagnostic found exact duplicate packets in 60.6% of
+title direct vertices and 31.8% at mid-Corneria. A stable source-load identity
+found 96.6% and 83.7% of those duplicates with zero mismatches. Hybrid U16
+storage would reduce direct vertex bytes by 52.4% and 24.1% respectively.
+
+That transfer model does not clear indexed rendering. Sony's July 2005 graphics
+seminar shows materially higher transfer cost for 24-byte indexed vertices and
+recommends compact non-indexed data in eDRAM; this port's earlier indexed path
+also regressed. Two non-indexed attempts tested whether the conversion work
+could instead be reused:
+
+| title candidate | task time | task cycles | batch cycles | batch FPU | batch memory stalls | batch D-misses |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| UV conversion cache | +4.51% | +4.57% | +17.26% | -28.24% | +29.22% | +88.08% |
+| Per-command UV hoist | +1.97% | +2.13% | +7.67% | -7.85% | +56.09% | +69.14% |
+
+Both pairs used thread hardware counters and layout-identical executables. Work
+changed by +0.0018% for the cache and -0.0023% for the hoist. The cache's
+arithmetic saving was overwhelmed by its data footprint. The hoist added six
+stores per triangle command: 328,800 commands predicted about 1.97 million
+stores, matching the measured 1,970,705 increase and a 201.74% rise in batch
+D-cache writebacks. Neither candidate warranted a Corneria run.
+
+Finding 3 ends at accepted Stage A. The audit's fused VFPU final-vertex Stage B
+is retired: after direct streaming removed the extra copy, the remaining path
+is memory-bound and both attempts to remove scalar UV work increased stalls and
+task time. Indexed reuse was a separate alternative and is also rejected. The
+packet diagnostic, source identities, experiment selectors and dedicated build
+targets have been removed; detailed captures are summarised in
+`docs/psp_vertex_reuse_diagnostics.md`.
+
 ## Appendix: how the merge potential was measured
 
 `PSP_MERGE_ANALYSIS` was a temporary diagnostic, removed once it had answered

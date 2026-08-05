@@ -11,20 +11,6 @@
 #define PROFILE_TRIVIAL_REJECTS 0
 #endif
 
-#ifndef PROFILE_VERTEX_REUSE
-#define PROFILE_VERTEX_REUSE 0
-#endif
-
-typedef enum {
-    PSP_PROFILE_VERTEX_REUSE_SOURCE_DIRECT,
-    PSP_PROFILE_VERTEX_REUSE_SOURCE_GENERIC_UNCLIPPED,
-    PSP_PROFILE_VERTEX_REUSE_SOURCE_CLIPPED_ORIGINAL,
-    PSP_PROFILE_VERTEX_REUSE_SOURCE_CLIPPED_GENERATED,
-    PSP_PROFILE_VERTEX_REUSE_SOURCE_RECTANGLE,
-    PSP_PROFILE_VERTEX_REUSE_SOURCE_UNKNOWN,
-    PSP_PROFILE_VERTEX_REUSE_SOURCE_COUNT
-} PspProfileVertexReuseSource;
-
 typedef enum {
     PSP_PROFILE_PHASE_GFX_TASK,
     PSP_PROFILE_PHASE_DL_TRAVERSAL,
@@ -219,10 +205,6 @@ void PspProfiler_CountTextureParameterCacheMiss(void);
 void PspProfiler_CountTextureParameterCacheReplacement(void);
 void PspProfiler_CountGlFlush(void);
 void PspProfiler_CountSync(void);
-#if PROFILE_VERTEX_REUSE
-void PspProfiler_AnalyzeBatchVertexReuse(const void* vertices, const u32* sourceIdentities,
-                                         u32 vertexCount, int directStream);
-#endif
 #if PROFILE_TRIVIAL_REJECTS
 void PspProfiler_CountTri2OutcomeMatrix(PspProfileTriOutcome first, PspProfileTriOutcome second);
 void PspProfiler_CountTrivialRejectCost(PspProfileTrivialRejectCost cost, u32 count);
@@ -274,7 +256,6 @@ void PspProfiler_CountTrivialRejectRenderState(PspProfileTrivialRejectRenderStat
 #define PspProfiler_CountTextureParameterCacheReplacement() ((void) 0)
 #define PspProfiler_CountGlFlush() ((void) 0)
 #define PspProfiler_CountSync() ((void) 0)
-#define PspProfiler_AnalyzeBatchVertexReuse(vertices, sourceIdentities, vertexCount, directStream) ((void) 0)
 #endif
 
 #if PROFILE_PHASES && PROFILE_COMPONENTS

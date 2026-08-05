@@ -246,9 +246,6 @@ typedef struct {
     float modelviewStack[PSP_GFX_DL_MTX_STACK_DEPTH][4][4];
     float batchProjection[4][4];
     u32 batchCount;
-#if PROFILE_VERTEX_REUSE
-    u32 vertexReuseIdentity[PSP_GFX_DL_MAX_VERTICES];
-#endif
     u32 modelviewStackDepth;
     u32 projectionSerial;
     u32 currentProjectionSnapshot;
@@ -447,12 +444,6 @@ static PspGfxPspglColorVertex* sPspGfxDlBatchCursor = sPspGfxDlBatch;
 static u32 sPspGfxDlBatchCapacity = PSP_GFX_DL_BATCH_VERTICES;
 #define PSP_GFX_DL_BATCH sPspGfxDlBatchCursor
 #define PSP_GFX_DL_BATCH_CAP sPspGfxDlBatchCapacity
-#if PROFILE_VERTEX_REUSE
-static u32 sPspGfxDlBatchIdentity[PSP_GFX_DL_BATCH_VERTICES] __attribute__((aligned(16)));
-static u32* sPspGfxDlBatchIdentityCursor = sPspGfxDlBatchIdentity;
-static u32 sPspGfxDlVertexReuseIdentity;
-#define PSP_GFX_DL_BATCH_IDENTITY sPspGfxDlBatchIdentityCursor
-#endif
 
 static n64psp_vec4f
     sPspGfxDlTransformInput[PSP_GFX_DL_MAX_VERTICES]
@@ -1401,27 +1392,6 @@ static u32 psp_gfx_dl_batch_owner_component(const PspGfxDlContext* ctx) {
 #define psp_gfx_dl_mark_batch_component(ctx) ((void) 0)
 #endif
 
-#if PROFILE_VERTEX_REUSE
-static u32 psp_gfx_dl_vertex_reuse_identity(const PspGfxDlContext* ctx, const PspGfxDlVertex* src) {
-    u32 index = (u32) (src - ctx->vertices);
-
-    return (index < PSP_GFX_DL_MAX_VERTICES) ? ctx->vertexReuseIdentity[index] : 0;
-}
-
-#define psp_gfx_dl_mark_vertex_reuse_identity(ctx, identity)              \
-    do {                                                                  \
-        if ((ctx)->batchCount != 0) {                                     \
-            PSP_GFX_DL_BATCH_IDENTITY[(ctx)->batchCount - 1] = (identity); \
-        }                                                                 \
-    } while (0)
-#else
-#define psp_gfx_dl_vertex_reuse_identity(ctx, src) 0
-#define psp_gfx_dl_mark_vertex_reuse_identity(ctx, identity) ((void) 0)
-#endif
-#define psp_gfx_dl_clipped_vertex_source(src) 0
-#define psp_gfx_dl_resolve_vertex_reuse_source(src, source) 0
-#define psp_gfx_dl_reset_vertex_reuse_batch(ctx) ((void) 0)
-
 static void psp_gfx_dl_handle_movemem(PspGfxDlContext* ctx, const Gfx* gfx) {
     u32 index = (gfx->words.w0 >> 16) & 0xFF;
     const Vp* viewport;
@@ -1540,7 +1510,6 @@ static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason 
 #if PROFILE_COMPONENTS
         ctx->batchComponentMask = 0;
 #endif
-        psp_gfx_dl_reset_vertex_reuse_batch(ctx);
         return;
     }
 #if PROFILE_COMPONENTS
@@ -1550,10 +1519,6 @@ static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason 
 #endif
     (void) reason;
     psp_gfx_dl_weld_flat_batch_seams(ctx);
-#if PROFILE_VERTEX_REUSE
-    PspProfiler_AnalyzeBatchVertexReuse(PSP_GFX_DL_BATCH, PSP_GFX_DL_BATCH_IDENTITY,
-                                        ctx->batchCount, ctx->batchReserved);
-#endif
     PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_SUBMIT);
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_BATCH_FLUSH);
     if (ctx->batchReserved) {
@@ -1590,7 +1555,6 @@ static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason 
 #if PROFILE_COMPONENTS
     ctx->batchComponentMask = 0;
 #endif
-    psp_gfx_dl_reset_vertex_reuse_batch(ctx);
 }
 
 static PspGfxPspglTextureRef psp_gfx_dl_null_texture_ref(void) {
@@ -1611,9 +1575,6 @@ static int psp_gfx_dl_texture_ref_equal(PspGfxPspglTextureRef a, PspGfxPspglText
 // the whole pool first, so all open slots always share that state by construction
 typedef struct {
     PspGfxPspglColorVertex vertices[PSP_BATCH_POOL_VERTICES] __attribute__((aligned(16)));
-#if PROFILE_VERTEX_REUSE
-    u32 vertexReuseIdentity[PSP_BATCH_POOL_VERTICES] __attribute__((aligned(16)));
-#endif
     PspGfxPspglVertexReservation reservation;
     int reserved;
     u32 count;
@@ -1694,9 +1655,6 @@ static void psp_gfx_dl_pool_select(PspGfxDlContext* ctx, u32 index) {
     ctx->batchReserved = sPspGfxDlPool[index].reserved;
     PSP_GFX_DL_BATCH = ctx->batchReserved ? ctx->batchReservation.vertices : sPspGfxDlPool[index].vertices;
     PSP_GFX_DL_BATCH_CAP = PSP_BATCH_POOL_VERTICES;
-#if PROFILE_VERTEX_REUSE
-    PSP_GFX_DL_BATCH_IDENTITY = sPspGfxDlPool[index].vertexReuseIdentity;
-#endif
 }
 
 // geometry that may not be reordered keeps the standalone buffer
@@ -1705,9 +1663,6 @@ static void psp_gfx_dl_pool_use_direct(PspGfxDlContext* ctx) {
     ctx->batchReserved = 0;
     PSP_GFX_DL_BATCH = sPspGfxDlBatch;
     PSP_GFX_DL_BATCH_CAP = PSP_GFX_DL_BATCH_VERTICES;
-#if PROFILE_VERTEX_REUSE
-    PSP_GFX_DL_BATCH_IDENTITY = sPspGfxDlBatchIdentity;
-#endif
 }
 
 static void psp_gfx_dl_pool_park(PspGfxDlContext* ctx) {
@@ -2377,14 +2332,12 @@ static void psp_gfx_dl_build_clip_vertex(PspGfxDlContext* ctx, const PspGfxDlVer
     dst->generated = 0;
 }
 
-static void psp_gfx_dl_emit_clip_vertex_with_source(PspGfxDlContext* ctx, const PspGfxDlClipVertex* src, u32 source) {
+static void psp_gfx_dl_emit_clip_vertex(PspGfxDlContext* ctx, const PspGfxDlClipVertex* src) {
     PspGfxPspglColorVertex* dst;
     float r;
     float g;
     float b;
     float a;
-
-    (void) source;
 
     if (ctx->batchCount >= PSP_GFX_DL_BATCH_CAP) {
         if (sPspGfxDlPoolCurrent >= 0) {
@@ -2395,7 +2348,6 @@ static void psp_gfx_dl_emit_clip_vertex_with_source(PspGfxDlContext* ctx, const 
 
     dst = &PSP_GFX_DL_BATCH[ctx->batchCount++];
     psp_gfx_dl_mark_batch_component(ctx);
-    psp_gfx_dl_mark_vertex_reuse_identity(ctx, 0);
 
     if (ctx->batchPretransformed) {
         float inverseW = 1.0f / src->w;
@@ -2423,10 +2375,6 @@ static void psp_gfx_dl_emit_clip_vertex_with_source(PspGfxDlContext* ctx, const 
     dst->color = psp_gfx_dl_pack_rgba(r, g, b, a);
     dst->u = src->u;
     dst->v = src->v;
-}
-
-static void psp_gfx_dl_emit_clip_vertex(PspGfxDlContext* ctx, const PspGfxDlClipVertex* src) {
-    psp_gfx_dl_emit_clip_vertex_with_source(ctx, src, psp_gfx_dl_clipped_vertex_source(src));
 }
 
 static void psp_gfx_dl_count_fog_depth_vertex(PspGfxDlContext* ctx, const PspGfxDlVertex* vertex,
@@ -2557,7 +2505,6 @@ static void psp_gfx_dl_emit_direct_vertex(PspGfxDlContext* ctx, const PspGfxDlVe
 
     dst = &PSP_GFX_DL_BATCH[ctx->batchCount++];
     psp_gfx_dl_mark_batch_component(ctx);
-    psp_gfx_dl_mark_vertex_reuse_identity(ctx, psp_gfx_dl_vertex_reuse_identity(ctx, src));
 
     if (ctx->batchPretransformed) {
         float inverseW = 1.0f / src->clipW;
@@ -2629,7 +2576,6 @@ static void psp_gfx_dl_emit_direct_vertex_unchecked(PspGfxDlContext* ctx, const 
     PspGfxPspglColorVertex* dst = &PSP_GFX_DL_BATCH[ctx->batchCount++];
 
     psp_gfx_dl_mark_batch_component(ctx);
-    psp_gfx_dl_mark_vertex_reuse_identity(ctx, psp_gfx_dl_vertex_reuse_identity(ctx, src));
     psp_gfx_dl_build_direct_vertex(ctx, src, uScale, vScale, dst);
 }
 
@@ -2874,16 +2820,16 @@ static float psp_gfx_dl_triangle_w_ratio(const PspGfxDlClipVertex* a, const PspG
 
 static u32 psp_gfx_dl_emit_perspective_triangle(PspGfxDlContext* ctx, const PspGfxDlClipVertex* a,
                                                 const PspGfxDlClipVertex* b, const PspGfxDlClipVertex* c,
-                                                u32 depth, u32 source) {
+                                                u32 depth) {
     const PspGfxDlClipVertex* low = a;
     const PspGfxDlClipVertex* high = a;
     PspGfxDlClipVertex midpoint;
 
     if ((depth >= PSP_GFX_DL_PERSPECTIVE_MAX_DEPTH) ||
         (psp_gfx_dl_triangle_w_ratio(a, b, c) <= PSP_GFX_DL_PERSPECTIVE_W_RATIO)) {
-        psp_gfx_dl_emit_clip_vertex_with_source(ctx, a, source);
-        psp_gfx_dl_emit_clip_vertex_with_source(ctx, b, source);
-        psp_gfx_dl_emit_clip_vertex_with_source(ctx, c, source);
+        psp_gfx_dl_emit_clip_vertex(ctx, a);
+        psp_gfx_dl_emit_clip_vertex(ctx, b);
+        psp_gfx_dl_emit_clip_vertex(ctx, c);
         ctx->stats.perspectiveTriangleCount++;
         return 1;
     }
@@ -2904,36 +2850,36 @@ static u32 psp_gfx_dl_emit_perspective_triangle(PspGfxDlContext* ctx, const PspG
     ctx->stats.perspectiveSplitCount++;
 
     if ((low == a) && (high == b)) {
-        return psp_gfx_dl_emit_perspective_triangle(ctx, a, &midpoint, c, depth + 1, source) +
-               psp_gfx_dl_emit_perspective_triangle(ctx, &midpoint, b, c, depth + 1, source);
+        return psp_gfx_dl_emit_perspective_triangle(ctx, a, &midpoint, c, depth + 1) +
+               psp_gfx_dl_emit_perspective_triangle(ctx, &midpoint, b, c, depth + 1);
     }
     if ((low == b) && (high == a)) {
-        return psp_gfx_dl_emit_perspective_triangle(ctx, a, &midpoint, c, depth + 1, source) +
-               psp_gfx_dl_emit_perspective_triangle(ctx, &midpoint, b, c, depth + 1, source);
+        return psp_gfx_dl_emit_perspective_triangle(ctx, a, &midpoint, c, depth + 1) +
+               psp_gfx_dl_emit_perspective_triangle(ctx, &midpoint, b, c, depth + 1);
     }
     if ((low == b) && (high == c)) {
-        return psp_gfx_dl_emit_perspective_triangle(ctx, a, b, &midpoint, depth + 1, source) +
-               psp_gfx_dl_emit_perspective_triangle(ctx, a, &midpoint, c, depth + 1, source);
+        return psp_gfx_dl_emit_perspective_triangle(ctx, a, b, &midpoint, depth + 1) +
+               psp_gfx_dl_emit_perspective_triangle(ctx, a, &midpoint, c, depth + 1);
     }
     if ((low == c) && (high == b)) {
-        return psp_gfx_dl_emit_perspective_triangle(ctx, a, b, &midpoint, depth + 1, source) +
-               psp_gfx_dl_emit_perspective_triangle(ctx, a, &midpoint, c, depth + 1, source);
+        return psp_gfx_dl_emit_perspective_triangle(ctx, a, b, &midpoint, depth + 1) +
+               psp_gfx_dl_emit_perspective_triangle(ctx, a, &midpoint, c, depth + 1);
     }
-    return psp_gfx_dl_emit_perspective_triangle(ctx, a, b, &midpoint, depth + 1, source) +
-           psp_gfx_dl_emit_perspective_triangle(ctx, &midpoint, b, c, depth + 1, source);
+    return psp_gfx_dl_emit_perspective_triangle(ctx, a, b, &midpoint, depth + 1) +
+           psp_gfx_dl_emit_perspective_triangle(ctx, &midpoint, b, c, depth + 1);
 }
 
 static u32 psp_gfx_dl_emit_textured_triangle(PspGfxDlContext* ctx, const PspGfxDlClipVertex* a,
-                                             const PspGfxDlClipVertex* b, const PspGfxDlClipVertex* c, u32 source) {
+                                             const PspGfxDlClipVertex* b, const PspGfxDlClipVertex* c) {
     u32 emitted;
 
     PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_BATCH);
     if (ctx->batchPretransformed) {
-        emitted = psp_gfx_dl_emit_perspective_triangle(ctx, a, b, c, 0, source);
+        emitted = psp_gfx_dl_emit_perspective_triangle(ctx, a, b, c, 0);
     } else {
-        psp_gfx_dl_emit_clip_vertex_with_source(ctx, a, source);
-        psp_gfx_dl_emit_clip_vertex_with_source(ctx, b, source);
-        psp_gfx_dl_emit_clip_vertex_with_source(ctx, c, source);
+        psp_gfx_dl_emit_clip_vertex(ctx, a);
+        psp_gfx_dl_emit_clip_vertex(ctx, b);
+        psp_gfx_dl_emit_clip_vertex(ctx, c);
         ctx->stats.perspectiveTriangleCount++;
         emitted = 1;
     }
@@ -3110,8 +3056,7 @@ static u32 psp_gfx_dl_emit_clipped_triangle(PspGfxDlContext* ctx, const PspGfxDl
     }
     for (i = 1; i + 1 < vertexCount; i++) {
         if (textured) {
-            psp_gfx_dl_emit_textured_triangle(ctx, &input[0], &input[i], &input[i + 1],
-                                              PSP_PROFILE_VERTEX_REUSE_SOURCE_CLIPPED_ORIGINAL);
+            psp_gfx_dl_emit_textured_triangle(ctx, &input[0], &input[i], &input[i + 1]);
         } else {
             psp_gfx_dl_emit_clip_vertex(ctx, &input[0]);
             psp_gfx_dl_emit_clip_vertex(ctx, &input[i]);
@@ -3291,15 +3236,11 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
             psp_gfx_dl_build_clip_vertex(ctx, vb, &vertices[1]);
             psp_gfx_dl_build_clip_vertex(ctx, vc, &vertices[2]);
             if (textureId != 0) {
-                psp_gfx_dl_emit_textured_triangle(ctx, &vertices[0], &vertices[1], &vertices[2],
-                                                  PSP_PROFILE_VERTEX_REUSE_SOURCE_GENERIC_UNCLIPPED);
+                psp_gfx_dl_emit_textured_triangle(ctx, &vertices[0], &vertices[1], &vertices[2]);
             } else {
-                psp_gfx_dl_emit_clip_vertex_with_source(ctx, &vertices[0],
-                                                        PSP_PROFILE_VERTEX_REUSE_SOURCE_GENERIC_UNCLIPPED);
-                psp_gfx_dl_emit_clip_vertex_with_source(ctx, &vertices[1],
-                                                        PSP_PROFILE_VERTEX_REUSE_SOURCE_GENERIC_UNCLIPPED);
-                psp_gfx_dl_emit_clip_vertex_with_source(ctx, &vertices[2],
-                                                        PSP_PROFILE_VERTEX_REUSE_SOURCE_GENERIC_UNCLIPPED);
+                psp_gfx_dl_emit_clip_vertex(ctx, &vertices[0]);
+                psp_gfx_dl_emit_clip_vertex(ctx, &vertices[1]);
+                psp_gfx_dl_emit_clip_vertex(ctx, &vertices[2]);
             }
             emittedTriangles = 1;
             PspProfiler_CountTrianglePath(0, 1, ((textureId != 0) && pretransformed) ? 1 : 0, 0, 0);
@@ -3342,8 +3283,6 @@ static void psp_gfx_dl_emit_rect_vertex(PspGfxDlContext* ctx,
 
     dst = &PSP_GFX_DL_BATCH[ctx->batchCount++];
     psp_gfx_dl_mark_batch_component(ctx);
-    psp_gfx_dl_mark_vertex_reuse_identity(ctx, 0);
-
     dst->u = psp_gfx_dl_normalize_texel_coord(ctx, u, ctx->textureUploadWidth, ctx->textureTileUls);
     dst->v = psp_gfx_dl_normalize_texel_coord(ctx, v, ctx->textureUploadHeight, ctx->textureTileUlt);
 
@@ -3960,13 +3899,6 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
             out->a = in->v.cn[3];
             out->s = in->v.tc[0];
             out->t = in->v.tc[1];
-#if PROFILE_VERTEX_REUSE
-            sPspGfxDlVertexReuseIdentity++;
-            if (sPspGfxDlVertexReuseIdentity == 0) {
-                sPspGfxDlVertexReuseIdentity = 1;
-            }
-            ctx->vertexReuseIdentity[v0 + i] = sPspGfxDlVertexReuseIdentity;
-#endif
         }
     }
     PspProfiler_RenderPhaseEnd(PSP_PROFILE_PHASE_G_VTX_ATTRIBUTE_COPY, phaseStartUs);
