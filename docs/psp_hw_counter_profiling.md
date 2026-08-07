@@ -135,6 +135,22 @@ cost is inside `frontend`, not `flush`.** Use the inner scopes to split it.
 also occur there. Treat the scopes as a hierarchy, not columns to add together.
 The triangle-exclusive remainder is obtained by subtracting its nested work.
 
+### Retired post-stream submission split
+
+A layout-controlled 17-phase diagnostic subdivided the accepted direct-stream
+submission path. It found matrix resolution/upload was the largest remaining
+fixed scope. A second split measured 0.113 ms per frame resolving the matrices
+and 0.482 ms emitting their GE packets after subtracting matched counter-read
+overhead.
+
+Bulk matrix-value reservation failed its first title pair. The successful PSPGL
+candidate instead stopped texture-object changes from dirtying an unchanged
+effective texture-matrix adjustment. It improved task time by 1.971% at the
+static title and 2.792% in the closely matched Corneria opening cutscene. The
+user confirmed both were visually correct on hardware. The optimisation is now
+unconditional; all subdivision hooks, selectors and dedicated targets have been
+removed. Full measurements are in Finding 11 of `psp_counter_findings.md`.
+
 Counters are per-thread, so they exclude other threads' work while the render
 thread is descheduled. Wall time does not. A scope where elapsed time is large
 but `cpuck` is small is a wait, not CPU cost — the audit's "low Allegrex time
@@ -154,8 +170,9 @@ Use all three from the audit, tagging each capture before starting it:
 
 Procedure per capture: audio off, reach the scene, tag it, press `Select` + `L`,
 hold the scene steady through warm-up and the recorded frames, and let it save
-itself. Repeat three times per configuration, matching the handoff's paired
-measurement rule.
+itself. The deterministic title needs one exact workload-matched pair when time
+and independent counters agree. Gameplay comparisons must be normalised for
+their recorded work.
 
 ## Output
 
@@ -185,12 +202,12 @@ Display-list commands, loaded vertices and submitted vertices for the capture.
 
 ```text
 [scopes]
-scope,samples,elapsed_us,us_per_frame_x1000
+scope,samples,elapsed_us,us_per_frame_x1000,us_per_sample_x1000
 ```
 
 ```text
 [counters]
-scope,counter,total,per_frame_x1000,per_command_x1000,per_loaded_vertex_x1000,per_submitted_vertex_x1000
+scope,counter,total,per_frame_x1000,per_sample_x1000,per_command_x1000,per_loaded_vertex_x1000,per_submitted_vertex_x1000
 ```
 
 One row per scope per counter, in the profiler register order: `systemck`,

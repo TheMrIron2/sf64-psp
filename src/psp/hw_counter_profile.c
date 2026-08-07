@@ -356,7 +356,7 @@ static int psp_hw_dump_scopes(SceUID fd) {
     char line[256];
     u32 i;
 
-    if (!psp_hw_write_all(fd, "\n[scopes]\nscope,samples,elapsed_us,us_per_frame_x1000\n")) {
+    if (!psp_hw_write_all(fd, "\n[scopes]\nscope,samples,elapsed_us,us_per_frame_x1000,us_per_sample_x1000\n")) {
         return 0;
     }
 
@@ -366,9 +366,10 @@ static int psp_hw_dump_scopes(SceUID fd) {
         if (totals->samples == 0) {
             continue;
         }
-        snprintf(line, sizeof(line), "%s,%lu,%llu,%llu\n", sPspHwScopeNames[i],
+        snprintf(line, sizeof(line), "%s,%lu,%llu,%llu,%llu\n", sPspHwScopeNames[i],
                  (unsigned long) totals->samples, (unsigned long long) totals->elapsedUs,
-                 (unsigned long long) psp_hw_ratio(totals->elapsedUs, sPspHwTotals.frames));
+                 (unsigned long long) psp_hw_ratio(totals->elapsedUs, sPspHwTotals.frames),
+                 (unsigned long long) psp_hw_ratio(totals->elapsedUs, totals->samples));
         if (!psp_hw_write_all(fd, line)) {
             return 0;
         }
@@ -386,7 +387,7 @@ static int psp_hw_dump_counters(SceUID fd) {
                                     "enabled before ThreadMan init; timings above are still valid\n");
     }
 
-    if (!psp_hw_write_all(fd, "\n[counters]\nscope,counter,total,per_frame_x1000,per_command_x1000,"
+    if (!psp_hw_write_all(fd, "\n[counters]\nscope,counter,total,per_frame_x1000,per_sample_x1000,per_command_x1000,"
                               "per_loaded_vertex_x1000,per_submitted_vertex_x1000\n")) {
         return 0;
     }
@@ -400,9 +401,10 @@ static int psp_hw_dump_counters(SceUID fd) {
         for (i = 0; i < PSP_HW_COUNTER_COUNT; i++) {
             u64 total = totals->counter[i];
 
-            snprintf(line, sizeof(line), "%s,%s,%llu,%llu,%llu,%llu,%llu\n", sPspHwScopeNames[scope],
+            snprintf(line, sizeof(line), "%s,%s,%llu,%llu,%llu,%llu,%llu,%llu\n", sPspHwScopeNames[scope],
                      sPspHwCounterNames[i], (unsigned long long) total,
                      (unsigned long long) psp_hw_ratio(total, sPspHwTotals.frames),
+                     (unsigned long long) psp_hw_ratio(total, totals->samples),
                      (unsigned long long) psp_hw_ratio(total, sPspHwTotals.commands),
                      (unsigned long long) psp_hw_ratio(total, sPspHwTotals.loadedVertices),
                      (unsigned long long) psp_hw_ratio(total, sPspHwTotals.submittedVertices));

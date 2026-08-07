@@ -610,6 +610,134 @@ packet diagnostic, source identities, experiment selectors and dedicated build
 targets have been removed; detailed captures are summarised in
 `docs/psp_vertex_reuse_diagnostics.md`.
 
+## Finding 11: GE matrix packet emission is the next PSPGL submission target
+
+The accepted direct-stream renderer was re-profiled at the title with a
+layout-controlled submission build. Its volatile selector changes only one
+initialised byte; control and phase 4 were verified with identical `.text` and
+`.rodata`. Every fine scope had exactly 32,400 samples: 108 submitted draws per
+frame. The captures matched at 3,272 display-list commands and 2,546 loaded
+vertices per frame; submitted vertices varied by less than 0.002%.
+
+Phase 9 measured the counter-read floor at 0.221533 ms and 67,147.813 CPU cycles
+per frame. Subtracting that floor separately from phases 10-13 gives:
+
+| PSPGL GE-state phase | ms/frame | CPU cycles/frame | memory stalls/frame | uncached-store units/frame |
+| --- | ---: | ---: | ---: | ---: |
+| preparation | 0.105713 | 28,274 | 15,810 | 0.863 |
+| **matrix resolution/upload** | **0.708340** | **219,840** | **100,355** | **1,486.133** |
+| dirty-register emission | 0.237457 | 73,424 | 13,076 | 346.313 |
+| CLUT/vertex pointers | 0.103117 | 29,807 | 14,510 | 216.307 |
+| total | 1.154627 | 351,345 | 143,751 | 2,049.616 |
+
+Matrix resolution and upload therefore owns 61.3% of corrected time, 62.6% of
+CPU cycles, 69.8% of memory stalls and 72.5% of uncached-store units in this
+fixed per-draw subdivision. Its corrected cost is 6.56 us and about 2,036 CPU
+cycles per submitted draw. Counter units remain uncalibrated, so the store
+number proves real command-list traffic but is not interpreted as a command or
+byte count.
+
+The first candidate belonged in generic PSPGL, not SF64 display-list code.
+`flush_matrix()` currently emits each 13- or 17-word GE matrix packet through a
+separate `__pspgl_dlist_enqueue_cmd()` call, repeating list lookup, capacity
+checking and bookkeeping for every word. A bulk reserve/emit experiment tested
+whether that overhead explained the measured matrix cost.
+
+### Matrix packet candidate: REJECTED
+
+The profiling-only candidate emitted the trigger normally, then bulk-reserved
+its 12 or 16 matrix values, splitting only at the original display-list
+rollover. Both executables contained both paths and differed by one volatile
+selector byte. Their title work matched exactly at 3,272 commands, 2,546 loaded
+vertices and 6,499.05 submitted vertices per frame.
+
+| title task metric | control | bulk packet | change |
+| --- | ---: | ---: | ---: |
+| time | 19.500606 ms | 19.538886 ms | +0.196% |
+| CPU cycles | 6,312,237 | 6,319,077 | +0.108% |
+| memory stalls | 2,438,795 | 2,473,614 | +1.428% |
+| bus accesses | 2,574,958 | 2,604,221 | +1.136% |
+| I-cache misses | 27,295 | 27,760 | +1.703% |
+| D-cache misses | 7,080 | 7,144 | +0.907% |
+
+Cached loads fell 1.61% and cached stores fell 2.32%, but the stall and miss
+increase outweighed them. The candidate failed its first-pair gate, so no repeat
+or Corneria run is justified. The bulk API, selector, build targets and build
+trees have been removed. Matrix resolution/upload remains the measured scope,
+but per-word enqueue overhead is not its useful optimisation target.
+
+A profiling-only follow-up subdivided each dirty matrix upload into a
+back-to-back counter-read control, stack resolution and optional VFPU adjustment,
+and the GE trigger plus matrix-value writes. All three recorded 33,000 samples,
+or 110 matrix uploads per frame against 108 draws. Work matched at 3,272 commands
+and 2,546 loaded vertices per frame; submitted vertices varied by 0.001%.
+
+After subtracting the per-upload control separately, the split is:
+
+| matrix upload phase | ms/frame | CPU cycles/frame | memory stalls/frame | uncached-store units/frame |
+| --- | ---: | ---: | ---: | ---: |
+| resolution and adjustment | 0.113216 | 36,228 | 27,783 | 0.247 |
+| **GE word emission** | **0.481813** | **151,254** | **69,543** | **1,484.337** |
+
+Emission owns 81.0% of corrected time, 80.7% of cycles, 71.4% of memory stalls
+and effectively all uncached stores. Software matrix resolution is not the next
+target. The useful route is to prevent unnecessary packets.
+
+PSPGL dirties the texture matrix on every texture-object change, although its
+backend adjustment depends only on texture-coordinate type and whether the
+texture is flipped. SF64 uses float texture coordinates, and the title's upload
+rate tracks its draw rate. The generic PSPGL candidate caches the effective
+texture-matrix adjustment and dirties the matrix only when that value changes.
+Both A/B builds contain both paths and select them with one volatile initialised
+byte.
+
+The first 300-frame title pair had exact work at 3,272 commands, 2,546 loaded
+vertices and 6,499.020 submitted vertices per frame:
+
+| title task metric | control | cached adjustment | change |
+| --- | ---: | ---: | ---: |
+| time | 19.581966 ms | 19.196013 ms | -1.971% |
+| CPU cycles | 6,355,668 | 6,205,975 | -2.355% |
+| internal stalls | 411,269 | 399,048 | -2.972% |
+| memory stalls | 2,482,069 | 2,420,881 | -2.465% |
+| bus accesses | 2,625,116 | 2,545,423 | -3.036% |
+| uncached stores | 68,442 | 67,027 | -2.068% |
+| I-cache misses | 26,587 | 25,971 | -2.317% |
+| D-cache misses | 8,538 | 8,324 | -2.509% |
+
+The candidate saves 0.386 ms and 150k CPU cycles per frame without a stall or
+miss regression. Its 1,415-unit uncached-store reduction is 95.3% of the GE
+emission previously attributed to redundant matrix uploads. `task + present`
+changed by only 0.000057 ms per frame, so the task saving reappeared as idle
+wait. This passes the title gate. The title workload is static, and its exact
+work match plus the agreement across independent counters makes repeat title
+captures redundant.
+
+The Corneria opening cutscene provided a faster, closely matched gameplay
+check. Commands differed by +0.015% and loaded vertices by +0.003%; submitted
+vertices were 0.968% lower in the candidate. Per-command results remove that
+small workload difference:
+
+| Corneria task metric | absolute change | per-command change |
+| --- | ---: | ---: |
+| time | -0.454 ms (-2.792%) | -2.806% |
+| CPU cycles | -129,845 (-2.448%) | -2.462% |
+| internal stalls | -1.817% | -1.832% |
+| memory stalls | -5.022% | -5.036% |
+| bus accesses | -5.231% | -5.245% |
+| uncached stores | -4.800% | -4.814% |
+| I-cache misses | -3.128% | -3.142% |
+| D-cache misses | -1.429% | -1.444% |
+
+FPU instructions changed by -0.043% per command and VFPU instructions by
+-0.013%, so geometry arithmetic was effectively unchanged. The candidate clears
+the performance gate in both title and gameplay. The user confirmed the title
+and Corneria cutscene were visually correct on hardware. The texture-matrix
+cache is accepted and unconditional; its selector and profiling targets have
+been removed. The promoted normal release was then visually clean on hardware
+and showed an approximate 0.2 ms title GFX improvement. This release observation
+is consistent with the counter result but is not a formal matched capture.
+
 ## Appendix: how the merge potential was measured
 
 `PSP_MERGE_ANALYSIS` was a temporary diagnostic, removed once it had answered
@@ -666,9 +794,10 @@ future batching question needs it.
   ~4 ms at the title. The triangle and batch scopes add about 2,200 high-frequency
   samples per frame and raise the measured task to 37 ms. Read attribution, not
   absolute milliseconds, from these captures.
-- **One capture per scene.** These are diagnostics, not A/B results. Any
-  optimisation candidate still needs the handoff's three paired 300-frame runs
-  on a clean build.
+- **One capture per scene.** These are diagnostics, not A/B results. Candidate
+  captures must be layout-controlled and workload-matched. One exact pair can
+  settle the deterministic title when time and independent counters agree;
+  variable gameplay still requires a matched cross-scene validation.
 - **Corneria sections differ slightly** between the scoped and unscoped runs
   (3,861 vs 4,036 commands per frame), so those two captures are not directly
   comparable frame-for-frame.
