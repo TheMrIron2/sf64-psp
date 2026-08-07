@@ -231,6 +231,25 @@ there is no float formatting anywhere in the capture path. When counters are
 unavailable the `[counters]` section is a single comment line instead of a
 table; the timing sections stay valid.
 
+Every hardware-counter capture also writes four event-total sections. They are
+capture-gated counters, not timing scopes, so use the unscoped build when
+comparing frame time. `[texture cache]` splits lookups, hits, misses, uploads,
+uploaded bytes and evictions across `ci8`, `rgba16`, `rgba32` and `converted`.
+`[batch flush reasons]` attributes submitted draws and vertices to each drain
+reason. `[texture barriers]` records the source of pool-wide texture drains.
+`[batch pool]` records material hits, opens, slot evictions, full-batch flushes,
+drained slots, unpooled transitions and stream-reservation fallbacks.
+
+`[frame pacing]` is the visible-performance section. `frame_interval` measures
+wall time between render-frame starts; the other rows measure the task, present,
+and their combined wall time. P95, P99 and maximum are in microseconds. The
+vblank buckets round elapsed wall time to the nearest 60 Hz interval, so the
+three-vblank count identifies 20 fps drops from a nominal 30 fps cap.
+
+`PSPGL_SWAP_INTERVAL=0` uses a non-blocking PSPGL present while retaining the
+game's N64 VI cadence. This is the default; set it to `1` only for comparison.
+The selected value is recorded in `build_flags`.
+
 Register deltas are accumulated as unsigned 32-bit differences, so a counter
 wrapping inside one scope is handled, but a counter wrapping more than once
 inside a single scope is not distinguishable. At 333 MHz `cpuck` wraps about

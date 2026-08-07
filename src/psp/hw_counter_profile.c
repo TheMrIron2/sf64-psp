@@ -9,6 +9,7 @@
 #include <pspthreadman.h>
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifndef SF64_GIT_SHA
@@ -57,6 +58,9 @@
 #ifndef PSP_FLOAT_MTX
 #define PSP_FLOAT_MTX 1
 #endif
+#ifndef PSPGL_SWAP_INTERVAL
+#define PSPGL_SWAP_INTERVAL 0
+#endif
 #ifndef PSP_AUDIO
 #define PSP_AUDIO 0
 #endif
@@ -75,6 +79,10 @@
 #define PSP_HW_PROFILE_MAX_SLOT 999
 #define PSP_HW_COUNTER_COUNT 19
 #define PSP_HW_RATIO_SCALE 1000
+#define PSP_HW_FLUSH_REASON_COUNT 8
+#define PSP_HW_TEXTURE_BARRIER_SOURCE_COUNT 4
+#define PSP_HW_VBLANK_US 16667
+#define PSP_HW_VBLANK_BUCKET_COUNT 4
 
 typedef enum {
     PSP_HW_STATUS_READY,
@@ -93,7 +101,9 @@ typedef enum {
     PSP_HW_STEP_META,
     PSP_HW_STEP_WORK,
     PSP_HW_STEP_SCOPES,
-    PSP_HW_STEP_COUNTERS
+    PSP_HW_STEP_COUNTERS,
+    PSP_HW_STEP_DIAGNOSTICS,
+    PSP_HW_STEP_PACING
 } PspHwCounterStep;
 
 typedef enum {
@@ -121,7 +131,37 @@ typedef struct {
 } PspHwCounterScopeTotals;
 
 typedef struct {
+    u64 lookups;
+    u64 hits;
+    u64 misses;
+    u64 uploads;
+    u64 uploadBytes;
+    u64 evictions;
+} PspHwTextureCacheTotals;
+
+typedef enum {
+    PSP_HW_PACING_FRAME_INTERVAL,
+    PSP_HW_PACING_TASK,
+    PSP_HW_PACING_PRESENT,
+    PSP_HW_PACING_TASK_AND_PRESENT,
+    PSP_HW_PACING_COUNT
+} PspHwPacingMetric;
+
+typedef struct {
+    u64 elapsedUs;
+    u32 maxUs;
+    u32 samples;
+    u32 vblankBuckets[PSP_HW_VBLANK_BUCKET_COUNT];
+} PspHwPacingTotals;
+
+typedef struct {
     PspHwCounterScopeTotals scope[PSP_HW_SCOPE_COUNT];
+    PspHwTextureCacheTotals textureCache[PSP_HW_TEXTURE_CACHE_COUNT];
+    u64 batchFlushes[PSP_HW_FLUSH_REASON_COUNT];
+    u64 batchFlushVertices[PSP_HW_FLUSH_REASON_COUNT];
+    u64 textureBarriers[PSP_HW_TEXTURE_BARRIER_SOURCE_COUNT];
+    u64 poolEvents[PSP_HW_POOL_EVENT_COUNT];
+    PspHwPacingTotals pacing[PSP_HW_PACING_COUNT];
     u64 commands;
     u64 loadedVertices;
     u64 submittedVertices;
@@ -139,6 +179,27 @@ static const char* sPspHwScopeNames[PSP_HW_SCOPE_COUNT] = {
     "task", "frontend", "flush", "present", "texture", "vertex", "submit", "triangle", "clipping", "batch"
 };
 
+static const char* sPspHwTextureCacheNames[PSP_HW_TEXTURE_CACHE_COUNT] = {
+    "ci8", "rgba16", "rgba32", "converted"
+};
+
+static const char* sPspHwFlushReasonNames[PSP_HW_FLUSH_REASON_COUNT] = {
+    "buffer_full", "texture_change", "render_state_change", "transform_change",
+    "clipping_path", "end_of_task", "explicit_sync", "other"
+};
+
+static const char* sPspHwTextureBarrierNames[PSP_HW_TEXTURE_BARRIER_SOURCE_COUNT] = {
+    "material_key", "texture_enable", "cache_miss_upload", "set_texture_image"
+};
+
+static const char* sPspHwPoolEventNames[PSP_HW_POOL_EVENT_COUNT] = {
+    "hit", "open", "eviction", "capacity_flush", "drained", "unpooled", "reservation_fallback"
+};
+
+static const char* sPspHwPacingMetricNames[PSP_HW_PACING_COUNT] = {
+    "frame_interval", "task", "present", "task_and_present"
+};
+
 /* Scene tags for the audit standard workloads plus a free slot */
 static const char* sPspHwSceneNames[] = { "title", "corneria", "light", "other" };
 #define PSP_HW_SCENE_COUNT ((u32) (sizeof(sPspHwSceneNames) / sizeof(sPspHwSceneNames[0])))
@@ -147,7 +208,7 @@ static const char* sPspHwSceneNames[] = { "title", "corneria", "light", "other" 
  * host0 is the PSPLINK host directory and catches both refusing writes */
 static const char* sPspHwRoots[PSP_HW_ROOT_COUNT] = { PSP_HW_PROFILE_DIR, PSP_HW_PROFILE_DIR_EF0, "host0:" };
 static const char sPspHwRootLetters[PSP_HW_ROOT_COUNT] = { 'M', 'E', 'H' };
-static const char* sPspHwStepNames[] = { "OK", "SLOT", "OPEN", "META", "WORK", "SCOPE", "CTRS" };
+static const char* sPspHwStepNames[] = { "OK", "SLOT", "OPEN", "META", "WORK", "SCOPE", "CTRS", "DIAG", "PACE" };
 
 static PspHwCounterTotals sPspHwTotals;
 static PspHwCounterSample sPspHwScopeStart[PSP_HW_SCOPE_COUNT];
@@ -166,12 +227,63 @@ static volatile int sPspHwDumpPending;
 static PspHwCounterStep sPspHwErrorStep;
 static int sPspHwErrorCode;
 static u32 sPspHwErrorRoot;
+static u64 sPspHwLastFrameBeginUs;
+static u32 sPspHwCurrentFrameIntervalUs;
+static u32 sPspHwCurrentTaskUs;
+static u32 sPspHwCurrentPresentUs;
+static int sPspHwFrameBeginValid;
+static int sPspHwCurrentFrameIntervalValid;
+static int sPspHwCurrentTaskValid;
+static int sPspHwCurrentPresentValid;
+static u32 sPspHwPacingSamples[PSP_HW_PACING_COUNT][PROFILE_HW_COUNTER_FRAMES];
 
 static u64 psp_hw_ratio(u64 value, u64 denominator) {
     if (denominator == 0) {
         return 0;
     }
     return (value * PSP_HW_RATIO_SCALE) / denominator;
+}
+
+static int psp_hw_compare_u32(const void* a, const void* b) {
+    u32 lhs = *(const u32*) a;
+    u32 rhs = *(const u32*) b;
+
+    return (lhs > rhs) - (lhs < rhs);
+}
+
+static void psp_hw_record_pacing(PspHwPacingMetric metric, u32 elapsedUs) {
+    PspHwPacingTotals* totals = &sPspHwTotals.pacing[metric];
+    u32 vblanks;
+
+    if (totals->samples >= PROFILE_HW_COUNTER_FRAMES) {
+        return;
+    }
+    sPspHwPacingSamples[metric][totals->samples++] = elapsedUs;
+    totals->elapsedUs += elapsedUs;
+    if (elapsedUs > totals->maxUs) {
+        totals->maxUs = elapsedUs;
+    }
+    vblanks = (elapsedUs + (PSP_HW_VBLANK_US / 2U)) / PSP_HW_VBLANK_US;
+    if (vblanks == 0) {
+        vblanks = 1;
+    }
+    if (vblanks >= PSP_HW_VBLANK_BUCKET_COUNT) {
+        vblanks = PSP_HW_VBLANK_BUCKET_COUNT;
+    }
+    totals->vblankBuckets[vblanks - 1]++;
+}
+
+static u32 psp_hw_pacing_percentile(PspHwPacingMetric metric, u32 percentile) {
+    PspHwPacingTotals* totals = &sPspHwTotals.pacing[metric];
+    u32 rank;
+
+    if (totals->samples == 0) {
+        return 0;
+    }
+    qsort(sPspHwPacingSamples[metric], totals->samples, sizeof(sPspHwPacingSamples[metric][0]),
+          psp_hw_compare_u32);
+    rank = ((totals->samples * percentile) + 99U) / 100U;
+    return sPspHwPacingSamples[metric][rank - 1];
 }
 
 /* Firmware exposes these only when profiler mode was chosen before ThreadMan init
@@ -318,10 +430,10 @@ static int psp_hw_dump_metadata(SceUID fd) {
     snprintf(line, sizeof(line),
              "build_flags,PROFILE_HW_COUNTERS=1 PROFILE_HW_COUNTER_SCOPES=%d PROFILE_PHASES=%d "
              "PROFILE_COMPONENTS=%d PROFILE_GPROF=%d PSP_FPS_OVERLAY=%d PSP_RENDERER_DIAGNOSTICS=%d "
-             "PSP_LOG=%d PSP_AUDIO=%d VTX_FUSED_TNL=%d PSP_FLOAT_MTX=%d BATCH_STATE_CACHE=%d\n",
+             "PSP_LOG=%d PSP_AUDIO=%d VTX_FUSED_TNL=%d PSP_FLOAT_MTX=%d PSPGL_SWAP_INTERVAL=%d BATCH_STATE_CACHE=%d\n",
              PROFILE_HW_COUNTER_SCOPES, PROFILE_PHASES, PROFILE_COMPONENTS, PROFILE_GPROF,
              PSP_FPS_OVERLAY, PSP_RENDERER_DIAGNOSTICS, PSP_LOG_ENABLED, PSP_AUDIO, VTX_FUSED_TNL,
-             PSP_FLOAT_MTX, BATCH_STATE_CACHE);
+             PSP_FLOAT_MTX, PSPGL_SWAP_INTERVAL, BATCH_STATE_CACHE);
     if (!psp_hw_write_all(fd, line)) {
         return 0;
     }
@@ -416,6 +528,97 @@ static int psp_hw_dump_counters(SceUID fd) {
     return 1;
 }
 
+static int psp_hw_dump_diagnostics(SceUID fd) {
+    char line[256];
+    u32 i;
+
+    if (!psp_hw_write_all(fd,
+                          "\n[texture cache]\n"
+                          "cache,lookups,hits,misses,uploads,bytes_uploaded,evictions,lookups_per_frame_x1000,"
+                          "misses_per_frame_x1000\n")) {
+        return 0;
+    }
+    for (i = 0; i < PSP_HW_TEXTURE_CACHE_COUNT; i++) {
+        const PspHwTextureCacheTotals* totals = &sPspHwTotals.textureCache[i];
+
+        snprintf(line, sizeof(line), "%s,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu\n", sPspHwTextureCacheNames[i],
+                 (unsigned long long) totals->lookups, (unsigned long long) totals->hits,
+                 (unsigned long long) totals->misses, (unsigned long long) totals->uploads,
+                 (unsigned long long) totals->uploadBytes, (unsigned long long) totals->evictions,
+                 (unsigned long long) psp_hw_ratio(totals->lookups, sPspHwTotals.frames),
+                 (unsigned long long) psp_hw_ratio(totals->misses, sPspHwTotals.frames));
+        if (!psp_hw_write_all(fd, line)) {
+            return 0;
+        }
+    }
+
+    if (!psp_hw_write_all(fd, "\n[batch flush reasons]\nreason,count,vertices,count_per_frame_x1000\n")) {
+        return 0;
+    }
+    for (i = 0; i < PSP_HW_FLUSH_REASON_COUNT; i++) {
+        snprintf(line, sizeof(line), "%s,%llu,%llu,%llu\n", sPspHwFlushReasonNames[i],
+                 (unsigned long long) sPspHwTotals.batchFlushes[i],
+                 (unsigned long long) sPspHwTotals.batchFlushVertices[i],
+                 (unsigned long long) psp_hw_ratio(sPspHwTotals.batchFlushes[i], sPspHwTotals.frames));
+        if (!psp_hw_write_all(fd, line)) {
+            return 0;
+        }
+    }
+
+    if (!psp_hw_write_all(fd, "\n[texture barriers]\nsource,count,count_per_frame_x1000\n")) {
+        return 0;
+    }
+    for (i = 0; i < PSP_HW_TEXTURE_BARRIER_SOURCE_COUNT; i++) {
+        snprintf(line, sizeof(line), "%s,%llu,%llu\n", sPspHwTextureBarrierNames[i],
+                 (unsigned long long) sPspHwTotals.textureBarriers[i],
+                 (unsigned long long) psp_hw_ratio(sPspHwTotals.textureBarriers[i], sPspHwTotals.frames));
+        if (!psp_hw_write_all(fd, line)) {
+            return 0;
+        }
+    }
+
+    if (!psp_hw_write_all(fd, "\n[batch pool]\nmetric,total,per_frame_x1000\n")) {
+        return 0;
+    }
+    for (i = 0; i < PSP_HW_POOL_EVENT_COUNT; i++) {
+        snprintf(line, sizeof(line), "%s,%llu,%llu\n", sPspHwPoolEventNames[i],
+                 (unsigned long long) sPspHwTotals.poolEvents[i],
+                 (unsigned long long) psp_hw_ratio(sPspHwTotals.poolEvents[i], sPspHwTotals.frames));
+        if (!psp_hw_write_all(fd, line)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int psp_hw_dump_pacing(SceUID fd) {
+    char line[256];
+    u32 i;
+
+    if (!psp_hw_write_all(fd,
+                          "\n[frame pacing]\n"
+                          "metric,samples,average_us,p95_us,p99_us,max_us,one_vblank,two_vblanks,"
+                          "three_vblanks,four_or_more_vblanks\n")) {
+        return 0;
+    }
+    for (i = 0; i < PSP_HW_PACING_COUNT; i++) {
+        const PspHwPacingTotals* totals = &sPspHwTotals.pacing[i];
+
+        snprintf(line, sizeof(line), "%s,%lu,%llu,%lu,%lu,%lu,%lu,%lu,%lu,%lu\n", sPspHwPacingMetricNames[i],
+                 (unsigned long) totals->samples,
+                 (unsigned long long) (totals->samples ? (totals->elapsedUs / totals->samples) : 0),
+                 (unsigned long) psp_hw_pacing_percentile((PspHwPacingMetric) i, 95),
+                 (unsigned long) psp_hw_pacing_percentile((PspHwPacingMetric) i, 99),
+                 (unsigned long) totals->maxUs, (unsigned long) totals->vblankBuckets[0],
+                 (unsigned long) totals->vblankBuckets[1], (unsigned long) totals->vblankBuckets[2],
+                 (unsigned long) totals->vblankBuckets[3]);
+        if (!psp_hw_write_all(fd, line)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static int psp_hw_dump_to_root(u32 root) {
     char path[112];
     SceUID fd;
@@ -444,6 +647,10 @@ static int psp_hw_dump_to_root(u32 root) {
         sPspHwErrorStep = PSP_HW_STEP_SCOPES;
     } else if (!psp_hw_dump_counters(fd)) {
         sPspHwErrorStep = PSP_HW_STEP_COUNTERS;
+    } else if (!psp_hw_dump_diagnostics(fd)) {
+        sPspHwErrorStep = PSP_HW_STEP_DIAGNOSTICS;
+    } else if (!psp_hw_dump_pacing(fd)) {
+        sPspHwErrorStep = PSP_HW_STEP_PACING;
     } else {
         sPspHwErrorStep = PSP_HW_STEP_NONE;
     }
@@ -478,6 +685,7 @@ static void psp_hw_start(void) {
         return;
     }
     memset(&sPspHwTotals, 0, sizeof(sPspHwTotals));
+    sPspHwFrameBeginValid = 0;
     sPspHwWarmupFrames = PROFILE_HW_COUNTER_WARMUP_FRAMES;
     sPspHwStopRequested = 0;
     sPspHwFrameArmed = 0;
@@ -515,6 +723,7 @@ void PspHwCounterProfile_Init(void) {
     sPspHwErrorStep = PSP_HW_STEP_NONE;
     sPspHwErrorCode = 0;
     sPspHwStatus = PSP_HW_STATUS_READY;
+    sPspHwFrameBeginValid = 0;
     psp_hw_bind_counters();
 }
 
@@ -563,6 +772,8 @@ int PspHwCounterProfile_PollControls(u32 rawButtons) {
 }
 
 void PspHwCounterProfile_FrameBegin(void) {
+    u64 now = (u64) sceKernelGetSystemTimeWide();
+
     /* Init binds on the main thread, rebind once here so the status reports this one */
     if (!sPspHwRenderThreadBound) {
         sPspHwRenderThreadBound = 1;
@@ -576,6 +787,8 @@ void PspHwCounterProfile_FrameBegin(void) {
 
     if (sPspHwWarmupFrames != 0) {
         sPspHwWarmupFrames--;
+        sPspHwLastFrameBeginUs = now;
+        sPspHwFrameBeginValid = 1;
         sPspHwFrameArmed = 0;
         if (sPspHwWarmupFrames == 0) {
             sPspHwStatus = PSP_HW_STATUS_RECORDING;
@@ -586,6 +799,14 @@ void PspHwCounterProfile_FrameBegin(void) {
     /* Every scope runs on this thread so the pointer only needs refreshing per frame */
     psp_hw_bind_counters();
     sPspHwFrameArmed = 1;
+    sPspHwCurrentFrameIntervalValid = sPspHwFrameBeginValid;
+    if (sPspHwCurrentFrameIntervalValid) {
+        sPspHwCurrentFrameIntervalUs = (u32) (now - sPspHwLastFrameBeginUs);
+    }
+    sPspHwLastFrameBeginUs = now;
+    sPspHwFrameBeginValid = 1;
+    sPspHwCurrentTaskValid = 0;
+    sPspHwCurrentPresentValid = 0;
 }
 
 void PspHwCounterProfile_FrameEnd(u32 commands, u32 loadedVertices, u32 submittedVertices) {
@@ -600,6 +821,19 @@ void PspHwCounterProfile_FrameEnd(u32 commands, u32 loadedVertices, u32 submitte
     }
 
     sPspHwFrameArmed = 0;
+    if (sPspHwCurrentFrameIntervalValid) {
+        psp_hw_record_pacing(PSP_HW_PACING_FRAME_INTERVAL, sPspHwCurrentFrameIntervalUs);
+    }
+    if (sPspHwCurrentTaskValid) {
+        psp_hw_record_pacing(PSP_HW_PACING_TASK, sPspHwCurrentTaskUs);
+    }
+    if (sPspHwCurrentPresentValid) {
+        psp_hw_record_pacing(PSP_HW_PACING_PRESENT, sPspHwCurrentPresentUs);
+    }
+    if (sPspHwCurrentTaskValid && sPspHwCurrentPresentValid) {
+        psp_hw_record_pacing(PSP_HW_PACING_TASK_AND_PRESENT,
+                             sPspHwCurrentTaskUs + sPspHwCurrentPresentUs);
+    }
     sPspHwTotals.commands += commands;
     sPspHwTotals.loadedVertices += loadedVertices;
     sPspHwTotals.submittedVertices += submittedVertices;
@@ -630,8 +864,17 @@ void PspHwCounterProfile_ScopeEnd(PspHwCounterScope scope) {
     psp_hw_sample(&end);
     start = &sPspHwScopeStart[scope];
     totals = &sPspHwTotals.scope[scope];
-    totals->elapsedUs += end.timeUs - start->timeUs;
+    end.timeUs -= start->timeUs;
+    totals->elapsedUs += end.timeUs;
     totals->samples++;
+
+    if (scope == PSP_HW_SCOPE_TASK) {
+        sPspHwCurrentTaskUs = (u32) end.timeUs;
+        sPspHwCurrentTaskValid = 1;
+    } else if (scope == PSP_HW_SCOPE_PRESENT) {
+        sPspHwCurrentPresentUs = (u32) end.timeUs;
+        sPspHwCurrentPresentValid = 1;
+    }
 
     if (sPspHwRegs == NULL) {
         return;
@@ -639,6 +882,55 @@ void PspHwCounterProfile_ScopeEnd(PspHwCounterScope scope) {
     for (i = 0; i < PSP_HW_COUNTER_COUNT; i++) {
         totals->counter[i] += (u32) (end.counter[i] - start->counter[i]);
     }
+}
+
+void PspHwCounterProfile_CountTextureCacheLookup(PspHwTextureCacheClass cache, int hit) {
+    if (!sPspHwFrameArmed || (cache >= PSP_HW_TEXTURE_CACHE_COUNT)) {
+        return;
+    }
+    sPspHwTotals.textureCache[cache].lookups++;
+    if (hit) {
+        sPspHwTotals.textureCache[cache].hits++;
+    } else {
+        sPspHwTotals.textureCache[cache].misses++;
+    }
+}
+
+void PspHwCounterProfile_CountTextureUpload(PspHwTextureCacheClass cache, u32 bytes) {
+    if (!sPspHwFrameArmed || (cache >= PSP_HW_TEXTURE_CACHE_COUNT)) {
+        return;
+    }
+    sPspHwTotals.textureCache[cache].uploads++;
+    sPspHwTotals.textureCache[cache].uploadBytes += bytes;
+}
+
+void PspHwCounterProfile_CountTextureCacheEviction(PspHwTextureCacheClass cache) {
+    if (!sPspHwFrameArmed || (cache >= PSP_HW_TEXTURE_CACHE_COUNT)) {
+        return;
+    }
+    sPspHwTotals.textureCache[cache].evictions++;
+}
+
+void PspHwCounterProfile_CountBatchFlush(u32 reason, u32 vertices) {
+    if (!sPspHwFrameArmed || (reason >= PSP_HW_FLUSH_REASON_COUNT)) {
+        return;
+    }
+    sPspHwTotals.batchFlushes[reason]++;
+    sPspHwTotals.batchFlushVertices[reason] += vertices;
+}
+
+void PspHwCounterProfile_CountTextureBarrier(u32 source) {
+    if (!sPspHwFrameArmed || (source >= PSP_HW_TEXTURE_BARRIER_SOURCE_COUNT)) {
+        return;
+    }
+    sPspHwTotals.textureBarriers[source]++;
+}
+
+void PspHwCounterProfile_CountPoolEvent(PspHwPoolEvent event) {
+    if (!sPspHwFrameArmed || (event >= PSP_HW_POOL_EVENT_COUNT)) {
+        return;
+    }
+    sPspHwTotals.poolEvents[event]++;
 }
 
 void PspHwCounterProfile_DrawStatus(void) {

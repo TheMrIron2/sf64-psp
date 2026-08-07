@@ -9,7 +9,6 @@
 #include "src/psp/renderer.h"
 
 #include <pspkernel.h>
-#include <pspdisplay.h>
 #include <pspdebug.h>
 #include <stdint.h>
 // <string.h> drags in <strings.h>, which conflicts with PR/os_libc.h via sf64thread.h
@@ -70,14 +69,7 @@ static void psp_renderer_draw_perf_overlay(void) {
     bufferWidth = 0;
     pixelFormat = 0;
 
-    if (sceDisplayGetFrameBuf(
-            &framebuffer,
-            &bufferWidth,
-            &pixelFormat,
-            PSP_DISPLAY_SETBUF_IMMEDIATE
-        ) != 0) {
-        return;
-    }
+    framebuffer = PspGfx_GetPresentedFrameBuffer(&bufferWidth, &pixelFormat);
 
     if ((framebuffer == NULL) || (bufferWidth != 512)) {
         return;

@@ -1,5 +1,6 @@
 #include "src/psp/gfx/gfx_psp.h"
 #include "src/psp/gfx/gfx_pspgl.h"
+#include "src/psp/hw_counter_profile.h"
 #include "src/psp/profiler.h"
 #include "macros.h"
 
@@ -973,6 +974,7 @@ static u32 psp_gfx_pspgl_create_converted_texture(const void* pixels, const u16*
     } else {
         entry = &sConvertedTextureCache[sConvertedTextureCacheReplaceIndex++];
         sConvertedTextureCacheReplaceIndex %= PSP_GFX_PSPGL_CONVERTED_TEXTURE_CACHE_SIZE;
+        PspHwCounterProfile_CountTextureCacheEviction(PSP_HW_TEXTURE_CACHE_CONVERTED);
 #if PROFILE_PHASES
         PspProfiler_RecordTextureCacheEviction(
             PSP_PROFILE_TEXTURE_CACHE_CONVERTED,
@@ -1213,6 +1215,7 @@ u32 PspGfxPspgl_CreateCi8Texture(const u8* indices, const u16* palette, u32 widt
     } else {
         entry = &sTextureCache[sTextureCacheReplaceIndex++];
         sTextureCacheReplaceIndex %= PSP_GFX_PSPGL_CI8_TEXTURE_CACHE_SIZE;
+        PspHwCounterProfile_CountTextureCacheEviction(PSP_HW_TEXTURE_CACHE_CI8);
 #if PROFILE_PHASES
         PspProfiler_RecordTextureCacheEviction(
             PSP_PROFILE_TEXTURE_CACHE_CI8,
@@ -1429,6 +1432,7 @@ u32 PspGfxPspgl_CreateRgba16Texture(const u16* pixels, u32 width, u32 height, in
     } else {
         entry = &sRgba16TextureCache[sRgba16TextureCacheReplaceIndex++];
         sRgba16TextureCacheReplaceIndex %= PSP_GFX_PSPGL_RGBA16_TEXTURE_CACHE_SIZE;
+        PspHwCounterProfile_CountTextureCacheEviction(PSP_HW_TEXTURE_CACHE_RGBA16);
 #if PROFILE_PHASES
         PspProfiler_RecordTextureCacheEviction(
             PSP_PROFILE_TEXTURE_CACHE_RGBA16,
@@ -1626,6 +1630,7 @@ static u32 psp_gfx_pspgl_create_rgba32_texture(const void* pixels, u32 width, u3
     } else {
         entry = &sRgba32TextureCache[sRgba32TextureCacheReplaceIndex++];
         sRgba32TextureCacheReplaceIndex %= PSP_GFX_PSPGL_RGBA32_TEXTURE_CACHE_SIZE;
+        PspHwCounterProfile_CountTextureCacheEviction(PSP_HW_TEXTURE_CACHE_RGBA32);
 #if PROFILE_PHASES
         PspProfiler_RecordTextureCacheEviction(
             PSP_PROFILE_TEXTURE_CACHE_RGBA32,

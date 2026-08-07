@@ -8,6 +8,10 @@
 #define PSP_GFX_WIDTH 480
 #define PSP_GFX_HEIGHT 272
 
+#ifndef PSPGL_SWAP_INTERVAL
+#define PSPGL_SWAP_INTERVAL 0
+#endif
+
 static EGLDisplay sDisplay = EGL_NO_DISPLAY;
 static EGLSurface sSurface = EGL_NO_SURFACE;
 static EGLContext sContext = EGL_NO_CONTEXT;
@@ -68,7 +72,7 @@ int PspGfx_Init(void) {
         return 0;
     }
 
-    eglSwapInterval(sDisplay, 1);
+    eglSwapInterval(sDisplay, PSPGL_SWAP_INTERVAL);
     sReady = 1;
     return 1;
 }
@@ -87,6 +91,14 @@ void PspGfx_EndFrame(void) {
         PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_FINISH_SYNC);
         PspProfiler_CountSync();
     }
+}
+
+void* PspGfx_GetPresentedFrameBuffer(int* stride, int* pixelFormat) {
+    if (!sReady || sSurface == EGL_NO_SURFACE) {
+        return NULL;
+    }
+
+    return eglGetPresentedFrameBufferPSP(sSurface, stride, pixelFormat);
 }
 
 int PspGfx_GetWidth(void) {

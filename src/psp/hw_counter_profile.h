@@ -44,6 +44,25 @@ typedef enum {
     PSP_HW_SCOPE_COUNT
 } PspHwCounterScope;
 
+typedef enum {
+    PSP_HW_TEXTURE_CACHE_CI8,
+    PSP_HW_TEXTURE_CACHE_RGBA16,
+    PSP_HW_TEXTURE_CACHE_RGBA32,
+    PSP_HW_TEXTURE_CACHE_CONVERTED,
+    PSP_HW_TEXTURE_CACHE_COUNT
+} PspHwTextureCacheClass;
+
+typedef enum {
+    PSP_HW_POOL_EVENT_HIT,
+    PSP_HW_POOL_EVENT_OPEN,
+    PSP_HW_POOL_EVENT_EVICTION,
+    PSP_HW_POOL_EVENT_CAPACITY_FLUSH,
+    PSP_HW_POOL_EVENT_DRAINED,
+    PSP_HW_POOL_EVENT_UNPOOLED,
+    PSP_HW_POOL_EVENT_RESERVATION_FALLBACK,
+    PSP_HW_POOL_EVENT_COUNT
+} PspHwPoolEvent;
+
 #if PROFILE_HW_COUNTERS
 
 void PspHwCounterProfile_Init(void);
@@ -53,6 +72,12 @@ void PspHwCounterProfile_FrameBegin(void);
 void PspHwCounterProfile_FrameEnd(u32 commands, u32 loadedVertices, u32 submittedVertices);
 void PspHwCounterProfile_ScopeBegin(PspHwCounterScope scope);
 void PspHwCounterProfile_ScopeEnd(PspHwCounterScope scope);
+void PspHwCounterProfile_CountTextureCacheLookup(PspHwTextureCacheClass cache, int hit);
+void PspHwCounterProfile_CountTextureUpload(PspHwTextureCacheClass cache, u32 bytes);
+void PspHwCounterProfile_CountTextureCacheEviction(PspHwTextureCacheClass cache);
+void PspHwCounterProfile_CountBatchFlush(u32 reason, u32 vertices);
+void PspHwCounterProfile_CountTextureBarrier(u32 source);
+void PspHwCounterProfile_CountPoolEvent(PspHwPoolEvent event);
 void PspHwCounterProfile_DrawStatus(void);
 
 #else
@@ -64,6 +89,12 @@ void PspHwCounterProfile_DrawStatus(void);
 #define PspHwCounterProfile_FrameEnd(commands, loadedVertices, submittedVertices) ((void) 0)
 #define PspHwCounterProfile_ScopeBegin(scope) ((void) 0)
 #define PspHwCounterProfile_ScopeEnd(scope) ((void) 0)
+#define PspHwCounterProfile_CountTextureCacheLookup(cache, hit) ((void) 0)
+#define PspHwCounterProfile_CountTextureUpload(cache, bytes) ((void) 0)
+#define PspHwCounterProfile_CountTextureCacheEviction(cache) ((void) 0)
+#define PspHwCounterProfile_CountBatchFlush(reason, vertices) ((void) 0)
+#define PspHwCounterProfile_CountTextureBarrier(source) ((void) 0)
+#define PspHwCounterProfile_CountPoolEvent(event) ((void) 0)
 #define PspHwCounterProfile_DrawStatus() ((void) 0)
 
 #endif
