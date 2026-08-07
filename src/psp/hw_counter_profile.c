@@ -61,6 +61,21 @@
 #ifndef PSPGL_SWAP_INTERVAL
 #define PSPGL_SWAP_INTERVAL 0
 #endif
+#ifndef PSP_MAP_SKIP_COMPLETED_PATHS
+#define PSP_MAP_SKIP_COMPLETED_PATHS 0
+#endif
+#ifndef PSP_MAP_SKIP_HISTORY_HUD
+#define PSP_MAP_SKIP_HISTORY_HUD 0
+#endif
+#ifndef PSP_MAP_SKIP_PLANETS
+#define PSP_MAP_SKIP_PLANETS 0
+#endif
+#ifndef PSP_NATIVE_MAP_PLANETS
+#define PSP_NATIVE_MAP_PLANETS 0
+#endif
+#ifndef PSP_NATIVE_MAP_METEO
+#define PSP_NATIVE_MAP_METEO 0
+#endif
 #ifndef PSP_AUDIO
 #define PSP_AUDIO 0
 #endif
@@ -386,7 +401,7 @@ static int psp_hw_find_slot(u32 root, char* path, u32 pathSize, u32* slotOut) {
 }
 
 static int psp_hw_dump_metadata(SceUID fd) {
-    char line[320];
+    char line[512];
 
     snprintf(line, sizeof(line),
              "key,value\n"
@@ -430,10 +445,13 @@ static int psp_hw_dump_metadata(SceUID fd) {
     snprintf(line, sizeof(line),
              "build_flags,PROFILE_HW_COUNTERS=1 PROFILE_HW_COUNTER_SCOPES=%d PROFILE_PHASES=%d "
              "PROFILE_COMPONENTS=%d PROFILE_GPROF=%d PSP_FPS_OVERLAY=%d PSP_RENDERER_DIAGNOSTICS=%d "
-             "PSP_LOG=%d PSP_AUDIO=%d VTX_FUSED_TNL=%d PSP_FLOAT_MTX=%d PSPGL_SWAP_INTERVAL=%d BATCH_STATE_CACHE=%d\n",
+             "PSP_LOG=%d PSP_AUDIO=%d VTX_FUSED_TNL=%d PSP_FLOAT_MTX=%d PSPGL_SWAP_INTERVAL=%d "
+             "PSP_MAP_SKIP_COMPLETED_PATHS=%d PSP_MAP_SKIP_HISTORY_HUD=%d PSP_MAP_SKIP_PLANETS=%d "
+             "PSP_NATIVE_MAP_PLANETS=%d PSP_NATIVE_MAP_METEO=%d BATCH_STATE_CACHE=%d\n",
              PROFILE_HW_COUNTER_SCOPES, PROFILE_PHASES, PROFILE_COMPONENTS, PROFILE_GPROF,
              PSP_FPS_OVERLAY, PSP_RENDERER_DIAGNOSTICS, PSP_LOG_ENABLED, PSP_AUDIO, VTX_FUSED_TNL,
-             PSP_FLOAT_MTX, PSPGL_SWAP_INTERVAL, BATCH_STATE_CACHE);
+             PSP_FLOAT_MTX, PSPGL_SWAP_INTERVAL, PSP_MAP_SKIP_COMPLETED_PATHS, PSP_MAP_SKIP_HISTORY_HUD,
+             PSP_MAP_SKIP_PLANETS, PSP_NATIVE_MAP_PLANETS, PSP_NATIVE_MAP_METEO, BATCH_STATE_CACHE);
     if (!psp_hw_write_all(fd, line)) {
         return 0;
     }
