@@ -24,8 +24,8 @@ void PspPlatform_LogLine(const char* line);
 #endif
 
 #define PSP_GFX_PSPGL_CI8_TEXTURE_CACHE_SIZE 96
-#define PSP_GFX_PSPGL_CONVERTED_TEXTURE_CACHE_SIZE 64
-#define PSP_GFX_PSPGL_RGBA16_TEXTURE_CACHE_SIZE 96
+#define PSP_GFX_PSPGL_CONVERTED_TEXTURE_CACHE_SIZE 192
+#define PSP_GFX_PSPGL_RGBA16_TEXTURE_CACHE_SIZE 128
 #define PSP_GFX_PSPGL_RGBA16_LOOKUP_SET_COUNT 128
 #define PSP_GFX_PSPGL_RGBA32_TEXTURE_CACHE_SIZE 48
 #define PSP_GFX_PSPGL_MAX_TEXTURE_PIXELS (256 * 32)
@@ -831,6 +831,10 @@ static int psp_gfx_pspgl_find_converted_texture(const void* pixels, const u16* p
         (uploadWidth == NULL) || (uploadHeight == NULL) || ((format == PSP_GFX_TEXTURE_CI4) && (palette == NULL))) {
         return 0;
     }
+    if (envBlend) {
+        primitiveColor &= 0x00FFFFFFU;
+        environmentColor &= 0x00FFFFFFU;
+    }
 #if PROFILE_PHASES
     keyHash = psp_gfx_pspgl_converted_key_hash(pixels, palette, width, height, format, envBlend, primitiveColor,
                                                environmentColor);
@@ -884,6 +888,10 @@ static u32 psp_gfx_pspgl_create_converted_texture(const void* pixels, const u16*
         (textureRef == NULL) || ((format == PSP_GFX_TEXTURE_CI4) && (palette == NULL))) {
         return 0;
     }
+    if (envBlend) {
+        primitiveColor &= 0x00FFFFFFU;
+        environmentColor &= 0x00FFFFFFU;
+    }
     finalWidth = psp_gfx_pspgl_next_power_of_two(width);
     finalHeight = psp_gfx_pspgl_next_power_of_two(height);
     finalPixelCount = finalWidth * finalHeight;
@@ -924,7 +932,6 @@ static u32 psp_gfx_pspgl_create_converted_texture(const void* pixels, const u16*
                     u8 pr = (u8) (primitiveColor & 0xFFU);
                     u8 pg = (u8) ((primitiveColor >> 8) & 0xFFU);
                     u8 pb = (u8) ((primitiveColor >> 16) & 0xFFU);
-                    u8 pa = (u8) ((primitiveColor >> 24) & 0xFFU);
                     u8 er = (u8) (environmentColor & 0xFFU);
                     u8 eg = (u8) ((environmentColor >> 8) & 0xFFU);
                     u8 eb = (u8) ((environmentColor >> 16) & 0xFFU);
@@ -932,7 +939,7 @@ static u32 psp_gfx_pspgl_create_converted_texture(const void* pixels, const u16*
                     out[0] = (u8) (((u32) er * (255U - intensity) + ((u32) pr * intensity) + 127U) / 255U);
                     out[1] = (u8) (((u32) eg * (255U - intensity) + ((u32) pg * intensity) + 127U) / 255U);
                     out[2] = (u8) (((u32) eb * (255U - intensity) + ((u32) pb * intensity) + 127U) / 255U);
-                    out[3] = (u8) ((((u32) alpha * pa) + 127U) / 255U);
+                    out[3] = alpha;
                 } else {
                     out[0] = intensity;
                     out[1] = intensity;
@@ -1490,6 +1497,10 @@ static int psp_gfx_pspgl_find_rgba32_texture(const void* pixels, u32 width, u32 
         (uploadWidth == NULL) || (uploadHeight == NULL)) {
         return 0;
     }
+    if (envBlend) {
+        primitiveColor &= 0x00FFFFFFU;
+        environmentColor &= 0x00FFFFFFU;
+    }
 #if PROFILE_PHASES
     keyHash = psp_gfx_pspgl_rgba32_key_hash(pixels, width, height, premultiply, envBlend, primitiveColor,
                                             environmentColor);
@@ -1552,6 +1563,10 @@ static u32 psp_gfx_pspgl_create_rgba32_texture(const void* pixels, u32 width, u3
         (textureRef == NULL)) {
         return 0;
     }
+    if (envBlend) {
+        primitiveColor &= 0x00FFFFFFU;
+        environmentColor &= 0x00FFFFFFU;
+    }
     finalWidth = psp_gfx_pspgl_next_power_of_two(width);
     finalHeight = psp_gfx_pspgl_next_power_of_two(height);
     finalPixelCount = finalWidth * finalHeight;
@@ -1586,7 +1601,6 @@ static u32 psp_gfx_pspgl_create_rgba32_texture(const void* pixels, u32 width, u3
                 u8 pr = (u8) (primitiveColor & 0xFFU);
                 u8 pg = (u8) ((primitiveColor >> 8) & 0xFFU);
                 u8 pb = (u8) ((primitiveColor >> 16) & 0xFFU);
-                u8 pa = (u8) ((primitiveColor >> 24) & 0xFFU);
                 u8 er = (u8) (environmentColor & 0xFFU);
                 u8 eg = (u8) ((environmentColor >> 8) & 0xFFU);
                 u8 eb = (u8) ((environmentColor >> 16) & 0xFFU);
@@ -1594,7 +1608,6 @@ static u32 psp_gfx_pspgl_create_rgba32_texture(const void* pixels, u32 width, u3
                 r = (u8) (((u32) er * (255U - r) + ((u32) pr * r) + 127U) / 255U);
                 g = (u8) (((u32) eg * (255U - g) + ((u32) pg * g) + 127U) / 255U);
                 b = (u8) (((u32) eb * (255U - b) + ((u32) pb * b) + 127U) / 255U);
-                a = (u8) ((((u32) a * pa) + 127U) / 255U);
             } else if (premultiply) {
                 r = (u8) ((((u32) r * a) + 127U) / 255U);
                 g = (u8) ((((u32) g * a) + 127U) / 255U);

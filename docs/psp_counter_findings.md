@@ -610,7 +610,7 @@ packet diagnostic, source identities, experiment selectors and dedicated build
 targets have been removed; detailed captures are summarised in
 `docs/psp_vertex_reuse_diagnostics.md`.
 
-## Finding 11: GE matrix packet emission is the next PSPGL submission target
+## Finding 11: GE matrix emission led to an accepted PSPGL cache
 
 The accepted direct-stream renderer was re-profiled at the title with a
 layout-controlled submission build. Its volatile selector changes only one
@@ -737,6 +737,44 @@ cache is accepted and unconditional; its selector and profiling targets have
 been removed. The promoted normal release was then visually clean on hardware
 and showed an approximate 0.2 ms title GFX improvement. This release observation
 is consistent with the counter result but is not a formal matched capture.
+
+## Finding 12: map transitions exposed two texture-cache pathologies
+
+The Corneria briefing originally spent 36.714 ms in the task and 28.889 ms in
+texture preparation despite loading only 208 vertices per frame. Its working
+set overflowed the 64-entry converted-texture cache, so map and radio textures
+were continually decoded and uploaded. Raising that cache to 192 entries and
+the RGBA16 cache from 96 to 128 reduced task time to 11.515 ms and texture time
+to 1.793 ms. Texture-scope uncached-store units fell from about 231,369 to 342
+per frame. The user confirmed the slowdown was gone on hardware.
+
+A separate 116-frame capture isolated the selected-planet zoom. It performs
+real extra work: 958 loaded vertices and 1,387 submitted vertices per frame,
+against 208 and 745 in the briefing. `Map_ZoomPlanet_Update` fades every
+non-selected planet over several frames, and `Map_Planet_Draw` stops drawing a
+planet only when its alpha reaches zero. The transition therefore cannot be
+expected to reach briefing cost without changing its appearance.
+
+The fade also exposed avoidable texture churn. The environment/texture blend
+path baked primitive alpha into IA8 and RGBA32 conversions and included that
+alpha in the cache key. Each fade step consequently created another decoded
+and uploaded texture variant. The zoom recorded 24,197 texture-scope uncached
+store units per frame, versus 342 in the stable briefing. The candidate keeps
+the baked RGB blend but leaves texture alpha unmodified, applies primitive
+alpha through the regular modulate stage, and excludes alpha from the cache
+key. This preserves the combine equation while allowing every fade step to
+reuse the same texture.
+
+### Alpha-independent blend texture result: ACCEPTED
+
+The 119-frame hardware follow-up contained slightly more work than the control:
+commands increased 0.69%, loaded vertices 0.53% and submitted vertices 0.68%.
+Despite that increase, task time fell from 22.365 to 18.993 ms, a 3.372 ms or
+15.08% improvement. Texture preparation fell from 4.948 to 1.456 ms and its
+uncached-store units fell from 24,197 to 1,528 per frame, reductions of 70.58%
+and 93.68%. The user confirmed the zoom was visually correct on hardware. The
+counter movement directly matches removal of the alpha-keyed texture variants,
+so the change is accepted.
 
 ## Appendix: how the merge potential was measured
 

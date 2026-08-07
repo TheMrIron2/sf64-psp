@@ -693,7 +693,7 @@ static int psp_gfx_dl_baked_env_blend_texture_enabled(const PspGfxDlContext* ctx
 
 static PspGfxPspglTextureEnv psp_gfx_dl_texture_env_for_combine(const PspGfxDlContext* ctx) {
     if (psp_gfx_dl_baked_env_blend_texture_enabled(ctx)) {
-        return PSP_GFX_PSPGL_TEX_REPLACE;
+        return PSP_GFX_PSPGL_TEX_MODULATE;
     }
     if (ctx->combineMode == PSP_GFX_DL_COMBINE_ENV_TEX_PRIM_ALPHA_BLEND) {
         return PSP_GFX_PSPGL_TEX_BLEND;
@@ -2306,9 +2306,15 @@ static void psp_gfx_dl_build_clip_vertex(PspGfxDlContext* ctx, const PspGfxDlVer
         dst->b = ((float) src->b * (float) ctx->primitiveB) / (255.0f * 255.0f);
         dst->a = (float) ctx->primitiveA / 255.0f;
     } else if (ctx->combineMode == PSP_GFX_DL_COMBINE_ENV_TEX_PRIM_ALPHA_BLEND) {
-        dst->r = (float) ctx->environmentR / 255.0f;
-        dst->g = (float) ctx->environmentG / 255.0f;
-        dst->b = (float) ctx->environmentB / 255.0f;
+        if (psp_gfx_dl_baked_env_blend_texture_enabled(ctx)) {
+            dst->r = 1.0f;
+            dst->g = 1.0f;
+            dst->b = 1.0f;
+        } else {
+            dst->r = (float) ctx->environmentR / 255.0f;
+            dst->g = (float) ctx->environmentG / 255.0f;
+            dst->b = (float) ctx->environmentB / 255.0f;
+        }
         dst->a = (float) ctx->primitiveA / 255.0f;
     } else if ((ctx->combineMode == PSP_GFX_DL_COMBINE_DECAL_RGB) ||
                (ctx->combineMode == PSP_GFX_DL_COMBINE_DECAL_RGBA)) {
@@ -2424,9 +2430,13 @@ static void psp_gfx_dl_vertex_color_u8(PspGfxDlContext* ctx, const PspGfxDlVerte
         *b = (src->b * ctx->primitiveB) / 255U;
         *a = ctx->primitiveA;
     } else if (ctx->combineMode == PSP_GFX_DL_COMBINE_ENV_TEX_PRIM_ALPHA_BLEND) {
-        *r = ctx->environmentR;
-        *g = ctx->environmentG;
-        *b = ctx->environmentB;
+        if (psp_gfx_dl_baked_env_blend_texture_enabled(ctx)) {
+            *r = *g = *b = 255;
+        } else {
+            *r = ctx->environmentR;
+            *g = ctx->environmentG;
+            *b = ctx->environmentB;
+        }
         *a = ctx->primitiveA;
     } else if ((ctx->combineMode == PSP_GFX_DL_COMBINE_DECAL_RGB) ||
                (ctx->combineMode == PSP_GFX_DL_COMBINE_DECAL_RGBA)) {
@@ -2466,8 +2476,15 @@ psp_gfx_dl_build_direct_pair_colors(PspGfxDlContext* ctx, const PspGfxDlVertex* 
             dst[i].color = psp_gfx_dl_pack_rgba_u8(r, g, b, ctx->primitiveA, ctx->batchPremultiplied);
         }
     } else if (ctx->combineMode == PSP_GFX_DL_COMBINE_ENV_TEX_PRIM_ALPHA_BLEND) {
-        u32 color = psp_gfx_dl_pack_rgba_u8(ctx->environmentR, ctx->environmentG, ctx->environmentB,
-                                            ctx->primitiveA, ctx->batchPremultiplied);
+        u32 r = ctx->environmentR;
+        u32 g = ctx->environmentG;
+        u32 b = ctx->environmentB;
+        u32 color;
+
+        if (psp_gfx_dl_baked_env_blend_texture_enabled(ctx)) {
+            r = g = b = 255;
+        }
+        color = psp_gfx_dl_pack_rgba_u8(r, g, b, ctx->primitiveA, ctx->batchPremultiplied);
 
         for (i = 0; i < 6; i++) {
             dst[i].color = color;
@@ -3290,6 +3307,9 @@ static void psp_gfx_dl_emit_rect_vertex(PspGfxDlContext* ctx,
     g = ctx->primitiveG;
     b = ctx->primitiveB;
     a = ctx->primitiveA;
+    if (psp_gfx_dl_baked_env_blend_texture_enabled(ctx)) {
+        r = g = b = 255;
+    }
 
     dst->color = psp_gfx_dl_pack_rgba_u8(r, g, b, a, ctx->batchPremultiplied);
 
@@ -3370,9 +3390,11 @@ static void psp_gfx_dl_handle_set_primitive_color(PspGfxDlContext* ctx, const Gf
     u8 b = psp_gfx_color_transfer_u8((u8) (gfx->words.w1 >> 8));
     u8 a = (u8) gfx->words.w1;
 
-    if ((ctx->primitiveR != r) || (ctx->primitiveG != g) || (ctx->primitiveB != b) || (ctx->primitiveA != a)) {
+    int rgbChanged = (ctx->primitiveR != r) || (ctx->primitiveG != g) || (ctx->primitiveB != b);
+
+    if (rgbChanged || (ctx->primitiveA != a)) {
         psp_gfx_dl_mark_effective_material_dirty(ctx);
-        if (psp_gfx_dl_baked_env_blend_texture_enabled(ctx)) {
+        if (rgbChanged && psp_gfx_dl_baked_env_blend_texture_enabled(ctx)) {
             ctx->textureId = 0;
             ctx->textureUploadAttempted = 0;
         }
@@ -3389,10 +3411,11 @@ static void psp_gfx_dl_handle_set_environment_color(PspGfxDlContext* ctx, const 
     u8 b = psp_gfx_color_transfer_u8((u8) (gfx->words.w1 >> 8));
     u8 a = (u8) gfx->words.w1;
 
-    if ((ctx->environmentR != r) || (ctx->environmentG != g) || (ctx->environmentB != b) ||
-        (ctx->environmentA != a)) {
+    int rgbChanged = (ctx->environmentR != r) || (ctx->environmentG != g) || (ctx->environmentB != b);
+
+    if (rgbChanged || (ctx->environmentA != a)) {
         psp_gfx_dl_mark_effective_material_dirty(ctx);
-        if (psp_gfx_dl_baked_env_blend_texture_enabled(ctx)) {
+        if (rgbChanged && psp_gfx_dl_baked_env_blend_texture_enabled(ctx)) {
             ctx->textureId = 0;
             ctx->textureUploadAttempted = 0;
         }

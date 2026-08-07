@@ -16,6 +16,15 @@ and carries full build metadata, so captures are comparable across builds.
 make -j8 psp-profile-hw-counters
 ```
 
+To locate a bottleneck in the current baseline, enable the nested scopes:
+
+```bash
+make -j8 psp-profile-hw-counters PROFILE_HW_COUNTER_SCOPES=1
+```
+
+Use the default unscoped build for candidate A/B results. Scoped timing locates
+cost but is not release timing because its frequent counter reads perturb draws.
+
 Output lands in `build/psp-profile-hw-counters/`, alongside the loadable
 `starfox64.psp.prx`,
 `profile_build_metadata.txt`, `PROFILE_BUILD_COMMANDS.txt` and `SHA256SUMS`.
