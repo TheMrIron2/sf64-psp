@@ -851,21 +851,45 @@ Vtx gMapPlanetVTX[] = {
     VTX(-30, -30, 0, 0, 256, 255, 255, 255, 255), VTX(30, -30, 0, 3072, 256, 255, 255, 255, 255),
 };
 
-#define MAP_PLANET_BLOCK_ROW(top, bottom, t) \
-    VTX(30, top, 0, 3072, t, 255, 255, 255, 255), VTX(-30, top, 0, 0, t, 255, 255, 255, 255), \
-        VTX(-30, bottom, 0, 0, t + 256, 255, 255, 255, 255), \
-        VTX(30, bottom, 0, 3072, t + 256, 255, 255, 255, 255)
+#define MAP_PLANET_BLOCK_VERTEX_ROW(y, t) \
+    VTX(30, y, 0, 3072, t, 255, 255, 255, 255), VTX(-30, y, 0, 0, t, 255, 255, 255, 255)
 
 Vtx gMapPlanetBlockVTX[] = {
-    MAP_PLANET_BLOCK_ROW(30, 25, 0),   MAP_PLANET_BLOCK_ROW(25, 20, 256),
-    MAP_PLANET_BLOCK_ROW(20, 15, 512), MAP_PLANET_BLOCK_ROW(15, 10, 768),
-    MAP_PLANET_BLOCK_ROW(10, 5, 0),    MAP_PLANET_BLOCK_ROW(5, 0, 256),
-    MAP_PLANET_BLOCK_ROW(0, -5, 512),  MAP_PLANET_BLOCK_ROW(-5, -10, 768),
-    MAP_PLANET_BLOCK_ROW(-10, -15, 0), MAP_PLANET_BLOCK_ROW(-15, -20, 256),
-    MAP_PLANET_BLOCK_ROW(-20, -25, 512), MAP_PLANET_BLOCK_ROW(-25, -30, 768),
+    MAP_PLANET_BLOCK_VERTEX_ROW(30, 0),    MAP_PLANET_BLOCK_VERTEX_ROW(25, 256),
+    MAP_PLANET_BLOCK_VERTEX_ROW(20, 512),  MAP_PLANET_BLOCK_VERTEX_ROW(15, 768),
+    MAP_PLANET_BLOCK_VERTEX_ROW(10, 1024), MAP_PLANET_BLOCK_VERTEX_ROW(5, 1280),
+    MAP_PLANET_BLOCK_VERTEX_ROW(0, 1536),  MAP_PLANET_BLOCK_VERTEX_ROW(0, 0),
+    MAP_PLANET_BLOCK_VERTEX_ROW(-5, 256),  MAP_PLANET_BLOCK_VERTEX_ROW(-10, 512),
+    MAP_PLANET_BLOCK_VERTEX_ROW(-15, 768), MAP_PLANET_BLOCK_VERTEX_ROW(-20, 1024),
+    MAP_PLANET_BLOCK_VERTEX_ROW(-25, 1280), MAP_PLANET_BLOCK_VERTEX_ROW(-30, 1536),
 };
 
-#undef MAP_PLANET_BLOCK_ROW
+#undef MAP_PLANET_BLOCK_VERTEX_ROW
+
+static Vtx sMapHistoryShadowVtx[] = {
+    VTX(20, 20, 0, 4096, 0, 0, 0, 119, 255), VTX(-20, 20, 0, 0, 0, 0, 0, 119, 255),
+    VTX(-20, 0, 0, 0, 2048, 0, 0, 119, 255), VTX(20, 0, 0, 4096, 2048, 0, 0, 119, 255),
+    VTX(20, 0, 0, 4096, 0, 0, 0, 119, 255), VTX(-20, 0, 0, 0, 0, 0, 0, 119, 255),
+    VTX(-20, -20, 0, 0, 2048, 0, 0, 119, 255), VTX(20, -20, 0, 4096, 2048, 0, 0, 119, 255),
+};
+
+static u8 sMapHistoryShadowTopTex[128 * 64];
+static u8 sMapHistoryShadowBottomTex[128 * 64];
+static bool sMapHistoryShadowTexturesReady;
+
+static Gfx sMapHistoryShadowDL[] = {
+    gsSPVertex(sMapHistoryShadowVtx, 4, 0),
+    gsDPLoadTextureBlock(sMapHistoryShadowTopTex, G_IM_FMT_IA, G_IM_SIZ_8b, 128, 64, 0,
+                         G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMASK, G_TX_NOMASK,
+                         G_TX_NOLOD, G_TX_NOLOD),
+    gsSP1Quadrangle(1, 2, 3, 0, 0),
+    gsSPVertex(&sMapHistoryShadowVtx[4], 4, 0),
+    gsDPLoadTextureBlock(sMapHistoryShadowBottomTex, G_IM_FMT_IA, G_IM_SIZ_8b, 128, 64, 0,
+                         G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMASK, G_TX_NOMASK,
+                         G_TX_NOLOD, G_TX_NOLOD),
+    gsSP1Quadrangle(1, 2, 3, 0, 0),
+    gsSPEndDisplayList(),
+};
 
 Gfx gMapPlanetCloudDL[] = {
     gsSPVertex(gMapPlanetVTX, 16, 0),
@@ -1317,27 +1341,23 @@ Gfx gMapZonessDL[] = {
     gsSPEndDisplayList(),
 };
 
-#if PSP_NATIVE_MAP_PLANETS
+#define MAP_PLANET_BLOCK_QUADS \
+    gsSP1Quadrangle(1, 3, 2, 0, 0), gsSP1Quadrangle(3, 5, 4, 2, 0), \
+        gsSP1Quadrangle(5, 7, 6, 4, 0), gsSP1Quadrangle(7, 9, 8, 6, 0), \
+        gsSP1Quadrangle(9, 11, 10, 8, 0), gsSP1Quadrangle(11, 13, 12, 10, 0)
+
 #define MAP_PLANET_FULL_DL(texture, tlut) \
     gsDPLoadTLUT_pal256(tlut), \
-    gsSPVertex(gMapPlanetBlockVTX, 16, 0), \
-    gsDPLoadTextureBlock(texture, G_IM_FMT_CI, G_IM_SIZ_8b, 96, 32, 0, G_TX_NOMIRROR | G_TX_WRAP, \
+    gsSPVertex(gMapPlanetBlockVTX, 14, 0), \
+    gsDPLoadTextureBlock(texture, G_IM_FMT_CI, G_IM_SIZ_8b, 96, 48, 0, G_TX_NOMIRROR | G_TX_WRAP, \
                          G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD, G_TX_NOLOD), \
     gsDPSetTextureLUT(G_TT_RGBA16), \
-    gsSP1Quadrangle(1, 2, 3, 0, 0), gsSP1Quadrangle(5, 6, 7, 4, 0), \
-    gsSP1Quadrangle(9, 10, 11, 8, 0), gsSP1Quadrangle(13, 14, 15, 12, 0), \
-    gsSPVertex(&gMapPlanetBlockVTX[16], 16, 0), \
-    gsDPLoadTextureBlock(texture + (96 * 32), G_IM_FMT_CI, G_IM_SIZ_8b, 96, 32, 0, \
+    MAP_PLANET_BLOCK_QUADS, \
+    gsSPVertex(&gMapPlanetBlockVTX[14], 14, 0), \
+    gsDPLoadTextureBlock(texture + (96 * 48), G_IM_FMT_CI, G_IM_SIZ_8b, 96, 48, 0, \
                          G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK, \
                          G_TX_NOLOD, G_TX_NOLOD), \
-    gsSP1Quadrangle(1, 2, 3, 0, 0), gsSP1Quadrangle(5, 6, 7, 4, 0), \
-    gsSP1Quadrangle(9, 10, 11, 8, 0), gsSP1Quadrangle(13, 14, 15, 12, 0), \
-    gsSPVertex(&gMapPlanetBlockVTX[32], 16, 0), \
-    gsDPLoadTextureBlock(texture + (96 * 64), G_IM_FMT_CI, G_IM_SIZ_8b, 96, 32, 0, \
-                         G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK, \
-                         G_TX_NOLOD, G_TX_NOLOD), \
-    gsSP1Quadrangle(1, 2, 3, 0, 0), gsSP1Quadrangle(5, 6, 7, 4, 0), \
-    gsSP1Quadrangle(9, 10, 11, 8, 0), gsSP1Quadrangle(13, 14, 15, 12, 0), \
+    MAP_PLANET_BLOCK_QUADS, \
     gsDPPipeSync(), gsDPSetTextureLUT(G_TT_NONE), gsSPEndDisplayList()
 
 Gfx gMapCorneriaFullDL[] = { MAP_PLANET_FULL_DL(gMapCorneriaTex, aMapCorneriaTLUT) };
@@ -1352,29 +1372,21 @@ Gfx gMapZonessFullDL[] = { MAP_PLANET_FULL_DL(gMapZonessTex, aMapZonessTLUT) };
 #undef MAP_PLANET_FULL_DL
 
 #define MAP_PLANET_CLOUD_FULL_DL(texture) \
-    gsSPVertex(gMapPlanetBlockVTX, 16, 0), \
-    gsDPLoadTextureBlock(texture, G_IM_FMT_IA, G_IM_SIZ_8b, 96, 32, 0, G_TX_NOMIRROR | G_TX_WRAP, \
+    gsSPVertex(gMapPlanetBlockVTX, 14, 0), \
+    gsDPLoadTextureBlock(texture, G_IM_FMT_IA, G_IM_SIZ_8b, 96, 48, 0, G_TX_NOMIRROR | G_TX_WRAP, \
                          G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD, G_TX_NOLOD), \
-    gsSP1Quadrangle(1, 2, 3, 0, 0), gsSP1Quadrangle(5, 6, 7, 4, 0), \
-    gsSP1Quadrangle(9, 10, 11, 8, 0), gsSP1Quadrangle(13, 14, 15, 12, 0), \
-    gsSPVertex(&gMapPlanetBlockVTX[16], 16, 0), \
-    gsDPLoadTextureBlock(texture + (96 * 32), G_IM_FMT_IA, G_IM_SIZ_8b, 96, 32, 0, \
+    MAP_PLANET_BLOCK_QUADS, \
+    gsSPVertex(&gMapPlanetBlockVTX[14], 14, 0), \
+    gsDPLoadTextureBlock(texture + (96 * 48), G_IM_FMT_IA, G_IM_SIZ_8b, 96, 48, 0, \
                          G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK, \
                          G_TX_NOLOD, G_TX_NOLOD), \
-    gsSP1Quadrangle(1, 2, 3, 0, 0), gsSP1Quadrangle(5, 6, 7, 4, 0), \
-    gsSP1Quadrangle(9, 10, 11, 8, 0), gsSP1Quadrangle(13, 14, 15, 12, 0), \
-    gsSPVertex(&gMapPlanetBlockVTX[32], 16, 0), \
-    gsDPLoadTextureBlock(texture + (96 * 64), G_IM_FMT_IA, G_IM_SIZ_8b, 96, 32, 0, \
-                         G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK, \
-                         G_TX_NOLOD, G_TX_NOLOD), \
-    gsSP1Quadrangle(1, 2, 3, 0, 0), gsSP1Quadrangle(5, 6, 7, 4, 0), \
-    gsSP1Quadrangle(9, 10, 11, 8, 0), gsSP1Quadrangle(13, 14, 15, 12, 0), \
+    MAP_PLANET_BLOCK_QUADS, \
     gsDPPipeSync(), gsDPSetTextureLUT(G_TT_NONE), gsSPEndDisplayList()
 
 Gfx gMapPlanetCloudFullDL[] = { MAP_PLANET_CLOUD_FULL_DL(gMapPlanetCloudTex) };
 
 #undef MAP_PLANET_CLOUD_FULL_DL
-#endif
+#undef MAP_PLANET_BLOCK_QUADS
 
 // BSS
 u8* gBSSMapPlanetTextures[9] = {
@@ -1390,13 +1402,8 @@ u8* gAssetMapPlanetTextures[9] = {
 
 Gfx* sMapPlanets[PLANET_MAX] = {
     aMapMeteorDL,  aMapArea6DL,  aMapBolseDL,   aMapSectorZDL, aMapSectorXDL,
-#if PSP_NATIVE_MAP_PLANETS
     aMapSectorYDL, gMapKatinaFullDL, gMapMacbethFullDL, gMapZonessFullDL, gMapCorneriaFullDL,
     gMapTitaniaFullDL, gMapAquasFullDL, gMapFortunaFullDL, gMapVenomFullDL, aMapSolarDL,
-#else
-    aMapSectorYDL, gMapKatinaDL, gMapMacbethDL, gMapZonessDL,  gMapCorneriaDL,
-    gMapTitaniaDL, gMapAquasDL,  gMapFortunaDL, gMapVenomDL,   aMapSolarDL,
-#endif
 };
 
 void Map_Setup(void);
@@ -1502,13 +1509,6 @@ void Map_CamMatrixRot(void);
 #ifndef PSP_MAP_SKIP_PLANETS
 #define PSP_MAP_SKIP_PLANETS 0
 #endif
-#ifndef PSP_NATIVE_MAP_PLANETS
-#define PSP_NATIVE_MAP_PLANETS 0
-#endif
-#ifndef PSP_NATIVE_MAP_METEO
-#define PSP_NATIVE_MAP_METEO 0
-#endif
-
 void Map_Main(void) {
     Map_AssetTrace_Check("map-main-entry");
     if (sMapTimer1 > 0) {
@@ -4948,11 +4948,7 @@ void Map_PlanetCloud_Draw(PlanetId planetId) {
     Matrix_Copy(gGfxMatrix, &D_menu_801CDE20[planetId]);
     Matrix_SetGfxMtx(&gMasterDisp);
 
-#if PSP_NATIVE_MAP_PLANETS
     gSPDisplayList(gMasterDisp++, gMapPlanetCloudFullDL);
-#else
-    gSPDisplayList(gMasterDisp++, gMapPlanetCloudDL);
-#endif
 
     Matrix_Pop(&gGfxMatrix);
 }
@@ -5487,9 +5483,7 @@ void Map_MeteoMeteors_Draw(void) {
         }
 
         if ((gGameFrameCount & mask) != 0) {
-#if PSP_NATIVE_MAP_METEO
             gSPDisplayList(gMasterDisp++, gMapMeteorSetupDL);
-#endif
             for (i = 0; i < ARRAY_COUNT(sMapMeteors); i++) {
                 Matrix_Push(&gGfxMatrix);
 
@@ -5503,12 +5497,8 @@ void Map_MeteoMeteors_Draw(void) {
 
                 Matrix_SetGfxMtx(&gMasterDisp);
 
-#if PSP_NATIVE_MAP_METEO
                 gSPVertex(gMasterDisp++, ast_map_seg6_vtx_60668, 3, 0);
                 gSP1Triangle(gMasterDisp++, 0, 1, 2, 0);
-#else
-                gSPDisplayList(gMasterDisp++, sMapPlanets[PLANET_METEO]);
-#endif
 
                 Matrix_Pop(&gGfxMatrix);
             }
@@ -5773,62 +5763,73 @@ void Map_TotalHits_Draw(void) {
 
 void Map_801A9FD4(bool arg0) {
     s32 i;
-    s32 curMission;
+    s32 lineBoxMission = 0;
+    s32 curMission = 0;
     f32 pathInfoXPos, pathPlanetXPos;
     s32 pad[2];
     f32 pathInfoXPosOffset = 16.0f;
 
     static s32 sHistoryCacheMission = -1;
-
-    // cache history hud to avoid re-rendering every frame
-    if (sHistoryCacheMission != gMissionNumber) {
-        PspRenderer_HistoryHudCacheInvalidate();
-        sHistoryCacheMission = gMissionNumber;
-    }
-    if (PspRenderer_HistoryHudCacheReady()) {
-        PSP_RENDERER_DL_HISTORY_REPLAY_MARKER(gMasterDisp++);
-        return;
-    }
-    PSP_RENDERER_DL_HISTORY_BEGIN_MARKER(gMasterDisp++);
-
+    static s32 sHistoryCacheLineBoxMission = -1;
+    static s32 sHistoryCacheMissionCount = -1;
 
     if (arg0) {
-        curMission = gMissionNumber;
+        lineBoxMission = gMissionNumber;
     } else {
         if ((gLastGameState == GSTATE_PLAY) || (gLastGameState == GSTATE_ENDING)) {
-            curMission = gMissionNumber;
+            lineBoxMission = gMissionNumber;
         }
         if (gLastGameState == GSTATE_GAME_OVER) {
-            curMission = D_menu_801CD9AC;
+            lineBoxMission = D_menu_801CD9AC;
         }
     }
-
-    Map_PathLineBox_Draw(curMission);
-
+    curMission = lineBoxMission;
     if ((gLastGameState == GSTATE_PLAY) || (gLastGameState == GSTATE_ENDING)) {
         curMission = 7;
     }
-
     if (gLastGameState == GSTATE_GAME_OVER) {
         curMission++;
     }
 
+    if ((sHistoryCacheMission != gMissionNumber) || (sHistoryCacheLineBoxMission != lineBoxMission) ||
+        (sHistoryCacheMissionCount != curMission)) {
+        PspRenderer_HistoryHudCacheInvalidate();
+        sHistoryCacheMission = gMissionNumber;
+        sHistoryCacheLineBoxMission = lineBoxMission;
+        sHistoryCacheMissionCount = curMission;
+    }
+
+    if (PspRenderer_HistoryHudCacheReady()) {
+        PSP_RENDERER_DL_HISTORY_REPLAY_MARKER(gMasterDisp++);
+    } else {
+        PSP_RENDERER_DL_HISTORY_BEGIN_MARKER(gMasterDisp++);
+        Map_PathLineBox_Draw(lineBoxMission);
+
+        Matrix_Push(&gGfxMatrix);
+        Matrix_LookAt(gGfxMatrix, 0.0f, 0.0f, 100.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, MTXF_APPLY);
+        Matrix_SetGfxMtx(&gMasterDisp);
+
+        for (pathInfoXPos = 0.0f, i = 0; i < curMission; i++, pathInfoXPos += 24.0f + pathInfoXPosOffset) {
+            if (gMissionPlanet[i] != PLANET_NONE) {
+                Map_PathInfo_Draw(i, 28.0f + pathInfoXPos, 182.0f, gMissionPlanet[i]);
+            }
+        }
+
+        Matrix_Pop(&gGfxMatrix);
+        PSP_RENDERER_DL_HISTORY_END_MARKER(gMasterDisp++);
+    }
+
     Matrix_Push(&gGfxMatrix);
-
     Matrix_LookAt(gGfxMatrix, 0.0f, 0.0f, 100.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, MTXF_APPLY);
-
     Matrix_SetGfxMtx(&gMasterDisp);
 
-    for (pathInfoXPos = 0.0f, pathPlanetXPos = -41.5f, i = 0; i < curMission;
-         i++, pathInfoXPos += 24.0f + pathInfoXPosOffset, pathPlanetXPos += 13.8f) {
+    for (pathPlanetXPos = -41.5f, i = 0; i < curMission; i++, pathPlanetXPos += 13.8f) {
         if (gMissionPlanet[i] != PLANET_NONE) {
-            Map_PathInfo_Draw(i, 28.0f + pathInfoXPos, 182.0f, gMissionPlanet[i]);
             Map_PathPlanet_Draw(i, pathPlanetXPos, -25.4f, gMissionPlanet[i]);
         }
     }
 
     Matrix_Pop(&gGfxMatrix);
-    PSP_RENDERER_DL_HISTORY_END_MARKER(gMasterDisp++);
 }
 
 void Map_PathLineBox_Draw(s32 curMission) {
@@ -5920,6 +5921,27 @@ void Map_PathInfo_Draw(s32 missionIdx, f32 x, f32 y, s32 idx) {
             mask >>= 8;
         }
     }
+}
+
+static void Map_HistoryShadowTextures_Init(void) {
+    s32 row;
+
+    if (sMapHistoryShadowTexturesReady) {
+        return;
+    }
+
+    for (row = 0; row < 32; row++) {
+        memcpy(&sMapHistoryShadowTopTex[row * 128], &aMapPlanetShadowTex7[row * 64], 64);
+        memcpy(&sMapHistoryShadowTopTex[(row * 128) + 64], &aMapPlanetShadowTex8[row * 64], 64);
+        memcpy(&sMapHistoryShadowTopTex[(row + 32) * 128], &aMapPlanetShadowTex5[row * 64], 64);
+        memcpy(&sMapHistoryShadowTopTex[((row + 32) * 128) + 64], &aMapPlanetShadowTex6[row * 64], 64);
+        memcpy(&sMapHistoryShadowBottomTex[row * 128], &aMapPlanetShadowTex3[row * 64], 64);
+        memcpy(&sMapHistoryShadowBottomTex[(row * 128) + 64], &aMapPlanetShadowTex4[row * 64], 64);
+        memcpy(&sMapHistoryShadowBottomTex[(row + 32) * 128], &aMapPlanetShadowTex1[row * 64], 64);
+        memcpy(&sMapHistoryShadowBottomTex[((row + 32) * 128) + 64], &aMapPlanetShadowTex2[row * 64], 64);
+    }
+
+    sMapHistoryShadowTexturesReady = true;
 }
 
 void Map_PathPlanet_Draw(s32 missionIdx, f32 x, f32 y, PlanetId planetId) {
@@ -6072,15 +6094,12 @@ void Map_PathPlanet_Draw(s32 missionIdx, f32 x, f32 y, PlanetId planetId) {
                         } else {
                             gDPSetPrimColor(gMasterDisp++, 0, 0, 255, 255, 255, 255);
                         }
-#if PSP_NATIVE_MAP_PLANETS
                         gSPDisplayList(gMasterDisp++, gMapPlanetCloudFullDL);
-#else
-                        gSPDisplayList(gMasterDisp++, gMapPlanetCloudDL);
-#endif
                     }
                     Matrix_Scale(gGfxMatrix, 1.6f, 1.6f, 1.6f, MTXF_APPLY);
                     Matrix_SetGfxMtx(&gMasterDisp);
-                    gSPDisplayList(gMasterDisp++, aMapPlanetShadowDL);
+                    Map_HistoryShadowTextures_Init();
+                    gSPDisplayList(gMasterDisp++, sMapHistoryShadowDL);
                 }
                 Matrix_Pop(&gGfxMatrix);
             }
