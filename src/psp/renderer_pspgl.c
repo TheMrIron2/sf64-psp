@@ -365,3 +365,11 @@ void PspRenderer_StarfieldDiagCounts(u32 requested, u32 traversed) {
 void PspRenderer_DrawPendingStarfield(void) {
     psp_renderer_draw_starfield();
 }
+
+int PspRenderer_HistoryHudCacheReady(void) {
+    return PspGfxPspgl_ReplayCacheReady();
+}
+
+void PspRenderer_HistoryHudCacheInvalidate(void) {
+    PspGfxPspgl_ReplayCacheInvalidate();
+}

@@ -32,6 +32,30 @@ void PspPlatform_LogLine(const char* line);
 #define PSP_GFX_PSPGL_MAX_TEXTURE_PIXELS (256 * 32)
 #define PSP_GFX_PSPGL_MIN_TEXTURE_DIMENSION 8
 #define PSP_GFX_PSPGL_VERTEX_STREAM_SETS 2
+#define PSP_GFX_PSPGL_REPLAY_CACHE_DRAWS 128
+#define PSP_GFX_PSPGL_REPLAY_CACHE_VERTICES 8192
+
+typedef struct {
+    u32 first;
+    u32 count;
+    u32 textureId;
+    PspGfxPspglTextureRef textureRef;
+    PspGfxPspglTextureEnv textureEnv;
+    u32 textureEnvColor;
+    PspGfxPspglTextureWrap wrapS;
+    PspGfxPspglTextureWrap wrapT;
+    int alphaTest, blend, premultiplied, depthTest, depthWrite, fog, pretransformed, pointFilter;
+    float fogColor[4];
+    float projection[16];
+    u32 projectionSerial;
+} PspGfxPspglReplayDraw;
+
+static PspGfxPspglReplayDraw sReplayCacheDraws[PSP_GFX_PSPGL_REPLAY_CACHE_DRAWS];
+static PspGfxPspglColorVertex sReplayCacheVertices[PSP_GFX_PSPGL_REPLAY_CACHE_VERTICES];
+static u32 sReplayCacheDrawCount;
+static u32 sReplayCacheVertexCount;
+static int sReplayCacheCapturing;
+static int sReplayCacheReady;
 #define PSP_GFX_PSPGL_VERTEX_STREAM_SMALL_PAGES_PER_SET 256
 #define PSP_GFX_PSPGL_VERTEX_STREAM_SMALL_PAGE_VERTICES 256
 #define PSP_GFX_PSPGL_VERTEX_STREAM_LARGE_PAGES_PER_SET 32
@@ -2152,6 +2176,40 @@ void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u3
                                pretransformed, pointFilter, NULL);
 }
 
+void PspGfxPspgl_BeginReplayCache(void) {
+    sReplayCacheDrawCount = 0;
+    sReplayCacheVertexCount = 0;
+    sReplayCacheReady = 0;
+    sReplayCacheCapturing = 1;
+}
+
+void PspGfxPspgl_EndReplayCache(void) {
+    sReplayCacheCapturing = 0;
+    sReplayCacheReady = (sReplayCacheDrawCount != 0);
+}
+
+int PspGfxPspgl_ReplayCacheReady(void) {
+    return sReplayCacheReady;
+}
+
+void PspGfxPspgl_ReplayCacheInvalidate(void) {
+    sReplayCacheCapturing = 0;
+    sReplayCacheReady = 0;
+}
+
+void PspGfxPspgl_ReplayCache(void) {
+    u32 i;
+    for (i = 0; i < sReplayCacheDrawCount; i++) {
+        PspGfxPspglReplayDraw* draw = &sReplayCacheDraws[i];
+        PspGfxPspgl_DrawColoredTriangles(&sReplayCacheVertices[draw->first], draw->count, draw->textureId,
+                                         draw->textureRef, draw->textureEnv, draw->textureEnvColor, draw->wrapS,
+                                         draw->wrapT, draw->alphaTest, draw->blend, draw->premultiplied,
+                                         draw->depthTest, draw->depthWrite, draw->fog, draw->fogColor, 0.0f, 0.0f,
+                                         draw->projection, draw->projectionSerial, draw->pretransformed,
+                                         draw->pointFilter);
+    }
+}
+
 void PspGfxPspgl_DrawReservedColoredTriangles(const PspGfxPspglVertexReservation* reservation, u32 vertexCount,
                                               u32 textureId, PspGfxPspglTextureRef textureRef,
                                               PspGfxPspglTextureEnv textureEnv, u32 textureEnvColor,
@@ -2162,6 +2220,27 @@ void PspGfxPspgl_DrawReservedColoredTriangles(const PspGfxPspglVertexReservation
                                               int pretransformed, int pointFilter) {
     if ((reservation == NULL) || (reservation->vertices == NULL) || (vertexCount > reservation->capacity)) {
         return;
+    }
+    if (sReplayCacheCapturing && (sReplayCacheDrawCount < PSP_GFX_PSPGL_REPLAY_CACHE_DRAWS) &&
+        ((sReplayCacheVertexCount + vertexCount) <= PSP_GFX_PSPGL_REPLAY_CACHE_VERTICES)) {
+        PspGfxPspglReplayDraw* draw = &sReplayCacheDraws[sReplayCacheDrawCount++];
+        draw->first = sReplayCacheVertexCount;
+        draw->count = vertexCount;
+        draw->textureId = textureId;
+        draw->textureRef = textureRef;
+        draw->textureEnv = textureEnv;
+        draw->textureEnvColor = textureEnvColor;
+        draw->wrapS = wrapS;
+        draw->wrapT = wrapT;
+        draw->alphaTest = alphaTest; draw->blend = blend; draw->premultiplied = premultiplied;
+        draw->depthTest = depthTest; draw->depthWrite = depthWrite; draw->fog = fog;
+        draw->pretransformed = pretransformed; draw->pointFilter = pointFilter;
+        memcpy(draw->fogColor, fogColor, sizeof(draw->fogColor));
+        memcpy(draw->projection, projectionMatrix, sizeof(draw->projection));
+        draw->projectionSerial = projectionSerial;
+        memcpy(&sReplayCacheVertices[sReplayCacheVertexCount], reservation->vertices,
+               vertexCount * sizeof(*reservation->vertices));
+        sReplayCacheVertexCount += vertexCount;
     }
     psp_gfx_pspgl_draw_colored(reservation->vertices, vertexCount, GL_TRIANGLES, textureId, textureRef,
                                textureEnv, textureEnvColor, wrapS, wrapT, alphaTest, blend, premultiplied,

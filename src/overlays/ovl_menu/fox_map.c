@@ -15,11 +15,10 @@
 #include "assets/ast_map.h"
 #include "assets/ast_text.h"
 #include "assets/ast_font_3d.h"
+#include "src/psp/renderer.h"
 
-#if defined(TARGET_PSP)
 #ifndef PSP_RENDERER_DIAGNOSTICS
 #define PSP_RENDERER_DIAGNOSTICS 0
-#endif
 #if (PSP_RENDERER_DIAGNOSTICS + 0)
 #include "src/psp/platform.h"
 #endif
@@ -5779,6 +5778,20 @@ void Map_801A9FD4(bool arg0) {
     s32 pad[2];
     f32 pathInfoXPosOffset = 16.0f;
 
+    static s32 sHistoryCacheMission = -1;
+
+    // cache history hud to avoid re-rendering every frame
+    if (sHistoryCacheMission != gMissionNumber) {
+        PspRenderer_HistoryHudCacheInvalidate();
+        sHistoryCacheMission = gMissionNumber;
+    }
+    if (PspRenderer_HistoryHudCacheReady()) {
+        PSP_RENDERER_DL_HISTORY_REPLAY_MARKER(gMasterDisp++);
+        return;
+    }
+    PSP_RENDERER_DL_HISTORY_BEGIN_MARKER(gMasterDisp++);
+
+
     if (arg0) {
         curMission = gMissionNumber;
     } else {
@@ -5815,6 +5828,7 @@ void Map_801A9FD4(bool arg0) {
     }
 
     Matrix_Pop(&gGfxMatrix);
+    PSP_RENDERER_DL_HISTORY_END_MARKER(gMasterDisp++);
 }
 
 void Map_PathLineBox_Draw(s32 curMission) {

@@ -4360,6 +4360,21 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
                 PspRenderer_DrawPendingStarfield();
                 continue;
             }
+            if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_HISTORY_BEGIN) {
+                psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+                PspGfxPspgl_BeginReplayCache();
+                continue;
+            }
+            if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_HISTORY_END) {
+                psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+                PspGfxPspgl_EndReplayCache();
+                continue;
+            }
+            if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_HISTORY_REPLAY) {
+                psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+                PspGfxPspgl_ReplayCache();
+                continue;
+            }
         }
 
 #if PROFILE_COMPONENTS
