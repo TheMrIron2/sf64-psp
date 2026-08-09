@@ -4477,6 +4477,8 @@ void Map_RestartLevelLifeDown_Draw(void) {
 }
 
 void Map_LevelStart_Update(void) {
+    static f32 sGoodLuckVolumeMod = 1.5f;
+
     switch (sLevelStartState) {
         case 0:
             sWipeHeight = 0;
@@ -4538,7 +4540,8 @@ void Map_LevelStart_Update(void) {
 
         case 4:
             if (sMapTimer1 == 0) {
-                AUDIO_PLAY_SFX(NA_SE_GOOD_LUCK, gDefaultSfxSource, 4);
+                Audio_PlaySfx(NA_SE_GOOD_LUCK, gDefaultSfxSource, 4, &gDefaultMod, &sGoodLuckVolumeMod,
+                              &gDefaultReverb);
                 sMapTimer1 = 75;
                 sLevelStartState++;
             }

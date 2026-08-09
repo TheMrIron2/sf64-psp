@@ -520,6 +520,7 @@ void Audio_SetSfxProperties(u8 bankId, u8 entryIndex, u8 channelId) {
             }
             break;
         case SFX_BANK_SYSTEM:
+            volumeMod = *entry->volMod;
             if (sSfxLayout == SFX_LAYOUT_VS) {
                 if (entry->token != 4) {
                     pan = (entry->token & 1) * 127;
