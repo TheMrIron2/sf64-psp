@@ -891,6 +891,32 @@ static Gfx sMapPlanetShadowDL[] = {
     gsSPEndDisplayList(),
 };
 
+static Gfx sMapPlanetShadowTopSetupDL[] = {
+    gsDPLoadTextureBlock(sMapPlanetShadowTopTex, G_IM_FMT_IA, G_IM_SIZ_8b, 128, 64, 0,
+                         G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMASK, G_TX_NOMASK,
+                         G_TX_NOLOD, G_TX_NOLOD),
+    gsSPEndDisplayList(),
+};
+
+static Gfx sMapPlanetShadowBottomSetupDL[] = {
+    gsDPLoadTextureBlock(sMapPlanetShadowBottomTex, G_IM_FMT_IA, G_IM_SIZ_8b, 128, 64, 0,
+                         G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMASK, G_TX_NOMASK,
+                         G_TX_NOLOD, G_TX_NOLOD),
+    gsSPEndDisplayList(),
+};
+
+static Gfx sMapPlanetShadowTopGeometryDL[] = {
+    gsSPVertex(sMapPlanetShadowVtx, 4, 0),
+    gsSP1Quadrangle(1, 2, 3, 0, 0),
+    gsSPEndDisplayList(),
+};
+
+static Gfx sMapPlanetShadowBottomGeometryDL[] = {
+    gsSPVertex(&sMapPlanetShadowVtx[4], 4, 0),
+    gsSP1Quadrangle(1, 2, 3, 0, 0),
+    gsSPEndDisplayList(),
+};
+
 static Vtx sMapSolarVtx[] = {
     VTX(40, 40, 0, 4096, 0, 0, 0, 119, 255), VTX(-40, 40, 0, 0, 0, 0, 0, 119, 255),
     VTX(-40, 0, 0, 0, 2048, 0, 0, 119, 255), VTX(40, 0, 0, 4096, 2048, 0, 0, 119, 255),
@@ -901,6 +927,7 @@ static Vtx sMapSolarVtx[] = {
 static u8 sMapSolarTopTex[128 * 64];
 static u8 sMapSolarBottomTex[128 * 64];
 static bool sMapSolarTexturesReady;
+static f32 sMapSolarRayAngle;
 
 static Gfx sMapSolarFullDL[] = {
     gsSPVertex(sMapSolarVtx, 4, 0),
@@ -913,6 +940,151 @@ static Gfx sMapSolarFullDL[] = {
     gsSP1Quadrangle(1, 2, 3, 0, 0),
     gsSPEndDisplayList(),
 };
+
+static Gfx sMapSolarTopSetupDL[] = {
+    gsDPLoadTextureBlock(sMapSolarTopTex, G_IM_FMT_IA, G_IM_SIZ_8b, 128, 64, 0, G_TX_NOMIRROR | G_TX_CLAMP,
+                         G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD, G_TX_NOLOD),
+    gsSPEndDisplayList(),
+};
+
+static Gfx sMapSolarBottomSetupDL[] = {
+    gsDPLoadTextureBlock(sMapSolarBottomTex, G_IM_FMT_IA, G_IM_SIZ_8b, 128, 64, 0, G_TX_NOMIRROR | G_TX_CLAMP,
+                         G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD, G_TX_NOLOD),
+    gsSPEndDisplayList(),
+};
+
+static Gfx sMapSolarTopGeometryDL[] = {
+    gsSPVertex(sMapSolarVtx, 4, 0),
+    gsSP1Quadrangle(1, 2, 3, 0, 0),
+    gsSPEndDisplayList(),
+};
+
+static Gfx sMapSolarBottomGeometryDL[] = {
+    gsSPVertex(&sMapSolarVtx[4], 4, 0),
+    gsSP1Quadrangle(1, 2, 3, 0, 0),
+    gsSPEndDisplayList(),
+};
+
+#define MAP_AREA6_ATLAS_WIDTH 96
+#define MAP_AREA6_ATLAS_HEIGHT 56
+#define MAP_BOLSE_ATLAS_WIDTH 72
+#define MAP_BOLSE_ATLAS_HEIGHT 56
+#define MAP_AREA6_SHIP_ATLAS_WIDTH 128
+#define MAP_AREA6_SHIP_ATLAS_HEIGHT 64
+#define MAP_AREA6_SHIP_TRIANGLE_COUNT 47
+#define MAP_AREA6_SHIP_GEOMETRY_DL_CAPACITY 64
+
+typedef char MapArea6AtlasSizeCheck[((MAP_AREA6_ATLAS_WIDTH * MAP_AREA6_ATLAS_HEIGHT) <= 8192) ? 1 : -1];
+typedef char MapBolseAtlasSizeCheck[((MAP_BOLSE_ATLAS_WIDTH * MAP_BOLSE_ATLAS_HEIGHT) <= 8192) ? 1 : -1];
+typedef char MapArea6ShipAtlasSizeCheck[
+    ((MAP_AREA6_SHIP_ATLAS_WIDTH * MAP_AREA6_SHIP_ATLAS_HEIGHT) <= 8192) ? 1 : -1];
+
+static u8 sMapArea6AtlasTex[MAP_AREA6_ATLAS_WIDTH * MAP_AREA6_ATLAS_HEIGHT];
+static u16 sMapArea6AtlasTLUT[256];
+static Vtx sMapArea6Vtx1[32];
+static Vtx sMapArea6Vtx2[32];
+static Vtx sMapArea6Vtx3[32];
+static Vtx sMapArea6Vtx4[20];
+static Vtx sMapArea6Vtx5[18];
+
+static Gfx sMapArea6FullDL[] = {
+    gsDPLoadTLUT_pal256(sMapArea6AtlasTLUT),
+    gsDPLoadTextureBlock(sMapArea6AtlasTex, G_IM_FMT_CI, G_IM_SIZ_8b, MAP_AREA6_ATLAS_WIDTH,
+                         MAP_AREA6_ATLAS_HEIGHT, 0, G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMIRROR | G_TX_CLAMP,
+                         G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD, G_TX_NOLOD),
+    gsDPSetTextureLUT(G_TT_RGBA16),
+    gsSPVertex(sMapArea6Vtx1, 32, 0),
+    gsSP2Triangles(0, 1, 2, 0, 1, 3, 2, 0),
+    gsSP2Triangles(4, 5, 6, 0, 7, 4, 6, 0),
+    gsSP2Triangles(8, 9, 10, 0, 9, 11, 10, 0),
+    gsSP2Triangles(12, 13, 14, 0, 13, 15, 14, 0),
+    gsSP2Triangles(16, 17, 18, 0, 17, 19, 18, 0),
+    gsSP2Triangles(20, 21, 22, 0, 20, 22, 23, 0),
+    gsSP2Triangles(24, 25, 26, 0, 24, 26, 27, 0),
+    gsSP2Triangles(28, 29, 30, 0, 28, 30, 31, 0),
+    gsSPVertex(sMapArea6Vtx2, 32, 0),
+    gsSP2Triangles(3, 1, 2, 0, 3, 2, 0, 0),
+    gsSP2Triangles(3, 4, 5, 0, 3, 5, 1, 0),
+    gsSP2Triangles(7, 8, 9, 0, 7, 9, 6, 0),
+    gsSP2Triangles(10, 11, 9, 0, 10, 9, 8, 0),
+    gsSP2Triangles(13, 15, 14, 0, 13, 14, 12, 0),
+    gsSP2Triangles(19, 17, 18, 0, 19, 18, 16, 0),
+    gsSP2Triangles(21, 23, 22, 0, 21, 22, 20, 0),
+    gsSP2Triangles(24, 25, 26, 0, 24, 26, 27, 0),
+    gsSP2Triangles(28, 29, 30, 0, 28, 31, 29, 0),
+    gsSPVertex(sMapArea6Vtx3, 32, 0),
+    gsSP2Triangles(0, 1, 2, 0, 3, 4, 5, 0),
+    gsSP2Triangles(6, 7, 8, 0, 6, 8, 9, 0),
+    gsSP2Triangles(13, 11, 12, 0, 13, 12, 10, 0),
+    gsSP2Triangles(14, 15, 16, 0, 17, 18, 19, 0),
+    gsSP2Triangles(17, 20, 18, 0, 21, 22, 23, 0),
+    gsSP2Triangles(21, 23, 24, 0, 25, 26, 27, 0),
+    gsSP2Triangles(28, 29, 30, 0, 31, 28, 30, 0),
+    gsSPVertex(sMapArea6Vtx4, 20, 0),
+    gsSP2Triangles(0, 1, 2, 0, 3, 4, 5, 0),
+    gsSP2Triangles(4, 6, 5, 0, 7, 8, 9, 0),
+    gsSP2Triangles(10, 11, 12, 0, 13, 14, 15, 0),
+    gsSP2Triangles(16, 13, 15, 0, 17, 18, 19, 0),
+    gsSPVertex(sMapArea6Vtx5, 18, 0),
+    gsSP2Triangles(0, 1, 2, 0, 3, 1, 4, 0),
+    gsSP2Triangles(5, 1, 6, 0, 7, 1, 8, 0),
+    gsSP2Triangles(9, 10, 11, 0, 12, 10, 13, 0),
+    gsSP2Triangles(14, 10, 15, 0, 16, 10, 17, 0),
+    gsDPPipeSync(),
+    gsDPSetTextureLUT(G_TT_NONE),
+    gsSPEndDisplayList(),
+};
+
+static u8 sMapBolseAtlasTex[MAP_BOLSE_ATLAS_WIDTH * MAP_BOLSE_ATLAS_HEIGHT];
+static u16 sMapBolseAtlasTLUT[256];
+static Vtx sMapBolseVtx1[8];
+static Vtx sMapBolseVtx2[4];
+static Vtx sMapBolseVtx3[16];
+static Vtx sMapBolseVtx4[16];
+
+static Gfx sMapBolseFullDL[] = {
+    gsDPLoadTLUT_pal256(sMapBolseAtlasTLUT),
+    gsDPLoadTextureBlock(sMapBolseAtlasTex, G_IM_FMT_CI, G_IM_SIZ_8b, MAP_BOLSE_ATLAS_WIDTH,
+                         MAP_BOLSE_ATLAS_HEIGHT, 0, G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMIRROR | G_TX_CLAMP,
+                         G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD, G_TX_NOLOD),
+    gsDPSetTextureLUT(G_TT_RGBA16),
+    gsSPVertex(sMapBolseVtx1, 8, 0),
+    gsSP2Triangles(3, 1, 2, 0, 3, 2, 0, 0),
+    gsSP2Triangles(7, 5, 6, 0, 7, 6, 4, 0),
+    gsSPVertex(sMapBolseVtx2, 4, 0),
+    gsSP2Triangles(1, 2, 3, 0, 1, 3, 0, 0),
+    gsSPVertex(sMapBolseVtx3, 16, 0),
+    gsSP2Triangles(3, 1, 2, 0, 3, 2, 0, 0),
+    gsSP2Triangles(5, 6, 7, 0, 5, 7, 4, 0),
+    gsSP2Triangles(11, 9, 10, 0, 11, 10, 8, 0),
+    gsSP2Triangles(13, 14, 15, 0, 13, 15, 12, 0),
+    gsSPVertex(sMapBolseVtx4, 16, 0),
+    gsSP2Triangles(3, 1, 2, 0, 3, 2, 0, 0),
+    gsSP2Triangles(7, 5, 6, 0, 7, 6, 4, 0),
+    gsSP2Triangles(9, 10, 11, 0, 9, 11, 8, 0),
+    gsSP2Triangles(15, 13, 14, 0, 15, 14, 12, 0),
+    gsDPPipeSync(),
+    gsDPSetTextureLUT(G_TT_NONE),
+    gsSPEndDisplayList(),
+};
+
+static bool sMapStationTexturesReady;
+
+static u8 sMapArea6ShipAtlasTex[MAP_AREA6_SHIP_ATLAS_WIDTH * MAP_AREA6_SHIP_ATLAS_HEIGHT];
+static u16 sMapArea6ShipAtlasTLUT[256];
+static Vtx sMapArea6ShipTriangleVtx[MAP_AREA6_SHIP_TRIANGLE_COUNT * 3];
+static Gfx sMapArea6ShipGeometryDL[MAP_AREA6_SHIP_GEOMETRY_DL_CAPACITY];
+
+static Gfx sMapArea6ShipSetupDL[] = {
+    gsDPLoadTLUT_pal256(sMapArea6ShipAtlasTLUT),
+    gsDPLoadTextureBlock(sMapArea6ShipAtlasTex, G_IM_FMT_CI, G_IM_SIZ_8b, MAP_AREA6_SHIP_ATLAS_WIDTH,
+                         MAP_AREA6_SHIP_ATLAS_HEIGHT, 0, G_TX_NOMIRROR | G_TX_CLAMP,
+                         G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD, G_TX_NOLOD),
+    gsDPSetTextureLUT(G_TT_RGBA16),
+    gsSPEndDisplayList(),
+};
+
+static bool sMapArea6ShipTexturesReady;
 
 Gfx gMapPlanetCloudDL[] = {
     gsSPVertex(gMapPlanetVTX, 16, 0),
@@ -975,16 +1147,24 @@ Gfx gMapMeteorSetupDL[] = {
     gsSPEndDisplayList(),
 };
 
+static Vtx sMapVenomCloudVtx[] = {
+    VTX(20, 20, 0, 2048, 0, 0, 0, 119, 255), VTX(20, 0, 0, 2048, 1024, 0, 0, 119, 255),
+    VTX(-20, 0, 0, 0, 1024, 0, 0, 119, 255), VTX(-20, 20, 0, 0, 0, 0, 0, 119, 255),
+    VTX(-20, -20, 0, 0, 2047, 0, 0, 119, 255), VTX(20, -20, 0, 2048, 2047, 0, 0, 119, 255),
+    VTX(20, 0, 0, 2048, 1024, 0, 0, 119, 255), VTX(-20, 0, 0, 0, 1024, 0, 0, 119, 255),
+};
+
 Gfx gMapVenomCloudRuntimeDL[] = {
-    gsSPVertex(ast_map_seg6_vtx_47F00, 8, 0),
-    gsDPLoadTextureBlock(MAP_VENOM_CLOUD_DEST_TEX_FIRST, G_IM_FMT_IA, G_IM_SIZ_8b, 64, 33, 0,
-                         G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK,
-                         G_TX_NOLOD, G_TX_NOLOD),
+    gsSPVertex(sMapVenomCloudVtx, 8, 0),
     gsSP2Triangles(1, 2, 3, 0, 1, 3, 0, 0),
-    gsDPLoadTextureBlock(MAP_VENOM_CLOUD_DEST_TEX_SECOND, G_IM_FMT_IA, G_IM_SIZ_8b, 64, 32, 0,
-                         G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK,
-                         G_TX_NOLOD, G_TX_NOLOD),
     gsSP2Triangles(5, 6, 7, 0, 5, 7, 4, 0),
+    gsSPEndDisplayList(),
+};
+
+static Gfx sMapVenomCloudSetupDL[] = {
+    gsDPLoadTextureBlock(gMapVenomCloudDestTex, G_IM_FMT_IA, G_IM_SIZ_8b, MAP_VENOM_CLOUD_TEX_WIDTH,
+                         MAP_VENOM_CLOUD_TEX_HEIGHT, 0, G_TX_NOMIRROR | G_TX_WRAP,
+                         G_TX_NOMIRROR | G_TX_CLAMP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD, G_TX_NOLOD),
     gsSPEndDisplayList(),
 };
 
@@ -1408,6 +1588,32 @@ Gfx gMapZonessFullDL[] = { MAP_PLANET_FULL_DL(gMapZonessTex, aMapZonessTLUT) };
 
 Gfx gMapPlanetCloudFullDL[] = { MAP_PLANET_CLOUD_FULL_DL(gMapPlanetCloudTex) };
 
+static Gfx sMapPlanetCloudTopSetupDL[] = {
+    gsDPLoadTextureBlock(gMapPlanetCloudTex, G_IM_FMT_IA, G_IM_SIZ_8b, 96, 48, 0,
+                         G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK,
+                         G_TX_NOLOD, G_TX_NOLOD),
+    gsSPEndDisplayList(),
+};
+
+static Gfx sMapPlanetCloudBottomSetupDL[] = {
+    gsDPLoadTextureBlock(gMapPlanetCloudTex + (96 * 48), G_IM_FMT_IA, G_IM_SIZ_8b, 96, 48, 0,
+                         G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK,
+                         G_TX_NOLOD, G_TX_NOLOD),
+    gsSPEndDisplayList(),
+};
+
+static Gfx sMapPlanetCloudTopGeometryDL[] = {
+    gsSPVertex(gMapPlanetBlockVTX, 14, 0),
+    MAP_PLANET_BLOCK_QUADS,
+    gsSPEndDisplayList(),
+};
+
+static Gfx sMapPlanetCloudBottomGeometryDL[] = {
+    gsSPVertex(&gMapPlanetBlockVTX[14], 14, 0),
+    MAP_PLANET_BLOCK_QUADS,
+    gsSPEndDisplayList(),
+};
+
 #undef MAP_PLANET_CLOUD_FULL_DL
 #undef MAP_PLANET_BLOCK_QUADS
 
@@ -1424,7 +1630,7 @@ u8* gAssetMapPlanetTextures[9] = {
 };
 
 Gfx* sMapPlanets[PLANET_MAX] = {
-    aMapMeteorDL,  aMapArea6DL,  aMapBolseDL,   aMapSectorZDL, aMapSectorXDL,
+    aMapMeteorDL,  sMapArea6FullDL, sMapBolseFullDL, aMapSectorZDL, aMapSectorXDL,
     aMapSectorYDL, gMapKatinaFullDL, gMapMacbethFullDL, gMapZonessFullDL, gMapCorneriaFullDL,
     gMapTitaniaFullDL, gMapAquasFullDL, gMapFortunaFullDL, gMapVenomFullDL, sMapSolarFullDL,
 };
@@ -1481,17 +1687,24 @@ void Map_PositionPlanets(void);
 void Map_PlanetOrderZpos(void);
 void Map_Fade_Update(void);
 void Map_Planet_Draw(PlanetId);
+static void Map_PlanetBase_Draw(PlanetId planetId);
+static void Map_PlanetForeground_Draw(PlanetId planetId);
+static void Map_PlanetSharedLayers_Draw(void);
+static bool Map_PlanetLayersCanBatch(void);
 s32 Map_CheckPlanetMedal(PlanetId planetId);
 void Map_PlanetAnim2(PlanetId planetId);
 void Map_PlanetAnim(PlanetId planetId);
 void Map_SolarRays_Draw(PlanetId);
+static void Map_SolarPair_Draw(PlanetId planetId);
 void Map_PlanetCloud_Draw(PlanetId planetId);
 void Map_PlanetShadow_Draw(PlanetId planetId);
 static void Map_PlanetShadowTextures_Init(void);
 static void Map_SolarTextures_Init(void);
+static void Map_StationTextures_Init(void);
+static void Map_Area6ShipTextures_Init(void);
 void Map_Titania_DrawRings1(PlanetId planetId);
 void Map_Titania_DrawRings2(PlanetId planetId);
-void Map_VenomCloud_Draw(f32* zAngle, f32 next, f32 scale);
+static void Map_VenomCloudPair_Draw(void);
 void Map_PlanetCleared2_Draw(PlanetId planetId);
 void Map_PlanetCleared_Draw(PlanetId planetId);
 void Map_PositionCursor(void);
@@ -2238,8 +2451,18 @@ void Map_Draw(void) {
     Map_Area6Ships_Draw();
 
     if (!PSP_MAP_SKIP_PLANETS) {
-        for (ptr = D_menu_801CD8A0, i = 0; i < 15; i++, ptr++) {
-            Map_Planet_Draw(*ptr);
+        if ((sMapState == MAP_IDLE) && Map_PlanetLayersCanBatch()) {
+            for (ptr = D_menu_801CD8A0, i = 0; i < PLANET_MAX; i++, ptr++) {
+                Map_PlanetBase_Draw(*ptr);
+            }
+            Map_PlanetSharedLayers_Draw();
+            for (ptr = D_menu_801CD8A0, i = 0; i < PLANET_MAX; i++, ptr++) {
+                Map_PlanetForeground_Draw(*ptr);
+            }
+        } else {
+            for (ptr = D_menu_801CD8A0, i = 0; i < PLANET_MAX; i++, ptr++) {
+                Map_Planet_Draw(*ptr);
+            }
         }
     }
 
@@ -4733,8 +4956,7 @@ void Map_Planet_Draw(PlanetId planetId) {
                 Map_PlanetShadow_Draw(planetId);
             }
             if (planetId == PLANET_VENOM) {
-                Map_VenomCloud_Draw(&D_menu_801CEEBC, +0.1f, 3.1f);
-                Map_VenomCloud_Draw(&D_menu_801CEEC0, -0.1f, 2.9f);
+                Map_VenomCloudPair_Draw();
             }
         }
 
@@ -4768,6 +4990,218 @@ void Map_Planet_Draw(PlanetId planetId) {
         }
     }
     Matrix_Pop(&gGfxMatrix);
+}
+
+static bool Map_PlanetDrawEnabled(PlanetId planetId) {
+    s32 mask = 0xFFFFFFFF;
+
+    if ((sPlanets[planetId].alpha == 0) && (planetId != sCurrentPlanetId)) {
+        return false;
+    }
+    if ((planetId == sCurrentPlanetId) && (sMapState == MAP_ZOOM_PLANET) && (D_menu_801CD95C != 0)) {
+        mask = 0x00000001;
+    }
+    return (gGameFrameCount & mask) != 0;
+}
+
+static void Map_PlanetBase_Draw(PlanetId planetId) {
+    PlanetStatus planetStatus;
+
+    if ((sPlanets[planetId].alpha == 0) && (planetId != sCurrentPlanetId)) {
+        return;
+    }
+
+    planetStatus = Map_CheckPlanetMedal(planetId);
+    Map_PlanetAnim2(planetId);
+    Map_PlanetCleared2_Draw(planetId);
+    Matrix_Push(&gGfxMatrix);
+
+    if (Map_PlanetDrawEnabled(planetId)) {
+        if (planetId == PLANET_TITANIA) {
+            Map_Titania_DrawRings1(planetId);
+        }
+        if ((planetStatus == PLANET_CLEARED) && (sPlanetPositions[planetId].z > D_menu_801CEA18[planetId]) &&
+            (planetId != PLANET_AREA_6) && (planetId != PLANET_BOLSE)) {
+            Map_PlanetCleared_Draw(planetId);
+        }
+
+        if (planetId == PLANET_SOLAR) {
+            Map_SolarPair_Draw(planetId);
+        } else {
+            Map_PlanetAnim(planetId);
+        }
+        if ((planetId == PLANET_VENOM) && (sPlanets[planetId].anim == PL_ANIM_SPIN)) {
+            Map_VenomCloudPair_Draw();
+        }
+    }
+    Matrix_Pop(&gGfxMatrix);
+}
+
+static void Map_PlanetForeground_Draw(PlanetId planetId) {
+    PlanetStatus planetStatus;
+
+    if (!Map_PlanetDrawEnabled(planetId)) {
+        return;
+    }
+
+    planetStatus = Map_CheckPlanetMedal(planetId);
+    Matrix_Push(&gGfxMatrix);
+
+    if (planetId == PLANET_TITANIA) {
+        Map_Titania_DrawRings2(planetId);
+    }
+    if ((planetId == PLANET_CORNERIA) && sPlanetExplosions[EXPLOSIONS_CORNERIA]) {
+        Map_PlanetExplosions_Draw(PLANET_CORNERIA, EXPLOSIONS_CORNERIA);
+    }
+    if ((planetId == PLANET_KATINA) && sPlanetExplosions[EXPLOSIONS_KATINA]) {
+        Map_PlanetExplosions_Draw(PLANET_KATINA, EXPLOSIONS_KATINA);
+    }
+    if ((planetId == PLANET_SECTOR_Y) && sPlanetExplosions[EXPLOSIONS_SECTOR_Y]) {
+        Map_PlanetExplosions_Draw(PLANET_SECTOR_Y, EXPLOSIONS_SECTOR_Y);
+    }
+    if ((planetStatus == PLANET_CLEARED) && (sPlanetPositions[planetId].z <= D_menu_801CEA18[planetId]) &&
+        (planetId != PLANET_AREA_6) && (planetId != PLANET_BOLSE)) {
+        Map_PlanetCleared_Draw(planetId);
+    }
+    if ((planetStatus == PLANET_CLEARED) && ((planetId == PLANET_AREA_6) || (planetId == PLANET_BOLSE))) {
+        Map_PlanetCleared_Draw(planetId);
+    }
+    if (planetStatus == PLANET_MEDAL) {
+        Map_PlanetMedal_Draw(planetId);
+    }
+
+    Matrix_Pop(&gGfxMatrix);
+}
+
+static bool Map_PlanetCloudEnabled(PlanetId planetId) {
+    return Map_PlanetDrawEnabled(planetId) && (sPlanets[planetId].anim == PL_ANIM_SPIN) &&
+           (planetId != PLANET_VENOM) && (planetId != PLANET_AQUAS) && (planetId != PLANET_TITANIA);
+}
+
+static bool Map_PlanetShadowEnabled(PlanetId planetId) {
+    return Map_PlanetDrawEnabled(planetId) && (sPlanets[planetId].anim == PL_ANIM_SPIN) &&
+           (planetId != PLANET_VENOM);
+}
+
+static bool Map_PlanetLayersCanBatch(void) {
+    s32 i;
+    s32 j;
+    PlanetId source;
+    PlanetId target;
+    f32 sourceZ;
+    f32 targetZ;
+    f32 deltaX;
+    f32 deltaY;
+    f32 radius;
+
+    for (i = 0; i < (PLANET_MAX - 1); i++) {
+        source = D_menu_801CD8A0[i];
+        if (!Map_PlanetShadowEnabled(source)) {
+            continue;
+        }
+        sourceZ = fabsf(sPlanetPositions[source].z);
+        if (sourceZ < 1.0f) {
+            return false;
+        }
+
+        for (j = i + 1; j < PLANET_MAX; j++) {
+            target = D_menu_801CD8A0[j];
+            if ((sPlanets[target].alpha == 0) && (target != sCurrentPlanetId)) {
+                continue;
+            }
+            targetZ = fabsf(sPlanetPositions[target].z);
+            if (targetZ < 1.0f) {
+                return false;
+            }
+
+            deltaX = (sPlanetPositions[source].x / sourceZ) - (sPlanetPositions[target].x / targetZ);
+            deltaY = (sPlanetPositions[source].y / sourceZ) - (sPlanetPositions[target].y / targetZ);
+            radius = ((sPlanets[source].scale * 32.0f) / sourceZ) + (D_menu_801AFFB8[target] / targetZ);
+            if ((SQ(deltaX) + SQ(deltaY)) < SQ(radius * 1.1f)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+static void Map_PlanetCloudHalf_Draw(PlanetId planetId, Gfx* geometry) {
+    s32 color = 255;
+
+    if (planetId == PLANET_MACBETH) {
+        color = 64;
+    }
+    gDPSetPrimColor(gMasterDisp++, 0, 0, color, color, color, sPlanets[planetId].alpha);
+
+    Matrix_Push(&gGfxMatrix);
+    Matrix_Copy(gGfxMatrix, &D_menu_801CDE20[planetId]);
+    Matrix_SetGfxMtx(&gMasterDisp);
+    gSPDisplayList(gMasterDisp++, geometry);
+    Matrix_Pop(&gGfxMatrix);
+}
+
+static void Map_PlanetShadowHalf_Draw(PlanetId planetId, Gfx* geometry) {
+    gDPSetPrimColor(gMasterDisp++, 0, 0, 255, 255, 255, sPlanets[planetId].alpha);
+
+    Matrix_Push(&gGfxMatrix);
+    Matrix_Copy(gGfxMatrix, &D_menu_801CDE20[planetId]);
+    if ((planetId == PLANET_TITANIA) || (planetId == PLANET_MACBETH) || (planetId == PLANET_ZONESS)) {
+        Matrix_RotateY(gGfxMatrix, M_DTOR * 180.0f, MTXF_APPLY);
+    }
+    Matrix_RotateZ(gGfxMatrix, M_DTOR * sPlanets[planetId].orbit.tilt, MTXF_APPLY);
+    Matrix_Scale(gGfxMatrix, 1.6f, 1.6f, 1.6f, MTXF_APPLY);
+    Matrix_SetGfxMtx(&gMasterDisp);
+    gSPDisplayList(gMasterDisp++, geometry);
+    Matrix_Pop(&gGfxMatrix);
+}
+
+static void Map_PlanetSharedLayers_Draw(void) {
+    s32 i;
+    PlanetId planetId;
+    bool clouds = false;
+    bool shadows = false;
+
+    for (i = 0; i < PLANET_MAX; i++) {
+        clouds |= Map_PlanetCloudEnabled(i);
+        shadows |= Map_PlanetShadowEnabled(i);
+    }
+
+    if (clouds) {
+        RCP_SetupDL(&gMasterDisp, SETUPDL_64);
+        gSPDisplayList(gMasterDisp++, sMapPlanetCloudTopSetupDL);
+        for (i = 0; i < PLANET_MAX; i++) {
+            planetId = D_menu_801CD8A0[i];
+            if (Map_PlanetCloudEnabled(planetId)) {
+                Map_PlanetCloudHalf_Draw(planetId, sMapPlanetCloudTopGeometryDL);
+            }
+        }
+        gSPDisplayList(gMasterDisp++, sMapPlanetCloudBottomSetupDL);
+        for (i = 0; i < PLANET_MAX; i++) {
+            planetId = D_menu_801CD8A0[i];
+            if (Map_PlanetCloudEnabled(planetId)) {
+                Map_PlanetCloudHalf_Draw(planetId, sMapPlanetCloudBottomGeometryDL);
+            }
+        }
+    }
+
+    if (shadows) {
+        Map_PlanetShadowTextures_Init();
+        RCP_SetupDL(&gMasterDisp, SETUPDL_64);
+        gSPDisplayList(gMasterDisp++, sMapPlanetShadowTopSetupDL);
+        for (i = 0; i < PLANET_MAX; i++) {
+            planetId = D_menu_801CD8A0[i];
+            if (Map_PlanetShadowEnabled(planetId)) {
+                Map_PlanetShadowHalf_Draw(planetId, sMapPlanetShadowTopGeometryDL);
+            }
+        }
+        gSPDisplayList(gMasterDisp++, sMapPlanetShadowBottomSetupDL);
+        for (i = 0; i < PLANET_MAX; i++) {
+            planetId = D_menu_801CD8A0[i];
+            if (Map_PlanetShadowEnabled(planetId)) {
+                Map_PlanetShadowHalf_Draw(planetId, sMapPlanetShadowBottomGeometryDL);
+            }
+        }
+    }
 }
 
 s32 Map_CheckPlanetMedal(PlanetId planetId) {
@@ -4924,6 +5358,8 @@ void Map_PlanetAnim(PlanetId planetId) {
 
     if (planetId == PLANET_SOLAR) {
         Map_SolarTextures_Init();
+    } else if ((planetId == PLANET_AREA_6) || (planetId == PLANET_BOLSE)) {
+        Map_StationTextures_Init();
     }
     gSPDisplayList(gMasterDisp++, sMapPlanets[sPlanets[planetId].id]);
 
@@ -4931,7 +5367,6 @@ void Map_PlanetAnim(PlanetId planetId) {
 }
 
 void Map_SolarRays_Draw(PlanetId planetId) {
-    static f32 angle = 0.0f;
     s32 alpha = sPlanets[PLANET_VENOM].alpha;
 
     if (sPlanets[planetId].alpha > 128) {
@@ -4946,7 +5381,7 @@ void Map_SolarRays_Draw(PlanetId planetId) {
     Matrix_Push(&gGfxMatrix);
 
     Matrix_Copy(gGfxMatrix, &D_menu_801CDE20[planetId]);
-    Matrix_RotateZ(gGfxMatrix, M_DTOR * angle, MTXF_APPLY);
+    Matrix_RotateZ(gGfxMatrix, M_DTOR * sMapSolarRayAngle, MTXF_APPLY);
     Matrix_Scale(gGfxMatrix, 0.8f, 0.8f, 0.8f, MTXF_APPLY);
 
     Matrix_SetGfxMtx(&gMasterDisp);
@@ -4955,7 +5390,46 @@ void Map_SolarRays_Draw(PlanetId planetId) {
 
     Matrix_Pop(&gGfxMatrix);
 
-    angle -= 0.2f;
+    sMapSolarRayAngle -= 0.2f;
+}
+
+static void Map_SolarHalf_Draw(PlanetId planetId, Gfx* geometry, bool rays, f32 angle, s32 alpha) {
+    if (rays) {
+        gDPSetPrimColor(gMasterDisp++, 0, 0, 255, 255, 255, alpha);
+    } else {
+        gDPSetPrimColor(gMasterDisp++, 0, 0, 240, 0, 0, alpha);
+    }
+    gDPSetEnvColor(gMasterDisp++, 31, 0, 0, 0);
+
+    Matrix_Push(&gGfxMatrix);
+    Matrix_Copy(gGfxMatrix, &D_menu_801CDE20[planetId]);
+    if (rays) {
+        Matrix_RotateZ(gGfxMatrix, M_DTOR * angle, MTXF_APPLY);
+        Matrix_Scale(gGfxMatrix, 0.8f, 0.8f, 0.8f, MTXF_APPLY);
+    }
+    Matrix_SetGfxMtx(&gMasterDisp);
+    gSPDisplayList(gMasterDisp++, geometry);
+    Matrix_Pop(&gGfxMatrix);
+}
+
+static void Map_SolarPair_Draw(PlanetId planetId) {
+    s32 rayAlpha = sPlanets[PLANET_VENOM].alpha;
+
+    if (sPlanets[planetId].alpha > 128) {
+        rayAlpha = 128;
+    }
+
+    Map_SolarTextures_Init();
+    RCP_SetupDL(&gMasterDisp, SETUPDL_67);
+    gSPDisplayList(gMasterDisp++, sMapSolarTopSetupDL);
+    Map_SolarHalf_Draw(planetId, sMapSolarTopGeometryDL, false, sMapSolarRayAngle, sPlanets[planetId].alpha);
+    Map_SolarHalf_Draw(planetId, sMapSolarTopGeometryDL, true, sMapSolarRayAngle, rayAlpha);
+    gSPDisplayList(gMasterDisp++, sMapSolarBottomSetupDL);
+    Map_SolarHalf_Draw(planetId, sMapSolarBottomGeometryDL, false, sMapSolarRayAngle, sPlanets[planetId].alpha);
+    Map_SolarHalf_Draw(planetId, sMapSolarBottomGeometryDL, true, sMapSolarRayAngle, rayAlpha);
+
+    sPlanets[planetId].orbit.tilt += 0.1f;
+    sMapSolarRayAngle -= 0.2f;
 }
 
 void Map_PlanetCloud_Draw(PlanetId planetId) {
@@ -5047,18 +5521,7 @@ void Map_Titania_DrawRings2(PlanetId planetId) {
     Matrix_Pop(&gGfxMatrix);
 }
 
-void Map_VenomCloud_Draw(f32* zAngle, f32 next, f32 scale) {
-    s32 alpha = sPlanets[PLANET_VENOM].alpha;
-
-    if (sPlanets[PLANET_VENOM].alpha > 128) {
-        alpha = 128;
-    }
-
-    RCP_SetupDL(&gMasterDisp, SETUPDL_67);
-
-    gDPSetPrimColor(gMasterDisp++, 0, 0, 63, 95, 30, alpha);
-    gDPSetEnvColor(gMasterDisp++, 0, 0, 0, 0);
-
+static void Map_VenomCloudGeometry_Draw(f32* zAngle, f32 next, f32 scale) {
     Matrix_Push(&gGfxMatrix);
 
     Matrix_Copy(gGfxMatrix, &D_menu_801CDE20[PLANET_VENOM]);
@@ -5073,6 +5536,23 @@ void Map_VenomCloud_Draw(f32* zAngle, f32 next, f32 scale) {
     Matrix_Pop(&gGfxMatrix);
 
     *zAngle += next;
+}
+
+static void Map_VenomCloudPair_Draw(void) {
+    s32 alpha = sPlanets[PLANET_VENOM].alpha;
+
+    if (sPlanets[PLANET_VENOM].alpha > 128) {
+        alpha = 128;
+    }
+
+    RCP_SetupDL(&gMasterDisp, SETUPDL_67);
+
+    gDPSetPrimColor(gMasterDisp++, 0, 0, 63, 95, 30, alpha);
+    gDPSetEnvColor(gMasterDisp++, 0, 0, 0, 0);
+
+    gSPDisplayList(gMasterDisp++, sMapVenomCloudSetupDL);
+    Map_VenomCloudGeometry_Draw(&D_menu_801CEEBC, +0.1f, 3.1f);
+    Map_VenomCloudGeometry_Draw(&D_menu_801CEEC0, -0.1f, 2.9f);
 }
 
 void Map_PlanetCleared2_Draw(PlanetId planetId) {
@@ -5569,6 +6049,9 @@ void Map_Area6Ships_Draw(void) {
     dest.z = 0.0f;
 
     if ((gGameFrameCount & mask) != 0) {
+        Map_Area6ShipTextures_Init();
+        gSPDisplayList(gMasterDisp++, sMapArea6ShipSetupDL);
+
         for (i = 0; i < ARRAY_COUNT(sMapArea6Ships); i++) {
             Matrix_Push(&gGfxMatrix);
 
@@ -5603,10 +6086,13 @@ void Map_Area6Ships_Draw(void) {
             Matrix_MultVec3f(gCalcMatrix, &dest, &src);
             Lights_SetOneLight(&gMasterDisp, src.x, src.y, src.z, 80, 80, 60, 0, 0, 0);
 
-            gSPDisplayList(gMasterDisp++, aMapArea6ShipDL);
+            gSPDisplayList(gMasterDisp++, sMapArea6ShipGeometryDL);
 
             Matrix_Pop(&gGfxMatrix);
         }
+
+        gDPPipeSync(gMasterDisp++);
+        gDPSetTextureLUT(gMasterDisp++, G_TT_NONE);
     }
 }
 
@@ -5952,6 +6438,376 @@ void Map_PathInfo_Draw(s32 missionIdx, f32 x, f32 y, s32 idx) {
     }
 }
 
+static s32 Map_AtlasWrapTexel(s32 coord, s32 size) {
+    s32 texel = coord / 32;
+
+    if ((coord < 0) && ((coord % 32) != 0)) {
+        texel--;
+    }
+    texel %= size;
+    if (texel < 0) {
+        texel += size;
+    }
+    return texel;
+}
+
+static u8 Map_AtlasCI4Texel(const u8* texture, s32 width, s32 height, s32 s, s32 t) {
+    s32 x = Map_AtlasWrapTexel(s, width);
+    s32 y = Map_AtlasWrapTexel(t, height);
+    s32 index = (y * width) + x;
+    u8 value = texture[index >> 1];
+
+    if ((index & 1) == 0) {
+        value >>= 4;
+    }
+    return value & 0xF;
+}
+
+static void Map_AtlasBakeCI4(u8* atlas, s32 atlasWidth, const u8* texture, s32 textureWidth, s32 textureHeight,
+                            s32 paletteBase, s32 x, s32 y, s32 width, s32 height, s32 minS, s32 maxS,
+                            s32 minT, s32 maxT) {
+    s32 i;
+    s32 j;
+    s32 sourceS;
+    s32 sourceT;
+
+    for (j = 0; j < height; j++) {
+        sourceT = minT + (((j * 2) + 1) * (maxT - minT)) / (height * 2);
+        for (i = 0; i < width; i++) {
+            sourceS = minS + (((i * 2) + 1) * (maxS - minS)) / (width * 2);
+            atlas[((y + j) * atlasWidth) + x + i] =
+                paletteBase + Map_AtlasCI4Texel(texture, textureWidth, textureHeight, sourceS, sourceT);
+        }
+    }
+
+    for (j = 0; j < height; j++) {
+        atlas[((y + j) * atlasWidth) + x - 1] = atlas[((y + j) * atlasWidth) + x];
+        atlas[((y + j) * atlasWidth) + x + width] = atlas[((y + j) * atlasWidth) + x + width - 1];
+    }
+    memcpy(&atlas[((y - 1) * atlasWidth) + x - 1], &atlas[(y * atlasWidth) + x - 1], width + 2);
+    memcpy(&atlas[((y + height) * atlasWidth) + x - 1],
+           &atlas[((y + height - 1) * atlasWidth) + x - 1], width + 2);
+}
+
+static void Map_AtlasRemapVertices(Vtx* dest, const Vtx* source, s32 count, s32 x, s32 y, s32 width, s32 height,
+                                   s32 minS, s32 maxS, s32 minT, s32 maxT) {
+    s32 i;
+    s32 rangeS = maxS - minS;
+    s32 rangeT = maxT - minT;
+
+    memcpy(dest, source, count * sizeof(Vtx));
+    for (i = 0; i < count; i++) {
+        dest[i].v.tc[0] = (x * 32) + (((source[i].v.tc[0] - minS) * width * 32) + (rangeS / 2)) / rangeS;
+        dest[i].v.tc[1] = (y * 32) + (((source[i].v.tc[1] - minT) * height * 32) + (rangeT / 2)) / rangeT;
+    }
+}
+
+static void Map_StationTextures_Init(void) {
+    if (sMapStationTexturesReady) {
+        return;
+    }
+
+    memset(sMapArea6AtlasTex, 0, sizeof(sMapArea6AtlasTex));
+    memset(sMapArea6AtlasTLUT, 0, sizeof(sMapArea6AtlasTLUT));
+    memcpy(&sMapArea6AtlasTLUT[0], aMapArea6Tex1TLUT, 16 * sizeof(u16));
+    memcpy(&sMapArea6AtlasTLUT[16], aMapArea6Tex2TLUT, 16 * sizeof(u16));
+    Map_AtlasBakeCI4(sMapArea6AtlasTex, MAP_AREA6_ATLAS_WIDTH, aMapArea6Tex1, 32, 32, 0, 1, 1, 89, 34,
+                     -1072, 4585, -1107, 1034);
+    Map_AtlasBakeCI4(sMapArea6AtlasTex, MAP_AREA6_ATLAS_WIDTH, aMapArea6Tex2, 16, 16, 16, 1, 38, 16, 16, 0,
+                     493, -2, 511);
+    Map_AtlasRemapVertices(sMapArea6Vtx1, ast_map_seg6_vtx_1E098, ARRAY_COUNT(sMapArea6Vtx1), 1, 1, 89, 34,
+                           -1072, 4585, -1107, 1034);
+    Map_AtlasRemapVertices(sMapArea6Vtx2, ast_map_seg6_vtx_1E298, ARRAY_COUNT(sMapArea6Vtx2), 1, 1, 89, 34,
+                           -1072, 4585, -1107, 1034);
+    Map_AtlasRemapVertices(sMapArea6Vtx3, ast_map_seg6_vtx_1E498, ARRAY_COUNT(sMapArea6Vtx3), 1, 1, 89, 34,
+                           -1072, 4585, -1107, 1034);
+    Map_AtlasRemapVertices(sMapArea6Vtx4, ast_map_seg6_vtx_1E698, ARRAY_COUNT(sMapArea6Vtx4), 1, 1, 89, 34,
+                           -1072, 4585, -1107, 1034);
+    Map_AtlasRemapVertices(sMapArea6Vtx5, ast_map_seg6_vtx_1E7D8, ARRAY_COUNT(sMapArea6Vtx5), 1, 38, 16, 16, 0,
+                           493, -2, 511);
+
+    memset(sMapBolseAtlasTex, 0, sizeof(sMapBolseAtlasTex));
+    memset(sMapBolseAtlasTLUT, 0, sizeof(sMapBolseAtlasTLUT));
+    memcpy(&sMapBolseAtlasTLUT[0], aMapBolseTex1TLUT, 16 * sizeof(u16));
+    memcpy(&sMapBolseAtlasTLUT[16], aMapBolseTex2TLUT, 16 * sizeof(u16));
+    memcpy(&sMapBolseAtlasTLUT[32], aMapBolseTex3TLUT, 16 * sizeof(u16));
+    memcpy(&sMapBolseAtlasTLUT[48], aMapBolseTex4TLUT, 16 * sizeof(u16));
+    Map_AtlasBakeCI4(sMapBolseAtlasTex, MAP_BOLSE_ATLAS_WIDTH, aMapBolseTex1, 32, 32, 0, 1, 1, 32, 32, 0,
+                     2062, -1038, 1024);
+    Map_AtlasBakeCI4(sMapBolseAtlasTex, MAP_BOLSE_ATLAS_WIDTH, aMapBolseTex2, 32, 32, 16, 36, 1, 32, 32, 0,
+                     2049, -1025, 1024);
+    Map_AtlasBakeCI4(sMapBolseAtlasTex, MAP_BOLSE_ATLAS_WIDTH, aMapBolseTex3, 32, 32, 32, 1, 37, 17, 16, -26,
+                     1024, 0, 1024);
+    Map_AtlasBakeCI4(sMapBolseAtlasTex, MAP_BOLSE_ATLAS_WIDTH, aMapBolseTex4, 16, 16, 48, 22, 37, 25, 13, -549,
+                     1061, -291, 512);
+    Map_AtlasRemapVertices(sMapBolseVtx1, ast_map_seg6_vtx_4B988, ARRAY_COUNT(sMapBolseVtx1), 1, 1, 32, 32, 0,
+                           2062, -1038, 1024);
+    Map_AtlasRemapVertices(sMapBolseVtx2, ast_map_seg6_vtx_4BA08, ARRAY_COUNT(sMapBolseVtx2), 36, 1, 32, 32, 0,
+                           2049, -1025, 1024);
+    Map_AtlasRemapVertices(sMapBolseVtx3, ast_map_seg6_vtx_4BA48, ARRAY_COUNT(sMapBolseVtx3), 1, 37, 17, 16, -26,
+                           1024, 0, 1024);
+    Map_AtlasRemapVertices(sMapBolseVtx4, ast_map_seg6_vtx_4BB48, ARRAY_COUNT(sMapBolseVtx4), 22, 37, 25, 13, -549,
+                           1061, -291, 512);
+    sMapStationTexturesReady = true;
+}
+
+static void Map_AtlasBakeCI4Repeat(u8* atlas, s32 atlasWidth, const u8* texture, s32 textureWidth,
+                                   s32 textureHeight, s32 paletteBase, s32 x, s32 y) {
+    s32 i;
+    s32 j;
+    s32 sourceX;
+    s32 sourceY;
+
+    for (j = 0; j < textureHeight * 2; j++) {
+        sourceY = (j + (textureHeight / 2)) % textureHeight;
+        for (i = 0; i < textureWidth * 2; i++) {
+            sourceX = (i + (textureWidth / 2)) % textureWidth;
+            atlas[((y + j) * atlasWidth) + x + i] =
+                paletteBase + Map_AtlasCI4Texel(texture, textureWidth, textureHeight, sourceX * 32, sourceY * 32);
+        }
+    }
+}
+
+static void Map_Area6ShipRemapAxis(s16* a, s16* b, s16* c, s32 textureSize, s32 atlasOffset) {
+    s32 period = textureSize * 32;
+    s32 values[3];
+    s32 best[3];
+    s32 shiftB;
+    s32 shiftC;
+    s32 min;
+    s32 max;
+    s32 span;
+    s32 bestSpan = 0x7FFFFFFF;
+    s32 i;
+
+    values[0] = *a % period;
+    values[1] = *b % period;
+    values[2] = *c % period;
+    for (i = 0; i < 3; i++) {
+        if (values[i] < 0) {
+            values[i] += period;
+        }
+    }
+
+    for (shiftB = -period; shiftB <= period; shiftB += period) {
+        for (shiftC = -period; shiftC <= period; shiftC += period) {
+            min = values[0];
+            max = values[0];
+            if ((values[1] + shiftB) < min) {
+                min = values[1] + shiftB;
+            }
+            if ((values[1] + shiftB) > max) {
+                max = values[1] + shiftB;
+            }
+            if ((values[2] + shiftC) < min) {
+                min = values[2] + shiftC;
+            }
+            if ((values[2] + shiftC) > max) {
+                max = values[2] + shiftC;
+            }
+            span = max - min;
+            if (span < bestSpan) {
+                bestSpan = span;
+                best[0] = values[0];
+                best[1] = values[1] + shiftB;
+                best[2] = values[2] + shiftC;
+            }
+        }
+    }
+
+    min = best[0];
+    max = best[0];
+    for (i = 1; i < 3; i++) {
+        if (best[i] < min) {
+            min = best[i];
+        }
+        if (best[i] > max) {
+            max = best[i];
+        }
+    }
+    while (min < -(period / 2)) {
+        min += period;
+        max += period;
+        for (i = 0; i < 3; i++) {
+            best[i] += period;
+        }
+    }
+    while (max >= (period + (period / 2))) {
+        min -= period;
+        max -= period;
+        for (i = 0; i < 3; i++) {
+            best[i] -= period;
+        }
+    }
+
+    *a = (atlasOffset * 32) + best[0] + (period / 2);
+    *b = (atlasOffset * 32) + best[1] + (period / 2);
+    *c = (atlasOffset * 32) + best[2] + (period / 2);
+}
+
+static void Map_Area6ShipAppendTriangle(s32* count, const Vtx* source, s32 a, s32 b, s32 c, s32 textureWidth,
+                                        s32 textureHeight, s32 atlasX, s32 atlasY) {
+    Vtx* dest = &sMapArea6ShipTriangleVtx[*count];
+
+    dest[0] = source[a];
+    dest[1] = source[b];
+    dest[2] = source[c];
+    Map_Area6ShipRemapAxis(&dest[0].v.tc[0], &dest[1].v.tc[0], &dest[2].v.tc[0], textureWidth, atlasX);
+    Map_Area6ShipRemapAxis(&dest[0].v.tc[1], &dest[1].v.tc[1], &dest[2].v.tc[1], textureHeight, atlasY);
+    *count += 3;
+}
+
+static void Map_Area6ShipTextures_Init(void) {
+    const Gfx* source;
+    const Vtx* vertices = NULL;
+    Gfx* dest;
+    u32 w0;
+    u32 w1;
+    u8 opcode;
+    s32 textureWidth = 0;
+    s32 textureHeight = 0;
+    s32 atlasX = 0;
+    s32 atlasY = 0;
+    s32 vertexCount = 0;
+    s32 packedCount = 0;
+    s32 chunkStart = 0;
+    s32 chunkVertexCount = 0;
+    s32 triangleIndex;
+    s32 indices[3];
+    s32 pending[3];
+    s32 missing;
+    s32 i;
+    s32 j;
+    bool found;
+    bool hasPending = false;
+    Vtx triangle[3];
+    Gfx* vertexCommand;
+
+    if (sMapArea6ShipTexturesReady) {
+        return;
+    }
+
+    memset(sMapArea6ShipAtlasTex, 0, sizeof(sMapArea6ShipAtlasTex));
+    memset(sMapArea6ShipAtlasTLUT, 0, sizeof(sMapArea6ShipAtlasTLUT));
+    memcpy(&sMapArea6ShipAtlasTLUT[0], aMapArea6Tex1TLUT, 16 * sizeof(u16));
+    memcpy(&sMapArea6ShipAtlasTLUT[16], aMapArea6Tex3TLUT, 16 * sizeof(u16));
+    memcpy(&sMapArea6ShipAtlasTLUT[32], aMapArea6Tex4TLUT, 16 * sizeof(u16));
+    memcpy(&sMapArea6ShipAtlasTLUT[48], aMapArea6Tex5TLUT, 16 * sizeof(u16));
+    Map_AtlasBakeCI4Repeat(sMapArea6ShipAtlasTex, MAP_AREA6_SHIP_ATLAS_WIDTH, aMapArea6Tex1, 32, 32, 0, 0, 0);
+    Map_AtlasBakeCI4Repeat(sMapArea6ShipAtlasTex, MAP_AREA6_SHIP_ATLAS_WIDTH, aMapArea6Tex3, 16, 16, 16, 64, 0);
+    Map_AtlasBakeCI4Repeat(sMapArea6ShipAtlasTex, MAP_AREA6_SHIP_ATLAS_WIDTH, aMapArea6Tex4, 16, 16, 32, 64, 32);
+    Map_AtlasBakeCI4Repeat(sMapArea6ShipAtlasTex, MAP_AREA6_SHIP_ATLAS_WIDTH, aMapArea6Tex5, 16, 16, 48, 96, 0);
+
+    for (source = aMapArea6ShipDL;; source++) {
+        w0 = source->words.w0;
+        w1 = source->words.w1;
+        opcode = w0 >> 24;
+        if (opcode == (u8) G_ENDDL) {
+            break;
+        }
+        if (opcode == G_SETTIMG) {
+            if ((const u8*) w1 == aMapArea6Tex1) {
+                textureWidth = textureHeight = 32;
+                atlasX = atlasY = 0;
+            } else if ((const u8*) w1 == aMapArea6Tex3) {
+                textureWidth = textureHeight = 16;
+                atlasX = 64;
+                atlasY = 0;
+            } else if ((const u8*) w1 == aMapArea6Tex4) {
+                textureWidth = textureHeight = 16;
+                atlasX = 64;
+                atlasY = 32;
+            } else if ((const u8*) w1 == aMapArea6Tex5) {
+                textureWidth = textureHeight = 16;
+                atlasX = 96;
+                atlasY = 0;
+            }
+        } else if (opcode == G_VTX) {
+            vertices = (const Vtx*) w1;
+        } else if (opcode == (u8) G_TRI1) {
+            Map_Area6ShipAppendTriangle(&vertexCount, vertices, ((w1 >> 16) & 0xFF) / 2,
+                                        ((w1 >> 8) & 0xFF) / 2, (w1 & 0xFF) / 2, textureWidth, textureHeight, atlasX,
+                                        atlasY);
+        } else if (opcode == (u8) G_TRI2) {
+            Map_Area6ShipAppendTriangle(&vertexCount, vertices, ((w0 >> 16) & 0xFF) / 2,
+                                        ((w0 >> 8) & 0xFF) / 2, (w0 & 0xFF) / 2, textureWidth, textureHeight, atlasX,
+                                        atlasY);
+            Map_Area6ShipAppendTriangle(&vertexCount, vertices, ((w1 >> 16) & 0xFF) / 2,
+                                        ((w1 >> 8) & 0xFF) / 2, (w1 & 0xFF) / 2, textureWidth, textureHeight, atlasX,
+                                        atlasY);
+        }
+    }
+
+    dest = sMapArea6ShipGeometryDL;
+    vertexCommand = dest++;
+    for (triangleIndex = 0; triangleIndex < vertexCount; triangleIndex += 3) {
+        memcpy(triangle, &sMapArea6ShipTriangleVtx[triangleIndex], sizeof(triangle));
+        missing = 0;
+        for (i = 0; i < 3; i++) {
+            found = false;
+            for (j = 0; j < chunkVertexCount; j++) {
+                if (memcmp(&triangle[i], &sMapArea6ShipTriangleVtx[chunkStart + j], sizeof(Vtx)) == 0) {
+                    found = true;
+                    break;
+                }
+            }
+            for (j = 0; !found && (j < i); j++) {
+                if (memcmp(&triangle[i], &triangle[j], sizeof(Vtx)) == 0) {
+                    found = true;
+                }
+            }
+            if (!found) {
+                missing++;
+            }
+        }
+
+        if ((chunkVertexCount + missing) > 32) {
+            if (hasPending) {
+                gSP1Triangle(dest++, pending[0], pending[1], pending[2], 0);
+                hasPending = false;
+            }
+            gSPVertex(vertexCommand, &sMapArea6ShipTriangleVtx[chunkStart], chunkVertexCount, 0);
+            chunkStart = packedCount;
+            chunkVertexCount = 0;
+            vertexCommand = dest++;
+        }
+
+        for (i = 0; i < 3; i++) {
+            found = false;
+            for (j = 0; j < chunkVertexCount; j++) {
+                if (memcmp(&triangle[i], &sMapArea6ShipTriangleVtx[chunkStart + j], sizeof(Vtx)) == 0) {
+                    indices[i] = j;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                sMapArea6ShipTriangleVtx[packedCount] = triangle[i];
+                indices[i] = chunkVertexCount;
+                packedCount++;
+                chunkVertexCount++;
+            }
+        }
+
+        if (hasPending) {
+            gSP2Triangles(dest++, pending[0], pending[1], pending[2], 0, indices[0], indices[1], indices[2], 0);
+            hasPending = false;
+        } else {
+            pending[0] = indices[0];
+            pending[1] = indices[1];
+            pending[2] = indices[2];
+            hasPending = true;
+        }
+    }
+
+    if (hasPending) {
+        gSP1Triangle(dest++, pending[0], pending[1], pending[2], 0);
+    }
+    gSPVertex(vertexCommand, &sMapArea6ShipTriangleVtx[chunkStart], chunkVertexCount, 0);
+    gSPEndDisplayList(dest);
+    sMapArea6ShipTexturesReady = true;
+}
+
 static void Map_PlanetShadowTextures_Init(void) {
     s32 row;
 
@@ -5987,6 +6843,12 @@ static void Map_SolarTextures_Init(void) {
 
 void Map_PathPlanet_Draw(s32 missionIdx, f32 x, f32 y, PlanetId planetId) {
     s32 mask = 0xFFFFFFFF;
+
+    if (planetId == PLANET_SOLAR) {
+        Map_SolarTextures_Init();
+    } else if ((planetId == PLANET_AREA_6) || (planetId == PLANET_BOLSE)) {
+        Map_StationTextures_Init();
+    }
 
     if ((gGameState == GSTATE_MAP) && (planetId == sCurrentPlanetId)) {
         mask = 0x00000010;
