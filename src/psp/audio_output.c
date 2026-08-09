@@ -23,11 +23,14 @@
 #if PSP_AUDIO
 typedef struct {
     unsigned int frames;
-    short samples[PSP_AUDIO_MAX_FRAMES * PSP_AUDIO_CHANNELS];
+    short samples[PSP_AUDIO_MAX_FRAMES * PSP_AUDIO_CHANNELS] __attribute__((aligned(64)));
 } PspAudioBlock;
 
 typedef char PspAudioBlockStorageCheck[
     sizeof(((PspAudioBlock*) 0)->samples) >= (PSP_AUDIO_MAX_FRAMES * PSP_AUDIO_BYTES_PER_FRAME) ? 1 : -1
+];
+typedef char PspAudioBlockAlignmentCheck[
+    (__builtin_offsetof(PspAudioBlock, samples) % 64) == 0 ? 1 : -1
 ];
 
 static PspAudioBlock sBlocks[PSP_AUDIO_BLOCK_COUNT] __attribute__((aligned(64)));
@@ -49,6 +52,8 @@ static volatile unsigned int sSilentBlocks;
 static volatile unsigned int sNonzeroSamples;
 static volatile unsigned int sPeakSampleMagnitude;
 static volatile int sLastOutputError;
+static PspAudioBlock* sReservedBlock;
+static unsigned int sReservedFrames;
 static SceUID sMutex = -1;
 static SceUID sReady = -1;
 static SceUID sSpace = -1;
@@ -170,6 +175,8 @@ static void psp_audio_reset_state(void) {
     sNonzeroSamples = 0;
     sPeakSampleMagnitude = 0;
     sLastOutputError = 0;
+    sReservedBlock = NULL;
+    sReservedFrames = 0;
 }
 
 static void psp_audio_cleanup_init(void) {
@@ -321,6 +328,142 @@ int PspAudioOutput_Init(void) {
 #endif
 }
 
+void* PspAudioOutput_Reserve(unsigned int size) {
+#if !PSP_AUDIO
+    (void) size;
+    return NULL;
+#else
+    unsigned int frames;
+
+    if ((size == 0) || ((size % PSP_AUDIO_BYTES_PER_FRAME) != 0) || (sThread < 0)) {
+        psp_audio_record_rejection(0, NULL);
+        return NULL;
+    }
+
+    frames = size / PSP_AUDIO_BYTES_PER_FRAME;
+    if (frames > PSP_AUDIO_MAX_FRAMES) {
+        psp_audio_record_rejection(1, NULL);
+        return NULL;
+    }
+
+    sceKernelWaitSema(sSpace, 1, NULL);
+    sceKernelWaitSema(sMutex, 1, NULL);
+    if ((sReservedBlock != NULL) || (sQueuedBlocks == PSP_AUDIO_BLOCK_COUNT)) {
+        sOverruns++;
+        sRejectedSubmissions++;
+        sceKernelSignalSema(sMutex, 1);
+        sceKernelSignalSema(sSpace, 1);
+        return NULL;
+    }
+
+    sReservedBlock = &sBlocks[sWriteIndex];
+    sReservedFrames = frames;
+    sceKernelSignalSema(sMutex, 1);
+    return sReservedBlock->samples;
+#endif
+}
+
+int PspAudioOutput_Commit(void* samples, unsigned int size) {
+#if !PSP_AUDIO
+    (void) samples;
+    (void) size;
+    return 0;
+#else
+    PspAudioBlock* block;
+    const short* inputSamples = samples;
+    unsigned int frames = size / PSP_AUDIO_BYTES_PER_FRAME;
+    unsigned int sampleCount = frames * PSP_AUDIO_CHANNELS;
+    unsigned int nonzeroSamples = 0;
+    unsigned int peakSampleMagnitude = 0;
+    unsigned int firstSignalBlock = 0;
+    unsigned int submittedBlocks;
+    unsigned int i;
+
+    sceKernelWaitSema(sMutex, 1, NULL);
+    block = sReservedBlock;
+    if ((block == NULL) || (samples != block->samples) || (frames != sReservedFrames) ||
+        ((size % PSP_AUDIO_BYTES_PER_FRAME) != 0)) {
+        sceKernelSignalSema(sMutex, 1);
+        return -1;
+    }
+
+    for (i = 0; i < sampleCount; i++) {
+        int sample = inputSamples[i];
+        unsigned int magnitude = sample < 0 ? (unsigned int) -sample : (unsigned int) sample;
+
+        if (sample != 0) {
+            nonzeroSamples++;
+        }
+        if (magnitude > peakSampleMagnitude) {
+            peakSampleMagnitude = magnitude;
+        }
+    }
+
+    block->frames = frames;
+    sReservedBlock = NULL;
+    sReservedFrames = 0;
+    sWriteIndex = (sWriteIndex + 1) % PSP_AUDIO_BLOCK_COUNT;
+    sQueuedBlocks++;
+    sQueuedBytes += size;
+    sSubmittedBlocks++;
+    sSubmittedFrames += frames;
+    if ((sMinSubmittedFrames == 0) || (frames < sMinSubmittedFrames)) {
+        sMinSubmittedFrames = frames;
+    }
+    if (frames > sMaxSubmittedFrames) {
+        sMaxSubmittedFrames = frames;
+    }
+    if (sQueuedBlocks > sPeakQueuedBlocks) {
+        sPeakQueuedBlocks = sQueuedBlocks;
+    }
+    if (nonzeroSamples == 0) {
+        sSilentBlocks++;
+    } else if (sNonzeroSamples == 0) {
+        firstSignalBlock = sSubmittedBlocks;
+    }
+    sNonzeroSamples += nonzeroSamples;
+    if (peakSampleMagnitude > sPeakSampleMagnitude) {
+        sPeakSampleMagnitude = peakSampleMagnitude;
+    }
+    submittedBlocks = sSubmittedBlocks;
+    sceKernelSignalSema(sMutex, 1);
+    sceKernelSignalSema(sReady, 1);
+
+#if PSP_LOG_ENABLED
+    if (submittedBlocks == 1) {
+        PspPlatform_LogValue("audio first PCM block frames", frames);
+    }
+    if (firstSignalBlock != 0) {
+        PspPlatform_LogValue("audio first signal block", firstSignalBlock);
+        PspPlatform_LogValue("audio first signal peak", peakSampleMagnitude);
+    }
+    if ((submittedBlocks % PSP_AUDIO_SUMMARY_INTERVAL) == 0) {
+        psp_audio_log_summary();
+    }
+#else
+    (void) firstSignalBlock;
+    (void) submittedBlocks;
+#endif
+    return 0;
+#endif
+}
+
+void PspAudioOutput_Cancel(void* samples) {
+#if PSP_AUDIO
+    sceKernelWaitSema(sMutex, 1, NULL);
+    if ((sReservedBlock != NULL) && (samples == sReservedBlock->samples)) {
+        sReservedBlock = NULL;
+        sReservedFrames = 0;
+        sceKernelSignalSema(sMutex, 1);
+        sceKernelSignalSema(sSpace, 1);
+        return;
+    }
+    sceKernelSignalSema(sMutex, 1);
+#else
+    (void) samples;
+#endif
+}
+
 int PspAudioOutput_Submit(const void* samples, unsigned int size) {
 #if !PSP_AUDIO
     (void) samples;
@@ -392,7 +535,7 @@ int PspAudioOutput_Submit(const void* samples, unsigned int size) {
     sceKernelWaitSema(sSpace, 1, NULL);
     sceKernelWaitSema(sMutex, 1, NULL);
 
-    if (sQueuedBlocks == PSP_AUDIO_BLOCK_COUNT) {
+    if ((sReservedBlock != NULL) || (sQueuedBlocks == PSP_AUDIO_BLOCK_COUNT)) {
         sOverruns++;
         sRejectedSubmissions++;
         rejectedCount = sRejectedSubmissions;

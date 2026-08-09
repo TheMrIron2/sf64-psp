@@ -26,8 +26,8 @@ void aEnvSetup1Impl(uint8_t initial_vol_wet, uint16_t rate_wet, uint16_t rate_le
     uint16_t rate_center, uint16_t rate_lfe, uint16_t rate_rear_left, uint16_t rate_rear_right);
 void aEnvSetup2Impl(uint16_t initial_vol_left, uint16_t initial_vol_right, int16_t initial_vol_center,
     int16_t initial_vol_lfe, int16_t initial_vol_rear_left, int16_t initial_vol_rear_right);
-void aEnvMixerImpl(uint16_t in_addr, uint16_t n_samples, bool swap_reverb, bool neg_left,
-                   bool neg_right, uint32_t destinations, uint32_t num_channels, uint32_t cutoff_freq_lfe);
+void aEnvMixerImpl(uint16_t in_addr, uint16_t n_samples, bool swap_reverb, bool x0, bool x1,
+                   bool x2, bool x3, uint32_t destinations, uint32_t num_channels, uint32_t cutoff_freq_lfe);
 void aMixImpl(uint16_t count, int16_t gain, uint16_t in_addr, uint16_t out_addr);
 void aS8DecImpl(uint8_t flags, ADPCM_STATE state);
 void aAddMixerImpl(uint16_t count, uint16_t in_addr, uint16_t out_addr);
@@ -40,5 +40,7 @@ void aUnkCmd3Impl(uint16_t a, uint16_t b, uint16_t c);
 void aUnkCmd19Impl(uint8_t f, uint16_t count, uint16_t out_addr, uint16_t in_addr);
 s32 PspAudioMixer_ExecuteCommandList(const Acmd* commands, s32 commandCount);
 s32 PspAudioMixer_ValidateState(void);
+void* PspAudioMixer_GetStateAddress(void);
+u32 PspAudioMixer_GetStateSize(void);
 
 #endif

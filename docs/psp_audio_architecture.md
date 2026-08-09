@@ -4,8 +4,8 @@
 
 The scalar mixer remains the known-good implementation. With `PSP_AUDIO=1`,
 SF64 now builds audio commands on Allegrex and executes them asynchronously on
-the Media Engine. Media Engine playback, Vita compatibility, and PPSSPP
-fallback still need hardware validation.
+the Media Engine. It has been stable and almost entirely full speed through the
+first two levels on real PSP hardware. Vita and PPSSPP fallback need scalar fallback.
 
 ## Driver Basis
 
@@ -116,10 +116,26 @@ Submission is asynchronous. Allegrex waits at the next synthesis period before
 queueing the completed buffer or building commands which depend on mixer state.
 This overlaps mixing with the game while preserving command order.
 
-The mailbox is uncached. Allegrex writes back and invalidates before submission;
-the ME invalidates before execution and writes back all results before marking
-the job idle. The mixer uses private scalar memory routines so ME execution
-does not enter Allegrex VFPU code.
+The mailbox is uncached. Allegrex collects command, sample, codec-state, filter,
+loop, and output ranges from the command stream. Up to sixteen coalesced input
+ranges are written back individually; busier lists use one whole-cache
+writeback because many kernel range calls cost more than flushing the PSP's
+small data cache. The ME invalidates external command inputs and writes back
+external results by opcode instead of applying whole-cache barriers. Normal
+Allegrex completion invalidates only command-owned state and output ranges.
+Range overflow and fault recovery retain whole-cache fallbacks.
+
+The complete scalar mixer state is published after each ME job so Allegrex can
+replay safely after a fault. This includes the byte-swapped ADPCM loop history,
+which no longer lives in an untracked function-static buffer. Diagnostic builds
+retain whole ME barriers because their additional mutable probe state is not
+part of the normal command ownership model.
+
+The ME sends a completion interrupt after publishing the idle state. Allegrex
+sleeps on a semaphore while synthesis is active, with bounded polling retained
+when interrupt setup is unavailable. The ME itself remains in its persistent
+idle loop between jobs. The mixer uses private scalar memory routines so ME
+execution does not enter Allegrex VFPU code.
 
 If ME startup fails, the same command interpreter runs synchronously on
 Allegrex. A faulted ME job is interrupted and replayed on the scalar fallback
@@ -127,9 +143,12 @@ from the last published cache state.
 
 ## PCM Output
 
-`osAiSetNextBuffer()` copies signed 16-bit interleaved stereo PCM into a
-bounded PSP-owned ring. Only the dedicated output thread performs blocking
-submission.
+The audio thread reserves a block in the bounded PSP-owned ring before command
+construction. The final `A_SAVEBUFF` writes signed 16-bit interleaved stereo PCM
+directly into that block, which is published only after ME completion. This
+removes the previous `osAiSetNextBuffer()` copy on the ME path. The legacy copy
+submission remains as an initialization failure fallback. Only the dedicated
+output thread performs blocking PSP submission.
 
 Current configuration:
 
@@ -145,6 +164,22 @@ output API:        sceAudioSRCChReserve / sceAudioOutput2OutputBlocking
 Blocks use the frame count selected by SF64, up to the bounded maximum.
 Cache writeback/invalidation occurs before PSP output. `osAiGetLength()`
 reports queued bytes including the block currently being played.
+
+## Exchange Formats
+
+The Allegrex-to-ME work item is a compact native array of eight-byte `Acmd`
+records plus a command count. Commands contain 32-bit PSP pointers to input,
+state, and output memory. This avoids translating or duplicating the command
+stream, but it intentionally couples the backend to the PSP address space and
+requires explicit cache ownership. A fixed-width offset-based transport would
+be more portable but would add translation work without improving this native
+PSP path.
+
+The ME-to-output format is the PSP device format itself: native little-endian
+signed 16-bit interleaved stereo at 32 kHz. No byte swap is needed between the
+two PSP processors. N64 big-endian conversion remains confined to asset loading,
+including ADPCM books and loop state, so compressed voice data is decoded into
+the same PCM format as music and effects.
 
 ## Voice State
 
@@ -168,6 +203,6 @@ performance work without sequence-specific logging.
 
 ## Next Steps
 
-After hardware correctness is established, profile ME execution and replace
-whole-cache barriers with command-owned ranges. VME acceleration can then be
-added behind the same interpreter without changing SF64 synthesis code.
+Profile the adaptive Allegrex writeback threshold and targeted ME barriers on
+hardware. VME acceleration can then be added behind the same interpreter
+without changing SF64 synthesis code.
