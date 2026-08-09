@@ -1917,7 +1917,7 @@ static void psp_gfx_dl_set_batch_texture(PspGfxDlContext* ctx, u32 textureId, Ps
 }
 
 static void psp_gfx_dl_set_batch_depth(PspGfxDlContext* ctx, int depthTest, int depthWrite, int depthBias) {
-    if ((ctx->batchCount != 0) &&
+    if (psp_gfx_dl_texture_barrier_has_pending(ctx) &&
         ((ctx->batchDepthTest != depthTest) || (ctx->batchDepthWrite != depthWrite) ||
          (ctx->batchDepthBias != depthBias))) {
 #if PROFILE_TRIVIAL_REJECTS
@@ -1933,7 +1933,7 @@ static void psp_gfx_dl_set_batch_depth(PspGfxDlContext* ctx, int depthTest, int 
             }
         }
 #endif
-    psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+        psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
     }
     ctx->batchDepthTest = depthTest;
     ctx->batchDepthWrite = depthWrite;
@@ -1942,7 +1942,7 @@ static void psp_gfx_dl_set_batch_depth(PspGfxDlContext* ctx, int depthTest, int 
 
 static void psp_gfx_dl_set_batch_fog_resolved(PspGfxDlContext* ctx, int fog, const float color[4], float start,
                                               float end) {
-    if ((ctx->batchCount != 0) &&
+    if (psp_gfx_dl_texture_barrier_has_pending(ctx) &&
         ((ctx->batchFog != fog) || (ctx->batchFogColor[0] != color[0]) ||
          (ctx->batchFogColor[1] != color[1]) || (ctx->batchFogColor[2] != color[2]) ||
          (ctx->batchFogColor[3] != color[3]) || (ctx->batchFogStart != start) ||
@@ -2006,7 +2006,7 @@ static void psp_gfx_dl_set_batch_fog(PspGfxDlContext* ctx, int fog, const float 
 
 static void psp_gfx_dl_set_batch_transform(PspGfxDlContext* ctx, int pretransformed, u32 projectionSerial,
                                            const float projection[4][4]) {
-    if ((ctx->batchCount != 0) &&
+    if (psp_gfx_dl_texture_barrier_has_pending(ctx) &&
         ((ctx->batchPretransformed != pretransformed) ||
          (!pretransformed && (ctx->batchProjectionSerial != projectionSerial)))) {
 #if PROFILE_TRIVIAL_REJECTS
@@ -2241,6 +2241,10 @@ static u32 psp_gfx_dl_apply_effective_batch_state(PspGfxDlContext* ctx, const Ps
         return ctx->effectiveMaterial.textureId;
     }
     psp_gfx_dl_set_batch_transform(ctx, pretransformed, vertex->projectionSerial, vertex->projection);
+    psp_gfx_dl_set_batch_depth(ctx, ctx->effectiveDepth.depthTest, ctx->effectiveDepth.depthWrite,
+                               ctx->effectiveDepth.depthBias);
+    psp_gfx_dl_set_batch_fog_resolved(ctx, ctx->effectiveFog.fog, ctx->effectiveFog.color,
+                                      ctx->effectiveFog.start, ctx->effectiveFog.end);
     psp_gfx_dl_set_batch_texture(ctx, ctx->effectiveMaterial.textureId, ctx->effectiveMaterial.textureRef,
                                  ctx->effectiveMaterial.textureEnv, ctx->effectiveMaterial.textureEnvColor,
                                  ctx->combineMode, psp_gfx_dl_primitive_color(ctx),
@@ -2248,10 +2252,6 @@ static u32 psp_gfx_dl_apply_effective_batch_state(PspGfxDlContext* ctx, const Ps
                                  ctx->effectiveMaterial.wrapS, ctx->effectiveMaterial.wrapT,
                                  ctx->effectiveMaterial.alphaTest, ctx->effectiveMaterial.blend,
                                  ctx->effectiveMaterial.premultiplied, ctx->effectiveMaterial.pointFilter);
-    psp_gfx_dl_set_batch_depth(ctx, ctx->effectiveDepth.depthTest, ctx->effectiveDepth.depthWrite,
-                               ctx->effectiveDepth.depthBias);
-    psp_gfx_dl_set_batch_fog_resolved(ctx, ctx->effectiveFog.fog, ctx->effectiveFog.color,
-                                      ctx->effectiveFog.start, ctx->effectiveFog.end);
     (void) resolved;
     return ctx->effectiveMaterial.textureId;
 }
@@ -2333,6 +2333,11 @@ static void psp_gfx_dl_build_clip_vertex(PspGfxDlContext* ctx, const PspGfxDlVer
         dst->g = 1.0f;
         dst->b = 1.0f;
         dst->a = (float) src->a / 255.0f;
+    } else if (ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_SHADE_DECAL_ALPHA) {
+        dst->r = (float) src->r / 255.0f;
+        dst->g = (float) src->g / 255.0f;
+        dst->b = (float) src->b / 255.0f;
+        dst->a = 1.0f;
     } else {
         dst->r = (float) src->r / 255.0f;
         dst->g = (float) src->g / 255.0f;
@@ -2455,6 +2460,11 @@ static void psp_gfx_dl_vertex_color_u8(PspGfxDlContext* ctx, const PspGfxDlVerte
         *g = 255;
         *b = 255;
         *a = src->a;
+    } else if (ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_SHADE_DECAL_ALPHA) {
+        *r = src->r;
+        *g = src->g;
+        *b = src->b;
+        *a = 255;
     } else {
         *r = src->r;
         *g = src->g;
@@ -2505,6 +2515,12 @@ psp_gfx_dl_build_direct_pair_colors(PspGfxDlContext* ctx, const PspGfxDlVertex* 
         for (i = 0; i < 6; i++) {
             dst[i].color = psp_gfx_dl_pack_rgba_u8(255, 255, 255, vertices[i]->a,
                                                    ctx->batchPremultiplied);
+        }
+    } else if (ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_SHADE_DECAL_ALPHA) {
+        for (i = 0; i < 6; i++) {
+            const PspGfxDlVertex* src = vertices[i];
+
+            dst[i].color = psp_gfx_dl_pack_rgba_u8(src->r, src->g, src->b, 255, ctx->batchPremultiplied);
         }
     } else {
         for (i = 0; i < 6; i++) {
@@ -2705,6 +2721,9 @@ static int psp_gfx_dl_try_emit_tri2_direct_pair(PspGfxDlContext* ctx, u8 a0, u8 
         psp_gfx_dl_prepare_texture(ctx, 1, psp_gfx_dl_premultiplied_blend_enabled(ctx));
     }
     textureId = ctx->textureEnabled ? ctx->textureId : 0;
+    psp_gfx_dl_set_batch_depth(ctx, (ctx->geometryMode & G_ZBUFFER) != 0, (ctx->otherModeL & Z_UPD) != 0,
+                               psp_gfx_dl_depth_bias_enabled(ctx));
+    psp_gfx_dl_set_batch_fog(ctx, !pretransformed0 && ((ctx->otherModeL >> 30) == G_BL_CLR_FOG), va0->projection);
     psp_gfx_dl_set_batch_texture(ctx, textureId, ctx->textureEnabled ? ctx->textureRef : psp_gfx_dl_null_texture_ref(),
                                  psp_gfx_dl_texture_env_for_combine(ctx),
                                  psp_gfx_dl_texture_env_color_for_combine(ctx), ctx->combineMode,
@@ -2714,9 +2733,6 @@ static int psp_gfx_dl_try_emit_tri2_direct_pair(PspGfxDlContext* ctx, u8 a0, u8 
                                  psp_gfx_dl_alpha_test_enabled(ctx), psp_gfx_dl_blend_enabled(ctx),
                                  psp_gfx_dl_premultiplied_blend_enabled(ctx),
                                  psp_gfx_dl_effective_point_filter(ctx));
-    psp_gfx_dl_set_batch_depth(ctx, (ctx->geometryMode & G_ZBUFFER) != 0, (ctx->otherModeL & Z_UPD) != 0,
-                               psp_gfx_dl_depth_bias_enabled(ctx));
-    psp_gfx_dl_set_batch_fog(ctx, !pretransformed0 && ((ctx->otherModeL >> 30) == G_BL_CLR_FOG), va0->projection);
 #endif
 
     vertices[0] = va0;
@@ -3202,6 +3218,8 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
     }
     textureId = ctx->textureEnabled ? ctx->textureId : 0;
     psp_gfx_dl_set_batch_transform(ctx, pretransformed, va->projectionSerial, va->projection);
+    psp_gfx_dl_set_batch_depth(ctx, depthTest, depthWrite, psp_gfx_dl_depth_bias_enabled(ctx));
+    psp_gfx_dl_set_batch_fog(ctx, !pretransformed && ((ctx->otherModeL >> 30) == G_BL_CLR_FOG), va->projection);
     textureEnv = psp_gfx_dl_texture_env_for_combine(ctx);
     psp_gfx_dl_set_batch_texture(ctx, textureId, ctx->textureEnabled ? ctx->textureRef : psp_gfx_dl_null_texture_ref(),
                                  textureEnv, psp_gfx_dl_texture_env_color_for_combine(ctx), ctx->combineMode,
@@ -3211,8 +3229,6 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
                                  psp_gfx_dl_alpha_test_enabled(ctx), psp_gfx_dl_blend_enabled(ctx),
                                  psp_gfx_dl_premultiplied_blend_enabled(ctx),
                                  psp_gfx_dl_effective_point_filter(ctx));
-    psp_gfx_dl_set_batch_depth(ctx, depthTest, depthWrite, psp_gfx_dl_depth_bias_enabled(ctx));
-    psp_gfx_dl_set_batch_fog(ctx, !pretransformed && ((ctx->otherModeL >> 30) == G_BL_CLR_FOG), va->projection);
 #endif
 #if PROFILE_TRIVIAL_REJECTS
 #endif
@@ -3996,10 +4012,10 @@ static void psp_gfx_dl_handle_other_mode_l(PspGfxDlContext* ctx, const Gfx* gfx)
         return;
     }
     mask = (length == 32) ? 0xFFFFFFFFU : (((1U << length) - 1U) << shift);
-    if ((ctx->batchCount != 0) &&
+    if (psp_gfx_dl_texture_barrier_has_pending(ctx) &&
         (((ctx->otherModeL ^ gfx->words.w1) & mask &
           (0xC0000000U | 3U | CVG_X_ALPHA | FORCE_BL | Z_UPD)) != 0)) {
-    psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+        psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
     }
     ctx->otherModeL = (ctx->otherModeL & ~mask) | (gfx->words.w1 & mask);
     psp_gfx_dl_mark_effective_state_dirty(ctx);
