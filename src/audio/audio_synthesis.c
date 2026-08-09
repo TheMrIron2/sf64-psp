@@ -1,7 +1,6 @@
 #include "sys.h"
 #include "sf64audio.h"
 #ifdef TARGET_PSP
-#include "src/psp/audio_mixer.h"
 #include "src/psp/platform.h"
 #if PSP_LOG_ENABLED
 extern u32 gPspAudioRequestedVoiceId;
@@ -848,9 +847,6 @@ Acmd* AudioSynth_ProcessSamples(s16* aiBuf, s32 aiBufLen, Acmd* aList, s32 updat
     aSetBuffer(aList++, 0, 0, DMEM_TEMP, j);
     aInterleave(aList++, DMEM_LEFT_CH, DMEM_RIGHT_CH);
     aSaveBuffer(aList++, DMEM_TEMP, AUDIO_RAM_ADDRESS(aiBuf), j * 2);
-#ifdef TARGET_PSP
-    PspAudioMixer_ValidateState();
-#endif
     return aList;
 }
 
@@ -913,7 +909,6 @@ Acmd* AudioSynth_ProcessSample(s32 noteIndex, NoteSampleState* sampleState, Note
 #if defined(TARGET_PSP) && PSP_LOG_ENABLED
     bool isVoiceNote;
     static s32 sLoggedActiveVoiceSample;
-    static s32 sLoggedVoiceSignal;
 #endif
 
     currentBook = NULL;
@@ -1316,16 +1311,6 @@ Acmd* AudioSynth_ProcessSample(s32 noteIndex, NoteSampleState* sampleState, Note
     // Resample the decompressed mono-signal to the correct pitch
     aList = AudioSynth_FinalResample(aList, synthState, aiBufLen * SAMPLE_SIZE, resampleRateFixedPoint,
                                      noteSamplesDmemAddrBeforeResampling, flags);
-#if defined(TARGET_PSP) && PSP_LOG_ENABLED
-    if (isVoiceNote && !sLoggedVoiceSignal && (resampleRateFixedPoint != 0)) {
-        u32 voicePeak = PspAudioMixer_GetPeak(DMEM_TEMP, aiBufLen);
-
-        if (voicePeak != 0) {
-            sLoggedVoiceSignal = true;
-            PspPlatform_LogValue("audio voice resample peak", voicePeak);
-        }
-    }
-#endif
 
     if (flags & A_INIT) {
         flags = A_INIT;

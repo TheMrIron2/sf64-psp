@@ -137,6 +137,15 @@ PSPGL_DIR ?= lib/pspgl
 LOCAL_PSPGL_LIB := $(PSPGL_DIR)/libGL.a
 
 PSP_LIBS ?= -lm -lpspdebug -lpspdisplay -lpspgu -lpspge -lpspctrl -lpspaudio -lpsppower
+ifeq ($(PSP_AUDIO),1)
+ifeq ($(wildcard $(PSPDEV)/psp/include/me-core-mapper/me-core.h),)
+$(error PSP Media Engine headers not found. Install psp-media-engine-custom-core)
+endif
+ifeq ($(wildcard $(PSPDEV)/psp/lib/libme-core.a),)
+$(error PSP Media Engine library not found. Install psp-media-engine-custom-core)
+endif
+PSP_LIBS := -lme-core $(PSP_LIBS)
+endif
 
 ifeq ($(COLOR),1)
 NO_COL := \033[0m
@@ -368,6 +377,9 @@ endif
 LDFLAGS += -specs=$(PSPSDK)/lib/prxspecs \
            -Wl,-q,-T$(PSPSDK)/lib/linkfile.prx \
            $(PSPSDK)/lib/prxexports.o
+ifeq ($(PSP_AUDIO),1)
+LDFLAGS += -Wl,-u,sf64PspMeKcallImport
+endif
 
 include src/psp/sources.mk
 
@@ -607,7 +619,8 @@ $(BUILD_DIR)/%.o: %.c Makefile src/psp/sources.mk $(COMPILE_FLAGS_STAMP)
 	$(call print,Compiling:,$<,$@)
 	$(V)$(CC) -c $(CFLAGS) $(source_warning_flags) -I$(dir $*) -o $@ $<
 
-$(BUILD_DIR)/src/psp/audio_mixer.o: CFLAGS += -std=gnu99
+$(BUILD_DIR)/src/psp/audio_me.o: CFLAGS += -std=gnu99
+$(BUILD_DIR)/src/psp/audio_mixer.o: CFLAGS += -std=gnu99 -fno-tree-loop-distribute-patterns -UPSP_LOG_ENABLED -DPSP_LOG_ENABLED=0
 
 $(BUILD_DIR)/src/libultra/libc/string.o: lib/n64psp/include/n64psp/detail/memory_psp_impl.h
 

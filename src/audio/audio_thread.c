@@ -2,6 +2,7 @@
 #include "sf64audio.h"
 #include "audiothread_cmd.h"
 #ifdef TARGET_PSP
+#include "src/psp/audio_me.h"
 #include "src/psp/platform.h"
 u64 sceKernelGetSystemTimeWide(void);
 #endif
@@ -88,6 +89,10 @@ SPTask* AudioThread_CreateTask(void) {
     if ((gAudioTaskCountQ % gAudioBufferParams.numBuffers) != 0) {
         return gWaitingAudioTask;
     }
+
+#ifdef TARGET_PSP
+    PspAudioMe_Wait();
+#endif
 
     osSendMesg(gAudioTaskStartQueue, (OSMesg) gAudioTaskCountQ, OS_MESG_NOBLOCK);
 
@@ -182,6 +187,10 @@ SPTask* AudioThread_CreateTask(void) {
     
     gAudioRandom = osGetCount() * (gAudioRandom + gAudioTaskCountQ);
     gAudioRandom = gAiBuffers[aiBuffIndex][gAudioTaskCountQ & 0xFF] + gAudioRandom;
+
+#ifdef TARGET_PSP
+    PspAudioMe_Submit(gAbiCmdBuffs[gAudioTaskIndexQ], abiCmdCount);
+#endif
 
     aiBuffIndex = gAudioTaskIndexQ;
 

@@ -5,6 +5,7 @@
 #include "PR/os_eeprom.h"
 #include "PR/ucode.h"
 #include "sf64dma.h"
+#include "src/psp/audio_me.h"
 #include "src/psp/audio_output.h"
 #include "src/psp/input.h"
 #include "src/psp/platform.h"
@@ -296,6 +297,7 @@ static int psp_vi_thread(SceSize args, void* argp) {
 }
 
 void PspPlatform_Init(void) {
+    int audioMeResult;
     int audioResult;
 
     sExitRequested = 0;
@@ -309,14 +311,25 @@ void PspPlatform_Init(void) {
 #endif
     PspInput_Init();
     PspProfiler_Init();
+    audioMeResult = PspAudioMe_Init();
     audioResult = PspAudioOutput_Init();
 #if PSP_LOG_ENABLED
     if (audioResult < 0) {
         PspPlatform_LogLine("[psp-audio] output initialization failed");
     } else {
-        PspPlatform_LogLine("[psp-audio] scalar software backend, 32000 Hz stereo");
+#if PSP_AUDIO
+        if (PspAudioMe_IsActive()) {
+            PspPlatform_LogLine("[psp-audio] Media Engine scalar backend, 32000 Hz stereo");
+        } else {
+            PspPlatform_LogLine("[psp-audio] Allegrex scalar fallback, 32000 Hz stereo");
+            PspPlatform_LogValue("audio Media Engine error", (u32) audioMeResult);
+        }
+#else
+        PspPlatform_LogLine("[psp-audio] disabled");
+#endif
     }
 #else
+    (void) audioMeResult;
     (void) audioResult;
 #endif
     PspRenderer_Init();

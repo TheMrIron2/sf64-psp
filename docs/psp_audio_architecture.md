@@ -1,11 +1,11 @@
-# PSP Software Audio Architecture
+# PSP Media Engine Audio Architecture
 
 ## Status
 
-The CPU scalar audio path is complete and validated on real PSP hardware.
-BGM, SFX, radio voices, percussion, sequence transitions, and PCM output are
-working with the original US revision 1 audio data. Vita compatibility and
-optional acceleration paths remain untested.
+The scalar mixer remains the known-good implementation. With `PSP_AUDIO=1`,
+SF64 now builds audio commands on Allegrex and executes them asynchronously on
+the Media Engine. Media Engine playback, Vita compatibility, and PPSSPP
+fallback still need hardware validation.
 
 ## Driver Basis
 
@@ -17,7 +17,7 @@ representation.
 The closest PSP reference used was:
 
 * `https://github.com/z2442/oot-PSP.git`
-* commit `805181d938e60afc843d6e7a37f2d98e78fb4ee1`
+* commit `0e40bb931e934248362c05820f0de68b3894affe`
 
 The useful conceptual mapping is:
 
@@ -30,9 +30,17 @@ The useful conceptual mapping is:
 | load tables and status | `gSequenceTable`, `gSoundFontTable`, `gSampleBankTable`, global status arrays |
 | audio specification | `gAudioSpecId`, `gAudioBufferParams`, related globals |
 
-OOT PSP informed 32-bit PSP execution, output ownership, and future
-acceleration boundaries. No OOT source was copied because a clear repository
-license was not found.
+OOT PSP informed the early ME boot, uncached mailbox, cache ownership, delayed
+completion wait, and scalar fallback design. No OOT source was copied because
+a clear repository license was not found.
+
+The Media Engine loader and core mapping come from:
+
+* `https://github.com/mcidclan/psp-media-engine-custom-core.git`
+* commit `9406d17af0fa831ced752d6e352c1c1e761b2f38`
+
+The library is MIT licensed and supplies model-aware ME core selection, the
+kernel bridge, suspend hooks, and ME cache operations.
 
 Secondary references:
 
@@ -57,8 +65,9 @@ audio_load.c audio_playback.c audio_seqplayer.c audio_synthesis.c
 audio_tables.c audio_thread.c note_data.c wave_samples.c
 ```
 
-It also includes `src/psp/audio_mixer.c`, `src/psp/audio_output.c`, and
-`src/psp/audio_assets.S`. No audio source wildcard is used.
+It also includes `src/psp/audio_me.c`, `src/psp/audio_mixer.c`,
+`src/psp/audio_output.c`, `src/psp/audio_assets.S`, and the retained kcall
+import in `src/psp/audio_me_kcall.S`. No audio source wildcard is used.
 
 Every audio source inherits `TARGET_PSP`, `NON_MATCHING`, `COMPILER_GCC`, and
 `AVOID_UB`. `AVOID_UB` is a required PSP invariant because it selects the
@@ -99,15 +108,22 @@ Audio heap initialization and later specification resets still run normally.
 ## Synthesis
 
 SF64's normal `AudioThread_CreateTask()` path remains responsible for command
-processing, sequence players, notes, effects, reverb, and buffer sizing.
-On PSP, the audio ABI macros call the scalar mixer directly while building
-the nominal command list. The scheduler still acknowledges the resulting
-audio task, but synthesis has already produced PCM on the CPU.
+processing, sequence players, notes, effects, reverb, and buffer sizing. The
+audio ABI macros now build the original eight-byte command stream. The ME runs
+the scalar command interpreter and publishes PCM plus persistent mixer state.
 
-The mixer implements the ABI operations emitted by this SF64 revision,
-including ADPCM decode, resampling, envelope mixing, reverb-related mixing,
-DMEM movement, interleave, and loop state handling. It has no SSE, NEON,
-SH-4, VFPU, or Media Engine requirement.
+Submission is asynchronous. Allegrex waits at the next synthesis period before
+queueing the completed buffer or building commands which depend on mixer state.
+This overlaps mixing with the game while preserving command order.
+
+The mailbox is uncached. Allegrex writes back and invalidates before submission;
+the ME invalidates before execution and writes back all results before marking
+the job idle. The mixer uses private scalar memory routines so ME execution
+does not enter Allegrex VFPU code.
+
+If ME startup fails, the same command interpreter runs synchronously on
+Allegrex. A faulted ME job is interrupted and replayed on the scalar fallback
+from the last published cache state.
 
 ## PCM Output
 
@@ -122,7 +138,7 @@ sample rate:       32000 Hz
 channels:          2
 sample format:     signed 16-bit interleaved
 ring blocks:       8
-maximum block:     1024 stereo frames
+maximum block:     1152 stereo frames
 output API:        sceAudioSRCChReserve / sceAudioOutput2OutputBlocking
 ```
 
@@ -141,7 +157,8 @@ Radio samples load, play, and complete correctly on real PSP hardware.
 
 ## Diagnostics
 
-With `PSP_LOG=1`, startup records the scalar backend and 32 kHz stereo output.
+With `PSP_LOG=1`, startup records the active ME backend or Allegrex fallback
+and 32 kHz stereo output.
 The first queued PCM frame count is logged once. Output-ring overruns are
 logged for the first four occurrences and then at powers of two, avoiding
 per-buffer spam.
@@ -149,16 +166,8 @@ per-buffer spam.
 Synthesis duration and bounded output health counters remain available for
 performance work without sequence-specific logging.
 
-## Acceleration Plan
+## Next Steps
 
-The scalar mixer is the permanent correctness and compatibility baseline.
-Real-PSP correctness is established; acceleration work should:
-
-1. Profile ADPCM decode, resampling, envelope mixing, reverb, and copies.
-2. Add optional VFPU replacements behind the same mixer boundary.
-3. Consider an optional Media Engine worker only after deterministic scalar
-   comparison is available.
-
-A future Media Engine path must define shared-buffer ownership, cache
-boundaries, work packets, startup/shutdown, failure fallback, PPSSPP behavior,
-and Vita behavior. It must never be required for normal playback.
+After hardware correctness is established, profile ME execution and replace
+whole-cache barriers with command-owned ranges. VME acceleration can then be
+added behind the same interpreter without changing SF64 synthesis code.

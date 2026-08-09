@@ -154,7 +154,7 @@ void Audio_ThreadEntry(void* arg0) {
 #endif
     if (task != NULL) {
 #if defined(TARGET_PSP) && PSP_AUDIO
-        // PSP scalar synthesis completes inline
+        // PSP audio synthesis runs outside the RSP scheduler
 #else
         task->mesgQueue = &gAudioTaskMesgQueue;
         task->msg = (OSMesg) TASK_MESG_1;
@@ -173,7 +173,7 @@ void Audio_ThreadEntry(void* arg0) {
 #endif
         if (task != NULL) {
 #if defined(TARGET_PSP) && PSP_AUDIO
-            // Output queue backpressure paces PSP synthesis
+            // Output backpressure paces PSP synthesis
 #else
             task->mesgQueue = &gAudioTaskMesgQueue;
             task->msg = (OSMesg) TASK_MESG_1;
@@ -570,7 +570,7 @@ void Main_ThreadEntry(void* arg0) {
     u8 mesg;
 
 #ifdef TARGET_PSP
-    // Allow scalar audio to preempt synchronous rendering
+    // Allow audio synthesis to preempt synchronous rendering
     osSetThreadPri(NULL, 70);
     Main_InitMesgQueues();
 #endif

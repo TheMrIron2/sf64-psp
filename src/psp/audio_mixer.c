@@ -18,6 +18,16 @@ static void* psp_audio_memset(void* dst, s32 value, size_t size) {
     return dst;
 }
 
+static void* psp_audio_memcpy(void* dst, const void* src, size_t size) {
+    u8* out = dst;
+    const u8* in = src;
+
+    while (size-- != 0) {
+        *out++ = *in++;
+    }
+    return dst;
+}
+
 static void* psp_audio_memmove(void* dst, const void* src, size_t size) {
     u8* out = dst;
     const u8* in = src;
@@ -37,6 +47,7 @@ static void* psp_audio_memmove(void* dst, const void* src, size_t size) {
 }
 
 #define memset psp_audio_memset
+#define memcpy psp_audio_memcpy
 #define memmove psp_audio_memmove
 
 #ifndef __clang__
@@ -1289,4 +1300,91 @@ void aUnkCmd19Impl(uint8_t f, uint16_t count, uint16_t out_addr, uint16_t in_add
         out += 32;
         nbytes -= 32 * sizeof(int16_t);
     } while (nbytes > 0);
+}
+
+s32 PspAudioMixer_ExecuteCommandList(const Acmd* commands, s32 commandCount) {
+    s32 i;
+
+    for (i = 0; i < commandCount; i++) {
+        u32 w0 = commands[i].words.w0;
+        u32 w1 = commands[i].words.w1;
+
+        switch (w0 >> 24) {
+            case A_SPNOOP:
+                break;
+            case A_ADPCM:
+                aADPCMdecImpl((w0 >> 16) & 0xFF, (s16*) w1);
+                break;
+            case A_CLEARBUFF:
+                aClearBufferImpl(w0 & 0xFFFF, w1);
+                break;
+            case A_UNK3:
+                aUnkCmd3Impl(w1 >> 16, w1 & 0xFFFF, w0 & 0xFFFF);
+                break;
+            case A_ADDMIXER:
+                aAddMixerImpl(((w0 >> 16) & 0xFF) << 4, w1 >> 16, w1 & 0xFFFF);
+                break;
+            case A_RESAMPLE:
+                aResampleImpl((w0 >> 16) & 0xFF, w0 & 0xFFFF, (s16*) w1);
+                break;
+            case A_RESAMPLE_ZOH:
+                aResampleZohImpl(w0 & 0xFFFF, w1 & 0xFFFF);
+                break;
+            case A_FILTER:
+                aFilterImpl((w0 >> 16) & 0xFF, w0 & 0xFFFF, (s16*) w1);
+                break;
+            case A_SETBUFF:
+                aSetBufferImpl((w0 >> 16) & 0xFF, w0 & 0xFFFF, w1 >> 16, w1 & 0xFFFF);
+                break;
+            case A_DUPLICATE:
+                aDuplicateImpl((w0 >> 16) & 0xFF, w0 & 0xFFFF, w1 >> 16);
+                break;
+            case A_DMEMMOVE:
+                aDMEMMoveImpl(w0 & 0xFFFF, w1 >> 16, w1 & 0xFFFF);
+                break;
+            case A_LOADADPCM:
+                aLoadADPCMImpl(w0 & 0xFFFFFF, (const s16*) w1);
+                break;
+            case A_MIXER:
+                aMixImpl((w0 >> 16) & 0xFF, (s16) w0, w1 >> 16, w1 & 0xFFFF);
+                break;
+            case A_INTERLEAVE:
+                aInterleaveImpl(w1 >> 16, w1 & 0xFFFF, 0, 0, 0, 0, 2);
+                break;
+            case A_SETLOOP:
+                aSetLoopImpl((ADPCM_STATE*) w1);
+                break;
+            case A_INTERL:
+                aInterlImpl(w1 >> 16, w1 & 0xFFFF, w0 & 0xFFFF);
+                break;
+            case A_ENVSETUP1:
+                aEnvSetup1Impl((w0 >> 16) & 0xFF, w0 & 0xFFFF, w1 >> 16, w1 & 0xFFFF, 0, 0, 0, 0);
+                break;
+            case A_ENVMIXER:
+                aEnvMixerImpl(((w0 >> 16) & 0xFF) << 4, (w0 >> 8) & 0xFF, (w0 >> 2) & 1,
+                              (w0 >> 1) & 1, w0 & 1, w1, 2, 0);
+                break;
+            case A_LOADBUFF:
+                aLoadBufferImpl((const void*) w1, w0 & 0xFFFF, ((w0 >> 16) & 0xFF) << 4);
+                break;
+            case A_SAVEBUFF:
+                aSaveBufferImpl(w0 & 0xFFFF, (s16*) w1, ((w0 >> 16) & 0xFF) << 4);
+                break;
+            case A_ENVSETUP2:
+                aEnvSetup2Impl(w1 >> 16, w1 & 0xFFFF, 0, 0, 0, 0);
+                break;
+            case A_S8DEC:
+                aS8DecImpl((w0 >> 16) & 0xFF, (s16*) w1);
+                break;
+            case A_HILOGAIN:
+                aHiLoGainImpl((w0 >> 16) & 0xFF, w0 & 0xFFFF, w1 >> 16);
+                break;
+            case A_UNK19:
+                aUnkCmd19Impl((w0 >> 16) & 0xFF, w0 & 0xFFFF, w1 >> 16, w1 & 0xFFFF);
+                break;
+            default:
+                return -1;
+        }
+    }
+    return 0;
 }

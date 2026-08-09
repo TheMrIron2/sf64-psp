@@ -5,6 +5,7 @@
 #include <psppower.h>
 
 #ifdef PSP_FULL
+#include "src/psp/audio_me.h"
 #include "src/psp/hw_counter_profile.h"
 #include "src/psp/n64psp_integration.h"
 #include "src/psp/platform.h"
@@ -77,6 +78,8 @@ int main(int argc, char* argv[]) {
     pspDebugScreenPrintf("Select+Left/Right selects the capture scene\n");
     pspDebugScreenPrintf("Counters need PSPLINK profmode t; else timings only\n");
 #endif
+
+    (void) PspAudioMe_Boot();
 
     if (!PspN64psp_Init()) {
         pspDebugScreenPrintf("[psp] n64psp init failed; boot aborted\n");
