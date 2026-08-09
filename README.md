@@ -22,6 +22,10 @@ Special thanks:
 - sonicdcer: Original decompilation & guidance
 - Falco Girgis: Guidance based on sf64-dc
 - jnmartin84: sf64-dc, used as reference and initial `ultra_reimpl.c`
+- DaedalusX64: VFPU implementations and architectural guidance
+
+> [!NOTE]
+> Codex has been used as a development aid.
 
 The original README continues below. Follow the build instructions and compile with `make psp`.
 
