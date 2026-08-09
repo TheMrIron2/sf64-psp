@@ -609,6 +609,8 @@ $(BUILD_DIR)/%.o: %.c Makefile src/psp/sources.mk $(COMPILE_FLAGS_STAMP)
 
 $(BUILD_DIR)/src/psp/audio_mixer.o: CFLAGS += -std=gnu99
 
+$(BUILD_DIR)/src/libultra/libc/string.o: lib/n64psp/include/n64psp/detail/memory_psp_impl.h
+
 $(BUILD_DIR)/%.o: %.S Makefile src/psp/sources.mk $(COMPILE_FLAGS_STAMP)
 	@mkdir -p $(dir $@)
 	$(call print,Assembling:,$<,$@)

@@ -1,5 +1,9 @@
 #include "PR/ultratypes.h"
 
+#if defined(TARGET_PSP)
+#define N64PSP_MEMCPY_PSP_NAME memcpy
+#include "n64psp/detail/memory_psp_impl.h"
+#else
 void* memcpy(void* s1, const void* s2, size_t n) {
     unsigned char* su1 = (unsigned char*) s1;
     const unsigned char* su2 = (const unsigned char*) s2;
@@ -13,6 +17,7 @@ void* memcpy(void* s1, const void* s2, size_t n) {
 
     return s1;
 }
+#endif
 
 size_t strlen(const char* s) {
     const char* sc = s;
