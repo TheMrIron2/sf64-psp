@@ -51,6 +51,9 @@ extern Gfx gMapVenomCloudRuntimeDL[];
 #define VTX_FUSED_TNL 1
 #endif
 
+#ifndef PSP_GFX_ME_REPLAY
+#define PSP_GFX_ME_REPLAY 0
+#endif
 
 // Open batch pool, see docs/psp_counter_findings.md finding 9
 // Keeps one open batch per texture material so a texture change no longer forces
@@ -720,6 +723,17 @@ static u32 psp_gfx_dl_texture_env_color_for_combine(const PspGfxDlContext* ctx) 
 static u8 psp_gfx_dl_opcode(const Gfx* gfx) {
     return (u8) (gfx->words.w0 >> 24);
 }
+
+#if PSP_GFX_ME_REPLAY
+static void psp_gfx_dl_hash_word(PspGfxDlStats* stats, u32 word) {
+    stats->commandHash = (stats->commandHash ^ word) * 16777619U;
+}
+
+static void psp_gfx_dl_hash_command(PspGfxDlStats* stats, const Gfx* command) {
+    psp_gfx_dl_hash_word(stats, command->words.w0);
+    psp_gfx_dl_hash_word(stats, command->words.w1);
+}
+#endif
 
 static int psp_gfx_dl_is_native_ptr(uintptr_t ptr) {
     return PSP_IS_NATIVE_PTR(ptr);
@@ -4401,6 +4415,9 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
 #endif
 
         ctx->stats.commandCount++;
+#if PSP_GFX_ME_REPLAY
+        psp_gfx_dl_hash_command(&ctx->stats, cmd);
+#endif
         PspProfiler_CountOpcode(opcode);
 
         if (psp_gfx_dl_is_end(opcode)) {
@@ -4515,6 +4532,9 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
         }
 
         if (opcode == PSP_GFX_OP_F3D_VTX) {
+#if PSP_GFX_ME_REPLAY
+            ctx->stats.gvtxCommandCount++;
+#endif
             psp_gfx_dl_handle_vtx(ctx, cmd);
             continue;
         }
@@ -4580,6 +4600,10 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
             half1 = pc++;
             half2 = pc++;
             ctx->stats.commandCount += 2;
+#if PSP_GFX_ME_REPLAY
+            psp_gfx_dl_hash_command(&ctx->stats, half1);
+            psp_gfx_dl_hash_command(&ctx->stats, half2);
+#endif
             psp_gfx_dl_handle_texture_rectangle(ctx, cmd, half1, half2, opcode == G_TEXRECTFLIP);
             continue;
         }
@@ -4596,6 +4620,9 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
 
         if (opcode == PSP_GFX_OP_F3D_TRI1) {
             u32 w1 = cmd->words.w1;
+#if PSP_GFX_ME_REPLAY
+            ctx->stats.tri1CommandCount++;
+#endif
             PspProfiler_CountTriangleCommand(1, 1, 0);
             PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_TRIANGLE);
             PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TRIANGLE);
@@ -4617,6 +4644,9 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
             u8 b1 = psp_gfx_dl_decode_tri_index((w1 >> 8) & 0xFF);
             u8 c1 = psp_gfx_dl_decode_tri_index(w1 & 0xFF);
 
+#if PSP_GFX_ME_REPLAY
+            ctx->stats.tri2CommandCount++;
+#endif
             PspProfiler_CountTriangleCommand(2, 0, 1);
             PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_TRIANGLE);
             PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TRIANGLE);
@@ -4649,6 +4679,9 @@ static void psp_gfx_dl_reset_context(PspGfxDlContext* ctx) {
     for (i = 0; i < offsetof(PspGfxDlContext, vertices); i++) {
         bytes[i] = 0;
     }
+#if PSP_GFX_ME_REPLAY
+    ctx->stats.commandHash = 2166136261U;
+#endif
     for (i = 0; i < ARRAY_COUNT(ctx->vertices); i++) {
         ctx->vertices[i].projectionSerial = 0;
         ctx->vertices[i].valid = 0;

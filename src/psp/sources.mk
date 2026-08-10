@@ -24,6 +24,7 @@ endif
 PSP_RENDERER_C_FILES := \
     src/psp/gfx/gfx_psp.c \
     src/psp/gfx/gfx_psp_dl.c \
+    src/psp/gfx/gfx_me_replay.c \
     src/psp/gfx/gfx_pspgl.c \
     src/psp/renderer_pspgl.c
 
@@ -47,7 +48,7 @@ PSP_AUDIO_C_FILES := \
 PSP_GAME_S_FILES := \
     src/psp/audio_assets.S
 
-ifeq ($(PSP_AUDIO),1)
+ifneq ($(filter 1,$(PSP_AUDIO) $(PSP_GFX_ME_REPLAY)),)
 PSP_GAME_S_FILES += src/psp/audio_me_kcall.S
 endif
 

@@ -47,6 +47,7 @@ ifeq ($(PSP_RENDERER_DIAGNOSTICS),1)
 PSP_LOG := 1
 endif
 PSP_AUDIO ?= 0
+PSP_GFX_ME_REPLAY ?= 0
 PSP_FPS_OVERLAY ?= 1
 COLOR ?= 1
 VERBOSE ?= 0
@@ -83,6 +84,14 @@ ifneq ($(PSP_AUDIO),0)
 ifneq ($(PSP_AUDIO),1)
 $(error PSP_AUDIO must be 0 or 1)
 endif
+endif
+ifneq ($(PSP_GFX_ME_REPLAY),0)
+ifneq ($(PSP_GFX_ME_REPLAY),1)
+$(error PSP_GFX_ME_REPLAY must be 0 or 1)
+endif
+endif
+ifeq ($(PSP_GFX_ME_REPLAY),1)
+PSP_LOG := 1
 endif
 ifneq ($(VTX_FUSED_TNL),0)
 ifneq ($(VTX_FUSED_TNL),1)
@@ -137,7 +146,7 @@ PSPGL_DIR ?= lib/pspgl
 LOCAL_PSPGL_LIB := $(PSPGL_DIR)/libGL.a
 
 PSP_LIBS ?= -lm -lpspdebug -lpspdisplay -lpspgu -lpspge -lpspctrl -lpspaudio -lpsppower
-ifeq ($(PSP_AUDIO),1)
+ifneq ($(filter 1,$(PSP_AUDIO) $(PSP_GFX_ME_REPLAY)),)
 ifeq ($(wildcard $(PSPDEV)/psp/include/me-core-mapper/me-core.h),)
 $(error PSP Media Engine headers not found. Install psp-media-engine-custom-core)
 endif
@@ -272,6 +281,7 @@ CFLAGS += -fno-exceptions -fno-unwind-tables
 CFLAGS += -fno-asynchronous-unwind-tables -fno-ident
 CFLAGS += -DPSP_FPS_OVERLAY=$(PSP_FPS_OVERLAY)
 CFLAGS += -DPSP_AUDIO=$(PSP_AUDIO)
+CFLAGS += -DPSP_GFX_ME_REPLAY=$(PSP_GFX_ME_REPLAY)
 CFLAGS += -DPROFILE_GPROF=$(if $(filter 1,$(PROFILE_PSP)),1,0)
 CFLAGS += -DPROFILE_PHASES=$(if $(filter 1,$(PROFILE_PHASES)),1,0)
 CFLAGS += -DPROFILE_CAPTURE_FRAMES=$(PROFILE_CAPTURE_FRAMES)
@@ -377,7 +387,7 @@ endif
 LDFLAGS += -specs=$(PSPSDK)/lib/prxspecs \
            -Wl,-q,-T$(PSPSDK)/lib/linkfile.prx \
            $(PSPSDK)/lib/prxexports.o
-ifeq ($(PSP_AUDIO),1)
+ifneq ($(filter 1,$(PSP_AUDIO) $(PSP_GFX_ME_REPLAY)),)
 LDFLAGS += -Wl,-u,sf64PspMeKcallImport
 endif
 

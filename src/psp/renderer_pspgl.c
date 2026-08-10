@@ -1,5 +1,6 @@
 #include "PR/ultratypes.h"
 #include "sf64thread.h"
+#include "src/psp/audio_me.h"
 #include "src/psp/gfx/gfx_psp_dl.h"
 #include "src/psp/gfx/gfx_psp.h"
 #include "src/psp/gfx/gfx_pspgl.h"
@@ -15,9 +16,15 @@
 
 #include <stdio.h>
 
+extern GameState gGameState;
+
 #define PSPGL_STARFIELD_CAP 1000
 #define PSPGL_STARFIELD_VERTICES_PER_STAR 2
 #define PSPGL_STARFIELD_CHUNK_STARS 512
+
+#ifndef PSP_GFX_ME_REPLAY
+#define PSP_GFX_ME_REPLAY 0
+#endif
 
 typedef struct {
     s16 x;
@@ -254,6 +261,10 @@ void PspRenderer_Init(void) {
 
 void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
     const Gfx* dl;
+#if PSP_GFX_ME_REPLAY
+    PspGfxDlStats dlStats;
+    PspGfxMeReplayStats replayExpected;
+#endif
 
     #if PROFILE_HW_COUNTERS
         u32 hwCommands = 0;
@@ -287,7 +298,27 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
 
         if ((task != NULL) && (task->task.t.data_ptr != NULL)) {
             dl = (const Gfx*) task->task.t.data_ptr;
+#if PSP_GFX_ME_REPLAY
+            PspGfxDl_Run(dl, taskIndex, &dlStats);
+            if (gGameState == GSTATE_TITLE) {
+                replayExpected.commandCount = dlStats.commandCount;
+                replayExpected.nestedDlCount = dlStats.nestedDlFollowed;
+                replayExpected.gvtxCommandCount = dlStats.gvtxCommandCount;
+                replayExpected.loadedVertexCount = dlStats.vertexCount;
+                replayExpected.matrixCommandCount = dlStats.mtxCount;
+                replayExpected.tri1CommandCount = dlStats.tri1CommandCount;
+                replayExpected.tri2CommandCount = dlStats.tri2CommandCount;
+                replayExpected.inputTriangleCount =
+                    dlStats.tri1CommandCount + (2 * dlStats.tri2CommandCount);
+                replayExpected.textureRectangleCount = dlStats.textureRectangleCount;
+                replayExpected.commandHash = dlStats.commandHash;
+                replayExpected.commandLimitHit = dlStats.commandLimitHit;
+                replayExpected.depthLimitHit = dlStats.depthLimitHit;
+                PspMe_SubmitGfxReplay(dl, taskIndex, &replayExpected);
+            }
+#else
             PspGfxDl_Run(dl, taskIndex, NULL);
+#endif
     #if PROFILE_HW_COUNTERS
             /* Only after a run, the context still holds the previous task otherwise */
             PspGfxDl_GetLastWork(&hwCommands, &hwLoadedVertices, &hwSubmittedVertices);

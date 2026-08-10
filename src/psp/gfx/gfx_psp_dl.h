@@ -7,6 +7,10 @@
 
 typedef struct {
     u32 commandCount;
+    u32 gvtxCommandCount;
+    u32 tri1CommandCount;
+    u32 tri2CommandCount;
+    u32 commandHash;
     u32 vertexCount;
     u32 triangleCount;
     u32 nestedDlFollowed;
