@@ -97,8 +97,8 @@ SPTask* AudioThread_CreateTask(void) {
     }
 
 #ifdef TARGET_PSP
-    PspAudioMe_Wait();
 #if PSP_AUDIO
+    PspAudioMe_Wait();
     if (sPendingOutput != NULL) {
         if (PspAudioMe_GetLastError() < 0) {
             memset(sPendingOutput, 0, sPendingOutputSize);
@@ -241,8 +241,6 @@ SPTask* AudioThread_CreateTask(void) {
         }
         sPendingOutputReserved = false;
     }
-#else
-    PspAudioMe_Submit(gAbiCmdBuffs[gAudioTaskIndexQ], abiCmdCount);
 #endif
 #endif
 

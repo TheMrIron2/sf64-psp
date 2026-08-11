@@ -90,9 +90,6 @@ ifneq ($(PSP_GFX_ME_REPLAY),1)
 $(error PSP_GFX_ME_REPLAY must be 0 or 1)
 endif
 endif
-ifeq ($(PSP_GFX_ME_REPLAY),1)
-PSP_LOG := 1
-endif
 ifneq ($(VTX_FUSED_TNL),0)
 ifneq ($(VTX_FUSED_TNL),1)
 $(error VTX_FUSED_TNL must be 0 or 1)

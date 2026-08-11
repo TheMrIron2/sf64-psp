@@ -9,7 +9,8 @@ int PspAudioMe_Boot(void);
 int PspAudioMe_Init(void);
 void PspAudioMe_Submit(const Acmd* commands, s32 commandCount);
 void PspAudioMe_Wait(void);
-void PspMe_SubmitGfxReplay(const Gfx* dl, u32 taskIndex,
+void PspMe_WaitGfxReplayPool(const void* task);
+void PspMe_SubmitGfxReplay(const void* task, const Gfx* dl, u32 taskIndex,
                            const PspGfxMeReplayStats* expected);
 int PspAudioMe_IsActive(void);
 int PspAudioMe_GetLastError(void);

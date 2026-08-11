@@ -17,8 +17,16 @@ typedef struct {
     u32 commandHash;
     u32 commandLimitHit;
     u32 depthLimitHit;
+    u32 transformedVertexCount;
+    u32 transformHash;
 } PspGfxMeReplayStats;
 
-int PspGfxMeReplay_Walk(const Gfx* dl, PspGfxMeReplayStats* stats);
+int PspGfxMeReplay_Walk(const Gfx* dl, PspGfxMeReplayStats* stats,
+                        const void* sourceBase, const void* snapshotBase,
+                        u32 snapshotSize);
+void PspGfxMeReplay_HashTransform(u32* hash, u32 slot,
+                                  float viewX, float viewY, float viewZ, float viewW,
+                                  float clipX, float clipY, float clipZ, float clipW,
+                                  int valid, int hasProjection);
 
 #endif

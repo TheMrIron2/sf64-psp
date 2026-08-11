@@ -1,4 +1,5 @@
 #include "src/psp/gfx/gfx_psp_dl.h"
+#include "src/psp/gfx/gfx_me_replay.h"
 
 #include "buffers.h"
 #include "macros.h"
@@ -3967,7 +3968,7 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
     }
     PspProfiler_RenderPhaseEnd(PSP_PROFILE_PHASE_G_VTX_ATTRIBUTE_COPY, phaseStartUs);
 
-#if PSP_GFX_DL_HOT_STATS || PROFILE_HW_COUNTERS
+#if PSP_GFX_DL_HOT_STATS || PROFILE_HW_COUNTERS || PSP_GFX_ME_REPLAY
     /* Loaded vertices normalise counter captures so this add survives without hot stats */
     ctx->stats.vertexCount += count;
 #endif

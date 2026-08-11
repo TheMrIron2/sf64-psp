@@ -264,6 +264,7 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
 #if PSP_GFX_ME_REPLAY
     PspGfxDlStats dlStats;
     PspGfxMeReplayStats replayExpected;
+    int submitReplay = 0;
 #endif
 
     #if PROFILE_HW_COUNTERS
@@ -314,7 +315,13 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
                 replayExpected.commandHash = dlStats.commandHash;
                 replayExpected.commandLimitHit = dlStats.commandLimitHit;
                 replayExpected.depthLimitHit = dlStats.depthLimitHit;
-                PspMe_SubmitGfxReplay(dl, taskIndex, &replayExpected);
+                replayExpected.transformedVertexCount = 0;
+                replayExpected.transformHash = 2166136261U;
+#if PSP_AUDIO
+                submitReplay = (taskIndex & 3U) == 0;
+#else
+                submitReplay = 1;
+#endif
             }
 #else
             PspGfxDl_Run(dl, taskIndex, NULL);
@@ -338,6 +345,11 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
         PspHwCounterProfile_ScopeBegin(PSP_HW_SCOPE_PRESENT);
         PspGfx_EndFrame();
         PspHwCounterProfile_ScopeEnd(PSP_HW_SCOPE_PRESENT);
+#if PSP_GFX_ME_REPLAY
+        if (submitReplay) {
+            PspMe_SubmitGfxReplay(task, dl, taskIndex, &replayExpected);
+        }
+#endif
         PspProfiler_ComponentTaskEnd();
 
     #if PROFILE_HW_COUNTERS

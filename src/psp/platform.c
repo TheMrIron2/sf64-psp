@@ -325,6 +325,7 @@ void PspPlatform_Init(void) {
             PspPlatform_LogValue("audio Media Engine error", (u32) audioMeResult);
         }
 #else
+        (void) audioMeResult;
         PspPlatform_LogLine("[psp-audio] disabled");
 #endif
     }

@@ -2,6 +2,7 @@
 #include "sf64audio_external.h"
 #include "mods.h"
 #ifdef TARGET_PSP
+#include "src/psp/audio_me.h"
 #include "src/psp/platform.h"
 #include "src/psp/profiler.h"
 #endif
@@ -217,6 +218,9 @@ void Graphics_SetTask(void) {
 }
 
 void Graphics_InitializeTask(u32 frameCount) {
+#ifdef TARGET_PSP
+    PspMe_WaitGfxReplayPool(&gGfxPools[frameCount % 2]);
+#endif
     gGfxPool = &gGfxPools[frameCount % 2];
 
     gGfxTask = &gGfxPool->task;

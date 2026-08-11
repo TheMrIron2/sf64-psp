@@ -28,6 +28,7 @@ void PspPlatform_LogLine(const char* line);
 #define PSP_AUDIO_ME_CACHE_LINE_SIZE 64
 #define PSP_AUDIO_ME_MAX_INPUT_RANGES 16
 #define PSP_AUDIO_ME_MAX_WRITE_RANGES 512
+#define PSP_GFX_ME_POOL_SIZE 0x2AD50
 
 typedef enum {
     PSP_AUDIO_ME_BOOTING,
@@ -41,7 +42,6 @@ typedef enum {
 typedef enum {
     PSP_ME_JOB_NONE,
     PSP_ME_JOB_AUDIO,
-    PSP_ME_JOB_GFX_BENCH_EMPTY,
     PSP_ME_JOB_GFX_REPLAY,
 } PspMeJob;
 
@@ -53,6 +53,9 @@ enum {
     PSP_AUDIO_ME_SHARED_PROGRESS,
     PSP_AUDIO_ME_SHARED_COMPLETION_ENABLED,
     PSP_AUDIO_ME_SHARED_JOB,
+    PSP_AUDIO_ME_SHARED_GFX_SOURCE_BASE,
+    PSP_AUDIO_ME_SHARED_GFX_SNAPSHOT_BASE,
+    PSP_AUDIO_ME_SHARED_GFX_SNAPSHOT_SIZE,
     PSP_AUDIO_ME_SHARED_COUNT,
 };
 
@@ -68,6 +71,9 @@ static volatile u32 sSharedStorage[PSP_AUDIO_ME_SHARED_COUNT]
 #define sMeProgress PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_PROGRESS]
 #define sMeCompletionEnabled PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_COMPLETION_ENABLED]
 #define sMeJob PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_JOB]
+#define sMeGfxSourceBase PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_GFX_SOURCE_BASE]
+#define sMeGfxSnapshotBase PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_GFX_SNAPSHOT_BASE]
+#define sMeGfxSnapshotSize PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_GFX_SNAPSHOT_SIZE]
 
 static volatile PspGfxMeReplayStats sGfxReplayResultStorage
     __attribute__((aligned(64), section(".uncached")));
@@ -94,15 +100,10 @@ static PspGfxMeReplayStats sPendingGfxExpected;
 static u32 sPendingGfxTaskIndex;
 static s32 sPendingGfxCountResult;
 static s32 sPendingGfxLogResult;
+static const void* sPendingGfxSourcePool;
 static u32 sGfxReplayMatches;
 static u32 sGfxReplayMismatches;
-static u32 sGfxBenchmarkSamples;
-static u64 sGfxBenchmarkCacheTotalUs;
-static u64 sGfxBenchmarkEmptyTotalUs;
-static u64 sGfxBenchmarkReplayTotalUs;
-static s64 sGfxBenchmarkNetTotalUs;
-static s32 sGfxBenchmarkNetMinUs;
-static s32 sGfxBenchmarkNetMaxUs;
+static u32 sGfxReplaySkippedBusy;
 static s32 sGfxReplaySubmissionStarted;
 static s32 sGfxReplayInactiveLogged;
 #endif
@@ -111,7 +112,9 @@ static SceUID sCompletionSema = -1;
 static SceUID sDispatchSema = -1;
 #endif
 static s32 sCompletionReady;
+#if PSP_AUDIO
 static PspAudioMeCacheRange sInputRanges[PSP_AUDIO_ME_MAX_INPUT_RANGES];
+#endif
 static u32 sInputRangeCount;
 static s32 sInputRangeOverflow;
 static PspAudioMeCacheRange sWriteRanges[PSP_AUDIO_ME_MAX_WRITE_RANGES];
@@ -179,9 +182,11 @@ static void psp_audio_me_enable_completion(void) {
     sCompletionReady = 1;
 }
 
+#if PSP_AUDIO
 static u32 psp_audio_me_command_dma_size(u32 w0) {
     return ((w0 >> 16) & 0xFF) << 4;
 }
+#endif
 
 static void psp_audio_me_reset_ranges(void) {
     sInputRangeCount = 0;
@@ -190,6 +195,7 @@ static void psp_audio_me_reset_ranges(void) {
     sWriteRangeOverflow = false;
 }
 
+#if PSP_AUDIO
 static void psp_audio_me_record_range(PspAudioMeCacheRange* ranges, u32* count, s32* overflow,
                                       u32 capacity, void* address, u32 size) {
     uintptr_t start;
@@ -226,17 +232,23 @@ static void psp_audio_me_record_range(PspAudioMeCacheRange* ranges, u32* count, 
     ranges[*count].size = end - start;
     (*count)++;
 }
+#endif
 
+#if PSP_AUDIO
 static void psp_audio_me_record_input(const void* address, u32 size) {
     psp_audio_me_record_range(sInputRanges, &sInputRangeCount, &sInputRangeOverflow,
                               PSP_AUDIO_ME_MAX_INPUT_RANGES, (void*) address, size);
 }
+#endif
 
+#if PSP_AUDIO
 static void psp_audio_me_record_write(void* address, u32 size) {
     psp_audio_me_record_range(sWriteRanges, &sWriteRangeCount, &sWriteRangeOverflow,
                               PSP_AUDIO_ME_MAX_WRITE_RANGES, address, size);
 }
+#endif
 
+#if PSP_AUDIO
 static void psp_audio_me_collect_ranges(const Acmd* commands, s32 commandCount) {
     s32 i;
 
@@ -291,6 +303,7 @@ static void psp_audio_me_writeback_inputs(void) {
         sceKernelDcacheWritebackRange(sInputRanges[i].address, sInputRanges[i].size);
     }
 }
+#endif
 
 static void psp_audio_me_invalidate_writes(void) {
     u32 i;
@@ -344,7 +357,7 @@ static void psp_audio_me_invalidate_range_me(const void* address, u32 size) {
     meLibDcacheInvalidateRange((u32) start, end - start);
 }
 
-#if !defined(PSP_LOG_ENABLED) || !PSP_LOG_ENABLED
+#if PSP_AUDIO && (!defined(PSP_LOG_ENABLED) || !PSP_LOG_ENABLED)
 static void psp_audio_me_writeback_range_me(const void* address, u32 size) {
     uintptr_t start;
     uintptr_t end;
@@ -458,16 +471,37 @@ static int psp_gfx_me_stats_match(const PspGfxMeReplayStats* expected,
            (expected->textureRectangleCount == actual->textureRectangleCount) &&
            (expected->commandHash == actual->commandHash) &&
            (expected->commandLimitHit == actual->commandLimitHit) &&
-           (expected->depthLimitHit == actual->depthLimitHit);
+           (expected->depthLimitHit == actual->depthLimitHit) &&
+           (expected->transformedVertexCount == actual->transformedVertexCount) &&
+           (expected->transformHash == actual->transformHash);
+}
+
+static int psp_gfx_me_structure_matches(const PspGfxMeReplayStats* expected,
+                                        const PspGfxMeReplayStats* actual) {
+    return (expected->commandCount == actual->commandCount) &&
+           (expected->nestedDlCount == actual->nestedDlCount) &&
+           (expected->gvtxCommandCount == actual->gvtxCommandCount) &&
+           (expected->loadedVertexCount == actual->loadedVertexCount) &&
+           (expected->matrixCommandCount == actual->matrixCommandCount) &&
+           (expected->tri1CommandCount == actual->tri1CommandCount) &&
+           (expected->tri2CommandCount == actual->tri2CommandCount) &&
+           (expected->inputTriangleCount == actual->inputTriangleCount) &&
+           (expected->textureRectangleCount == actual->textureRectangleCount) &&
+           (expected->commandHash == actual->commandHash) &&
+           (expected->commandLimitHit == actual->commandLimitHit) &&
+           (expected->depthLimitHit == actual->depthLimitHit) &&
+           (expected->transformedVertexCount == actual->transformedVertexCount);
 }
 
 static void psp_gfx_me_report_result(void) {
     PspGfxMeReplayStats actual;
     char line[512];
     int match;
+    int structureMatch;
 
     psp_gfx_me_read_result(&actual);
     match = (sLastError == 0) && psp_gfx_me_stats_match(&sPendingGfxExpected, &actual);
+    structureMatch = psp_gfx_me_structure_matches(&sPendingGfxExpected, &actual);
     if (sPendingGfxCountResult) {
         if (match) {
             sGfxReplayMatches++;
@@ -475,12 +509,13 @@ static void psp_gfx_me_report_result(void) {
             sGfxReplayMismatches++;
         }
     }
-    if (!match || (sPendingGfxCountResult && sPendingGfxLogResult &&
-                   ((sPendingGfxTaskIndex <= 4) || ((sPendingGfxTaskIndex % 30) == 0)))) {
+    if ((sLastError != 0) || !structureMatch ||
+        (sPendingGfxCountResult && sPendingGfxLogResult &&
+         ((sPendingGfxTaskIndex <= 4) || ((sPendingGfxTaskIndex % 30) == 0)))) {
         snprintf(line, sizeof(line),
                  "[psp-me-gfx] task=%lu %s cmds=%lu/%lu dl=%lu/%lu vtx=%lu/%lu "
                  "loaded=%lu/%lu mtx=%lu/%lu tri1=%lu/%lu tri2=%lu/%lu hash=%08lx/%08lx "
-                 "matches=%lu mismatches=%lu result=%ld",
+                 "xvtx=%lu/%lu xhash=%08lx/%08lx matches=%lu mismatches=%lu skips=%lu result=%ld",
                  (unsigned long) sPendingGfxTaskIndex, match ? "match" : "MISMATCH",
                  (unsigned long) actual.commandCount, (unsigned long) sPendingGfxExpected.commandCount,
                  (unsigned long) actual.nestedDlCount, (unsigned long) sPendingGfxExpected.nestedDlCount,
@@ -496,7 +531,12 @@ static void psp_gfx_me_report_result(void) {
                  (unsigned long) sPendingGfxExpected.tri2CommandCount,
                  (unsigned long) actual.commandHash,
                  (unsigned long) sPendingGfxExpected.commandHash,
+                 (unsigned long) actual.transformedVertexCount,
+                 (unsigned long) sPendingGfxExpected.transformedVertexCount,
+                 (unsigned long) actual.transformHash,
+                 (unsigned long) sPendingGfxExpected.transformHash,
                  (unsigned long) sGfxReplayMatches, (unsigned long) sGfxReplayMismatches,
+                 (unsigned long) sGfxReplaySkippedBusy,
                  (long) sLastError);
         PspPlatform_LogLine(line);
     }
@@ -535,7 +575,9 @@ __attribute__((noinline, aligned(4))) void meLibOnProcess(void) {
 
     while (sMeState != PSP_AUDIO_ME_STOP) {
         if (sMeState == PSP_AUDIO_ME_RUN) {
-            if (sMeJob == PSP_ME_JOB_AUDIO) {
+            if (0) {
+#if PSP_AUDIO
+            } else if (sMeJob == PSP_ME_JOB_AUDIO) {
                 const Acmd* commands = (const Acmd*) (uintptr_t) sMeCommands;
                 s32 commandCount = (s32) sMeCommandCount;
 
@@ -553,16 +595,19 @@ __attribute__((noinline, aligned(4))) void meLibOnProcess(void) {
 #else
                 psp_audio_me_writeback_outputs_me(commands, commandCount);
 #endif
+#endif
 #if PSP_GFX_ME_REPLAY
-            } else if (sMeJob == PSP_ME_JOB_GFX_BENCH_EMPTY) {
-                meLibDcacheWritebackInvalidateAll();
-                sMeResult = 0;
             } else if (sMeJob == PSP_ME_JOB_GFX_REPLAY) {
                 PspGfxMeReplayStats result;
 
-                meLibDcacheWritebackInvalidateAll();
+                psp_audio_me_invalidate_range_me(
+                    (const void*) (uintptr_t) sMeGfxSnapshotBase,
+                    sMeGfxSnapshotSize);
                 sMeResult = PspGfxMeReplay_Walk(
-                    (const Gfx*) (uintptr_t) sMeCommands, &result);
+                    (const Gfx*) (uintptr_t) sMeCommands, &result,
+                    (const void*) (uintptr_t) sMeGfxSourceBase,
+                    (const void*) (uintptr_t) sMeGfxSnapshotBase,
+                    sMeGfxSnapshotSize);
                 psp_gfx_me_publish_result(&result);
 #endif
             } else {
@@ -596,6 +641,9 @@ int PspAudioMe_Boot(void) {
     sMeProgress = 0;
     sMeCompletionEnabled = 0;
     sMeJob = PSP_ME_JOB_NONE;
+    sMeGfxSourceBase = 0;
+    sMeGfxSnapshotBase = 0;
+    sMeGfxSnapshotSize = 0;
     sMeState = PSP_AUDIO_ME_BOOTING;
     meLibSync();
 
@@ -648,7 +696,11 @@ int PspAudioMe_Init(void) {
 
     sInitialized = 1;
 #if PSP_GFX_ME_REPLAY
-    PspPlatform_LogLine("[psp-me-gfx] replay benchmark v3 active");
+#if PSP_AUDIO
+    PspPlatform_LogLine("[psp-me-gfx] direct-pool quarter-rate matrix validation v13 active");
+#else
+    PspPlatform_LogLine("[psp-me-gfx] direct-pool full-rate graphics-only matrix validation v13 active");
+#endif
 #endif
     return 0;
 }
@@ -741,6 +793,22 @@ void PspAudioMe_Wait(void) {
     psp_me_dispatch_unlock();
 }
 
+void PspMe_WaitGfxReplayPool(const void* task) {
+#if PSP_GFX_ME_REPLAY
+    if (task == NULL) {
+        return;
+    }
+    psp_me_dispatch_lock();
+    if (sPending && (sPendingJob == PSP_ME_JOB_GFX_REPLAY) &&
+        (sPendingGfxSourcePool == task)) {
+        psp_audio_me_wait_locked();
+    }
+    psp_me_dispatch_unlock();
+#else
+    (void) task;
+#endif
+}
+
 void PspAudioMe_Submit(const Acmd* commands, s32 commandCount) {
 #if !PSP_AUDIO
     (void) commands;
@@ -784,18 +852,21 @@ void PspAudioMe_Submit(const Acmd* commands, s32 commandCount) {
 #if PSP_GFX_ME_REPLAY
 static void psp_gfx_me_start_locked(const Gfx* dl, u32 taskIndex,
                                     const PspGfxMeReplayStats* expected,
-                                    s32 countResult, s32 logResult, s32 flushInputs) {
-    if (flushInputs) {
-        sceKernelDcacheWritebackAll();
-    }
+                                    const void* sourceBase, const void* snapshotBase,
+                                    u32 snapshotSize, s32 countResult,
+                                    s32 logResult) {
     psp_audio_me_drain_completion();
     sMeCommands = (u32) (uintptr_t) dl;
     sMeCommandCount = 0;
     sMeResult = 0;
+    sMeGfxSourceBase = (u32) (uintptr_t) sourceBase;
+    sMeGfxSnapshotBase = (u32) (uintptr_t) snapshotBase;
+    sMeGfxSnapshotSize = snapshotSize;
     sPendingGfxExpected = *expected;
     sPendingGfxTaskIndex = taskIndex;
     sPendingGfxCountResult = countResult;
     sPendingGfxLogResult = logResult;
+    sPendingGfxSourcePool = sourceBase;
     sPendingStart = sceKernelGetSystemTimeLow();
     sPendingJob = PSP_ME_JOB_GFX_REPLAY;
     sPending = 1;
@@ -805,76 +876,18 @@ static void psp_gfx_me_start_locked(const Gfx* dl, u32 taskIndex,
     meLibSync();
 }
 
-static u32 psp_gfx_me_time_locked(const Gfx* dl, u32 taskIndex,
-                                  const PspGfxMeReplayStats* expected, s32 countResult) {
-    u64 start = sceKernelGetSystemTimeWide();
-    u64 elapsed;
-
-    psp_gfx_me_start_locked(dl, taskIndex, expected, countResult, 0, 0);
-    psp_audio_me_wait_locked();
-    elapsed = sceKernelGetSystemTimeWide() - start;
-    return elapsed > 0xFFFFFFFFULL ? 0xFFFFFFFFU : (u32) elapsed;
-}
-
-static u32 psp_gfx_me_time_empty_locked(void) {
-    u64 start = sceKernelGetSystemTimeWide();
-    u64 elapsed;
-
-    psp_audio_me_drain_completion();
-    sMeCommands = 0;
-    sMeCommandCount = 0;
-    sMeResult = 0;
-    sPendingStart = sceKernelGetSystemTimeLow();
-    sPendingJob = PSP_ME_JOB_GFX_BENCH_EMPTY;
-    sPending = 1;
-    meLibSync();
-    sMeJob = PSP_ME_JOB_GFX_BENCH_EMPTY;
-    sMeState = PSP_AUDIO_ME_RUN;
-    meLibSync();
-    psp_audio_me_wait_locked();
-    elapsed = sceKernelGetSystemTimeWide() - start;
-    return elapsed > 0xFFFFFFFFULL ? 0xFFFFFFFFU : (u32) elapsed;
-}
-
-static void psp_gfx_me_report_benchmark(u32 taskIndex, u32 commandCount,
-                                        u32 cacheUs, u32 emptyUs, u32 replayUs) {
-    char line[384];
-    s32 netUs = (s32) replayUs - (s32) emptyUs;
-
-    sGfxBenchmarkSamples++;
-    sGfxBenchmarkCacheTotalUs += cacheUs;
-    sGfxBenchmarkEmptyTotalUs += emptyUs;
-    sGfxBenchmarkReplayTotalUs += replayUs;
-    sGfxBenchmarkNetTotalUs += netUs;
-    if ((sGfxBenchmarkSamples == 1) || (netUs < sGfxBenchmarkNetMinUs)) {
-        sGfxBenchmarkNetMinUs = netUs;
-    }
-    if ((sGfxBenchmarkSamples == 1) || (netUs > sGfxBenchmarkNetMaxUs)) {
-        sGfxBenchmarkNetMaxUs = netUs;
-    }
-
-    snprintf(line, sizeof(line),
-             "[psp-me-gfx-bench] task=%lu sample=%lu cmds=%lu cache_us=%lu empty_us=%lu "
-             "replay_us=%lu net_us=%ld total_us=%lu avg_cache_us=%llu avg_empty_us=%llu "
-             "avg_replay_us=%llu avg_net_us=%lld net_range=%ld..%ld matches=%lu mismatches=%lu",
-             (unsigned long) taskIndex, (unsigned long) sGfxBenchmarkSamples,
-             (unsigned long) commandCount, (unsigned long) cacheUs,
-             (unsigned long) emptyUs, (unsigned long) replayUs, (long) netUs,
-             (unsigned long) (cacheUs + replayUs),
-             (unsigned long long) (sGfxBenchmarkCacheTotalUs / sGfxBenchmarkSamples),
-             (unsigned long long) (sGfxBenchmarkEmptyTotalUs / sGfxBenchmarkSamples),
-             (unsigned long long) (sGfxBenchmarkReplayTotalUs / sGfxBenchmarkSamples),
-             (long long) (sGfxBenchmarkNetTotalUs / (s64) sGfxBenchmarkSamples),
-             (long) sGfxBenchmarkNetMinUs, (long) sGfxBenchmarkNetMaxUs,
-             (unsigned long) sGfxReplayMatches, (unsigned long) sGfxReplayMismatches);
-    PspPlatform_LogLine(line);
-}
 #endif
 
-void PspMe_SubmitGfxReplay(const Gfx* dl, u32 taskIndex,
+void PspMe_SubmitGfxReplay(const void* task, const Gfx* dl, u32 taskIndex,
                            const PspGfxMeReplayStats* expected) {
 #if PSP_GFX_ME_REPLAY
-    if ((dl == NULL) || (expected == NULL)) {
+    uintptr_t dlOffset;
+
+    if ((task == NULL) || (dl == NULL) || (expected == NULL)) {
+        return;
+    }
+    dlOffset = (uintptr_t) dl - (uintptr_t) task;
+    if (dlOffset >= PSP_GFX_ME_POOL_SIZE) {
         return;
     }
 
@@ -884,6 +897,11 @@ void PspMe_SubmitGfxReplay(const Gfx* dl, u32 taskIndex,
     }
 
     psp_me_dispatch_lock();
+    if (sPending && psp_audio_me_is_running()) {
+        sGfxReplaySkippedBusy++;
+        psp_me_dispatch_unlock();
+        return;
+    }
     psp_audio_me_wait_locked();
     if (!sInitialized || (sMeState != PSP_AUDIO_ME_IDLE)) {
         if (!sGfxReplayInactiveLogged) {
@@ -900,30 +918,12 @@ void PspMe_SubmitGfxReplay(const Gfx* dl, u32 taskIndex,
         return;
     }
 
-    if ((taskIndex % 30) == 0) {
-        u64 cacheStart;
-        u64 cacheElapsed;
-        u32 cacheUs;
-        u32 emptyUs;
-        u32 replayUs;
-
-        cacheStart = sceKernelGetSystemTimeWide();
-        sceKernelDcacheWritebackAll();
-        cacheElapsed = sceKernelGetSystemTimeWide() - cacheStart;
-        cacheUs = cacheElapsed > 0xFFFFFFFFULL ? 0xFFFFFFFFU : (u32) cacheElapsed;
-        emptyUs = psp_gfx_me_time_empty_locked();
-        if (!sInitialized || (sMeState != PSP_AUDIO_ME_IDLE)) {
-            psp_me_dispatch_unlock();
-            return;
-        }
-        replayUs = psp_gfx_me_time_locked(dl, taskIndex, expected, 1);
-        psp_gfx_me_report_benchmark(taskIndex, expected->commandCount,
-                                    cacheUs, emptyUs, replayUs);
-    } else {
-        psp_gfx_me_start_locked(dl, taskIndex, expected, 1, 1, 1);
-    }
+    psp_gfx_me_start_locked(
+        dl, taskIndex, expected,
+        task, task, PSP_GFX_ME_POOL_SIZE, 1, 1);
     psp_me_dispatch_unlock();
 #else
+    (void) task;
     (void) dl;
     (void) taskIndex;
     (void) expected;
@@ -951,13 +951,18 @@ int PspAudioMe_Init(void) {
 void PspAudioMe_Wait(void) {
 }
 
+void PspMe_WaitGfxReplayPool(const void* task) {
+    (void) task;
+}
+
 void PspAudioMe_Submit(const Acmd* commands, s32 commandCount) {
     (void) commands;
     (void) commandCount;
 }
 
-void PspMe_SubmitGfxReplay(const Gfx* dl, u32 taskIndex,
+void PspMe_SubmitGfxReplay(const void* task, const Gfx* dl, u32 taskIndex,
                            const PspGfxMeReplayStats* expected) {
+    (void) task;
     (void) dl;
     (void) taskIndex;
     (void) expected;
