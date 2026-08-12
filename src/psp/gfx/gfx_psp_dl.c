@@ -280,6 +280,8 @@ typedef struct {
     u32 textureHeight;
     u32 textureUploadWidth;
     u32 textureUploadHeight;
+    u32 textureUploadX;
+    u32 textureUploadY;
     s32 textureTileUls;
     s32 textureTileUlt;
     u32 textureCms;
@@ -590,32 +592,34 @@ static PspGfxPspglTextureWrap psp_gfx_dl_texture_wrap(u32 mode, u32 mask) {
     return PSP_GFX_PSPGL_WRAP_REPEAT;
 }
 
-static float psp_gfx_dl_normalize_s10_5_scaled(s16 coord, u32 uploadSize, s32 tileOrigin, s32 scale) {
+static float psp_gfx_dl_normalize_s10_5_scaled(s16 coord, u32 uploadSize, u32 uploadOffset, s32 tileOrigin,
+                                               s32 scale) {
     float scaledCoord = ((float) coord * (float) scale) / 65536.0f;
 
     if (uploadSize == 0) {
         return 0.0f;
     }
-    return (scaledCoord - ((float) tileOrigin * 8.0f)) / (32.0f * (float) uploadSize);
+    return (scaledCoord - ((float) tileOrigin * 8.0f) + ((float) uploadOffset * 32.0f)) /
+           (32.0f * (float) uploadSize);
 }
 
 static float psp_gfx_dl_normalize_s10_5_s(const PspGfxDlContext* ctx, s16 coord, u32 uploadSize, s32 tileOrigin) {
-    return psp_gfx_dl_normalize_s10_5_scaled(coord, uploadSize, tileOrigin, ctx->textureScaleS);
+    return psp_gfx_dl_normalize_s10_5_scaled(coord, uploadSize, ctx->textureUploadX, tileOrigin,
+                                             ctx->textureScaleS);
 }
 
 static float psp_gfx_dl_normalize_s10_5_t(const PspGfxDlContext* ctx, s16 coord, u32 uploadSize, s32 tileOrigin) {
-    return psp_gfx_dl_normalize_s10_5_scaled(coord, uploadSize, tileOrigin, ctx->textureScaleT);
+    return psp_gfx_dl_normalize_s10_5_scaled(coord, uploadSize, ctx->textureUploadY, tileOrigin,
+                                             ctx->textureScaleT);
 }
 
-static float psp_gfx_dl_normalize_texel_coord(const PspGfxDlContext* ctx, float coord, u32 uploadSize,
-                                              s32 tileOrigin) {
+static float psp_gfx_dl_normalize_texel_coord(float coord, u32 uploadSize, u32 uploadOffset, s32 tileOrigin) {
     float result;
 
-    (void) ctx;
     if (uploadSize == 0) {
         result = 0.0f;
     } else {
-        result = (coord - ((float) tileOrigin * 0.25f)) / (float) uploadSize;
+        result = (coord - ((float) tileOrigin * 0.25f) + (float) uploadOffset) / (float) uploadSize;
     }
     return result;
 }
@@ -2610,9 +2614,9 @@ static void psp_gfx_dl_build_direct_vertex(PspGfxDlContext* ctx, const PspGfxDlV
     }
     psp_gfx_dl_apply_depth_bias(ctx, &dst->z);
     dst->u = ((((float) src->s * (float) ctx->textureScaleS) / 65536.0f) -
-              ((float) ctx->textureTileUls * 8.0f)) * uScale;
+              ((float) ctx->textureTileUls * 8.0f) + ((float) ctx->textureUploadX * 32.0f)) * uScale;
     dst->v = ((((float) src->t * (float) ctx->textureScaleT) / 65536.0f) -
-              ((float) ctx->textureTileUlt * 8.0f)) * vScale;
+              ((float) ctx->textureTileUlt * 8.0f) + ((float) ctx->textureUploadY * 32.0f)) * vScale;
 }
 
 static void psp_gfx_dl_emit_direct_vertex_unchecked(PspGfxDlContext* ctx, const PspGfxDlVertex* src,
@@ -3327,8 +3331,10 @@ static void psp_gfx_dl_emit_rect_vertex(PspGfxDlContext* ctx,
 
     dst = &PSP_GFX_DL_BATCH[ctx->batchCount++];
     psp_gfx_dl_mark_batch_component(ctx);
-    dst->u = psp_gfx_dl_normalize_texel_coord(ctx, u, ctx->textureUploadWidth, ctx->textureTileUls);
-    dst->v = psp_gfx_dl_normalize_texel_coord(ctx, v, ctx->textureUploadHeight, ctx->textureTileUlt);
+    dst->u = psp_gfx_dl_normalize_texel_coord(u, ctx->textureUploadWidth, ctx->textureUploadX,
+                                             ctx->textureTileUls);
+    dst->v = psp_gfx_dl_normalize_texel_coord(v, ctx->textureUploadHeight, ctx->textureUploadY,
+                                             ctx->textureTileUlt);
 
     r = ctx->primitiveR;
     g = ctx->primitiveG;
@@ -4067,6 +4073,8 @@ static void psp_gfx_dl_handle_set_texture_image(PspGfxDlContext* ctx, const Gfx*
     ctx->textureRef = psp_gfx_dl_null_texture_ref();
     ctx->textureUploadWidth = 0;
     ctx->textureUploadHeight = 0;
+    ctx->textureUploadX = 0;
+    ctx->textureUploadY = 0;
     ctx->textureUploadAttempted = 0;
     psp_gfx_dl_mark_effective_material_dirty(ctx);
 }
@@ -4158,12 +4166,14 @@ static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int pr
         palette = ctx->texturePalette + (ctx->texturePaletteIndex * 16);
         hit = PspGfxPspgl_FindCi4Texture((const u8*) ctx->textureImage, palette, ctx->textureWidth,
                                          ctx->textureHeight, &ctx->textureId, &ctx->textureRef,
-                                         &ctx->textureUploadWidth, &ctx->textureUploadHeight);
+                                         &ctx->textureUploadWidth, &ctx->textureUploadHeight,
+                                         &ctx->textureUploadX, &ctx->textureUploadY);
         if (!hit) {
             psp_gfx_dl_flush_texture_change(ctx, PSP_PROFILE_TEXTURE_FLUSH_CACHE_MISS_UPLOAD);
             ctx->textureId = PspGfxPspgl_CreateCi4Texture((const u8*) ctx->textureImage, palette, ctx->textureWidth,
                                                           ctx->textureHeight, &ctx->textureUploadWidth,
-                                                          &ctx->textureUploadHeight, &ctx->textureRef);
+                                                          &ctx->textureUploadHeight, &ctx->textureUploadX,
+                                                          &ctx->textureUploadY, &ctx->textureRef);
         }
     } else if ((ctx->textureFormat == G_IM_FMT_RGBA) && (ctx->textureSize == G_IM_SIZ_16b)) {
         cache = PSP_HW_TEXTURE_CACHE_RGBA16;

@@ -111,11 +111,14 @@ u32 PspGfxPspgl_CreateCi8Texture(const u8* indices, const u16* palette, u32 widt
 u32 PspGfxPspgl_GetCi8Texture(const u8* indices, const u16* palette, u32 width, u32 height, u32* uploadWidth,
                               u32* uploadHeight, PspGfxPspglTextureRef* textureRef);
 int PspGfxPspgl_FindCi4Texture(const u8* indices, const u16* palette, u32 width, u32 height, u32* textureId,
-                               PspGfxPspglTextureRef* textureRef, u32* uploadWidth, u32* uploadHeight);
+                               PspGfxPspglTextureRef* textureRef, u32* uploadWidth, u32* uploadHeight,
+                               u32* uploadX, u32* uploadY);
 u32 PspGfxPspgl_CreateCi4Texture(const u8* indices, const u16* palette, u32 width, u32 height, u32* uploadWidth,
-                                 u32* uploadHeight, PspGfxPspglTextureRef* textureRef);
+                                 u32* uploadHeight, u32* uploadX, u32* uploadY,
+                                 PspGfxPspglTextureRef* textureRef);
 u32 PspGfxPspgl_GetCi4Texture(const u8* indices, const u16* palette, u32 width, u32 height, u32* uploadWidth,
-                              u32* uploadHeight, PspGfxPspglTextureRef* textureRef);
+                              u32* uploadHeight, u32* uploadX, u32* uploadY,
+                              PspGfxPspglTextureRef* textureRef);
 int PspGfxPspgl_FindRgba16Texture(const u16* pixels, u32 width, u32 height, int premultiply, u32* textureId,
                                   PspGfxPspglTextureRef* textureRef, u32* uploadWidth, u32* uploadHeight);
 u32 PspGfxPspgl_CreateRgba16Texture(const u16* pixels, u32 width, u32 height, int premultiply, u32* uploadWidth,
