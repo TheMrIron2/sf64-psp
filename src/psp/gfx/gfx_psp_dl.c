@@ -334,6 +334,7 @@ typedef struct {
     int batchAlphaTest;
     int batchBlend;
     int batchPremultiplied;
+    int batchSprites;
     int batchDepthTest;
     int batchDepthWrite;
     int batchDepthBias;
@@ -1503,7 +1504,6 @@ static void psp_gfx_dl_weld_flat_batch_seams(PspGfxDlContext* ctx) {
     }
 }
 
-
 static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason reason) {
 #if PROFILE_COMPONENTS
     u32 ownerComponent;
@@ -1525,7 +1525,15 @@ static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason 
     psp_gfx_dl_weld_flat_batch_seams(ctx);
     PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_SUBMIT);
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_BATCH_FLUSH);
-    if (ctx->batchReserved) {
+    if (ctx->batchSprites) {
+        PspGfxPspgl_DrawColoredSprites(
+            PSP_GFX_DL_BATCH, ctx->batchCount, ctx->batchTextureId, ctx->batchTextureRef,
+            ctx->batchTextureEnv, ctx->batchTextureEnvColor, ctx->batchWrapS, ctx->batchWrapT,
+            ctx->batchAlphaTest, ctx->batchBlend, ctx->batchPremultiplied, ctx->batchDepthTest,
+            ctx->batchDepthWrite, ctx->batchFog, ctx->batchFogColor, ctx->batchFogStart, ctx->batchFogEnd,
+            &ctx->batchProjection[0][0], ctx->batchProjectionSerial, ctx->batchPretransformed,
+            ctx->batchPointFilter);
+    } else if (ctx->batchReserved) {
         PspGfxPspgl_DrawReservedColoredTriangles(
             &ctx->batchReservation, ctx->batchCount, ctx->batchTextureId, ctx->batchTextureRef,
             ctx->batchTextureEnv, ctx->batchTextureEnvColor, ctx->batchWrapS, ctx->batchWrapT,
@@ -1783,6 +1791,14 @@ static void psp_gfx_dl_pool_rotate_full(PspGfxDlContext* ctx) {
 }
 
 #define psp_gfx_dl_flush_all(ctx, reason) psp_gfx_dl_pool_drain((ctx), (reason))
+
+static void psp_gfx_dl_set_batch_sprites(PspGfxDlContext* ctx, int sprites) {
+    if (ctx->batchSprites == sprites) {
+        return;
+    }
+    psp_gfx_dl_flush_all(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+    ctx->batchSprites = sprites;
+}
 
 static int psp_gfx_dl_texture_barrier_has_pending(const PspGfxDlContext* ctx) {
     return (ctx->batchCount != 0) || (sPspGfxDlPoolOpen != 0);
@@ -2691,6 +2707,8 @@ static int psp_gfx_dl_try_emit_tri2_direct_pair(PspGfxDlContext* ctx, u8 a0, u8 
         return 0;
     }
 
+    psp_gfx_dl_set_batch_sprites(ctx, 0);
+
     pretransformed0 = psp_gfx_dl_triangle_pretransformed(ctx, va0, vb0, vc0);
     pretransformed1 = psp_gfx_dl_triangle_pretransformed(ctx, va1, vb1, vc1);
     if (pretransformed0 != pretransformed1) {
@@ -3153,6 +3171,7 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
     va = &ctx->vertices[a];
     vb = &ctx->vertices[b];
     vc = &ctx->vertices[c];
+    psp_gfx_dl_set_batch_sprites(ctx, 0);
     pretransformed = !ctx->hasProjection || (va->projectionSerial == 0) ||
                      (va->projectionSerial != vb->projectionSerial) ||
                      (va->projectionSerial != vc->projectionSerial);
@@ -3363,6 +3382,7 @@ static void psp_gfx_dl_handle_texture_rectangle(PspGfxDlContext* ctx, const Gfx*
     float dtdy = (float) (s16) (half2->words.w1 & 0xFFFF) / 1024.0f;
     float s1;
     float t1;
+    int sprites;
 
     if (ctx->textureId == 0) {
         psp_gfx_dl_prepare_texture(ctx, 1, psp_gfx_dl_premultiplied_blend_enabled(ctx));
@@ -3382,6 +3402,15 @@ static void psp_gfx_dl_handle_texture_rectangle(PspGfxDlContext* ctx, const Gfx*
         t1 = t0 + ((y1 - y0) * dtdy);
     }
 
+    sprites = !flip && (ctx->textureFormat == G_IM_FMT_CI) && (ctx->textureSize == G_IM_SIZ_4b) &&
+              (ctx->textureWidth == 16) && (ctx->textureHeight == 13);
+    psp_gfx_dl_set_batch_sprites(ctx, sprites);
+
+    if (sprites) {
+        psp_gfx_dl_set_batch_depth(ctx, 0, 0, 0);
+        psp_gfx_dl_set_batch_fog(ctx, 0, ctx->projection);
+        psp_gfx_dl_set_batch_transform(ctx, 1, 0, NULL);
+    }
     psp_gfx_dl_set_batch_texture(
         ctx, ctx->textureId, ctx->textureRef, PSP_GFX_PSPGL_TEX_MODULATE,
         0, ctx->combineMode, psp_gfx_dl_primitive_color(ctx), psp_gfx_dl_environment_color(ctx),
@@ -3389,14 +3418,19 @@ static void psp_gfx_dl_handle_texture_rectangle(PspGfxDlContext* ctx, const Gfx*
         psp_gfx_dl_texture_wrap(ctx->textureCmt, ctx->textureMaskT),
         psp_gfx_dl_alpha_test_enabled(ctx), psp_gfx_dl_blend_enabled(ctx),
         psp_gfx_dl_premultiplied_blend_enabled(ctx), psp_gfx_dl_effective_point_filter(ctx));
-    psp_gfx_dl_set_batch_depth(ctx, 0, 0, 0);
-    psp_gfx_dl_set_batch_fog(ctx, 0, ctx->projection);
-    psp_gfx_dl_set_batch_transform(ctx, 1, 0, NULL);
+    if (!sprites) {
+        psp_gfx_dl_set_batch_depth(ctx, 0, 0, 0);
+        psp_gfx_dl_set_batch_fog(ctx, 0, ctx->projection);
+        psp_gfx_dl_set_batch_transform(ctx, 1, 0, NULL);
+    }
 #if BATCH_STATE_CACHE
     psp_gfx_dl_mark_effective_state_dirty(ctx);
 #endif
 
-    if (flip) {
+    if (sprites) {
+        psp_gfx_dl_emit_rect_vertex(ctx, x0, y0, s0, t0);
+        psp_gfx_dl_emit_rect_vertex(ctx, x1, y1, s1, t1);
+    } else if (flip) {
         psp_gfx_dl_emit_rect_vertex(ctx, x0, y0, s0, t0);
         psp_gfx_dl_emit_rect_vertex(ctx, x1, y0, s0, t1);
         psp_gfx_dl_emit_rect_vertex(ctx, x1, y1, s1, t1);
