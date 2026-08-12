@@ -40,6 +40,7 @@ static int sStarfieldReady;
 #if PSP_GFX_ME_REPLAY
 static u32 sMeOffloadTasks;
 static u32 sMeOffloadVertices;
+static u32 sMeVmeVertices;
 static u32 sMeLitVertices;
 static u32 sMeTraceMismatches;
 static u32 sMeOffloadFailures;
@@ -112,16 +113,18 @@ static void psp_renderer_draw_perf_overlay(void) {
      */
 #if PSP_GFX_ME_REPLAY
     pspDebugScreenPrintf(
-        "FPS %lu.%lu GFX %lu.%lums ME T%lu V%lu L%lu X%lu F%lu   ",
+        "FPS %lu.%lu GFX %lu.%lums ME T%lu V%lu Q%lu L%lu X%lu F%lu S%lu   ",
         (unsigned long) (sPerfFpsTenths / 10),
         (unsigned long) (sPerfFpsTenths % 10),
         (unsigned long) (sPerfGfxMsTenths / 10),
         (unsigned long) (sPerfGfxMsTenths % 10),
         (unsigned long) sMeOffloadTasks,
         (unsigned long) sMeOffloadVertices,
+        (unsigned long) sMeVmeVertices,
         (unsigned long) sMeLitVertices,
         (unsigned long) sMeTraceMismatches,
-        (unsigned long) sMeOffloadFailures
+        (unsigned long) sMeOffloadFailures,
+        (unsigned long) PspMe_GetGfxVmeStage()
     );
 #else
     pspDebugScreenPrintf(
@@ -287,7 +290,7 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
 #if PSP_GFX_ME_REPLAY
     PspGfxDlStats dlStats;
     const PspGfxMeTransformTrace* meTransformTrace = NULL;
-    u32 meTransformTraceCount = 0;
+    volatile const u32* meTransformTracePublished = NULL;
 #endif
 
     #if PROFILE_HW_COUNTERS
@@ -324,21 +327,22 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
             dl = (const Gfx*) task->task.t.data_ptr;
 #if PSP_GFX_ME_REPLAY
             if (gGameState == GSTATE_TITLE) {
-                if (PspMe_RunGfxTransform(
+                if (PspMe_BeginGfxTransform(
                         task, dl, taskIndex,
-                        &meTransformTrace, &meTransformTraceCount) == 0) {
+                        &meTransformTrace, &meTransformTracePublished) == 0) {
                     sMeOffloadTasks++;
                 } else {
                     sMeOffloadFailures++;
                 }
             }
             PspGfxDl_Run(
-                dl, taskIndex, &dlStats, meTransformTrace, meTransformTraceCount);
+                dl, taskIndex, &dlStats, meTransformTrace, meTransformTracePublished);
             sMeOffloadVertices += dlStats.meTransformVertexCount;
+            sMeVmeVertices += dlStats.meTransformVmeVertexCount;
             sMeLitVertices += dlStats.meTransformLitVertexCount;
             sMeTraceMismatches += dlStats.meTransformMismatchCount;
 #else
-            PspGfxDl_Run(dl, taskIndex, NULL, NULL, 0);
+            PspGfxDl_Run(dl, taskIndex, NULL, NULL, NULL);
 #endif
     #if PROFILE_HW_COUNTERS
             /* Only after a run, the context still holds the previous task otherwise */

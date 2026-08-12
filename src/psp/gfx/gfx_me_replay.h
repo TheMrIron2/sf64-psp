@@ -7,6 +7,9 @@
 #define PSP_GFX_ME_TRANSFORM_TRACE_CAPACITY 4096
 #define PSP_GFX_ME_TRANSFORM_VALID 1U
 #define PSP_GFX_ME_TRANSFORM_PROJECTED 2U
+#define PSP_GFX_ME_TRANSFORM_VME 4U
+#define PSP_GFX_ME_TRACE_DONE 0x80000000U
+#define PSP_GFX_ME_TRACE_COUNT_MASK 0x7FFFFFFFU
 
 typedef struct {
     float view[4];
@@ -36,6 +39,8 @@ typedef struct {
 int PspGfxMeReplay_Walk(const Gfx* dl, PspGfxMeReplayStats* stats,
                         const void* sourceBase, const void* snapshotBase,
                         u32 snapshotSize, PspGfxMeTransformTrace* trace,
-                        u32 traceCapacity);
+                        u32 traceCapacity, volatile u32* tracePublished,
+                        volatile u32* vmeStage);
+void PspGfxMeReplay_VmeInit(volatile u32* vmeStage);
 
 #endif

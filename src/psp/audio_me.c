@@ -58,6 +58,8 @@ enum {
     PSP_AUDIO_ME_SHARED_GFX_SNAPSHOT_SIZE,
     PSP_AUDIO_ME_SHARED_GFX_TRACE_BASE,
     PSP_AUDIO_ME_SHARED_GFX_TRACE_CAPACITY,
+    PSP_AUDIO_ME_SHARED_GFX_TRACE_PUBLISHED,
+    PSP_AUDIO_ME_SHARED_GFX_VME_STAGE,
     PSP_AUDIO_ME_SHARED_COUNT,
 };
 
@@ -78,6 +80,8 @@ static volatile u32 sSharedStorage[PSP_AUDIO_ME_SHARED_COUNT]
 #define sMeGfxSnapshotSize PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_GFX_SNAPSHOT_SIZE]
 #define sMeGfxTraceBase PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_GFX_TRACE_BASE]
 #define sMeGfxTraceCapacity PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_GFX_TRACE_CAPACITY]
+#define sMeGfxTracePublished PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_GFX_TRACE_PUBLISHED]
+#define sMeGfxVmeStage PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_GFX_VME_STAGE]
 
 static volatile PspGfxMeReplayStats sGfxReplayResultStorage
     __attribute__((aligned(64), section(".uncached")));
@@ -87,7 +91,11 @@ static volatile PspGfxMeReplayStats sGfxReplayResultStorage
 
 #if PSP_GFX_ME_REPLAY
 static PspGfxMeTransformTrace
-    sGfxReplayTrace[PSP_GFX_ME_TRANSFORM_TRACE_CAPACITY] __attribute__((aligned(64)));
+    sGfxReplayTraceStorage[PSP_GFX_ME_TRANSFORM_TRACE_CAPACITY]
+        __attribute__((aligned(64), section(".uncached")));
+#define sGfxReplayTrace \
+    ((PspGfxMeTransformTrace*) \
+        (PSP_AUDIO_ME_UNCACHED | (u32) (uintptr_t) sGfxReplayTraceStorage))
 #endif
 
 typedef struct {
@@ -106,7 +114,6 @@ static PspMeJob sPendingJob;
 static s32 sLastError;
 #if PSP_GFX_ME_REPLAY
 static PspGfxMeReplayStats sPendingGfxExpected;
-static PspGfxMeReplayStats sCompletedGfxStats;
 static const PspGfxMeTransformTrace* sPendingGfxExpectedTrace;
 static u32 sPendingGfxTaskIndex;
 static s32 sPendingGfxCountResult;
@@ -371,6 +378,7 @@ static void psp_audio_me_invalidate_range_me(const void* address, u32 size) {
     meLibDcacheInvalidateRange((u32) start, end - start);
 }
 
+#if PSP_AUDIO && (!defined(PSP_LOG_ENABLED) || !PSP_LOG_ENABLED)
 static void psp_audio_me_writeback_range_me(const void* address, u32 size) {
     uintptr_t start;
     uintptr_t end;
@@ -384,7 +392,6 @@ static void psp_audio_me_writeback_range_me(const void* address, u32 size) {
     meLibDcacheWritebackRange((u32) start, end - start);
 }
 
-#if PSP_AUDIO && (!defined(PSP_LOG_ENABLED) || !PSP_LOG_ENABLED)
 static void psp_audio_me_invalidate_inputs_me(const Acmd* commands, s32 commandCount) {
     s32 i;
 
@@ -550,12 +557,6 @@ static void psp_gfx_me_report_result(void) {
     u32 maxErrorQ16;
 
     psp_gfx_me_read_result(&actual);
-    psp_audio_me_invalidate_range_cpu(
-        sGfxReplayTrace,
-        (actual.transformTraceCount < PSP_GFX_ME_TRANSFORM_TRACE_CAPACITY ?
-             actual.transformTraceCount : PSP_GFX_ME_TRANSFORM_TRACE_CAPACITY) *
-            sizeof(sGfxReplayTrace[0]));
-    sCompletedGfxStats = actual;
     if (!sPendingGfxCountResult) {
         return;
     }
@@ -641,11 +642,16 @@ __attribute__((noinline, aligned(4))) void meLibOnProcess(void) {
     sMeProgress = 1;
     meLibSync();
 
+    meLibExceptionHandlerInit(0);
+
     while (sMeState == PSP_AUDIO_ME_BOOTING) {
         meLibDelayPipeline();
     }
 
     psp_audio_me_invalidate_range_me(PspAudioMixer_GetStateAddress(), PspAudioMixer_GetStateSize());
+#if PSP_GFX_ME_REPLAY
+    PspGfxMeReplay_VmeInit(&sMeGfxVmeStage);
+#endif
     sMeProgress = PSP_AUDIO_ME_READY;
     meLibSync();
 
@@ -686,12 +692,12 @@ __attribute__((noinline, aligned(4))) void meLibOnProcess(void) {
                     (const void*) (uintptr_t) sMeGfxSnapshotBase,
                     sMeGfxSnapshotSize,
                     (PspGfxMeTransformTrace*) (uintptr_t) sMeGfxTraceBase,
-                    sMeGfxTraceCapacity);
+                    sMeGfxTraceCapacity, &sMeGfxTracePublished,
+                    &sMeGfxVmeStage);
                 traceCount = result.transformTraceCount < sMeGfxTraceCapacity ?
                                  result.transformTraceCount : sMeGfxTraceCapacity;
-                psp_audio_me_writeback_range_me(
-                    (const void*) (uintptr_t) sMeGfxTraceBase,
-                    traceCount * sizeof(PspGfxMeTransformTrace));
+                meLibSync();
+                sMeGfxTracePublished = PSP_GFX_ME_TRACE_DONE | traceCount;
                 psp_gfx_me_publish_result(&result);
 #endif
             } else {
@@ -730,6 +736,8 @@ int PspAudioMe_Boot(void) {
     sMeGfxSnapshotSize = 0;
     sMeGfxTraceBase = 0;
     sMeGfxTraceCapacity = 0;
+    sMeGfxTracePublished = 0;
+    sMeGfxVmeStage = 0;
     sMeState = PSP_AUDIO_ME_BOOTING;
     meLibSync();
 
@@ -783,9 +791,9 @@ int PspAudioMe_Init(void) {
     sInitialized = 1;
 #if PSP_GFX_ME_REPLAY
 #if PSP_AUDIO
-    PspPlatform_LogLine("[psp-me-gfx] synchronous G_VTX offload v19 active");
+    PspPlatform_LogLine("[psp-me-gfx] unlit adaptive VME offload v28 active");
 #else
-    PspPlatform_LogLine("[psp-me-gfx] synchronous G_VTX offload v19 active");
+    PspPlatform_LogLine("[psp-me-gfx] unlit adaptive VME offload v28 active");
 #endif
 #endif
     return 0;
@@ -951,6 +959,7 @@ static void psp_gfx_me_start_locked(const Gfx* dl, u32 taskIndex,
     sMeGfxSnapshotSize = snapshotSize;
     sMeGfxTraceBase = (u32) (uintptr_t) sGfxReplayTrace;
     sMeGfxTraceCapacity = PSP_GFX_ME_TRANSFORM_TRACE_CAPACITY;
+    sMeGfxTracePublished = 0;
     sPendingGfxExpected = *expected;
     sPendingGfxExpectedTrace = expectedTrace;
     sPendingGfxTaskIndex = taskIndex;
@@ -968,14 +977,16 @@ static void psp_gfx_me_start_locked(const Gfx* dl, u32 taskIndex,
 
 #endif
 
-int PspMe_RunGfxTransform(const void* task, const Gfx* dl, u32 taskIndex,
-                          const PspGfxMeTransformTrace** trace, u32* traceCount) {
+int PspMe_BeginGfxTransform(const void* task, const Gfx* dl, u32 taskIndex,
+                            const PspGfxMeTransformTrace** trace,
+                            volatile const u32** tracePublished) {
 #if PSP_GFX_ME_REPLAY
     PspGfxMeReplayStats expected = { 0 };
     uintptr_t dlOffset;
     int result = -1;
 
-    if ((task == NULL) || (dl == NULL) || (trace == NULL) || (traceCount == NULL)) {
+    if ((task == NULL) || (dl == NULL) || (trace == NULL) ||
+        (tracePublished == NULL)) {
         return -1;
     }
     dlOffset = (uintptr_t) dl - (uintptr_t) task;
@@ -990,12 +1001,9 @@ int PspMe_RunGfxTransform(const void* task, const Gfx* dl, u32 taskIndex,
         psp_gfx_me_start_locked(
             dl, taskIndex, &expected, NULL,
             task, task, PSP_GFX_ME_POOL_SIZE, 0, 0);
-        psp_audio_me_wait_locked();
-        if ((sLastError == 0) && (sCompletedGfxStats.transformTraceOverflow == 0)) {
-            *trace = sGfxReplayTrace;
-            *traceCount = sCompletedGfxStats.transformTraceCount;
-            result = 0;
-        }
+        *trace = sGfxReplayTrace;
+        *tracePublished = &sMeGfxTracePublished;
+        result = 0;
     }
     psp_me_dispatch_unlock();
     return result;
@@ -1004,7 +1012,7 @@ int PspMe_RunGfxTransform(const void* task, const Gfx* dl, u32 taskIndex,
     (void) dl;
     (void) taskIndex;
     (void) trace;
-    (void) traceCount;
+    (void) tracePublished;
     return -1;
 #endif
 }
@@ -1072,6 +1080,10 @@ int PspAudioMe_GetLastError(void) {
     return sLastError;
 }
 
+u32 PspMe_GetGfxVmeStage(void) {
+    return sMeGfxVmeStage;
+}
+
 void PspMe_GetGfxReplayCounts(u32* withinFine, u32* withinCoarse,
                               u32* overCoarse, u32* structuralMismatches,
                               u32* maxErrorQ16, u32* skippedBusy) {
@@ -1133,13 +1145,14 @@ void PspMe_WaitGfxReplayPool(const void* task) {
     (void) task;
 }
 
-int PspMe_RunGfxTransform(const void* task, const Gfx* dl, u32 taskIndex,
-                          const PspGfxMeTransformTrace** trace, u32* traceCount) {
+int PspMe_BeginGfxTransform(const void* task, const Gfx* dl, u32 taskIndex,
+                            const PspGfxMeTransformTrace** trace,
+                            volatile const u32** tracePublished) {
     (void) task;
     (void) dl;
     (void) taskIndex;
     (void) trace;
-    (void) traceCount;
+    (void) tracePublished;
     return -1;
 }
 
@@ -1163,6 +1176,10 @@ int PspAudioMe_IsActive(void) {
 }
 
 int PspAudioMe_GetLastError(void) {
+    return 0;
+}
+
+u32 PspMe_GetGfxVmeStage(void) {
     return 0;
 }
 

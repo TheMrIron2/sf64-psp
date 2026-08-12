@@ -4,6 +4,9 @@
 #include "src/psp/profiler.h"
 #include "src/psp/renderer.h"
 
+#if PSP_GFX_ME_REPLAY
+#include <me-core-mapper/vme-lib.h>
+#endif
 #include <stdint.h>
 
 #define PSP_GFX_ME_MAX_DEPTH 8
@@ -11,6 +14,15 @@
 #define PSP_GFX_ME_MAX_NESTED_COMMANDS 2048
 #define PSP_GFX_ME_MTX_STACK_DEPTH 4
 #define PSP_GFX_ME_UNCACHED 0x40000000U
+#if PSP_GFX_ME_REPLAY
+#define PSP_GFX_ME_VME_TOP_BUFFER_0 (VME_TOP_BUFFERS + 0x2000U * 0)
+#define PSP_GFX_ME_VME_TOP_BUFFER_1 (VME_TOP_BUFFERS + 0x2000U * 1)
+#define PSP_GFX_ME_VME_TOP_BUFFER_2 (VME_TOP_BUFFERS + 0x2000U * 2)
+#define PSP_GFX_ME_VME_TOP_BUFFER_3 (VME_TOP_BUFFERS + 0x2000U * 3)
+#define PSP_GFX_ME_VME_BASE_BUFFER_0 (VME_BASE_BUFFERS + 0x2000U * 0)
+#define PSP_GFX_ME_VME_MAX_FRAC_BITS 12
+#define PSP_GFX_ME_VME_LIMIT 0x7FFFFF
+#endif
 
 #define PSP_GFX_ME_OP_MTX 0x01
 #define PSP_GFX_ME_OP_VTX 0x04
@@ -35,7 +47,170 @@ typedef struct {
     PspGfxMeReplayStats* stats;
     PspGfxMeTransformTrace* trace;
     u32 traceCapacity;
+    volatile u32* tracePublished;
+#if PSP_GFX_ME_REPLAY
+    volatile u32* vmeStage;
+    int vmeStagePending;
+    int vmeFracBits;
+    float vmeInvScale;
+    int vmeModelviewDirty;
+    int vmeModelviewValid;
+#endif
 } PspGfxMeReplayContext;
+
+#if PSP_GFX_ME_REPLAY
+static int sPspGfxMeVmeConfigured;
+
+static void psp_gfx_me_vme_configure(void) {
+    int count = 4 - 1;
+    u32 mux;
+
+    if (sPspGfxMeVmeConfigured) {
+        return;
+    }
+    vmeLibStart();
+    vme_icn(AGU_TOP, 0);
+    vme_icn(AGU_BASE, VME_DEF_MAPPER);
+    vme_icn(AGU_WRITE, 0);
+
+    mux = vme_mux(TOP_0, BASE_0);
+    vme_pe0(vme_fu(PRIMARY), mux, VME_FU_OPCODE_MAC_INNER_PRODUCT_BIAS);
+    vme_pe0(agu_top(MODE), VME_DEF_MODE);
+    vme_pe0(agu_top(COUNT), VME_DEF_STEP, count);
+    vme_pe0(agu_base(MODE), VME_DEF_MODE, 4);
+    vme_pe0(agu_base(COUNT), VME_DEF_STEP, count);
+    vme_pe0(agu_write(MODE), VME_DEF_MODE, VME_CYCLE_6);
+    vme_pe0(agu_write(COUNT), VME_DEF_STEP, count);
+
+    mux = vme_mux(TOP_1, BASE_0);
+    vme_pe1(vme_fu(PRIMARY), mux, VME_FU_OPCODE_MAC_INNER_PRODUCT_BIAS);
+    mux = vme_mux(TOP_2, BASE_0);
+    vme_pe2(vme_fu(PRIMARY), mux, VME_FU_OPCODE_MAC_INNER_PRODUCT_BIAS);
+    mux = vme_mux(TOP_3, BASE_0);
+    vme_pe3(vme_fu(PRIMARY), mux, VME_FU_OPCODE_MAC_INNER_PRODUCT_BIAS);
+    vmeLibFinish();
+    sPspGfxMeVmeConfigured = 1;
+}
+
+void PspGfxMeReplay_VmeInit(volatile u32* vmeStage) {
+    *vmeStage = 1;
+    vmeLibEnable();
+    *vmeStage = 2;
+    vmeLibWipe();
+    psp_gfx_me_vme_configure();
+    *vmeStage = 3;
+}
+
+static int psp_gfx_me_vme_fixed(float value, int fracBits, s32* fixed) {
+    float scaled = value * (1 << fracBits);
+
+    if ((scaled > PSP_GFX_ME_VME_LIMIT) ||
+        (scaled < -PSP_GFX_ME_VME_LIMIT)) {
+        return 0;
+    }
+    *fixed = (s32) (scaled + (scaled >= 0.0f ? 0.5f : -0.5f));
+    return 1;
+}
+
+static int psp_gfx_me_vme_choose_frac_bits(const float matrix[4][4],
+                                            const Vtx* src, u32 count) {
+    s32 maxCoord[4] = { 0, 0, 0, 1 };
+    int fracBits;
+    u32 vertex;
+    u32 column;
+    u32 row;
+
+    for (vertex = 0; vertex < count; vertex++) {
+        for (column = 0; column < 3; column++) {
+            s32 value = src[vertex].v.ob[column];
+            s32 magnitude = value < 0 ? -value : value;
+
+            if (magnitude > maxCoord[column]) {
+                maxCoord[column] = magnitude;
+            }
+        }
+    }
+    for (fracBits = PSP_GFX_ME_VME_MAX_FRAC_BITS; fracBits >= 0; fracBits--) {
+        int fits = 1;
+
+        for (row = 0; (row < 4) && fits; row++) {
+            int64_t bound = 0;
+
+            for (column = 0; column < 4; column++) {
+                s32 fixed;
+                int64_t magnitude;
+
+                if (!psp_gfx_me_vme_fixed(matrix[column][row], fracBits, &fixed)) {
+                    fits = 0;
+                    break;
+                }
+                magnitude = fixed < 0 ? -(int64_t) fixed : fixed;
+                bound += magnitude * maxCoord[column];
+            }
+            if (bound > PSP_GFX_ME_VME_LIMIT) {
+                fits = 0;
+            }
+        }
+        if (fits) {
+            return fracBits;
+        }
+    }
+    return -1;
+}
+
+static int psp_gfx_me_vme_set_matrix(const float matrix[4][4], int fracBits) {
+    volatile s32* rows[4];
+    u32 row;
+    u32 column;
+
+    rows[0] = (volatile s32*) PSP_GFX_ME_VME_TOP_BUFFER_0;
+    rows[1] = (volatile s32*) PSP_GFX_ME_VME_TOP_BUFFER_1;
+    rows[2] = (volatile s32*) PSP_GFX_ME_VME_TOP_BUFFER_2;
+    rows[3] = (volatile s32*) PSP_GFX_ME_VME_TOP_BUFFER_3;
+    for (row = 0; row < 4; row++) {
+        for (column = 0; column < 4; column++) {
+            s32 fixed;
+
+            if (!psp_gfx_me_vme_fixed(matrix[column][row], fracBits, &fixed)) {
+                return 0;
+            }
+            rows[row][column] = fixed;
+        }
+    }
+    return 1;
+}
+
+static void psp_gfx_me_vme_transform(float out[4], s32 x, s32 y, s32 z,
+                                     float invScale) {
+    volatile s32* input = (volatile s32*) (PSP_GFX_ME_VME_BASE_BUFFER_0 + 16);
+    volatile s32* output = (volatile s32*) PSP_GFX_ME_VME_BASE_BUFFER_0;
+
+    input[0] = x;
+    input[1] = y;
+    input[2] = z;
+    input[3] = 1;
+    vmeLibStart();
+    vmeLibRefresh();
+    out[0] = output[3] * invScale;
+    out[1] = output[2051] * invScale;
+    out[2] = output[4099] * invScale;
+    out[3] = output[6147] * invScale;
+}
+#endif
+
+static void psp_gfx_me_publish_trace(PspGfxMeReplayContext* ctx) {
+    u32 count;
+
+    if (ctx->tracePublished == NULL) {
+        return;
+    }
+    count = ctx->stats->transformTraceCount;
+    if (count > ctx->traceCapacity) {
+        count = ctx->traceCapacity;
+    }
+    __asm__ volatile("sync" ::: "memory");
+    *ctx->tracePublished = count;
+}
 
 static void psp_gfx_me_matrix_identity(float matrix[4][4]) {
     u32 column;
@@ -177,6 +352,11 @@ static void psp_gfx_me_handle_matrix(PspGfxMeReplayContext* ctx,
         psp_gfx_me_matrix_mul(target, target, loaded);
     }
     *hasTarget = 1;
+#if PSP_GFX_ME_REPLAY
+    if ((flags & G_MTX_PROJECTION) == 0) {
+        ctx->vmeModelviewDirty = 1;
+    }
+#endif
 }
 
 static void psp_gfx_me_handle_pop_matrix(PspGfxMeReplayContext* ctx) {
@@ -187,6 +367,9 @@ static void psp_gfx_me_handle_pop_matrix(PspGfxMeReplayContext* ctx) {
     psp_gfx_me_matrix_copy(
         ctx->modelview, ctx->modelviewStack[ctx->modelviewStackDepth]);
     ctx->hasModelview = 1;
+#if PSP_GFX_ME_REPLAY
+    ctx->vmeModelviewDirty = 1;
+#endif
 }
 
 static void psp_gfx_me_transform_vertex(float out[4], const float matrix[4][4],
@@ -199,7 +382,7 @@ static void psp_gfx_me_transform_vertex(float out[4], const float matrix[4][4],
 
 static void psp_gfx_me_trace_vertex(PspGfxMeReplayContext* ctx, u32 slot,
                                     const float view[4], const float clip[4],
-                                    int valid) {
+                                    int valid, int usedVme) {
     PspGfxMeTransformTrace* entry;
     u32 index = ctx->stats->transformTraceCount++;
     u32 i;
@@ -215,7 +398,8 @@ static void psp_gfx_me_trace_vertex(PspGfxMeReplayContext* ctx, u32 slot,
     }
     entry->slot = slot;
     entry->flags = (valid ? PSP_GFX_ME_TRANSFORM_VALID : 0) |
-                   (ctx->hasProjection ? PSP_GFX_ME_TRANSFORM_PROJECTED : 0);
+                   (ctx->hasProjection ? PSP_GFX_ME_TRANSFORM_PROJECTED : 0) |
+                   (usedVme ? PSP_GFX_ME_TRANSFORM_VME : 0);
 }
 
 static void psp_gfx_me_handle_vertices(PspGfxMeReplayContext* ctx, const Gfx* command) {
@@ -227,15 +411,54 @@ static void psp_gfx_me_handle_vertices(PspGfxMeReplayContext* ctx, const Gfx* co
     if ((src == NULL) || (count == 0) || ((first + count) > 64)) {
         return;
     }
+#if PSP_GFX_ME_REPLAY
+    {
+        int fracBits = psp_gfx_me_vme_choose_frac_bits(ctx->modelview, src, count);
+
+        if (ctx->vmeModelviewDirty || (ctx->vmeFracBits != fracBits)) {
+            if (ctx->vmeStagePending) {
+                *ctx->vmeStage = 6;
+            }
+            ctx->vmeModelviewValid = (fracBits >= 0) &&
+                psp_gfx_me_vme_set_matrix(ctx->modelview, fracBits);
+            if (ctx->vmeStagePending) {
+                *ctx->vmeStage = 7;
+            }
+            ctx->vmeFracBits = fracBits;
+            ctx->vmeInvScale = fracBits >= 0 ? 1.0f / (1 << fracBits) : 1.0f;
+            ctx->vmeModelviewDirty = 0;
+        }
+    }
+#endif
     for (i = 0; i < count; i++) {
         float view[4];
         float clip[4];
         int valid = 1;
 
+#if PSP_GFX_ME_REPLAY
+        if (ctx->vmeModelviewValid) {
+            if (ctx->vmeStagePending) {
+                *ctx->vmeStage = 8;
+            }
+            psp_gfx_me_vme_transform(
+                view, src[i].v.ob[0], src[i].v.ob[1], src[i].v.ob[2],
+                ctx->vmeInvScale);
+            if (ctx->vmeStagePending) {
+                *ctx->vmeStage = 9;
+                ctx->vmeStagePending = 0;
+            }
+        } else {
+            psp_gfx_me_transform_vertex(
+                view, ctx->modelview,
+                (float) src[i].v.ob[0], (float) src[i].v.ob[1],
+                (float) src[i].v.ob[2], 1.0f);
+        }
+#else
         psp_gfx_me_transform_vertex(
             view, ctx->modelview,
             (float) src[i].v.ob[0], (float) src[i].v.ob[1],
             (float) src[i].v.ob[2], 1.0f);
+#endif
         if (ctx->hasProjection) {
             psp_gfx_me_transform_vertex(
                 clip, ctx->projection,
@@ -247,10 +470,17 @@ static void psp_gfx_me_handle_vertices(PspGfxMeReplayContext* ctx, const Gfx* co
             clip[2] = view[2] / 4096.0f;
             clip[3] = 1.0f;
         }
-        psp_gfx_me_trace_vertex(ctx, first + i, view, clip, valid);
+        psp_gfx_me_trace_vertex(ctx, first + i, view, clip, valid,
+#if PSP_GFX_ME_REPLAY
+                                ctx->vmeModelviewValid
+#else
+                                0
+#endif
+        );
     }
     ctx->stats->loadedVertexCount += count;
     ctx->stats->transformedVertexCount += count;
+    psp_gfx_me_publish_trace(ctx);
 }
 
 static int psp_gfx_me_has_bounded_end(const Gfx* dl) {
@@ -366,7 +596,8 @@ static int psp_gfx_me_walk_internal(PspGfxMeReplayContext* ctx, const Gfx* dl, u
 int PspGfxMeReplay_Walk(const Gfx* dl, PspGfxMeReplayStats* stats,
                         const void* sourceBase, const void* snapshotBase,
                         u32 snapshotSize, PspGfxMeTransformTrace* trace,
-                        u32 traceCapacity) {
+                        u32 traceCapacity, volatile u32* tracePublished,
+                        volatile u32* vmeStage) {
     PspGfxMeReplayContext ctx;
     u32 i;
 
@@ -383,11 +614,25 @@ int PspGfxMeReplay_Walk(const Gfx* dl, PspGfxMeReplayStats* stats,
     ctx.stats = stats;
     ctx.trace = trace;
     ctx.traceCapacity = traceCapacity;
+    ctx.tracePublished = tracePublished;
+#if PSP_GFX_ME_REPLAY
+    ctx.vmeStage = vmeStage;
+    ctx.vmeStagePending = *vmeStage != 9;
+#else
+    (void) vmeStage;
+#endif
     ctx.sourceBase = (uintptr_t) sourceBase;
     ctx.snapshotBase = (uintptr_t) snapshotBase;
     ctx.snapshotSize = snapshotSize;
     psp_gfx_me_matrix_identity(ctx.modelview);
     psp_gfx_me_matrix_identity(ctx.projection);
+#if PSP_GFX_ME_REPLAY
+    ctx.vmeModelviewDirty = 1;
+    ctx.vmeFracBits = -1;
+    if (ctx.vmeStagePending) {
+        *ctx.vmeStage = 5;
+    }
+#endif
     psp_gfx_me_walk_internal(&ctx, dl, 0);
     return (stats->commandLimitHit == 0) && (stats->depthLimitHit == 0) ? 0 : -2;
 }

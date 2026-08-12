@@ -19,6 +19,11 @@
 #include <stddef.h>
 #include <stdio.h>
 
+#if PSP_GFX_ME_REPLAY
+#include <pspkernel.h>
+#define PSP_GFX_ME_TRACE_WAIT_US 250000
+#endif
+
 static int sPspGfxDlBackgroundFeedbackPrimed = 0;
 static u32 sPspGfxDlBackgroundFeedbackSeedColor = 0xFF000000u;
 
@@ -245,7 +250,7 @@ typedef struct {
     u32 segments[16];
 #if PSP_GFX_ME_REPLAY
     const PspGfxMeTransformTrace* transformTrace;
-    u32 transformTraceCount;
+    volatile const u32* transformTracePublished;
     u32 transformTraceCursor;
 #endif
     PspGfxDlVertex vertices[PSP_GFX_DL_MAX_VERTICES];
@@ -3688,6 +3693,40 @@ static void psp_gfx_dl_handle_set_combine(PspGfxDlContext* ctx, const Gfx* gfx) 
     psp_gfx_dl_mark_effective_material_dirty(ctx);
 }
 
+#if PSP_GFX_ME_REPLAY
+static int psp_gfx_dl_wait_me_trace(PspGfxDlContext* ctx, u32 needed) {
+    u32 published = *ctx->transformTracePublished;
+    u32 polls = 0;
+    u32 start;
+
+    if ((published & PSP_GFX_ME_TRACE_COUNT_MASK) >= needed) {
+        __asm__ volatile("sync" ::: "memory");
+        return 1;
+    }
+    if ((published & PSP_GFX_ME_TRACE_DONE) != 0) {
+        return 0;
+    }
+    start = sceKernelGetSystemTimeLow();
+
+    while (1) {
+        published = *ctx->transformTracePublished;
+
+        if ((published & PSP_GFX_ME_TRACE_COUNT_MASK) >= needed) {
+            __asm__ volatile("sync" ::: "memory");
+            return 1;
+        }
+        if ((published & PSP_GFX_ME_TRACE_DONE) != 0) {
+            return 0;
+        }
+        polls++;
+        if (((polls & 0xFF) == 0) &&
+            ((sceKernelGetSystemTimeLow() - start) >= PSP_GFX_ME_TRACE_WAIT_US)) {
+            return 0;
+        }
+    }
+}
+#endif
+
 static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
     const Vtx* src = (const Vtx*) psp_gfx_dl_resolve_ptr(ctx, gfx->words.w1);
     u32 w0 = gfx->words.w0;
@@ -3725,31 +3764,38 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
 #if PSP_GFX_ME_REPLAY
     if (ctx->transformTrace != NULL) {
         u32 traceStart = ctx->transformTraceCursor;
-        int traceMatches = (traceStart + count) <= ctx->transformTraceCount;
+        int traceMatches;
 
-        if (traceMatches) {
-            meBatch = &ctx->transformTrace[traceStart];
-            for (i = 0; i < count; i++) {
-                u32 projected = ctx->hasProjection ? PSP_GFX_ME_TRANSFORM_PROJECTED : 0;
+        ctx->transformTraceCursor += count;
+        if ((ctx->geometryMode & G_LIGHTING) != 0) {
+            traceMatches = 0;
+        } else {
+            traceMatches = psp_gfx_dl_wait_me_trace(ctx, traceStart + count);
 
-                if ((meBatch[i].slot != ((u32) v0 + i)) ||
-                    ((meBatch[i].flags & PSP_GFX_ME_TRANSFORM_PROJECTED) != projected)) {
-                    traceMatches = 0;
-                    break;
+            if (traceMatches) {
+                meBatch = &ctx->transformTrace[traceStart];
+                for (i = 0; i < count; i++) {
+                    u32 projected = ctx->hasProjection ? PSP_GFX_ME_TRANSFORM_PROJECTED : 0;
+
+                    if ((meBatch[i].slot != ((u32) v0 + i)) ||
+                        ((meBatch[i].flags & PSP_GFX_ME_TRANSFORM_PROJECTED) != projected)) {
+                        traceMatches = 0;
+                        break;
+                    }
                 }
             }
         }
-        ctx->transformTraceCursor += count;
-        if (!traceMatches) {
+        if (!traceMatches && ((ctx->geometryMode & G_LIGHTING) == 0)) {
             ctx->stats.meTransformMismatchCount += count;
             ctx->transformTrace = NULL;
             meBatch = NULL;
-        } else {
+        } else if ((ctx->geometryMode & G_LIGHTING) == 0) {
             useMeTransform = 1;
             ctx->stats.meTransformVertexCount += count;
-            if ((ctx->geometryMode & G_LIGHTING) != 0) {
-                ctx->stats.meTransformLitVertexCount += count;
-                runSeparateLighting = 1;
+            for (i = 0; i < count; i++) {
+                if ((meBatch[i].flags & PSP_GFX_ME_TRANSFORM_VME) != 0) {
+                    ctx->stats.meTransformVmeVertexCount++;
+                }
             }
         }
     }
@@ -4903,7 +4949,8 @@ static void psp_gfx_dl_pool_report(u32 taskIndex) {
 #endif
 
 int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats,
-                 const PspGfxMeTransformTrace* trace, u32 traceCount) {
+                 const PspGfxMeTransformTrace* trace,
+                 volatile const u32* tracePublished) {
     PspGfxDlContext* ctx = &sPspGfxDlContext;
 #if PSP_LOG_ENABLED || PSP_RENDERER_DIAGNOSTICS
     // sized so the widest stats lines cannot truncate at large counter values
@@ -4915,10 +4962,10 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats,
     ctx->taskIndex = taskIndex;
 #if PSP_GFX_ME_REPLAY
     ctx->transformTrace = trace;
-    ctx->transformTraceCount = traceCount;
+    ctx->transformTracePublished = tracePublished;
 #else
     (void) trace;
-    (void) traceCount;
+    (void) tracePublished;
 #endif
     PspProfiler_CountDisplayListTask();
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_DL_TRAVERSAL);
@@ -4931,12 +4978,17 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats,
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_DL_TRAVERSAL);
 
 #if PSP_GFX_ME_REPLAY
-    if ((ctx->transformTraceCount != 0) &&
-        (ctx->transformTraceCursor != ctx->transformTraceCount)) {
-        ctx->stats.meTransformMismatchCount +=
-            ctx->transformTraceCursor > ctx->transformTraceCount ?
-                ctx->transformTraceCursor - ctx->transformTraceCount :
-                ctx->transformTraceCount - ctx->transformTraceCursor;
+    if (ctx->transformTrace != NULL) {
+        u32 published = *ctx->transformTracePublished;
+        u32 traceCount = published & PSP_GFX_ME_TRACE_COUNT_MASK;
+
+        if (((published & PSP_GFX_ME_TRACE_DONE) != 0) &&
+            (ctx->transformTraceCursor != traceCount)) {
+            ctx->stats.meTransformMismatchCount +=
+                ctx->transformTraceCursor > traceCount ?
+                    ctx->transformTraceCursor - traceCount :
+                    traceCount - ctx->transformTraceCursor;
+        }
     }
 #endif
 
