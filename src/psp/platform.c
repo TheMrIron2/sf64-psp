@@ -5,7 +5,9 @@
 #include "PR/os_eeprom.h"
 #include "PR/ucode.h"
 #include "sf64dma.h"
+#if PSP_AUDIO
 #include "src/psp/audio_me.h"
+#endif
 #include "src/psp/audio_output.h"
 #include "src/psp/input.h"
 #include "src/psp/platform.h"
@@ -297,7 +299,9 @@ static int psp_vi_thread(SceSize args, void* argp) {
 }
 
 void PspPlatform_Init(void) {
+#if PSP_AUDIO
     int audioMeResult;
+#endif
     int audioResult;
 
     sExitRequested = 0;
@@ -311,7 +315,9 @@ void PspPlatform_Init(void) {
 #endif
     PspInput_Init();
     PspProfiler_Init();
+#if PSP_AUDIO
     audioMeResult = PspAudioMe_Init();
+#endif
     audioResult = PspAudioOutput_Init();
 #if PSP_LOG_ENABLED
     if (audioResult < 0) {
@@ -329,7 +335,9 @@ void PspPlatform_Init(void) {
 #endif
     }
 #else
+#if PSP_AUDIO
     (void) audioMeResult;
+#endif
     (void) audioResult;
 #endif
     PspRenderer_Init();

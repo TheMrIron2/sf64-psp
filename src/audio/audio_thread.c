@@ -2,7 +2,9 @@
 #include "sf64audio.h"
 #include "audiothread_cmd.h"
 #ifdef TARGET_PSP
+#if PSP_AUDIO
 #include "src/psp/audio_me.h"
+#endif
 #include "src/psp/audio_output.h"
 #include "src/psp/platform.h"
 u64 sceKernelGetSystemTimeWide(void);
@@ -96,9 +98,8 @@ SPTask* AudioThread_CreateTask(void) {
         return gWaitingAudioTask;
     }
 
-#ifdef TARGET_PSP
+#if defined(TARGET_PSP) && PSP_AUDIO
     PspAudioMe_Wait();
-#if PSP_AUDIO
     if (sPendingOutput != NULL) {
         if (PspAudioMe_GetLastError() < 0) {
             memset(sPendingOutput, 0, sPendingOutputSize);
@@ -112,7 +113,6 @@ SPTask* AudioThread_CreateTask(void) {
         sPendingOutputSize = 0;
         sPendingOutputReserved = false;
     }
-#endif
 #endif
 
     osSendMesg(gAudioTaskStartQueue, (OSMesg) gAudioTaskCountQ, OS_MESG_NOBLOCK);
@@ -226,8 +226,7 @@ SPTask* AudioThread_CreateTask(void) {
     gAudioRandom = gAiBuffers[aiBuffIndex][gAudioTaskCountQ & 0xFF] + gAudioRandom;
 #endif
 
-#ifdef TARGET_PSP
-#if PSP_AUDIO
+#if defined(TARGET_PSP) && PSP_AUDIO
     if (abiCmdCount > 0) {
         PspAudioMe_Submit(gAbiCmdBuffs[gAudioTaskIndexQ], abiCmdCount);
         sPendingOutput = aiBuffer;
@@ -241,9 +240,6 @@ SPTask* AudioThread_CreateTask(void) {
         }
         sPendingOutputReserved = false;
     }
-#else
-    PspAudioMe_Submit(gAbiCmdBuffs[gAudioTaskIndexQ], abiCmdCount);
-#endif
 #endif
 
     aiBuffIndex = gAudioTaskIndexQ;
