@@ -33,45 +33,9 @@ typedef struct {
     int hasModelview;
     int hasProjection;
     PspGfxMeReplayStats* stats;
+    PspGfxMeTransformTrace* trace;
+    u32 traceCapacity;
 } PspGfxMeReplayContext;
-
-static void psp_gfx_me_hash_value(u32* hash, u32 value) {
-    *hash = (*hash ^ value) * 16777619U;
-}
-
-static s32 psp_gfx_me_quantize(float value, float scale) {
-    float scaled = value * scale;
-
-    if (scaled >= 2147483520.0f) {
-        return 0x7FFFFFFF;
-    }
-    if (scaled <= -2147483648.0f) {
-        return (s32) 0x80000000U;
-    }
-    return scaled >= 0.0f ? (s32) (scaled + 0.5f) : (s32) (scaled - 0.5f);
-}
-
-void PspGfxMeReplay_HashTransform(u32* hash, u32 slot,
-                                  float viewX, float viewY, float viewZ, float viewW,
-                                  float clipX, float clipY, float clipZ, float clipW,
-                                  int valid, int hasProjection) {
-    const float view[4] = { viewX, viewY, viewZ, viewW };
-    const float clip[4] = { clipX, clipY, clipZ, clipW };
-    float clipScale = hasProjection ? 16.0f : 65536.0f;
-    u32 i;
-
-    psp_gfx_me_hash_value(hash, slot);
-    psp_gfx_me_hash_value(hash, valid != 0);
-    for (i = 0; i < 4; i++) {
-        psp_gfx_me_hash_value(hash, (u32) psp_gfx_me_quantize(view[i], 16.0f));
-    }
-    if (!valid) {
-        return;
-    }
-    for (i = 0; i < 4; i++) {
-        psp_gfx_me_hash_value(hash, (u32) psp_gfx_me_quantize(clip[i], clipScale));
-    }
-}
 
 static void psp_gfx_me_matrix_identity(float matrix[4][4]) {
     u32 column;
@@ -225,15 +189,68 @@ static void psp_gfx_me_handle_pop_matrix(PspGfxMeReplayContext* ctx) {
     ctx->hasModelview = 1;
 }
 
-static void psp_gfx_me_handle_vertices(PspGfxMeReplayContext* ctx, const Gfx* command) {
-    u32 count = (command->words.w0 >> 10) & 0x3F;
-    u32 first = (command->words.w0 >> 17) & 0x7F;
+static void psp_gfx_me_transform_vertex(float out[4], const float matrix[4][4],
+                                        float x, float y, float z, float w) {
+    out[0] = matrix[0][0] * x + matrix[1][0] * y + matrix[2][0] * z + matrix[3][0] * w;
+    out[1] = matrix[0][1] * x + matrix[1][1] * y + matrix[2][1] * z + matrix[3][1] * w;
+    out[2] = matrix[0][2] * x + matrix[1][2] * y + matrix[2][2] * z + matrix[3][2] * w;
+    out[3] = matrix[0][3] * x + matrix[1][3] * y + matrix[2][3] * z + matrix[3][3] * w;
+}
 
-    if ((psp_gfx_me_resolve_ptr(ctx, command->words.w1) == NULL) ||
-        (count == 0) || ((first + count) > 64)) {
+static void psp_gfx_me_trace_vertex(PspGfxMeReplayContext* ctx, u32 slot,
+                                    const float view[4], const float clip[4],
+                                    int valid) {
+    PspGfxMeTransformTrace* entry;
+    u32 index = ctx->stats->transformTraceCount++;
+    u32 i;
+
+    if ((ctx->trace == NULL) || (index >= ctx->traceCapacity)) {
+        ctx->stats->transformTraceOverflow++;
         return;
     }
+    entry = &ctx->trace[index];
+    for (i = 0; i < 4; i++) {
+        entry->view[i] = view[i];
+        entry->clip[i] = valid ? clip[i] : 0.0f;
+    }
+    entry->slot = slot;
+    entry->flags = (valid ? PSP_GFX_ME_TRANSFORM_VALID : 0) |
+                   (ctx->hasProjection ? PSP_GFX_ME_TRANSFORM_PROJECTED : 0);
+}
+
+static void psp_gfx_me_handle_vertices(PspGfxMeReplayContext* ctx, const Gfx* command) {
+    const Vtx* src = (const Vtx*) psp_gfx_me_resolve_ptr(ctx, command->words.w1);
+    u32 count = (command->words.w0 >> 10) & 0x3F;
+    u32 first = (command->words.w0 >> 17) & 0x7F;
+    u32 i;
+
+    if ((src == NULL) || (count == 0) || ((first + count) > 64)) {
+        return;
+    }
+    for (i = 0; i < count; i++) {
+        float view[4];
+        float clip[4];
+        int valid = 1;
+
+        psp_gfx_me_transform_vertex(
+            view, ctx->modelview,
+            (float) src[i].v.ob[0], (float) src[i].v.ob[1],
+            (float) src[i].v.ob[2], 1.0f);
+        if (ctx->hasProjection) {
+            psp_gfx_me_transform_vertex(
+                clip, ctx->projection,
+                view[0], view[1], view[2], view[3]);
+            valid = !((clip[3] > -0.001f) && (clip[3] < 0.001f));
+        } else {
+            clip[0] = view[0] / 320.0f;
+            clip[1] = -view[1] / 240.0f;
+            clip[2] = view[2] / 4096.0f;
+            clip[3] = 1.0f;
+        }
+        psp_gfx_me_trace_vertex(ctx, first + i, view, clip, valid);
+    }
     ctx->stats->loadedVertexCount += count;
+    ctx->stats->transformedVertexCount += count;
 }
 
 static int psp_gfx_me_has_bounded_end(const Gfx* dl) {
@@ -348,7 +365,8 @@ static int psp_gfx_me_walk_internal(PspGfxMeReplayContext* ctx, const Gfx* dl, u
 
 int PspGfxMeReplay_Walk(const Gfx* dl, PspGfxMeReplayStats* stats,
                         const void* sourceBase, const void* snapshotBase,
-                        u32 snapshotSize) {
+                        u32 snapshotSize, PspGfxMeTransformTrace* trace,
+                        u32 traceCapacity) {
     PspGfxMeReplayContext ctx;
     u32 i;
 
@@ -362,8 +380,9 @@ int PspGfxMeReplay_Walk(const Gfx* dl, PspGfxMeReplayStats* stats,
         ((u8*) stats)[i] = 0;
     }
     stats->commandHash = 2166136261U;
-    stats->transformHash = 2166136261U;
     ctx.stats = stats;
+    ctx.trace = trace;
+    ctx.traceCapacity = traceCapacity;
     ctx.sourceBase = (uintptr_t) sourceBase;
     ctx.snapshotBase = (uintptr_t) snapshotBase;
     ctx.snapshotSize = snapshotSize;

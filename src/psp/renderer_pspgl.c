@@ -37,6 +37,14 @@ static PspGfxPspglColorVertex sStarfieldVertices[PSPGL_STARFIELD_CHUNK_STARS * P
 static u32 sStarfieldCount;
 static int sStarfieldReady;
 
+#if PSP_GFX_ME_REPLAY
+static u32 sMeOffloadTasks;
+static u32 sMeOffloadVertices;
+static u32 sMeLitVertices;
+static u32 sMeTraceMismatches;
+static u32 sMeOffloadFailures;
+#endif
+
 #if PSP_RENDERER_DIAGNOSTICS
 static u32 sStarfieldDiagRequested;
 static u32 sStarfieldDiagTraversed;
@@ -102,6 +110,20 @@ static void psp_renderer_draw_perf_overlay(void) {
      * No floating-point formatting: both values are stored in tenths.
      * Trailing spaces erase remnants when the number loses a digit.
      */
+#if PSP_GFX_ME_REPLAY
+    pspDebugScreenPrintf(
+        "FPS %lu.%lu GFX %lu.%lums ME T%lu V%lu L%lu X%lu F%lu   ",
+        (unsigned long) (sPerfFpsTenths / 10),
+        (unsigned long) (sPerfFpsTenths % 10),
+        (unsigned long) (sPerfGfxMsTenths / 10),
+        (unsigned long) (sPerfGfxMsTenths % 10),
+        (unsigned long) sMeOffloadTasks,
+        (unsigned long) sMeOffloadVertices,
+        (unsigned long) sMeLitVertices,
+        (unsigned long) sMeTraceMismatches,
+        (unsigned long) sMeOffloadFailures
+    );
+#else
     pspDebugScreenPrintf(
         "FPS %lu.%lu  GFX %lu.%lums   ",
         (unsigned long) (sPerfFpsTenths / 10),
@@ -109,6 +131,7 @@ static void psp_renderer_draw_perf_overlay(void) {
         (unsigned long) (sPerfGfxMsTenths / 10),
         (unsigned long) (sPerfGfxMsTenths % 10)
     );
+#endif
 }
 
 static void psp_renderer_perf_frame_complete(u64 renderUs) {
@@ -263,8 +286,8 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
     const Gfx* dl;
 #if PSP_GFX_ME_REPLAY
     PspGfxDlStats dlStats;
-    PspGfxMeReplayStats replayExpected;
-    int submitReplay = 0;
+    const PspGfxMeTransformTrace* meTransformTrace = NULL;
+    u32 meTransformTraceCount = 0;
 #endif
 
     #if PROFILE_HW_COUNTERS
@@ -300,31 +323,22 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
         if ((task != NULL) && (task->task.t.data_ptr != NULL)) {
             dl = (const Gfx*) task->task.t.data_ptr;
 #if PSP_GFX_ME_REPLAY
-            PspGfxDl_Run(dl, taskIndex, &dlStats);
             if (gGameState == GSTATE_TITLE) {
-                replayExpected.commandCount = dlStats.commandCount;
-                replayExpected.nestedDlCount = dlStats.nestedDlFollowed;
-                replayExpected.gvtxCommandCount = dlStats.gvtxCommandCount;
-                replayExpected.loadedVertexCount = dlStats.vertexCount;
-                replayExpected.matrixCommandCount = dlStats.mtxCount;
-                replayExpected.tri1CommandCount = dlStats.tri1CommandCount;
-                replayExpected.tri2CommandCount = dlStats.tri2CommandCount;
-                replayExpected.inputTriangleCount =
-                    dlStats.tri1CommandCount + (2 * dlStats.tri2CommandCount);
-                replayExpected.textureRectangleCount = dlStats.textureRectangleCount;
-                replayExpected.commandHash = dlStats.commandHash;
-                replayExpected.commandLimitHit = dlStats.commandLimitHit;
-                replayExpected.depthLimitHit = dlStats.depthLimitHit;
-                replayExpected.transformedVertexCount = 0;
-                replayExpected.transformHash = 2166136261U;
-#if PSP_AUDIO
-                submitReplay = (taskIndex & 3U) == 0;
-#else
-                submitReplay = 1;
-#endif
+                if (PspMe_RunGfxTransform(
+                        task, dl, taskIndex,
+                        &meTransformTrace, &meTransformTraceCount) == 0) {
+                    sMeOffloadTasks++;
+                } else {
+                    sMeOffloadFailures++;
+                }
             }
+            PspGfxDl_Run(
+                dl, taskIndex, &dlStats, meTransformTrace, meTransformTraceCount);
+            sMeOffloadVertices += dlStats.meTransformVertexCount;
+            sMeLitVertices += dlStats.meTransformLitVertexCount;
+            sMeTraceMismatches += dlStats.meTransformMismatchCount;
 #else
-            PspGfxDl_Run(dl, taskIndex, NULL);
+            PspGfxDl_Run(dl, taskIndex, NULL, NULL, 0);
 #endif
     #if PROFILE_HW_COUNTERS
             /* Only after a run, the context still holds the previous task otherwise */
@@ -345,11 +359,6 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
         PspHwCounterProfile_ScopeBegin(PSP_HW_SCOPE_PRESENT);
         PspGfx_EndFrame();
         PspHwCounterProfile_ScopeEnd(PSP_HW_SCOPE_PRESENT);
-#if PSP_GFX_ME_REPLAY
-        if (submitReplay) {
-            PspMe_SubmitGfxReplay(task, dl, taskIndex, &replayExpected);
-        }
-#endif
         PspProfiler_ComponentTaskEnd();
 
     #if PROFILE_HW_COUNTERS

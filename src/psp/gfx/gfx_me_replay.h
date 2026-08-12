@@ -4,6 +4,17 @@
 #include "PR/ultratypes.h"
 #include "PR/gbi.h"
 
+#define PSP_GFX_ME_TRANSFORM_TRACE_CAPACITY 4096
+#define PSP_GFX_ME_TRANSFORM_VALID 1U
+#define PSP_GFX_ME_TRANSFORM_PROJECTED 2U
+
+typedef struct {
+    float view[4];
+    float clip[4];
+    u32 slot;
+    u32 flags;
+} PspGfxMeTransformTrace;
+
 typedef struct {
     u32 commandCount;
     u32 nestedDlCount;
@@ -18,15 +29,13 @@ typedef struct {
     u32 commandLimitHit;
     u32 depthLimitHit;
     u32 transformedVertexCount;
-    u32 transformHash;
+    u32 transformTraceCount;
+    u32 transformTraceOverflow;
 } PspGfxMeReplayStats;
 
 int PspGfxMeReplay_Walk(const Gfx* dl, PspGfxMeReplayStats* stats,
                         const void* sourceBase, const void* snapshotBase,
-                        u32 snapshotSize);
-void PspGfxMeReplay_HashTransform(u32* hash, u32 slot,
-                                  float viewX, float viewY, float viewZ, float viewW,
-                                  float clipX, float clipY, float clipZ, float clipW,
-                                  int valid, int hasProjection);
+                        u32 snapshotSize, PspGfxMeTransformTrace* trace,
+                        u32 traceCapacity);
 
 #endif

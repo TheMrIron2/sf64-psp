@@ -243,6 +243,11 @@ typedef struct {
     PspGfxDlStats stats;
     u32 taskIndex;
     u32 segments[16];
+#if PSP_GFX_ME_REPLAY
+    const PspGfxMeTransformTrace* transformTrace;
+    u32 transformTraceCount;
+    u32 transformTraceCursor;
+#endif
     PspGfxDlVertex vertices[PSP_GFX_DL_MAX_VERTICES];
     float modelview[4][4];
     float projection[4][4];
@@ -1335,7 +1340,7 @@ static void psp_gfx_dl_prepare_effective_lights(PspGfxDlContext* ctx) {
     ctx->lightingStateDirty = 0;
 }
 
-#if !VTX_FUSED_TNL
+#if !VTX_FUSED_TNL || PSP_GFX_ME_REPLAY
 static void psp_gfx_dl_stage_lighting_batch(
     PspGfxDlContext* ctx,
     const Vtx* src,
@@ -3693,8 +3698,15 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
     u64 phaseStartUs;
     const n64psp_directional_lightf* lightingLights;
     u32 lightingLightCount;
+#if !VTX_FUSED_TNL || PSP_GFX_ME_REPLAY
+    int runSeparateLighting = !VTX_FUSED_TNL;
+#endif
 #if VTX_FUSED_TNL
     n64psp_tnl_output_streams directOutput;
+#endif
+#if PSP_GFX_ME_REPLAY
+    const PspGfxMeTransformTrace* meBatch = NULL;
+    int useMeTransform = 0;
 #endif
 
     if (src == NULL) {
@@ -3709,6 +3721,39 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
         psp_gfx_dl_count_unsupported(ctx, psp_gfx_dl_opcode(gfx));
         return;
     }
+
+#if PSP_GFX_ME_REPLAY
+    if (ctx->transformTrace != NULL) {
+        u32 traceStart = ctx->transformTraceCursor;
+        int traceMatches = (traceStart + count) <= ctx->transformTraceCount;
+
+        if (traceMatches) {
+            meBatch = &ctx->transformTrace[traceStart];
+            for (i = 0; i < count; i++) {
+                u32 projected = ctx->hasProjection ? PSP_GFX_ME_TRANSFORM_PROJECTED : 0;
+
+                if ((meBatch[i].slot != ((u32) v0 + i)) ||
+                    ((meBatch[i].flags & PSP_GFX_ME_TRANSFORM_PROJECTED) != projected)) {
+                    traceMatches = 0;
+                    break;
+                }
+            }
+        }
+        ctx->transformTraceCursor += count;
+        if (!traceMatches) {
+            ctx->stats.meTransformMismatchCount += count;
+            ctx->transformTrace = NULL;
+            meBatch = NULL;
+        } else {
+            useMeTransform = 1;
+            ctx->stats.meTransformVertexCount += count;
+            if ((ctx->geometryMode & G_LIGHTING) != 0) {
+                ctx->stats.meTransformLitVertexCount += count;
+                runSeparateLighting = 1;
+            }
+        }
+    }
+#endif
 
     PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_VERTEX);
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_G_VTX);
@@ -3738,6 +3783,9 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
     phaseStartUs = PspProfiler_RenderPhaseBegin();
     {
 #if !VTX_FUSED_TNL
+#if PSP_GFX_ME_REPLAY
+        if (!useMeTransform) {
+#endif
         for (i = 0; i < count; i++) {
             const Vtx* in = &src[i];
 
@@ -3752,6 +3800,9 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
 
             sPspGfxDlTransformInput[i].w = 1.0f;
         }
+#if PSP_GFX_ME_REPLAY
+        }
+#endif
 #endif
 
         PspProfiler_RenderPhaseEnd(PSP_PROFILE_PHASE_G_VTX_UNPACK, phaseStartUs);
@@ -3766,6 +3817,9 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
 #if VTX_FUSED_TNL
         PspGfxDlVertex* firstOutput = &ctx->vertices[v0];
 
+#if PSP_GFX_ME_REPLAY
+        if (!useMeTransform) {
+#endif
         directOutput.view = &firstOutput->viewX;
         directOutput.clip = &firstOutput->clipX;
         directOutput.projected = &firstOutput->x;
@@ -3795,7 +3849,13 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
                 count
             );
         }
+#if PSP_GFX_ME_REPLAY
+        }
+#endif
 #else
+#if PSP_GFX_ME_REPLAY
+        if (!useMeTransform) {
+#endif
         n64psp_mat4f_transform_vec4_chain2_batch(
             sPspGfxDlTransformOutput,
             &ctx->alignedMatrices.modelview,
@@ -3803,6 +3863,9 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
             sPspGfxDlTransformInput,
             count
         );
+#if PSP_GFX_ME_REPLAY
+        }
+#endif
 #endif
     }
     PspProfiler_RenderPhaseEnd(PSP_PROFILE_PHASE_G_VTX_TRANSFORM, phaseStartUs);
@@ -3811,36 +3874,56 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
     {
         for (i = 0; i < count; i++) {
             PspGfxDlVertex* out = &ctx->vertices[v0 + i];
-#if !VTX_FUSED_TNL
+#if !VTX_FUSED_TNL || PSP_GFX_ME_REPLAY
             PspGfxDlVec4 view;
             PspGfxDlVec4 clip;
 #endif
 
             psp_gfx_dl_set_vertex_projection(ctx, out, projectionSnapshot);
 
+#if PSP_GFX_ME_REPLAY
+            if (useMeTransform) {
+                view.x = meBatch[i].view[0];
+                view.y = meBatch[i].view[1];
+                view.z = meBatch[i].view[2];
+                view.w = meBatch[i].view[3];
+                clip.x = meBatch[i].clip[0];
+                clip.y = meBatch[i].clip[1];
+                clip.z = meBatch[i].clip[2];
+                clip.w = meBatch[i].clip[3];
+                out->valid = psp_gfx_dl_store_transformed_vertex(ctx, out, &view, &clip);
+                if ((out->valid != 0) !=
+                    ((meBatch[i].flags & PSP_GFX_ME_TRANSFORM_VALID) != 0)) {
+                    ctx->stats.meTransformMismatchCount++;
+                }
+            } else {
+#endif
 #if !VTX_FUSED_TNL
-            view.x = sPspGfxDlTransformOutput[i].first.x;
-            view.y = sPspGfxDlTransformOutput[i].first.y;
-            view.z = sPspGfxDlTransformOutput[i].first.z;
-            view.w = sPspGfxDlTransformOutput[i].first.w;
+                view.x = sPspGfxDlTransformOutput[i].first.x;
+                view.y = sPspGfxDlTransformOutput[i].first.y;
+                view.z = sPspGfxDlTransformOutput[i].first.z;
+                view.w = sPspGfxDlTransformOutput[i].first.w;
 
-            clip.x = sPspGfxDlTransformOutput[i].second.x;
-            clip.y = sPspGfxDlTransformOutput[i].second.y;
-            clip.z = sPspGfxDlTransformOutput[i].second.z;
-            clip.w = sPspGfxDlTransformOutput[i].second.w;
+                clip.x = sPspGfxDlTransformOutput[i].second.x;
+                clip.y = sPspGfxDlTransformOutput[i].second.y;
+                clip.z = sPspGfxDlTransformOutput[i].second.z;
+                clip.w = sPspGfxDlTransformOutput[i].second.w;
 
-            out->valid =
-                psp_gfx_dl_store_transformed_vertex(
-                    ctx,
-                    out,
-                    &view,
-                    &clip
-                );
+                out->valid =
+                    psp_gfx_dl_store_transformed_vertex(
+                        ctx,
+                        out,
+                        &view,
+                        &clip
+                    );
 #elif PSP_GFX_DL_HOT_STATS
-            if (!out->valid) {
-                ctx->stats.nearZeroWCount++;
-            } else if (ctx->hasProjection && (out->clipW < 0.0f)) {
-                ctx->stats.behindEyeVertexCount++;
+                if (!out->valid) {
+                    ctx->stats.nearZeroWCount++;
+                } else if (ctx->hasProjection && (out->clipW < 0.0f)) {
+                    ctx->stats.behindEyeVertexCount++;
+                }
+#endif
+#if PSP_GFX_ME_REPLAY
             }
 #endif
 
@@ -3886,8 +3969,9 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
     }
     PspProfiler_RenderPhaseEnd(PSP_PROFILE_PHASE_G_VTX_POST_TRANSFORM, phaseStartUs);
 
-#if !VTX_FUSED_TNL
-    if ((ctx->geometryMode & G_LIGHTING) != 0) {
+#if !VTX_FUSED_TNL || PSP_GFX_ME_REPLAY
+    if (((ctx->geometryMode & G_LIGHTING) != 0) &&
+        runSeparateLighting) {
         phaseStartUs = PspProfiler_RenderPhaseBegin();
         psp_gfx_dl_stage_lighting_batch(ctx, src, count);
         PspProfiler_RenderPhaseEnd(PSP_PROFILE_PHASE_G_VTX_LIGHTING_STAGE, phaseStartUs);
@@ -3971,6 +4055,9 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
 #if PSP_GFX_DL_HOT_STATS || PROFILE_HW_COUNTERS || PSP_GFX_ME_REPLAY
     /* Loaded vertices normalise counter captures so this add survives without hot stats */
     ctx->stats.vertexCount += count;
+#endif
+#if PSP_GFX_ME_REPLAY
+    ctx->stats.transformedVertexCount += count;
 #endif
     PspProfiler_CountTransformWork(count,
                                    (ctx->geometryMode & G_LIGHTING) != 0 ? count : 0,
@@ -4815,7 +4902,8 @@ static void psp_gfx_dl_pool_report(u32 taskIndex) {
 }
 #endif
 
-int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
+int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats,
+                 const PspGfxMeTransformTrace* trace, u32 traceCount) {
     PspGfxDlContext* ctx = &sPspGfxDlContext;
 #if PSP_LOG_ENABLED || PSP_RENDERER_DIAGNOSTICS
     // sized so the widest stats lines cannot truncate at large counter values
@@ -4825,6 +4913,13 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
     PspGfxPspgl_InitColorTransfer();
     psp_gfx_dl_reset_context(ctx);
     ctx->taskIndex = taskIndex;
+#if PSP_GFX_ME_REPLAY
+    ctx->transformTrace = trace;
+    ctx->transformTraceCount = traceCount;
+#else
+    (void) trace;
+    (void) traceCount;
+#endif
     PspProfiler_CountDisplayListTask();
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_DL_TRAVERSAL);
     psp_gfx_dl_run_internal(ctx, dl, 0);
@@ -4834,6 +4929,16 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
     psp_gfx_dl_flush_all(ctx, PSP_PROFILE_FLUSH_END_OF_TASK);
     PspGfxPspgl_ClearScissor();
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_DL_TRAVERSAL);
+
+#if PSP_GFX_ME_REPLAY
+    if ((ctx->transformTraceCount != 0) &&
+        (ctx->transformTraceCursor != ctx->transformTraceCount)) {
+        ctx->stats.meTransformMismatchCount +=
+            ctx->transformTraceCursor > ctx->transformTraceCount ?
+                ctx->transformTraceCursor - ctx->transformTraceCount :
+                ctx->transformTraceCount - ctx->transformTraceCursor;
+    }
+#endif
 
 #if PSP_LOG_ENABLED
     if ((taskIndex != 0) && ((taskIndex % 300) == 0)) {
