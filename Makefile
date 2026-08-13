@@ -47,6 +47,7 @@ ifeq ($(PSP_RENDERER_DIAGNOSTICS),1)
 PSP_LOG := 1
 endif
 PSP_AUDIO ?= 0
+PSP_AUDIO_PROFILE ?= 0
 PSP_FPS_OVERLAY ?= 1
 COLOR ?= 1
 VERBOSE ?= 0
@@ -82,6 +83,16 @@ PSPDEV ?= $(shell $(PSP_CONFIG) --psp-prefix 2>/dev/null | sed 's,/psp$$,,')
 ifneq ($(PSP_AUDIO),0)
 ifneq ($(PSP_AUDIO),1)
 $(error PSP_AUDIO must be 0 or 1)
+endif
+endif
+ifneq ($(PSP_AUDIO_PROFILE),0)
+ifneq ($(PSP_AUDIO_PROFILE),1)
+$(error PSP_AUDIO_PROFILE must be 0 or 1)
+endif
+endif
+ifeq ($(PSP_AUDIO_PROFILE),1)
+ifneq ($(PSP_AUDIO),1)
+$(error PSP_AUDIO_PROFILE=1 requires PSP_AUDIO=1)
 endif
 endif
 ifneq ($(VTX_FUSED_TNL),0)
@@ -272,6 +283,7 @@ CFLAGS += -fno-exceptions -fno-unwind-tables
 CFLAGS += -fno-asynchronous-unwind-tables -fno-ident
 CFLAGS += -DPSP_FPS_OVERLAY=$(PSP_FPS_OVERLAY)
 CFLAGS += -DPSP_AUDIO=$(PSP_AUDIO)
+CFLAGS += -DPSP_AUDIO_PROFILE=$(PSP_AUDIO_PROFILE)
 CFLAGS += -DPROFILE_GPROF=$(if $(filter 1,$(PROFILE_PSP)),1,0)
 CFLAGS += -DPROFILE_PHASES=$(if $(filter 1,$(PROFILE_PHASES)),1,0)
 CFLAGS += -DPROFILE_CAPTURE_FRAMES=$(PROFILE_CAPTURE_FRAMES)

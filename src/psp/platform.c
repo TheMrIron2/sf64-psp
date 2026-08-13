@@ -44,6 +44,10 @@ float sqrtf(float x);
 #ifndef PSP_LOG_ENABLED
 #define PSP_LOG_ENABLED 0
 #endif
+#ifndef PSP_AUDIO_PROFILE
+#define PSP_AUDIO_PROFILE 0
+#endif
+#define PSP_FILE_LOG_ENABLED (PSP_LOG_ENABLED || PSP_AUDIO_PROFILE)
 #ifndef PSP_DEBUG_OVERLAY_ENABLED
 #define PSP_DEBUG_OVERLAY_ENABLED 0
 #endif
@@ -62,7 +66,7 @@ static OSMesgQueue* sViMq;
 static OSMesg sViMsg;
 static u32 sViRetraceCount = 1;
 static SceUID sViThreadId = -1;
-#if PSP_LOG_ENABLED
+#if PSP_FILE_LOG_ENABLED
 static SceUID sLogSemaId = -1;
 #endif
 static volatile int sViEventPending;
@@ -179,7 +183,7 @@ PSP_EMPTY_SEGMENT(ovl_menu);
 PSP_EMPTY_SEGMENT(ovl_ending);
 PSP_EMPTY_SEGMENT(ovl_unused);
 
-#if PSP_LOG_ENABLED
+#if PSP_FILE_LOG_ENABLED
 static u32 psp_strlen(const char* text) {
     u32 len = 0;
 
@@ -216,7 +220,7 @@ static char* psp_append_u32(char* out, u32 value) {
     return out;
 }
 
-#if PSP_LOG_ENABLED
+#if PSP_FILE_LOG_ENABLED
 /* ms0 is absent on a PSP Go without an M2 card, ef0 is its internal flash
  * host0 is the PSPLINK host directory and catches both refusing writes */
 static const char* psp_log_path(void) {
@@ -243,10 +247,9 @@ static const char* psp_log_path(void) {
 }
 #endif
 
-void PspPlatform_LogLine(const char* line) {
-#if PSP_LOG_ENABLED
+#if PSP_FILE_LOG_ENABLED
+static void psp_log_line(const char* line) {
     SceUID fd;
-    static int sLogReady;
 
     if (line == NULL) {
         return;
@@ -258,9 +261,6 @@ void PspPlatform_LogLine(const char* line) {
 
     fd = sceIoOpen(psp_log_path(), PSP_O_WRONLY | PSP_O_CREAT | PSP_O_APPEND, 0777);
     if (fd >= 0) {
-        if (!sLogReady) {
-            sLogReady = 1;
-        }
         sceIoWrite(fd, line, psp_strlen(line));
         sceIoWrite(fd, "\n", 1);
         sceIoClose(fd);
@@ -268,6 +268,20 @@ void PspPlatform_LogLine(const char* line) {
     if (sLogSemaId >= 0) {
         sceKernelSignalSema(sLogSemaId, 1);
     }
+}
+#endif
+
+void PspPlatform_LogLine(const char* line) {
+#if PSP_LOG_ENABLED
+    psp_log_line(line);
+#else
+    (void) line;
+#endif
+}
+
+void PspPlatform_LogAudioProfileLine(const char* line) {
+#if PSP_AUDIO_PROFILE
+    psp_log_line(line);
 #else
     (void) line;
 #endif
@@ -306,12 +320,17 @@ void PspPlatform_Init(void) {
 
     sExitRequested = 0;
     sViEventPending = 0;
-#if PSP_LOG_ENABLED
+#if PSP_FILE_LOG_ENABLED
     if (sLogSemaId < 0) {
         sLogSemaId = sceKernelCreateSema("sf64_log", 0, 1, 1, NULL);
     }
     sceIoRemove(psp_log_path());
+#endif
+#if PSP_LOG_ENABLED
     PspPlatform_LogLine("[psp] log start");
+#endif
+#if PSP_AUDIO_PROFILE
+    PspPlatform_LogAudioProfileLine("[audio-prof] log start cache=targeted");
 #endif
     PspInput_Init();
     PspProfiler_Init();

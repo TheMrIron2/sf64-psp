@@ -7,6 +7,7 @@
 #include <macros.h>
 
 #include "src/psp/audio_mixer.h"
+#include "src/psp/audio_profile.h"
 #include "src/psp/platform.h"
 
 static void* psp_audio_memset(void* dst, s32 value, size_t size) {
@@ -1312,14 +1313,86 @@ void aUnkCmd19Impl(uint8_t f, uint16_t count, uint16_t out_addr, uint16_t in_add
     } while (nbytes > 0);
 }
 
-s32 PspAudioMixer_ExecuteCommandList(const Acmd* commands, s32 commandCount) {
+#if PSP_AUDIO_PROFILE
+static u32 psp_audio_profile_command_work(u32 w0, u32 w1) {
+    u32 opcode = w0 >> 24;
+
+    switch (opcode) {
+        case A_ADPCM:
+        case A_S8DEC:
+            return ROUND_UP_32(rspa.nbytes);
+        case A_CLEARBUFF:
+            return ROUND_UP_16(w1);
+        case A_ADDMIXER:
+            return ROUND_UP_64(ROUND_DOWN_16(((w0 >> 16) & 0xFF) << 4)) /
+                   sizeof(int16_t);
+        case A_RESAMPLE:
+            return ROUND_UP_16(rspa.nbytes) / sizeof(int16_t);
+        case A_RESAMPLE_ZOH:
+            return ROUND_UP_8(rspa.nbytes) / sizeof(int16_t);
+        case A_FILTER:
+            return (((w0 >> 16) & 0xFF) > A_INIT) ? 0 :
+                   rspa.filter_count / sizeof(int16_t);
+        case A_DUPLICATE:
+            return ((w0 >> 16) & 0xFF) * 128;
+        case A_DMEMMOVE:
+            return ROUND_UP_16(w1 & 0xFFFF);
+        case A_LOADADPCM:
+            return w0 & 0xFFFFFF;
+        case A_MIXER:
+            return ROUND_UP_32(ROUND_DOWN_16(((w0 >> 16) & 0xFF) << 4)) /
+                   sizeof(int16_t);
+        case A_INTERLEAVE:
+            return rspa.nbytes / sizeof(int16_t);
+        case A_INTERL:
+            return ROUND_UP_8(w0 & 0xFFFF);
+        case A_ENVMIXER: {
+            u32 samples = ROUND_UP_16((w0 >> 8) & 0xFF);
+
+            return samples < 192 ? samples : 192;
+        }
+        case A_LOADBUFF:
+        case A_SAVEBUFF:
+            return ROUND_DOWN_16(((w0 >> 16) & 0xFF) << 4);
+        case A_HILOGAIN:
+            return ROUND_UP_32(w0 & 0xFFFF) / sizeof(int16_t);
+        case A_UNK19:
+            return ROUND_UP_64(w0 & 0xFFFF) / sizeof(int16_t);
+        default:
+            return 0;
+    }
+}
+#endif
+
+#if PSP_AUDIO_PROFILE
+static s32 psp_audio_mixer_execute_command_list(const Acmd* commands,
+                                                s32 commandCount, s32 profile) {
+#else
+static s32 psp_audio_mixer_execute_command_list(const Acmd* commands,
+                                                s32 commandCount) {
+#endif
     s32 i;
+#if PSP_AUDIO_PROFILE
+    s32 result = 0;
+
+    if (profile) {
+        PspAudioProfile_MeBeginJob(commandCount);
+    }
+#endif
 
     for (i = 0; i < commandCount; i++) {
         u32 w0 = commands[i].words.w0;
         u32 w1 = commands[i].words.w1;
+        u32 opcode = w0 >> 24;
 
-        switch (w0 >> 24) {
+#if PSP_AUDIO_PROFILE
+        if (profile) {
+            PspAudioProfile_MeBeginCommand(opcode,
+                                           psp_audio_profile_command_work(w0, w1));
+        }
+#endif
+
+        switch (opcode) {
             case A_SPNOOP:
                 break;
             case A_ADPCM:
@@ -1393,8 +1466,43 @@ s32 PspAudioMixer_ExecuteCommandList(const Acmd* commands, s32 commandCount) {
                 aUnkCmd19Impl((w0 >> 16) & 0xFF, w0 & 0xFFFF, w1 >> 16, w1 & 0xFFFF);
                 break;
             default:
+#if PSP_AUDIO_PROFILE
+                result = -1;
+                break;
+#else
                 return -1;
+#endif
+        }
+#if PSP_AUDIO_PROFILE
+        if (profile) {
+            PspAudioProfile_MeEndCommand(opcode);
+        }
+        if (result != 0) {
+            break;
         }
     }
+    if (profile) {
+        PspAudioProfile_MeEndJob();
+    }
+    return result;
+#else
+    }
     return 0;
+#endif
+}
+
+s32 PspAudioMixer_ExecuteCommandList(const Acmd* commands, s32 commandCount) {
+#if PSP_AUDIO_PROFILE
+    return psp_audio_mixer_execute_command_list(commands, commandCount, false);
+#else
+    return psp_audio_mixer_execute_command_list(commands, commandCount);
+#endif
+}
+
+s32 PspAudioMixer_ExecuteCommandListMe(const Acmd* commands, s32 commandCount) {
+#if PSP_AUDIO_PROFILE
+    return psp_audio_mixer_execute_command_list(commands, commandCount, true);
+#else
+    return psp_audio_mixer_execute_command_list(commands, commandCount);
+#endif
 }

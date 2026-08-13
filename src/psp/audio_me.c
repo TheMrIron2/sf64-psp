@@ -4,6 +4,7 @@
 
 #include "src/psp/audio_me.h"
 #include "src/psp/audio_mixer.h"
+#include "src/psp/audio_profile.h"
 
 #ifndef PSP_AUDIO
 #define PSP_AUDIO 0
@@ -284,6 +285,7 @@ static void psp_audio_me_invalidate_range_me(const void* address, u32 size) {
     meLibDcacheInvalidateRange((u32) start, end - start);
 }
 
+#if !defined(PSP_LOG_ENABLED) || !PSP_LOG_ENABLED
 static void psp_audio_me_writeback_range_me(const void* address, u32 size) {
     uintptr_t start;
     uintptr_t end;
@@ -296,7 +298,9 @@ static void psp_audio_me_writeback_range_me(const void* address, u32 size) {
           ~(PSP_AUDIO_ME_CACHE_LINE_SIZE - 1);
     meLibDcacheWritebackRange((u32) start, end - start);
 }
+#endif
 
+#if !defined(PSP_LOG_ENABLED) || !PSP_LOG_ENABLED
 static void psp_audio_me_invalidate_inputs_me(const Acmd* commands, s32 commandCount) {
     s32 i;
 
@@ -361,6 +365,7 @@ static void psp_audio_me_writeback_outputs_me(const Acmd* commands, s32 commandC
     }
     psp_audio_me_writeback_range_me(PspAudioMixer_GetStateAddress(), PspAudioMixer_GetStateSize());
 }
+#endif
 
 __attribute__((noinline, aligned(4))) void meLibOnException(void) {
     sMeState = PSP_AUDIO_ME_FAULT;
@@ -402,7 +407,7 @@ __attribute__((noinline, aligned(4))) void meLibOnProcess(void) {
 #else
             psp_audio_me_invalidate_inputs_me(commands, commandCount);
 #endif
-            sMeResult = PspAudioMixer_ExecuteCommandList(commands, commandCount);
+            sMeResult = PspAudioMixer_ExecuteCommandListMe(commands, commandCount);
             if ((sMeResult == 0) && !PspAudioMixer_ValidateState()) {
                 sMeResult = -3;
             }
@@ -484,10 +489,20 @@ static s32 psp_audio_me_is_running(void) {
     return sMeState == PSP_AUDIO_ME_RUN;
 }
 
-void PspAudioMe_Wait(void) {
+static void psp_audio_me_wait(PspAudioProfileWaitReason reason) {
+#if PSP_AUDIO_PROFILE
+    u32 waitStart;
+    s32 blocked;
+#endif
+
     if (!sPending) {
         return;
     }
+
+#if PSP_AUDIO_PROFILE
+    blocked = psp_audio_me_is_running();
+    waitStart = sceKernelGetSystemTimeLow();
+#endif
 
     while (psp_audio_me_is_running()) {
         if (sCompletionReady) {
@@ -524,6 +539,7 @@ void PspAudioMe_Wait(void) {
         }
     }
 
+    PspAudioProfile_RecordCompletion(sceKernelGetSystemTimeLow() - sPendingStart);
     if (sMeState == PSP_AUDIO_ME_IDLE) {
         psp_audio_me_invalidate_writes();
         sLastError = (s32) sMeResult;
@@ -532,6 +548,7 @@ void PspAudioMe_Wait(void) {
         }
     } else if (sMeState == PSP_AUDIO_ME_FAULT) {
         sceKernelDcacheWritebackInvalidateAll();
+        PspAudioProfile_RecordFallback();
         sLastError = PspAudioMixer_ExecuteCommandList(sPendingCommands, sPendingCommandCount);
         if ((sLastError == 0) && !PspAudioMixer_ValidateState()) {
             sLastError = -3;
@@ -548,6 +565,15 @@ void PspAudioMe_Wait(void) {
         sInitialized = 0;
     }
     sPending = 0;
+#if PSP_AUDIO_PROFILE
+    PspAudioProfile_RecordWait(reason, blocked,
+                               sceKernelGetSystemTimeLow() - waitStart);
+    PspAudioProfile_Report();
+#endif
+}
+
+void PspAudioMe_Wait(void) {
+    psp_audio_me_wait(PSP_AUDIO_PROFILE_WAIT_PUBLIC);
 }
 
 void PspAudioMe_Submit(const Acmd* commands, s32 commandCount) {
@@ -555,8 +581,9 @@ void PspAudioMe_Submit(const Acmd* commands, s32 commandCount) {
         return;
     }
 
-    PspAudioMe_Wait();
+    psp_audio_me_wait(PSP_AUDIO_PROFILE_WAIT_SUBMIT);
     if (!sInitialized || (sMeState != PSP_AUDIO_ME_IDLE)) {
+        PspAudioProfile_RecordFallback();
         sLastError = PspAudioMixer_ExecuteCommandList(commands, commandCount);
         if ((sLastError == 0) && !PspAudioMixer_ValidateState()) {
             sLastError = -3;
