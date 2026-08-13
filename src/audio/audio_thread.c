@@ -100,6 +100,9 @@ SPTask* AudioThread_CreateTask(void) {
 
 #if defined(TARGET_PSP) && PSP_AUDIO
     PspAudioMe_Wait();
+#if PSP_AUDIO_VME_VALIDATE
+    PspPlatform_ReportAudioVmeMix();
+#endif
     if (sPendingOutput != NULL) {
         if (PspAudioMe_GetLastError() < 0) {
             memset(sPendingOutput, 0, sPendingOutputSize);

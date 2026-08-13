@@ -50,6 +50,9 @@ float sqrtf(float x);
 #ifndef PSP_AUDIO_VME
 #define PSP_AUDIO_VME 0
 #endif
+#ifndef PSP_AUDIO_VME_VALIDATE
+#define PSP_AUDIO_VME_VALIDATE 0
+#endif
 #define PSP_FILE_LOG_ENABLED (PSP_LOG_ENABLED || PSP_AUDIO_PROFILE || PSP_AUDIO_VME)
 #ifndef PSP_DEBUG_OVERLAY_ENABLED
 #define PSP_DEBUG_OVERLAY_ENABLED 0
@@ -352,6 +355,46 @@ static void psp_log_audio_vme_result(void) {
 }
 #endif
 
+void PspPlatform_ReportAudioVmeMix(void) {
+#if PSP_AUDIO_VME_VALIDATE
+    static u32 sLastCalls;
+    PspAudioVmeMixResult result;
+    char line[224];
+    char* out;
+
+    PspAudioMe_GetVmeMixResult(&result);
+    if ((result.calls == sLastCalls) ||
+        ((result.calls != 4) && ((result.calls - sLastCalls) < 256) &&
+         (result.mismatches == 0))) {
+        return;
+    }
+    sLastCalls = result.calls;
+    out = line;
+    out = psp_append_text(out, "[audio-vme] mixer calls=");
+    out = psp_append_u32(out, result.calls);
+    out = psp_append_text(out, " samples=");
+    out = psp_append_u32(out, result.samples);
+    out = psp_append_text(out, " mismatches=");
+    out = psp_append_u32(out, result.mismatches);
+    if (result.mismatches != 0) {
+        out = psp_append_text(out, " first=");
+        out = psp_append_s32(out, result.firstIndex);
+        out = psp_append_text(out, " input=");
+        out = psp_append_s32(out, result.input);
+        out = psp_append_text(out, " old_out=");
+        out = psp_append_s32(out, result.oldOutput);
+        out = psp_append_text(out, " gain=");
+        out = psp_append_s32(out, result.gain);
+        out = psp_append_text(out, " expected=");
+        out = psp_append_s32(out, result.expected);
+        out = psp_append_text(out, " actual=");
+        out = psp_append_s32(out, result.actual);
+    }
+    *out = '\0';
+    PspPlatform_LogAudioVmeLine(line);
+#endif
+}
+
 void PspPlatform_LogFrame(const char* phase, u32 frame) {
     char line[96];
     char* out = line;
@@ -406,6 +449,9 @@ void PspPlatform_Init(void) {
     audioMeResult = PspAudioMe_Init();
 #if PSP_AUDIO_VME
     psp_log_audio_vme_result();
+#if PSP_AUDIO_VME_VALIDATE
+    PspPlatform_ReportAudioVmeMix();
+#endif
 #endif
 #endif
     audioResult = PspAudioOutput_Init();

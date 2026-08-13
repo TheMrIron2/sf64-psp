@@ -9,6 +9,9 @@
 #include "src/psp/audio_mixer.h"
 #include "src/psp/audio_profile.h"
 #include "src/psp/platform.h"
+#if defined(TARGET_PSP) && PSP_AUDIO_VME_VALIDATE
+#include "src/psp/audio_me.h"
+#endif
 
 static void* psp_audio_memset(void* dst, s32 value, size_t size) {
     u8* out = dst;
@@ -965,6 +968,10 @@ void aMixImpl(uint16_t count, int16_t gain, uint16_t in_addr, uint16_t out_addr)
     int16_t* out = BUF_S16(out_addr);
     int i;
     int32_t sample;
+
+#if defined(TARGET_PSP) && PSP_AUDIO_VME_VALIDATE
+    PspAudioMe_ValidateVmeMix(count, gain, in, out);
+#endif
 
     if (gain == -0x8000) {
         while (nbytes > 0) {

@@ -12,6 +12,9 @@
 #ifndef PSP_AUDIO_VME
 #define PSP_AUDIO_VME 0
 #endif
+#ifndef PSP_AUDIO_VME_VALIDATE
+#define PSP_AUDIO_VME_VALIDATE 0
+#endif
 
 #if PSP_AUDIO
 #include <me-core-mapper/me-core.h>
@@ -31,6 +34,10 @@
 #define PSP_AUDIO_VME_SMOKE_PROLOGUE 16
 #define PSP_AUDIO_VME_SMOKE_FACTOR -7
 #define PSP_AUDIO_VME_SMOKE_REPEATS 4
+#define PSP_AUDIO_VME_MIX_MAX_SAMPLES 1024
+#define PSP_AUDIO_VME_BUFFER_WORDS 2048
+#define PSP_AUDIO_ROUND_UP_32(v) (((v) + 31) & ~31)
+#define PSP_AUDIO_ROUND_DOWN_16(v) ((v) & ~15)
 
 typedef enum {
     PSP_AUDIO_ME_BOOTING,
@@ -60,6 +67,17 @@ enum {
     PSP_AUDIO_ME_SHARED_VME_FACTOR,
     PSP_AUDIO_ME_SHARED_VME_EXPECTED,
     PSP_AUDIO_ME_SHARED_VME_ACTUAL,
+#if PSP_AUDIO_VME_VALIDATE
+    PSP_AUDIO_ME_SHARED_VME_MIX_CALLS,
+    PSP_AUDIO_ME_SHARED_VME_MIX_SAMPLES,
+    PSP_AUDIO_ME_SHARED_VME_MIX_MISMATCHES,
+    PSP_AUDIO_ME_SHARED_VME_MIX_FIRST_INDEX,
+    PSP_AUDIO_ME_SHARED_VME_MIX_INPUT,
+    PSP_AUDIO_ME_SHARED_VME_MIX_OLD_OUTPUT,
+    PSP_AUDIO_ME_SHARED_VME_MIX_GAIN,
+    PSP_AUDIO_ME_SHARED_VME_MIX_EXPECTED,
+    PSP_AUDIO_ME_SHARED_VME_MIX_ACTUAL,
+#endif
 #endif
     PSP_AUDIO_ME_SHARED_COUNT,
 };
@@ -86,6 +104,17 @@ static volatile u32 sSharedStorage[PSP_AUDIO_ME_SHARED_COUNT]
 #define sVmeFactor PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_VME_FACTOR]
 #define sVmeExpected PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_VME_EXPECTED]
 #define sVmeActual PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_VME_ACTUAL]
+#if PSP_AUDIO_VME_VALIDATE
+#define sVmeMixCalls PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_VME_MIX_CALLS]
+#define sVmeMixSamples PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_VME_MIX_SAMPLES]
+#define sVmeMixMismatches PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_VME_MIX_MISMATCHES]
+#define sVmeMixFirstIndex PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_VME_MIX_FIRST_INDEX]
+#define sVmeMixInput PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_VME_MIX_INPUT]
+#define sVmeMixOldOutput PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_VME_MIX_OLD_OUTPUT]
+#define sVmeMixGain PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_VME_MIX_GAIN]
+#define sVmeMixExpected PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_VME_MIX_EXPECTED]
+#define sVmeMixActual PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_VME_MIX_ACTUAL]
+#endif
 #endif
 
 typedef struct {
@@ -406,6 +435,10 @@ static void psp_audio_me_writeback_outputs_me(const Acmd* commands, s32 commandC
 #endif
 
 #if PSP_AUDIO_VME
+#if PSP_AUDIO_VME_VALIDATE
+static int psp_audio_me_vme_mix_synthetic(void);
+#endif
+
 static int psp_audio_me_vme_smoke_once(void) {
     static const s16 sInputs[PSP_AUDIO_VME_SMOKE_SAMPLES] = {
         0, 1, -1, 0x7fff, -0x8000, 2, -2, 17,
@@ -511,6 +544,144 @@ static int psp_audio_me_vme_smoke(void) {
     sVmeCheckpoint = 12;
     sVmeState = PSP_AUDIO_VME_READY;
     meLibSync();
+#if PSP_AUDIO_VME_VALIDATE
+    if (psp_audio_me_vme_mix_synthetic() < 0) {
+        vmeLibDisable();
+        sVmeState = PSP_AUDIO_VME_FAULT;
+        meLibSync();
+        return -1;
+    }
+#endif
+    return 0;
+}
+#endif
+
+#if PSP_AUDIO_VME_VALIDATE
+static s16 psp_audio_me_clamp16(s32 value) {
+    if (value < -0x8000) {
+        return -0x8000;
+    }
+    if (value > 0x7fff) {
+        return 0x7fff;
+    }
+    return (s16) value;
+}
+
+static void psp_audio_me_vme_multiply(s32 factor, s32 count) {
+    vmeLibStart();
+    vme_icn(FLOW, 0);
+    vme_icn(ARCH, VME_DEF_MAPPER);
+    vme_pe0(vme_fu(PRIMARY), vme_mux(TOP_0), VME_FU_OPCODE_MUL_CONST_RSHIFT_0, 0);
+    vme_pe0(fu_reg(PRIMARY, B), (u32) factor);
+    vme_pe0(agu_top(MODE), VME_DEF_MODE);
+    vme_pe0(agu_top(COUNT), VME_DEF_STEP, count - 1);
+    vme_pe0(agu_base(MODE), VME_DEF_MODE);
+    vme_pe0(agu_base(COUNT), VME_DEF_STEP, count - 1);
+    vme_pe0(agu_write(MODE), VME_DEF_MODE, VME_CYCLE_6);
+    vme_pe0(agu_write(COUNT), VME_DEF_STEP, count - 1);
+    vme_pe0(agu_write(FORMAT_0), PSP_AUDIO_VME_SMOKE_PROLOGUE);
+    vme_pe0(agu_write(FORMAT_1), VME_END_TOKEN);
+    vmeLibFinish();
+    meLibSync();
+}
+
+int PspAudioMe_ValidateVmeMix(u16 count, s16 gain, const s16* input,
+                              const s16* output) {
+    volatile s32* top = (volatile s32*) VME_TOP_BUFFERS;
+    volatile s32* products = (volatile s32*) VME_BASE_BUFFERS;
+    volatile s32* highProducts = top + PSP_AUDIO_VME_BUFFER_WORDS;
+    s32 nbytes = PSP_AUDIO_ROUND_UP_32(PSP_AUDIO_ROUND_DOWN_16((u32) count << 4));
+    s32 samples = nbytes / (s32) sizeof(s16);
+    s32 vmeCount = samples + PSP_AUDIO_VME_SMOKE_PROLOGUE;
+    s32 lowFactor = (u16) gain & 0xff;
+    s32 highFactor = ((s32) gain - lowFactor) / 256;
+    s32 i;
+
+    if ((sVmeState != PSP_AUDIO_VME_READY) || (input == NULL) ||
+        (output == NULL) || (samples <= 0) ||
+        (samples > PSP_AUDIO_VME_MIX_MAX_SAMPLES)) {
+        return 0;
+    }
+
+    for (i = 0; i < samples; i++) {
+        top[i] = input[i];
+    }
+    for (; i < vmeCount; i++) {
+        top[i] = 0;
+    }
+
+    meLibSync();
+    psp_audio_me_vme_multiply(highFactor, vmeCount);
+
+    products += PSP_AUDIO_VME_SMOKE_PROLOGUE;
+    for (i = 0; i < samples; i++) {
+        highProducts[i] = products[i];
+    }
+    psp_audio_me_vme_multiply(lowFactor, vmeCount);
+
+    sVmeMixCalls++;
+    for (i = 0; i < samples; i++) {
+        s32 product = highProducts[i] * 256 + products[i];
+        s16 expected;
+        s16 actual;
+
+        if (gain == -0x8000) {
+            expected = psp_audio_me_clamp16((s32) output[i] - input[i]);
+            actual = psp_audio_me_clamp16((s32) output[i] + (product >> 15));
+        } else {
+            expected = psp_audio_me_clamp16(
+                (((s32) output[i] * 0x7fff + (s32) input[i] * gain) + 0x4000) >> 15);
+            actual = psp_audio_me_clamp16(
+                (((s32) output[i] * 0x7fff + product) + 0x4000) >> 15);
+        }
+        sVmeMixSamples++;
+        if (actual != expected) {
+            if (sVmeMixMismatches == 0) {
+                sVmeMixFirstIndex = i;
+                sVmeMixInput = (u32) (s32) input[i];
+                sVmeMixOldOutput = (u32) (s32) output[i];
+                sVmeMixGain = (u32) (s32) gain;
+                sVmeMixExpected = (u32) (s32) expected;
+                sVmeMixActual = (u32) (s32) actual;
+            }
+            sVmeMixMismatches++;
+        }
+    }
+    if (sVmeMixMismatches != 0) {
+        vmeLibDisable();
+        sVmeState = PSP_AUDIO_VME_FAULT;
+        meLibSync();
+        return -1;
+    }
+    return 1;
+}
+
+static int psp_audio_me_vme_mix_synthetic(void) {
+    static const s16 sInput[16] = {
+        0, 1, -1, 0x7fff, -0x8000, 2, -2, 17,
+        -17, 255, -255, 4096, -4096, 16384, -16384, 30000,
+    };
+    static const s16 sOutput[16] = {
+        0x7fff, -0x8000, 1, -1, 0, 30000, -30000, 17,
+        -17, 255, -255, 4096, -4096, 16384, -16384, 0,
+    };
+    static const s16 sGains[4] = { 0, 0x7fff, -0x7fff, -0x8000 };
+    s32 i;
+
+    for (i = 0; i < 4; i++) {
+        if (PspAudioMe_ValidateVmeMix(2, sGains[i], sInput, sOutput) != 1) {
+            return -1;
+        }
+    }
+    return 0;
+}
+#else
+int PspAudioMe_ValidateVmeMix(u16 count, s16 gain, const s16* input,
+                              const s16* output) {
+    (void) count;
+    (void) gain;
+    (void) input;
+    (void) output;
     return 0;
 }
 #endif
@@ -603,6 +774,17 @@ int PspAudioMe_Boot(void) {
     sVmeState = PSP_AUDIO_VME_UNINITIALIZED;
     sVmeCheckpoint = 0;
     sVmeTimedOut = 0;
+#if PSP_AUDIO_VME_VALIDATE
+    sVmeMixCalls = 0;
+    sVmeMixSamples = 0;
+    sVmeMixMismatches = 0;
+    sVmeMixFirstIndex = (u32) -1;
+    sVmeMixInput = 0;
+    sVmeMixOldOutput = 0;
+    sVmeMixGain = 0;
+    sVmeMixExpected = 0;
+    sVmeMixActual = 0;
+#endif
 #endif
     sMeState = PSP_AUDIO_ME_BOOTING;
     meLibSync();
@@ -832,6 +1014,33 @@ void PspAudioMe_GetVmeSmokeResult(PspAudioVmeSmokeResult* result) {
 #endif
 }
 
+void PspAudioMe_GetVmeMixResult(PspAudioVmeMixResult* result) {
+    if (result == NULL) {
+        return;
+    }
+#if PSP_AUDIO_VME_VALIDATE
+    result->calls = sVmeMixCalls;
+    result->samples = sVmeMixSamples;
+    result->mismatches = sVmeMixMismatches;
+    result->firstIndex = (s32) sVmeMixFirstIndex;
+    result->input = (s32) sVmeMixInput;
+    result->oldOutput = (s32) sVmeMixOldOutput;
+    result->gain = (s32) sVmeMixGain;
+    result->expected = (s32) sVmeMixExpected;
+    result->actual = (s32) sVmeMixActual;
+#else
+    result->calls = 0;
+    result->samples = 0;
+    result->mismatches = 0;
+    result->firstIndex = -1;
+    result->input = 0;
+    result->oldOutput = 0;
+    result->gain = 0;
+    result->expected = 0;
+    result->actual = 0;
+#endif
+}
+
 #else
 
 int PspAudioMe_Boot(void) {
@@ -858,6 +1067,15 @@ int PspAudioMe_GetLastError(void) {
     return 0;
 }
 
+int PspAudioMe_ValidateVmeMix(u16 count, s16 gain, const s16* input,
+                              const s16* output) {
+    (void) count;
+    (void) gain;
+    (void) input;
+    (void) output;
+    return 0;
+}
+
 void PspAudioMe_GetVmeSmokeResult(PspAudioVmeSmokeResult* result) {
     if (result == NULL) {
         return;
@@ -870,6 +1088,21 @@ void PspAudioMe_GetVmeSmokeResult(PspAudioVmeSmokeResult* result) {
     result->firstIndex = -1;
     result->input = 0;
     result->factor = 0;
+    result->expected = 0;
+    result->actual = 0;
+}
+
+void PspAudioMe_GetVmeMixResult(PspAudioVmeMixResult* result) {
+    if (result == NULL) {
+        return;
+    }
+    result->calls = 0;
+    result->samples = 0;
+    result->mismatches = 0;
+    result->firstIndex = -1;
+    result->input = 0;
+    result->oldOutput = 0;
+    result->gain = 0;
     result->expected = 0;
     result->actual = 0;
 }
