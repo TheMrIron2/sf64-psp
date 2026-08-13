@@ -5,6 +5,7 @@
 #include "src/psp/renderer.h"
 
 #if PSP_GFX_ME_REPLAY
+#include <me-core-mapper/me-core-mapper.h>
 #include <me-core-mapper/vme-lib.h>
 #endif
 #include <stdint.h>
@@ -20,6 +21,7 @@
 #define PSP_GFX_ME_VME_TOP_BUFFER_2 (VME_TOP_BUFFERS + 0x2000U * 2)
 #define PSP_GFX_ME_VME_TOP_BUFFER_3 (VME_TOP_BUFFERS + 0x2000U * 3)
 #define PSP_GFX_ME_VME_BASE_BUFFER_0 (VME_BASE_BUFFERS + 0x2000U * 0)
+#define PSP_GFX_ME_VME_INPUT_OFFSET 0x100
 #define PSP_GFX_ME_VME_MAX_FRAC_BITS 12
 #define PSP_GFX_ME_VME_LIMIT 0x7FFFFF
 #endif
@@ -77,7 +79,7 @@ static void psp_gfx_me_vme_configure(void) {
     vme_pe0(vme_fu(PRIMARY), mux, VME_FU_OPCODE_MAC_INNER_PRODUCT_BIAS);
     vme_pe0(agu_top(MODE), VME_DEF_MODE);
     vme_pe0(agu_top(COUNT), VME_DEF_STEP, count);
-    vme_pe0(agu_base(MODE), VME_DEF_MODE, 4);
+    vme_pe0(agu_base(MODE), VME_DEF_MODE, PSP_GFX_ME_VME_INPUT_OFFSET);
     vme_pe0(agu_base(COUNT), VME_DEF_STEP, count);
     vme_pe0(agu_write(MODE), VME_DEF_MODE, VME_CYCLE_6);
     vme_pe0(agu_write(COUNT), VME_DEF_STEP, count);
@@ -180,17 +182,28 @@ static int psp_gfx_me_vme_set_matrix(const float matrix[4][4], int fracBits) {
     return 1;
 }
 
-static void psp_gfx_me_vme_transform(float out[4], s32 x, s32 y, s32 z,
+static void psp_gfx_me_vme_stage_vertices(const Vtx* src, u32 count) {
+    s32 input[64][4] __attribute__((aligned(64)));
+    u32 i;
+
+    for (i = 0; i < count; i++) {
+        input[i][0] = src[i].v.ob[0];
+        input[i][1] = src[i].v.ob[1];
+        input[i][2] = src[i].v.ob[2];
+        input[i][3] = 1;
+    }
+    meCoreDcacheWritebackRange(input, (count * sizeof(input[0]) + 63) & ~63);
+    vmeLibMemoryToRingBuffer(input, PSP_GFX_ME_VME_INPUT_OFFSET, count * 4);
+}
+
+static void psp_gfx_me_vme_transform(float out[4], u32 index,
                                      float invScale) {
-    volatile s32* input = (volatile s32*) (PSP_GFX_ME_VME_BASE_BUFFER_0 + 16);
     volatile s32* output = (volatile s32*) PSP_GFX_ME_VME_BASE_BUFFER_0;
 
-    input[0] = x;
-    input[1] = y;
-    input[2] = z;
-    input[3] = 1;
     vmeLibStart();
-    vmeLibRefresh();
+    vme_pe0(agu_base(MODE), VME_DEF_MODE,
+            PSP_GFX_ME_VME_INPUT_OFFSET + index * 4);
+    vmeLibFinish();
     out[0] = output[3] * invScale;
     out[1] = output[2051] * invScale;
     out[2] = output[4099] * invScale;
@@ -428,6 +441,9 @@ static void psp_gfx_me_handle_vertices(PspGfxMeReplayContext* ctx, const Gfx* co
             ctx->vmeInvScale = fracBits >= 0 ? 1.0f / (1 << fracBits) : 1.0f;
             ctx->vmeModelviewDirty = 0;
         }
+        if (ctx->vmeModelviewValid) {
+            psp_gfx_me_vme_stage_vertices(src, count);
+        }
     }
 #endif
     for (i = 0; i < count; i++) {
@@ -440,9 +456,7 @@ static void psp_gfx_me_handle_vertices(PspGfxMeReplayContext* ctx, const Gfx* co
             if (ctx->vmeStagePending) {
                 *ctx->vmeStage = 8;
             }
-            psp_gfx_me_vme_transform(
-                view, src[i].v.ob[0], src[i].v.ob[1], src[i].v.ob[2],
-                ctx->vmeInvScale);
+            psp_gfx_me_vme_transform(view, i, ctx->vmeInvScale);
             if (ctx->vmeStagePending) {
                 *ctx->vmeStage = 9;
                 ctx->vmeStagePending = 0;
