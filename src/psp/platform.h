@@ -13,6 +13,7 @@ void PspPlatform_LogLine(const char* line);
 void PspPlatform_LogAudioProfileLine(const char* line);
 void PspPlatform_LogAudioVmeLine(const char* line);
 void PspPlatform_ReportAudioVmeMix(void);
+void PspPlatform_ReportAudioVmeFilter(void);
 void PspPlatform_ReportAudioVmeBench(void);
 void PspPlatform_LogFrame(const char* phase, u32 frame);
 void PspPlatform_LogValue(const char* label, u32 value);

@@ -400,6 +400,34 @@ void PspPlatform_ReportAudioVmeMix(void) {
 #endif
 }
 
+void PspPlatform_ReportAudioVmeFilter(void) {
+#if PSP_AUDIO_VME_VALIDATE
+    PspAudioVmeFilterResult result;
+    char line[192];
+    char* out = line;
+
+    PspAudioMe_GetVmeFilterResult(&result);
+    out = psp_append_text(out, "[audio-vme] filter runs=");
+    out = psp_append_u32(out, result.runs);
+    out = psp_append_text(out, " outputs=");
+    out = psp_append_u32(out, result.outputs);
+    out = psp_append_text(out, " mismatches=");
+    out = psp_append_u32(out, result.mismatches);
+    if (result.mismatches != 0) {
+        out = psp_append_text(out, " run=");
+        out = psp_append_s32(out, result.firstCase);
+        out = psp_append_text(out, " first=");
+        out = psp_append_s32(out, result.firstIndex);
+        out = psp_append_text(out, " expected=");
+        out = psp_append_s32(out, result.expected);
+        out = psp_append_text(out, " actual=");
+        out = psp_append_s32(out, result.actual);
+    }
+    *out = '\0';
+    PspPlatform_LogAudioVmeLine(line);
+#endif
+}
+
 void PspPlatform_ReportAudioVmeBench(void) {
 #if PSP_AUDIO_VME_BENCH
     static u32 sNextReport = 256;
@@ -517,6 +545,7 @@ void PspPlatform_Init(void) {
     psp_log_audio_vme_result();
 #if PSP_AUDIO_VME_VALIDATE
     PspPlatform_ReportAudioVmeMix();
+    PspPlatform_ReportAudioVmeFilter();
 #endif
 #endif
 #endif
