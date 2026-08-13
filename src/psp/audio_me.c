@@ -125,6 +125,7 @@ static u32 sGfxReplayOverCoarse;
 static u32 sGfxReplayStructuralMismatches;
 static u32 sGfxReplayMaxErrorQ16;
 static u32 sGfxReplaySkippedBusy;
+static u32 sGfxReplaySkippedLitVertices;
 static s32 sGfxReplaySubmissionStarted;
 static s32 sGfxReplayInactiveLogged;
 #endif
@@ -557,6 +558,7 @@ static void psp_gfx_me_report_result(void) {
     u32 maxErrorQ16;
 
     psp_gfx_me_read_result(&actual);
+    sGfxReplaySkippedLitVertices += actual.skippedLitVertexCount;
     if (!sPendingGfxCountResult) {
         return;
     }
@@ -1084,6 +1086,10 @@ u32 PspMe_GetGfxVmeStage(void) {
     return sMeGfxVmeStage;
 }
 
+u32 PspMe_GetGfxSkippedLitVertices(void) {
+    return sGfxReplaySkippedLitVertices;
+}
+
 void PspMe_GetGfxReplayCounts(u32* withinFine, u32* withinCoarse,
                               u32* overCoarse, u32* structuralMismatches,
                               u32* maxErrorQ16, u32* skippedBusy) {
@@ -1180,6 +1186,10 @@ int PspAudioMe_GetLastError(void) {
 }
 
 u32 PspMe_GetGfxVmeStage(void) {
+    return 0;
+}
+
+u32 PspMe_GetGfxSkippedLitVertices(void) {
     return 0;
 }
 

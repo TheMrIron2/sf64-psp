@@ -32,6 +32,7 @@ typedef struct {
     u32 commandLimitHit;
     u32 depthLimitHit;
     u32 transformedVertexCount;
+    u32 skippedLitVertexCount;
     u32 transformTraceCount;
     u32 transformTraceOverflow;
 } PspGfxMeReplayStats;

@@ -3762,34 +3762,31 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
     }
 
 #if PSP_GFX_ME_REPLAY
-    if (ctx->transformTrace != NULL) {
+    if ((ctx->transformTrace != NULL) &&
+        ((ctx->geometryMode & G_LIGHTING) == 0)) {
         u32 traceStart = ctx->transformTraceCursor;
         int traceMatches;
 
         ctx->transformTraceCursor += count;
-        if ((ctx->geometryMode & G_LIGHTING) != 0) {
-            traceMatches = 0;
-        } else {
-            traceMatches = psp_gfx_dl_wait_me_trace(ctx, traceStart + count);
+        traceMatches = psp_gfx_dl_wait_me_trace(ctx, traceStart + count);
 
-            if (traceMatches) {
-                meBatch = &ctx->transformTrace[traceStart];
-                for (i = 0; i < count; i++) {
-                    u32 projected = ctx->hasProjection ? PSP_GFX_ME_TRANSFORM_PROJECTED : 0;
+        if (traceMatches) {
+            meBatch = &ctx->transformTrace[traceStart];
+            for (i = 0; i < count; i++) {
+                u32 projected = ctx->hasProjection ? PSP_GFX_ME_TRANSFORM_PROJECTED : 0;
 
-                    if ((meBatch[i].slot != ((u32) v0 + i)) ||
-                        ((meBatch[i].flags & PSP_GFX_ME_TRANSFORM_PROJECTED) != projected)) {
-                        traceMatches = 0;
-                        break;
-                    }
+                if ((meBatch[i].slot != ((u32) v0 + i)) ||
+                    ((meBatch[i].flags & PSP_GFX_ME_TRANSFORM_PROJECTED) != projected)) {
+                    traceMatches = 0;
+                    break;
                 }
             }
         }
-        if (!traceMatches && ((ctx->geometryMode & G_LIGHTING) == 0)) {
+        if (!traceMatches) {
             ctx->stats.meTransformMismatchCount += count;
             ctx->transformTrace = NULL;
             meBatch = NULL;
-        } else if ((ctx->geometryMode & G_LIGHTING) == 0) {
+        } else {
             useMeTransform = 1;
             ctx->stats.meTransformVertexCount += count;
             for (i = 0; i < count; i++) {

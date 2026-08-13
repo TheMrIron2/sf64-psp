@@ -19,6 +19,7 @@ void PspMe_SubmitGfxReplay(const void* task, const Gfx* dl, u32 taskIndex,
 int PspAudioMe_IsActive(void);
 int PspAudioMe_GetLastError(void);
 u32 PspMe_GetGfxVmeStage(void);
+u32 PspMe_GetGfxSkippedLitVertices(void);
 void PspMe_GetGfxReplayCounts(u32* withinFine, u32* withinCoarse,
                               u32* overCoarse, u32* structuralMismatches,
                               u32* maxErrorQ16, u32* skippedBusy);

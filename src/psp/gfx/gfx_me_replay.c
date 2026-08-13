@@ -30,6 +30,8 @@
 #define PSP_GFX_ME_OP_VTX 0x04
 #define PSP_GFX_ME_OP_DL 0x06
 #define PSP_GFX_ME_OP_TRI2 0xb1
+#define PSP_GFX_ME_OP_CLEARGEOMETRYMODE 0xb6
+#define PSP_GFX_ME_OP_SETGEOMETRYMODE 0xb7
 #define PSP_GFX_ME_OP_ENDDL 0xb8
 #define PSP_GFX_ME_OP_POPMTX 0xbd
 #define PSP_GFX_ME_OP_MOVEWORD 0xbc
@@ -44,6 +46,7 @@ typedef struct {
     float projection[4][4];
     float modelviewStack[PSP_GFX_ME_MTX_STACK_DEPTH][4][4];
     u32 modelviewStackDepth;
+    u32 geometryMode;
     int hasModelview;
     int hasProjection;
     PspGfxMeReplayStats* stats;
@@ -561,9 +564,23 @@ static int psp_gfx_me_walk_internal(PspGfxMeReplayContext* ctx, const Gfx* dl, u
             }
             continue;
         }
+        if (opcode == PSP_GFX_ME_OP_SETGEOMETRYMODE) {
+            ctx->geometryMode |= command->words.w1;
+            continue;
+        }
+        if (opcode == PSP_GFX_ME_OP_CLEARGEOMETRYMODE) {
+            ctx->geometryMode &= ~command->words.w1;
+            continue;
+        }
         if (opcode == PSP_GFX_ME_OP_VTX) {
+            u32 count = (command->words.w0 >> 10) & 0x3F;
+
             ctx->stats->gvtxCommandCount++;
-            psp_gfx_me_handle_vertices(ctx, command);
+            if ((ctx->geometryMode & G_LIGHTING) == 0) {
+                psp_gfx_me_handle_vertices(ctx, command);
+            } else {
+                ctx->stats->skippedLitVertexCount += count;
+            }
             continue;
         }
         if ((opcode == PSP_GFX_ME_OP_MTX) || (opcode == PSP_RENDERER_DL_OP_MTXF)) {

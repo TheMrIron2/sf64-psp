@@ -41,7 +41,6 @@ static int sStarfieldReady;
 static u32 sMeOffloadTasks;
 static u32 sMeOffloadVertices;
 static u32 sMeVmeVertices;
-static u32 sMeLitVertices;
 static u32 sMeTraceMismatches;
 static u32 sMeOffloadFailures;
 #endif
@@ -121,7 +120,7 @@ static void psp_renderer_draw_perf_overlay(void) {
         (unsigned long) sMeOffloadTasks,
         (unsigned long) sMeOffloadVertices,
         (unsigned long) sMeVmeVertices,
-        (unsigned long) sMeLitVertices,
+        (unsigned long) PspMe_GetGfxSkippedLitVertices(),
         (unsigned long) sMeTraceMismatches,
         (unsigned long) sMeOffloadFailures,
         (unsigned long) PspMe_GetGfxVmeStage()
@@ -339,7 +338,6 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
                 dl, taskIndex, &dlStats, meTransformTrace, meTransformTracePublished);
             sMeOffloadVertices += dlStats.meTransformVertexCount;
             sMeVmeVertices += dlStats.meTransformVmeVertexCount;
-            sMeLitVertices += dlStats.meTransformLitVertexCount;
             sMeTraceMismatches += dlStats.meTransformMismatchCount;
 #else
             PspGfxDl_Run(dl, taskIndex, NULL, NULL, NULL);
