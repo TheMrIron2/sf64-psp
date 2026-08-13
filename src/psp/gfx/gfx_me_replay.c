@@ -38,6 +38,11 @@
 #define PSP_GFX_ME_OP_TRI1 0xbf
 
 typedef struct {
+    u8 clipCode;
+    u8 valid;
+} PspGfxMeVertexState;
+
+typedef struct {
     u32 segments[16];
     uintptr_t sourceBase;
     uintptr_t snapshotBase;
@@ -53,6 +58,11 @@ typedef struct {
     PspGfxMeTransformTrace* trace;
     u32 traceCapacity;
     volatile u32* tracePublished;
+    PspGfxMeTriangleCode* triangles;
+    u32 triangleCapacity;
+    volatile u32* trianglesPublished;
+    u32 trianglePublishTarget;
+    PspGfxMeVertexState vertices[64];
 #if PSP_GFX_ME_REPLAY
     volatile u32* vmeStage;
     int vmeStagePending;
@@ -228,6 +238,28 @@ static void psp_gfx_me_publish_trace(PspGfxMeReplayContext* ctx) {
     *ctx->tracePublished = count;
 }
 
+static void psp_gfx_me_publish_triangles(PspGfxMeReplayContext* ctx) {
+    u32 count;
+
+    if (ctx->trianglesPublished == NULL) {
+        return;
+    }
+    count = ctx->stats->triangleResultCount;
+    if (count > ctx->triangleCapacity) {
+        count = ctx->triangleCapacity;
+    }
+    __asm__ volatile("sync" ::: "memory");
+    *ctx->trianglesPublished = count;
+}
+
+static void psp_gfx_me_publish_triangle_chunk(PspGfxMeReplayContext* ctx) {
+    if (ctx->stats->triangleResultCount < ctx->trianglePublishTarget) {
+        return;
+    }
+    psp_gfx_me_publish_triangles(ctx);
+    ctx->trianglePublishTarget += PSP_GFX_ME_TRIANGLE_PUBLISH_CHUNK;
+}
+
 static void psp_gfx_me_matrix_identity(float matrix[4][4]) {
     u32 column;
     u32 row;
@@ -396,6 +428,30 @@ static void psp_gfx_me_transform_vertex(float out[4], const float matrix[4][4],
     out[3] = matrix[0][3] * x + matrix[1][3] * y + matrix[2][3] * z + matrix[3][3] * w;
 }
 
+static u8 psp_gfx_me_clip_code(float x, float y, float z, float w) {
+    u8 code = 0;
+
+    if (x < -w) {
+        code |= 1U << 0;
+    }
+    if (x > w) {
+        code |= 1U << 1;
+    }
+    if (y < -w) {
+        code |= 1U << 2;
+    }
+    if (y > w) {
+        code |= 1U << 3;
+    }
+    if (z < -w) {
+        code |= 1U << 4;
+    }
+    if (z > w) {
+        code |= 1U << 5;
+    }
+    return code;
+}
+
 static void psp_gfx_me_trace_vertex(PspGfxMeReplayContext* ctx, u32 slot,
                                     const float view[4], const float clip[4],
                                     int valid, int usedVme) {
@@ -418,7 +474,9 @@ static void psp_gfx_me_trace_vertex(PspGfxMeReplayContext* ctx, u32 slot,
                    (usedVme ? PSP_GFX_ME_TRANSFORM_VME : 0);
 }
 
-static void psp_gfx_me_handle_vertices(PspGfxMeReplayContext* ctx, const Gfx* command) {
+static void psp_gfx_me_handle_vertices(
+    PspGfxMeReplayContext* ctx, const Gfx* command, int publishTrace
+) {
     const Vtx* src = (const Vtx*) psp_gfx_me_resolve_ptr(ctx, command->words.w1);
     u32 count = (command->words.w0 >> 10) & 0x3F;
     u32 first = (command->words.w0 >> 17) & 0x7F;
@@ -487,17 +545,90 @@ static void psp_gfx_me_handle_vertices(PspGfxMeReplayContext* ctx, const Gfx* co
             clip[2] = view[2] / 4096.0f;
             clip[3] = 1.0f;
         }
-        psp_gfx_me_trace_vertex(ctx, first + i, view, clip, valid,
+        ctx->vertices[first + i].valid = valid;
+        ctx->vertices[first + i].clipCode = valid ?
+            psp_gfx_me_clip_code(clip[0], clip[1], clip[2], clip[3]) : 0;
+        if (publishTrace) {
+            psp_gfx_me_trace_vertex(ctx, first + i, view, clip, valid,
 #if PSP_GFX_ME_REPLAY
-                                ctx->vmeModelviewValid
+                                    ctx->vmeModelviewValid
 #else
-                                0
+                                    0
 #endif
-        );
+            );
+        }
     }
     ctx->stats->loadedVertexCount += count;
     ctx->stats->transformedVertexCount += count;
-    psp_gfx_me_publish_trace(ctx);
+    if (publishTrace) {
+        psp_gfx_me_publish_trace(ctx);
+    }
+}
+
+static u8 psp_gfx_me_decode_tri_index(u32 packed) {
+    return (u8) (packed / 2);
+}
+
+static void psp_gfx_me_classify_triangle(PspGfxMeReplayContext* ctx,
+                                         u8 a, u8 b, u8 c) {
+    u32 index = ctx->stats->triangleResultCount++;
+    u8 shared;
+    u8 combined;
+    u8 classification;
+
+    if ((ctx->triangles == NULL) || (index >= ctx->triangleCapacity)) {
+        ctx->stats->triangleResultOverflow++;
+        return;
+    }
+    if ((a >= 64) || (b >= 64) || (c >= 64) ||
+        !ctx->vertices[a].valid || !ctx->vertices[b].valid ||
+        !ctx->vertices[c].valid) {
+        shared = 0;
+        combined = 0;
+        classification = PSP_GFX_ME_TRIANGLE_INVALID;
+    } else {
+        shared = ctx->vertices[a].clipCode & ctx->vertices[b].clipCode &
+                 ctx->vertices[c].clipCode;
+        combined = ctx->vertices[a].clipCode | ctx->vertices[b].clipCode |
+                   ctx->vertices[c].clipCode;
+        classification = shared != 0 ? PSP_GFX_ME_TRIANGLE_REJECTED :
+                         combined != 0 ? PSP_GFX_ME_TRIANGLE_PARTIAL :
+                                         PSP_GFX_ME_TRIANGLE_DIRECT;
+    }
+    if (classification == PSP_GFX_ME_TRIANGLE_INVALID) {
+        ctx->triangles[index] = PSP_GFX_ME_TRIANGLE_CODE_INVALID;
+    } else if (classification == PSP_GFX_ME_TRIANGLE_REJECTED) {
+        ctx->triangles[index] = PSP_GFX_ME_TRIANGLE_CODE_REJECTED | shared;
+    } else {
+        ctx->triangles[index] = combined;
+    }
+}
+
+static void psp_gfx_me_handle_tri1(PspGfxMeReplayContext* ctx,
+                                   const Gfx* command) {
+    u32 w1 = command->words.w1;
+
+    psp_gfx_me_classify_triangle(ctx,
+        psp_gfx_me_decode_tri_index((w1 >> 16) & 0xFF),
+        psp_gfx_me_decode_tri_index((w1 >> 8) & 0xFF),
+        psp_gfx_me_decode_tri_index(w1 & 0xFF));
+    psp_gfx_me_publish_triangle_chunk(ctx);
+}
+
+static void psp_gfx_me_handle_tri2(PspGfxMeReplayContext* ctx,
+                                   const Gfx* command) {
+    u32 w0 = command->words.w0;
+    u32 w1 = command->words.w1;
+
+    psp_gfx_me_classify_triangle(ctx,
+        psp_gfx_me_decode_tri_index((w0 >> 16) & 0xFF),
+        psp_gfx_me_decode_tri_index((w0 >> 8) & 0xFF),
+        psp_gfx_me_decode_tri_index(w0 & 0xFF));
+    psp_gfx_me_classify_triangle(ctx,
+        psp_gfx_me_decode_tri_index((w1 >> 16) & 0xFF),
+        psp_gfx_me_decode_tri_index((w1 >> 8) & 0xFF),
+        psp_gfx_me_decode_tri_index(w1 & 0xFF));
+    psp_gfx_me_publish_triangle_chunk(ctx);
 }
 
 static int psp_gfx_me_has_bounded_end(const Gfx* dl) {
@@ -573,14 +704,8 @@ static int psp_gfx_me_walk_internal(PspGfxMeReplayContext* ctx, const Gfx* dl, u
             continue;
         }
         if (opcode == PSP_GFX_ME_OP_VTX) {
-            u32 count = (command->words.w0 >> 10) & 0x3F;
-
             ctx->stats->gvtxCommandCount++;
-            if ((ctx->geometryMode & G_LIGHTING) == 0) {
-                psp_gfx_me_handle_vertices(ctx, command);
-            } else {
-                ctx->stats->skippedLitVertexCount += count;
-            }
+            psp_gfx_me_handle_vertices(ctx, command, 0);
             continue;
         }
         if ((opcode == PSP_GFX_ME_OP_MTX) || (opcode == PSP_RENDERER_DL_OP_MTXF)) {
@@ -596,11 +721,13 @@ static int psp_gfx_me_walk_internal(PspGfxMeReplayContext* ctx, const Gfx* dl, u
         if (opcode == PSP_GFX_ME_OP_TRI1) {
             ctx->stats->tri1CommandCount++;
             ctx->stats->inputTriangleCount++;
+            psp_gfx_me_handle_tri1(ctx, command);
             continue;
         }
         if (opcode == PSP_GFX_ME_OP_TRI2) {
             ctx->stats->tri2CommandCount++;
             ctx->stats->inputTriangleCount += 2;
+            psp_gfx_me_handle_tri2(ctx, command);
             continue;
         }
         if ((opcode == G_TEXRECT) || (opcode == G_TEXRECTFLIP)) {
@@ -628,6 +755,8 @@ int PspGfxMeReplay_Walk(const Gfx* dl, PspGfxMeReplayStats* stats,
                         const void* sourceBase, const void* snapshotBase,
                         u32 snapshotSize, PspGfxMeTransformTrace* trace,
                         u32 traceCapacity, volatile u32* tracePublished,
+                        PspGfxMeTriangleCode* triangles,
+                        u32 triangleCapacity, volatile u32* trianglesPublished,
                         volatile u32* vmeStage) {
     PspGfxMeReplayContext ctx;
     u32 i;
@@ -646,6 +775,10 @@ int PspGfxMeReplay_Walk(const Gfx* dl, PspGfxMeReplayStats* stats,
     ctx.trace = trace;
     ctx.traceCapacity = traceCapacity;
     ctx.tracePublished = tracePublished;
+    ctx.triangles = triangles;
+    ctx.triangleCapacity = triangleCapacity;
+    ctx.trianglesPublished = trianglesPublished;
+    ctx.trianglePublishTarget = PSP_GFX_ME_TRIANGLE_PUBLISH_CHUNK;
 #if PSP_GFX_ME_REPLAY
     ctx.vmeStage = vmeStage;
     ctx.vmeStagePending = *vmeStage != 9;

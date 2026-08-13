@@ -42,6 +42,12 @@ static u32 sMeOffloadTasks;
 static u32 sMeOffloadVertices;
 static u32 sMeVmeVertices;
 static u32 sMeTraceMismatches;
+static u32 sMeTriangles;
+static u32 sMeDirectTriangles;
+static u32 sMeRejectedTriangles;
+static u32 sMePartialTriangles;
+static u32 sMeTriangleMisses;
+static u32 sMeTriangleMismatches;
 static u32 sMeOffloadFailures;
 #endif
 
@@ -112,16 +118,18 @@ static void psp_renderer_draw_perf_overlay(void) {
      */
 #if PSP_GFX_ME_REPLAY
     pspDebugScreenPrintf(
-        "FPS %lu.%lu GFX %lu.%lums ME T%lu V%lu Q%lu L%lu X%lu F%lu S%lu   ",
+        "FPS %lu.%lu GFX %lu.%lums ME T%lu C%lu D%lu R%lu P%lu M%lu X%lu F%lu S%lu   ",
         (unsigned long) (sPerfFpsTenths / 10),
         (unsigned long) (sPerfFpsTenths % 10),
         (unsigned long) (sPerfGfxMsTenths / 10),
         (unsigned long) (sPerfGfxMsTenths % 10),
         (unsigned long) sMeOffloadTasks,
-        (unsigned long) sMeOffloadVertices,
-        (unsigned long) sMeVmeVertices,
-        (unsigned long) PspMe_GetGfxSkippedLitVertices(),
-        (unsigned long) sMeTraceMismatches,
+        (unsigned long) sMeTriangles,
+        (unsigned long) sMeDirectTriangles,
+        (unsigned long) sMeRejectedTriangles,
+        (unsigned long) sMePartialTriangles,
+        (unsigned long) sMeTriangleMisses,
+        (unsigned long) (sMeTraceMismatches + sMeTriangleMismatches),
         (unsigned long) sMeOffloadFailures,
         (unsigned long) PspMe_GetGfxVmeStage()
     );
@@ -290,6 +298,8 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
     PspGfxDlStats dlStats;
     const PspGfxMeTransformTrace* meTransformTrace = NULL;
     volatile const u32* meTransformTracePublished = NULL;
+    const PspGfxMeTriangleCode* meTriangles = NULL;
+    volatile const u32* meTrianglesPublished = NULL;
 #endif
 
     #if PROFILE_HW_COUNTERS
@@ -326,21 +336,22 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
             dl = (const Gfx*) task->task.t.data_ptr;
 #if PSP_GFX_ME_REPLAY
             if (gGameState == GSTATE_TITLE) {
-                if (PspMe_BeginGfxTransform(
-                        task, dl, taskIndex,
-                        &meTransformTrace, &meTransformTracePublished) == 0) {
-                    sMeOffloadTasks++;
-                } else {
-                    sMeOffloadFailures++;
-                }
+                sMeOffloadTasks++;
             }
             PspGfxDl_Run(
-                dl, taskIndex, &dlStats, meTransformTrace, meTransformTracePublished);
+                dl, taskIndex, &dlStats, meTransformTrace, meTransformTracePublished,
+                meTriangles, meTrianglesPublished);
             sMeOffloadVertices += dlStats.meTransformVertexCount;
             sMeVmeVertices += dlStats.meTransformVmeVertexCount;
             sMeTraceMismatches += dlStats.meTransformMismatchCount;
+            sMeTriangles += dlStats.meTriangleCount;
+            sMeDirectTriangles += dlStats.meTriangleDirectCount;
+            sMeRejectedTriangles += dlStats.meTriangleRejectedCount;
+            sMePartialTriangles += dlStats.meTrianglePartialCount;
+            sMeTriangleMisses += dlStats.meTriangleMissCount;
+            sMeTriangleMismatches += dlStats.meTriangleMismatchCount;
 #else
-            PspGfxDl_Run(dl, taskIndex, NULL, NULL, NULL);
+            PspGfxDl_Run(dl, taskIndex, NULL, NULL, NULL, NULL, NULL);
 #endif
     #if PROFILE_HW_COUNTERS
             /* Only after a run, the context still holds the previous task otherwise */

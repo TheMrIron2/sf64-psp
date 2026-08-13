@@ -2,6 +2,7 @@
 #include "sf64audio_external.h"
 #include "mods.h"
 #ifdef TARGET_PSP
+#include "context.h"
 #include "src/psp/audio_me.h"
 #include "src/psp/platform.h"
 #include "src/psp/profiler.h"
@@ -194,7 +195,7 @@ void Audio_ThreadEntry(void* arg0) {
     }
 }
 
-void Graphics_SetTask(void) {
+static void Graphics_PrepareTask(void) {
     gGfxTask->mesgQueue = &gGfxTaskMesgQueue;
     gGfxTask->msg = (OSMesg) TASK_MESG_2;
     gGfxTask->task.t.type = M_GFXTASK;
@@ -214,7 +215,20 @@ void Graphics_SetTask(void) {
     gGfxTask->task.t.yield_data_ptr = (u64*) &gOSYieldData;
     gGfxTask->task.t.yield_data_size = OS_YIELD_DATA_SIZE;
     osWritebackDCacheAll();
+#if PSP_GFX_ME_REPLAY && !PSP_AUDIO
+    if (gGameState == GSTATE_TITLE) {
+        PspMe_StartGfxFrontend(gGfxTask, gGfxPool->masterDL, gSysFrameCount);
+    }
+#endif
+}
+
+static void Graphics_SubmitTask(void) {
     osSendMesg(&gTaskMesgQueue, gGfxTask, OS_MESG_NOBLOCK);
+}
+
+void Graphics_SetTask(void) {
+    Graphics_PrepareTask();
+    Graphics_SubmitTask();
 }
 
 void Graphics_InitializeTask(u32 frameCount) {
@@ -378,6 +392,9 @@ void Graphics_ThreadEntry(void* arg0) {
             gDPFullSync(gMasterDisp++);
             gSPEndDisplayList(gMasterDisp++);
         }
+#if PSP_GFX_ME_REPLAY && !PSP_AUDIO
+        Graphics_PrepareTask();
+#endif
 #ifdef TARGET_PSP
         PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_GFX_TASK_BACKPRESSURE);
 #endif
@@ -389,7 +406,11 @@ void Graphics_ThreadEntry(void* arg0) {
             PSP_TRACE_FRAME("gfx task ack", gSysFrameCount);
         }
 
+#if PSP_GFX_ME_REPLAY && !PSP_AUDIO
+        Graphics_SubmitTask();
+#else
         Graphics_SetTask();
+#endif
         if ((gSysFrameCount <= 4) || ((gSysFrameCount % 30) == 0)) {
             PSP_TRACE_FRAME("gfx task queued", gSysFrameCount);
         }

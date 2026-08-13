@@ -17,6 +17,13 @@ typedef struct {
     u32 meTransformVmeVertexCount;
     u32 meTransformLitVertexCount;
     u32 meTransformMismatchCount;
+    u32 meTriangleCount;
+    u32 meTriangleDirectCount;
+    u32 meTriangleRejectedCount;
+    u32 meTrianglePartialCount;
+    u32 meTriangleInvalidCount;
+    u32 meTriangleMissCount;
+    u32 meTriangleMismatchCount;
     u32 vertexCount;
     u32 triangleCount;
     u32 nestedDlFollowed;
@@ -83,7 +90,9 @@ typedef struct {
 
 int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats,
                  const PspGfxMeTransformTrace* trace,
-                 volatile const u32* tracePublished);
+                 volatile const u32* tracePublished,
+                 const PspGfxMeTriangleCode* triangles,
+                 volatile const u32* trianglesPublished);
 
 #if PROFILE_HW_COUNTERS
 /* Work totals for the task that just ran, normalises counter captures */

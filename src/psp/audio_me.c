@@ -6,6 +6,7 @@
 #include "src/psp/audio_mixer.h"
 #include "src/psp/gfx/gfx_me_replay.h"
 
+#include <stddef.h>
 #include <stdio.h>
 
 void PspPlatform_LogLine(const char* line);
@@ -29,6 +30,8 @@ void PspPlatform_LogLine(const char* line);
 #define PSP_AUDIO_ME_MAX_INPUT_RANGES 16
 #define PSP_AUDIO_ME_MAX_WRITE_RANGES 512
 #define PSP_GFX_ME_POOL_SIZE 0x2AD50
+#define PSP_GFX_ME_READY_QUEUE_CAPACITY 256
+#define PSP_GFX_ME_READY_VERTEX_CAPACITY 4096
 
 typedef enum {
     PSP_AUDIO_ME_BOOTING,
@@ -43,6 +46,7 @@ typedef enum {
     PSP_ME_JOB_NONE,
     PSP_ME_JOB_AUDIO,
     PSP_ME_JOB_GFX_REPLAY,
+    PSP_ME_JOB_GFX_READY,
 } PspMeJob;
 
 enum {
@@ -59,6 +63,9 @@ enum {
     PSP_AUDIO_ME_SHARED_GFX_TRACE_BASE,
     PSP_AUDIO_ME_SHARED_GFX_TRACE_CAPACITY,
     PSP_AUDIO_ME_SHARED_GFX_TRACE_PUBLISHED,
+    PSP_AUDIO_ME_SHARED_GFX_TRIANGLE_BASE,
+    PSP_AUDIO_ME_SHARED_GFX_TRIANGLE_CAPACITY,
+    PSP_AUDIO_ME_SHARED_GFX_TRIANGLE_PUBLISHED,
     PSP_AUDIO_ME_SHARED_GFX_VME_STAGE,
     PSP_AUDIO_ME_SHARED_COUNT,
 };
@@ -80,7 +87,10 @@ static volatile u32 sSharedStorage[PSP_AUDIO_ME_SHARED_COUNT]
 #define sMeGfxSnapshotSize PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_GFX_SNAPSHOT_SIZE]
 #define sMeGfxTraceBase PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_GFX_TRACE_BASE]
 #define sMeGfxTraceCapacity PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_GFX_TRACE_CAPACITY]
-#define sMeGfxTracePublished PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_GFX_TRACE_PUBLISHED]
+#define sMeGfxTracePublishedBase PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_GFX_TRACE_PUBLISHED]
+#define sMeGfxTriangleBase PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_GFX_TRIANGLE_BASE]
+#define sMeGfxTriangleCapacity PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_GFX_TRIANGLE_CAPACITY]
+#define sMeGfxTrianglePublishedBase PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_GFX_TRIANGLE_PUBLISHED]
 #define sMeGfxVmeStage PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_GFX_VME_STAGE]
 
 static volatile PspGfxMeReplayStats sGfxReplayResultStorage
@@ -90,12 +100,59 @@ static volatile PspGfxMeReplayStats sGfxReplayResultStorage
         (PSP_AUDIO_ME_UNCACHED | (u32) (uintptr_t) &sGfxReplayResultStorage))
 
 #if PSP_GFX_ME_REPLAY
+static PspGfxMeReadyPacket sGfxReadyQueueStorage[PSP_GFX_ME_READY_QUEUE_CAPACITY]
+    __attribute__((aligned(64), section(".uncached")));
+static PspGfxMeVertex sGfxReadyVertexStorage[PSP_GFX_ME_READY_VERTEX_CAPACITY]
+    __attribute__((aligned(64), section(".uncached")));
+static u32 sGfxReadyVertexCount;
+static volatile u32 sGfxReadyPublishedStorage
+    __attribute__((aligned(64), section(".uncached")));
+static volatile u32 sGfxReadyConsumedStorage
+    __attribute__((aligned(64), section(".uncached")));
+static volatile u32 sGfxReadyAppliedStorage
+    __attribute__((aligned(64), section(".uncached")));
+static volatile u32 sGfxReadyDoneStorage
+    __attribute__((aligned(64), section(".uncached")));
+#define PSP_GFX_READY_QUEUE \
+    ((volatile PspGfxMeReadyPacket*) (PSP_AUDIO_ME_UNCACHED | \
+        (u32) (uintptr_t) sGfxReadyQueueStorage))
+#define PSP_GFX_READY_PUBLISHED \
+    (*(volatile u32*) (PSP_AUDIO_ME_UNCACHED | \
+        (u32) (uintptr_t) &sGfxReadyPublishedStorage))
+#define PSP_GFX_READY_CONSUMED \
+    (*(volatile u32*) (PSP_AUDIO_ME_UNCACHED | \
+        (u32) (uintptr_t) &sGfxReadyConsumedStorage))
+#define PSP_GFX_READY_APPLIED \
+    (*(volatile u32*) (PSP_AUDIO_ME_UNCACHED | \
+        (u32) (uintptr_t) &sGfxReadyAppliedStorage))
+#define PSP_GFX_READY_DONE \
+    (*(volatile u32*) (PSP_AUDIO_ME_UNCACHED | \
+        (u32) (uintptr_t) &sGfxReadyDoneStorage))
+
 static PspGfxMeTransformTrace
-    sGfxReplayTraceStorage[PSP_GFX_ME_TRANSFORM_TRACE_CAPACITY]
+    sGfxReplayTraceStorage[2][PSP_GFX_ME_TRANSFORM_TRACE_CAPACITY]
         __attribute__((aligned(64), section(".uncached")));
-#define sGfxReplayTrace \
+#define sGfxReplayTrace(slot) \
     ((PspGfxMeTransformTrace*) \
-        (PSP_AUDIO_ME_UNCACHED | (u32) (uintptr_t) sGfxReplayTraceStorage))
+        (PSP_AUDIO_ME_UNCACHED | (u32) (uintptr_t) sGfxReplayTraceStorage[slot]))
+
+static PspGfxMeTriangleCode
+    sGfxReplayTriangleStorage[2][PSP_GFX_ME_TRIANGLE_TRACE_CAPACITY]
+        __attribute__((aligned(64), section(".uncached")));
+#define sGfxReplayTriangles(slot) \
+    ((PspGfxMeTriangleCode*) \
+        (PSP_AUDIO_ME_UNCACHED | (u32) (uintptr_t) sGfxReplayTriangleStorage[slot]))
+
+static volatile u32 sGfxReplayTracePublishedStorage[2]
+    __attribute__((aligned(64), section(".uncached")));
+static volatile u32 sGfxReplayTrianglePublishedStorage[2]
+    __attribute__((aligned(64), section(".uncached")));
+#define sGfxReplayTracePublished(slot) \
+    ((volatile u32*) (PSP_AUDIO_ME_UNCACHED | \
+        (u32) (uintptr_t) &sGfxReplayTracePublishedStorage[slot]))
+#define sGfxReplayTrianglePublished(slot) \
+    ((volatile u32*) (PSP_AUDIO_ME_UNCACHED | \
+        (u32) (uintptr_t) &sGfxReplayTrianglePublishedStorage[slot]))
 #endif
 
 typedef struct {
@@ -119,13 +176,16 @@ static u32 sPendingGfxTaskIndex;
 static s32 sPendingGfxCountResult;
 static s32 sPendingGfxLogResult;
 static const void* sPendingGfxSourcePool;
+static const void* sGfxReplaySlotPool[2];
+static u32 sPendingGfxSlot;
+static u32 sGfxReplayNextSlot;
 static u32 sGfxReplayWithinFine;
 static u32 sGfxReplayWithinCoarse;
 static u32 sGfxReplayOverCoarse;
 static u32 sGfxReplayStructuralMismatches;
 static u32 sGfxReplayMaxErrorQ16;
 static u32 sGfxReplaySkippedBusy;
-static u32 sGfxReplaySkippedLitVertices;
+static u32 sGfxReplayPrivateLitVertices;
 static s32 sGfxReplaySubmissionStarted;
 static s32 sGfxReplayInactiveLogged;
 #endif
@@ -150,6 +210,108 @@ static void psp_audio_me_completion_interrupt(int subIntr, void* arg) {
         sceKernelSignalSema(sCompletionSema, 1);
     }
 }
+
+#if PSP_GFX_ME_REPLAY
+static u32 psp_gfx_me_ready_color(u32 r, u32 g, u32 b, u32 a,
+                                  int premultiplied) {
+    if (premultiplied) {
+        u32 value;
+
+        value = r * a;
+        r = (value + 1U + (value >> 8)) >> 8;
+        value = g * a;
+        g = (value + 1U + (value >> 8)) >> 8;
+        value = b * a;
+        b = (value + 1U + (value >> 8)) >> 8;
+    }
+    return r | (g << 8) | (b << 16) | (a << 24);
+}
+
+static void psp_gfx_me_ready_build(const PspGfxMeReadyPacket* packet) {
+    PspGfxMeReadyVertex* destination =
+        (PspGfxMeReadyVertex*) packet->output;
+    int pretransformed = (packet->flags & PSP_GFX_ME_READY_PRETRANSFORMED) != 0;
+    int depthBias = (packet->flags & PSP_GFX_ME_READY_DEPTH_BIAS) != 0;
+    int premultiplied = (packet->flags & PSP_GFX_ME_READY_PREMULTIPLIED) != 0;
+    int shade = (packet->flags & PSP_GFX_ME_READY_SHADE) != 0;
+    u32 i;
+
+    for (i = 0; i < packet->vertexCount; i++) {
+        const PspGfxMeVertex* src =
+            (const PspGfxMeVertex*) (PSP_AUDIO_ME_UNCACHED |
+                (u32) (uintptr_t) packet->source[i]);
+        PspGfxMeReadyVertex* dst = &destination[i];
+        u32 r = src->r;
+        u32 g = src->g;
+        u32 b = src->b;
+        u32 a = src->a;
+
+        if (pretransformed) {
+            float inverseW = 1.0f / src->clipW;
+
+            dst->x = src->clipX * inverseW;
+            dst->y = src->clipY * inverseW;
+            dst->z = src->clipZ * inverseW;
+        } else {
+            dst->x = src->viewX;
+            dst->y = src->viewY;
+            dst->z = src->viewZ;
+        }
+        if (depthBias) {
+            dst->z += pretransformed ? -0.0005f : 0.5f;
+        }
+        if ((packet->combineMode == 2) || (packet->combineMode == 7) || !shade) {
+            r = packet->primitive[0];
+            g = packet->primitive[1];
+            b = packet->primitive[2];
+            a = packet->primitive[3];
+        } else if (packet->combineMode == 8) {
+            u32 value;
+
+            value = r * packet->primitive[0];
+            r = (value + 1U + (value >> 8)) >> 8;
+            value = g * packet->primitive[1];
+            g = (value + 1U + (value >> 8)) >> 8;
+            value = b * packet->primitive[2];
+            b = (value + 1U + (value >> 8)) >> 8;
+            a = packet->primitive[3];
+        } else if (packet->combineMode == 9) {
+            if ((packet->flags & PSP_GFX_ME_READY_BAKED_ENV) != 0) {
+                r = g = b = 255;
+            } else {
+                r = packet->environment[0];
+                g = packet->environment[1];
+                b = packet->environment[2];
+            }
+            a = packet->primitive[3];
+        } else if ((packet->combineMode == 3) || (packet->combineMode == 4)) {
+            r = g = b = 255;
+        } else if (packet->combineMode == 5) {
+            a = 255;
+        }
+        dst->color = psp_gfx_me_ready_color(r, g, b, a, premultiplied);
+        dst->u = (float) src->s * packet->textureScaleS - packet->textureOffsetS;
+        dst->v = (float) src->t * packet->textureScaleT - packet->textureOffsetT;
+    }
+}
+
+static void psp_gfx_me_ready_run(void) {
+    while (!PSP_GFX_READY_DONE ||
+           (PSP_GFX_READY_CONSUMED != PSP_GFX_READY_PUBLISHED)) {
+        u32 consumed = PSP_GFX_READY_CONSUMED;
+
+        if (consumed == PSP_GFX_READY_PUBLISHED) {
+            meLibSync();
+            continue;
+        }
+        psp_gfx_me_ready_build(
+            (const PspGfxMeReadyPacket*)
+                &PSP_GFX_READY_QUEUE[consumed % PSP_GFX_ME_READY_QUEUE_CAPACITY]);
+        meLibSync();
+        PSP_GFX_READY_CONSUMED = consumed + 1;
+    }
+}
+#endif
 
 static void psp_audio_me_drain_completion(void) {
     if (!sCompletionReady) {
@@ -514,7 +676,7 @@ static u32 psp_gfx_me_error_q16(float error) {
 static int psp_gfx_me_trace_max_error(const PspGfxMeReplayStats* actual,
                                       float* maxError) {
     const PspGfxMeTransformTrace* expected = sPendingGfxExpectedTrace;
-    const PspGfxMeTransformTrace* result = sGfxReplayTrace;
+    const PspGfxMeTransformTrace* result = sGfxReplayTrace(sPendingGfxSlot);
     u32 count = actual->transformTraceCount;
     u32 i;
 
@@ -558,7 +720,7 @@ static void psp_gfx_me_report_result(void) {
     u32 maxErrorQ16;
 
     psp_gfx_me_read_result(&actual);
-    sGfxReplaySkippedLitVertices += actual.skippedLitVertexCount;
+    sGfxReplayPrivateLitVertices += actual.privateLitVertexCount;
     if (!sPendingGfxCountResult) {
         return;
     }
@@ -681,8 +843,15 @@ __attribute__((noinline, aligned(4))) void meLibOnProcess(void) {
 #endif
 #endif
 #if PSP_GFX_ME_REPLAY
+            } else if (sMeJob == PSP_ME_JOB_GFX_READY) {
+                psp_gfx_me_ready_run();
+                sMeResult = 0;
             } else if (sMeJob == PSP_ME_JOB_GFX_REPLAY) {
                 PspGfxMeReplayStats result;
+                volatile u32* tracePublished =
+                    (volatile u32*) (uintptr_t) sMeGfxTracePublishedBase;
+                volatile u32* trianglePublished =
+                    (volatile u32*) (uintptr_t) sMeGfxTrianglePublishedBase;
                 u32 traceCount;
 
                 psp_audio_me_invalidate_range_me(
@@ -694,12 +863,18 @@ __attribute__((noinline, aligned(4))) void meLibOnProcess(void) {
                     (const void*) (uintptr_t) sMeGfxSnapshotBase,
                     sMeGfxSnapshotSize,
                     (PspGfxMeTransformTrace*) (uintptr_t) sMeGfxTraceBase,
-                    sMeGfxTraceCapacity, &sMeGfxTracePublished,
+                    sMeGfxTraceCapacity, tracePublished,
+                    (PspGfxMeTriangleCode*) (uintptr_t) sMeGfxTriangleBase,
+                    sMeGfxTriangleCapacity, trianglePublished,
                     &sMeGfxVmeStage);
                 traceCount = result.transformTraceCount < sMeGfxTraceCapacity ?
                                  result.transformTraceCount : sMeGfxTraceCapacity;
                 meLibSync();
-                sMeGfxTracePublished = PSP_GFX_ME_TRACE_DONE | traceCount;
+                *tracePublished = PSP_GFX_ME_TRACE_DONE | traceCount;
+                meLibSync();
+                *trianglePublished = PSP_GFX_ME_TRACE_DONE |
+                    (result.triangleResultCount < sMeGfxTriangleCapacity ?
+                         result.triangleResultCount : sMeGfxTriangleCapacity);
                 psp_gfx_me_publish_result(&result);
 #endif
             } else {
@@ -738,7 +913,10 @@ int PspAudioMe_Boot(void) {
     sMeGfxSnapshotSize = 0;
     sMeGfxTraceBase = 0;
     sMeGfxTraceCapacity = 0;
-    sMeGfxTracePublished = 0;
+    sMeGfxTracePublishedBase = 0;
+    sMeGfxTriangleBase = 0;
+    sMeGfxTriangleCapacity = 0;
+    sMeGfxTrianglePublishedBase = 0;
     sMeGfxVmeStage = 0;
     sMeState = PSP_AUDIO_ME_BOOTING;
     meLibSync();
@@ -792,11 +970,7 @@ int PspAudioMe_Init(void) {
 
     sInitialized = 1;
 #if PSP_GFX_ME_REPLAY
-#if PSP_AUDIO
-    PspPlatform_LogLine("[psp-me-gfx] unlit adaptive VME offload v28 active");
-#else
-    PspPlatform_LogLine("[psp-me-gfx] unlit adaptive VME offload v28 active");
-#endif
+    PspPlatform_LogLine("[psp-me-gfx] reciprocal GE-ready packets v43 active");
 #endif
     return 0;
 }
@@ -895,7 +1069,8 @@ void PspMe_WaitGfxReplayPool(const void* task) {
         return;
     }
     psp_me_dispatch_lock();
-    if (sPending && (sPendingJob == PSP_ME_JOB_GFX_REPLAY) &&
+    if (sPending && ((sPendingJob == PSP_ME_JOB_GFX_REPLAY) ||
+                     (sPendingJob == PSP_ME_JOB_GFX_READY)) &&
         (sPendingGfxSourcePool == task)) {
         psp_audio_me_wait_locked();
     }
@@ -952,6 +1127,9 @@ static void psp_gfx_me_start_locked(const Gfx* dl, u32 taskIndex,
                                     const void* sourceBase, const void* snapshotBase,
                                     u32 snapshotSize, s32 countResult,
                                     s32 logResult) {
+    u32 slot = sGfxReplayNextSlot;
+
+    sGfxReplayNextSlot ^= 1U;
     psp_audio_me_drain_completion();
     sMeCommands = (u32) (uintptr_t) dl;
     sMeCommandCount = 0;
@@ -959,15 +1137,24 @@ static void psp_gfx_me_start_locked(const Gfx* dl, u32 taskIndex,
     sMeGfxSourceBase = (u32) (uintptr_t) sourceBase;
     sMeGfxSnapshotBase = (u32) (uintptr_t) snapshotBase;
     sMeGfxSnapshotSize = snapshotSize;
-    sMeGfxTraceBase = (u32) (uintptr_t) sGfxReplayTrace;
+    sMeGfxTraceBase = (u32) (uintptr_t) sGfxReplayTrace(slot);
     sMeGfxTraceCapacity = PSP_GFX_ME_TRANSFORM_TRACE_CAPACITY;
-    sMeGfxTracePublished = 0;
+    *sGfxReplayTracePublished(slot) = 0;
+    sMeGfxTracePublishedBase =
+        (u32) (uintptr_t) sGfxReplayTracePublished(slot);
+    sMeGfxTriangleBase = (u32) (uintptr_t) sGfxReplayTriangles(slot);
+    sMeGfxTriangleCapacity = PSP_GFX_ME_TRIANGLE_TRACE_CAPACITY;
+    *sGfxReplayTrianglePublished(slot) = 0;
+    sMeGfxTrianglePublishedBase =
+        (u32) (uintptr_t) sGfxReplayTrianglePublished(slot);
     sPendingGfxExpected = *expected;
     sPendingGfxExpectedTrace = expectedTrace;
     sPendingGfxTaskIndex = taskIndex;
     sPendingGfxCountResult = countResult;
     sPendingGfxLogResult = logResult;
     sPendingGfxSourcePool = sourceBase;
+    sPendingGfxSlot = slot;
+    sGfxReplaySlotPool[slot] = sourceBase;
     sPendingStart = sceKernelGetSystemTimeLow();
     sPendingJob = PSP_ME_JOB_GFX_REPLAY;
     sPending = 1;
@@ -979,16 +1166,12 @@ static void psp_gfx_me_start_locked(const Gfx* dl, u32 taskIndex,
 
 #endif
 
-int PspMe_BeginGfxTransform(const void* task, const Gfx* dl, u32 taskIndex,
-                            const PspGfxMeTransformTrace** trace,
-                            volatile const u32** tracePublished) {
+int PspMe_StartGfxFrontend(const void* task, const Gfx* dl, u32 taskIndex) {
 #if PSP_GFX_ME_REPLAY
-    PspGfxMeReplayStats expected = { 0 };
     uintptr_t dlOffset;
     int result = -1;
 
-    if ((task == NULL) || (dl == NULL) || (trace == NULL) ||
-        (tracePublished == NULL)) {
+    if ((task == NULL) || (dl == NULL)) {
         return -1;
     }
     dlOffset = (uintptr_t) dl - (uintptr_t) task;
@@ -999,12 +1182,21 @@ int PspMe_BeginGfxTransform(const void* task, const Gfx* dl, u32 taskIndex,
     psp_me_dispatch_lock();
     psp_audio_me_wait_locked();
     if (sInitialized && (sMeState == PSP_AUDIO_ME_IDLE)) {
-        psp_audio_me_writeback_range_cpu(task, PSP_GFX_ME_POOL_SIZE);
-        psp_gfx_me_start_locked(
-            dl, taskIndex, &expected, NULL,
-            task, task, PSP_GFX_ME_POOL_SIZE, 0, 0);
-        *trace = sGfxReplayTrace;
-        *tracePublished = &sMeGfxTracePublished;
+        psp_audio_me_drain_completion();
+        PSP_GFX_READY_PUBLISHED = 0;
+        PSP_GFX_READY_CONSUMED = 0;
+        PSP_GFX_READY_APPLIED = 0;
+        sGfxReadyVertexCount = 0;
+        PSP_GFX_READY_DONE = 0;
+        sPendingGfxSourcePool = task;
+        sPendingGfxTaskIndex = taskIndex;
+        sPendingStart = sceKernelGetSystemTimeLow();
+        sPendingJob = PSP_ME_JOB_GFX_READY;
+        sPending = 1;
+        meLibSync();
+        sMeJob = PSP_ME_JOB_GFX_READY;
+        sMeState = PSP_AUDIO_ME_RUN;
+        meLibSync();
         result = 0;
     }
     psp_me_dispatch_unlock();
@@ -1013,8 +1205,150 @@ int PspMe_BeginGfxTransform(const void* task, const Gfx* dl, u32 taskIndex,
     (void) task;
     (void) dl;
     (void) taskIndex;
+    return -1;
+#endif
+}
+
+int PspMe_StageGfxReadyVertices(const PspGfxMeVertex* vertices, u32 count,
+                                const PspGfxMeVertex** staged) {
+#if PSP_GFX_ME_REPLAY
+    PspGfxMeVertex* destination;
+    u32 i;
+
+    if ((vertices == NULL) || (staged == NULL) || (count == 0) ||
+        !sPending || (sPendingJob != PSP_ME_JOB_GFX_READY) ||
+        ((sGfxReadyVertexCount + count) > PSP_GFX_ME_READY_VERTEX_CAPACITY)) {
+        return 0;
+    }
+    destination = &sGfxReadyVertexStorage[sGfxReadyVertexCount];
+    for (i = 0; i < count; i++) {
+        destination[i] = vertices[i];
+        staged[i] = &destination[i];
+    }
+    sceKernelDcacheWritebackRange(destination, count * sizeof(*destination));
+    sGfxReadyVertexCount += count;
+    return 1;
+#else
+    (void) vertices;
+    (void) count;
+    (void) staged;
+    return 0;
+#endif
+}
+
+int PspMe_SubmitGfxReadyPacket(const PspGfxMeReadyPacket* packet) {
+#if PSP_GFX_ME_REPLAY
+    volatile u32* destination;
+    const u32* source;
+    u32 i;
+    u32 published;
+
+    if ((packet == NULL) || !sPending ||
+        (sPendingJob != PSP_ME_JOB_GFX_READY)) {
+        return 0;
+    }
+    published = PSP_GFX_READY_PUBLISHED;
+    while ((published - PSP_GFX_READY_APPLIED) >=
+           PSP_GFX_ME_READY_QUEUE_CAPACITY) {
+        if (!psp_audio_me_is_running()) {
+            return 0;
+        }
+    }
+    destination = (volatile u32*)
+        &PSP_GFX_READY_QUEUE[published % PSP_GFX_ME_READY_QUEUE_CAPACITY];
+    source = (const u32*) packet;
+    for (i = 0; i < (offsetof(PspGfxMeReadyPacket, output) / sizeof(u32)); i++) {
+        destination[i] = source[i];
+    }
+    __asm__ volatile("sync" ::: "memory");
+    PSP_GFX_READY_PUBLISHED = published + 1;
+    return 1;
+#else
+    (void) packet;
+    return 0;
+#endif
+}
+
+void PspMe_WaitGfxReadyPackets(void) {
+#if PSP_GFX_ME_REPLAY
+    u32 published;
+
+    if (!sPending || (sPendingJob != PSP_ME_JOB_GFX_READY)) {
+        return;
+    }
+    published = PSP_GFX_READY_PUBLISHED;
+
+    while (PSP_GFX_READY_CONSUMED != published) {
+        if (!psp_audio_me_is_running()) {
+            break;
+        }
+    }
+    while (PSP_GFX_READY_APPLIED != PSP_GFX_READY_CONSUMED) {
+        u32 applied = PSP_GFX_READY_APPLIED;
+        PspGfxMeReadyPacket* packet =
+            &sGfxReadyQueueStorage[applied % PSP_GFX_ME_READY_QUEUE_CAPACITY];
+        PspGfxMeReadyVertex* destination =
+            (PspGfxMeReadyVertex*) packet->destination;
+        u32 i;
+
+        sceKernelDcacheInvalidateRange(packet, sizeof(*packet));
+        for (i = 0; i < packet->vertexCount; i++) {
+            destination[i] = packet->output[i];
+        }
+        PSP_GFX_READY_APPLIED = applied + 1;
+    }
+#endif
+}
+
+void PspMe_FinishGfxReadyPackets(void) {
+#if PSP_GFX_ME_REPLAY
+    if (!sPending || (sPendingJob != PSP_ME_JOB_GFX_READY)) {
+        return;
+    }
+    PSP_GFX_READY_DONE = 1;
+    meLibSync();
+    psp_me_dispatch_lock();
+    psp_audio_me_wait_locked();
+    psp_me_dispatch_unlock();
+#endif
+}
+
+int PspMe_AcquireGfxFrontend(const void* task,
+                             const PspGfxMeTransformTrace** trace,
+                             volatile const u32** tracePublished,
+                             const PspGfxMeTriangleCode** triangles,
+                             volatile const u32** trianglesPublished) {
+#if PSP_GFX_ME_REPLAY
+    int result = -1;
+
+    if ((task == NULL) || (trace == NULL) || (tracePublished == NULL) ||
+        (triangles == NULL) || (trianglesPublished == NULL)) {
+        return -1;
+    }
+    psp_me_dispatch_lock();
+    {
+        u32 slot;
+
+        for (slot = 0; slot < 2; slot++) {
+            if (sGfxReplaySlotPool[slot] != task) {
+                continue;
+            }
+            *trace = NULL;
+            *tracePublished = NULL;
+            *triangles = sGfxReplayTriangleStorage[slot];
+            *trianglesPublished = sGfxReplayTrianglePublished(slot);
+            result = 0;
+            break;
+        }
+    }
+    psp_me_dispatch_unlock();
+    return result;
+#else
+    (void) task;
     (void) trace;
     (void) tracePublished;
+    (void) triangles;
+    (void) trianglesPublished;
     return -1;
 #endif
 }
@@ -1086,8 +1420,8 @@ u32 PspMe_GetGfxVmeStage(void) {
     return sMeGfxVmeStage;
 }
 
-u32 PspMe_GetGfxSkippedLitVertices(void) {
-    return sGfxReplaySkippedLitVertices;
+u32 PspMe_GetGfxPrivateLitVertices(void) {
+    return sGfxReplayPrivateLitVertices;
 }
 
 void PspMe_GetGfxReplayCounts(u32* withinFine, u32* withinCoarse,
@@ -1151,14 +1485,42 @@ void PspMe_WaitGfxReplayPool(const void* task) {
     (void) task;
 }
 
-int PspMe_BeginGfxTransform(const void* task, const Gfx* dl, u32 taskIndex,
-                            const PspGfxMeTransformTrace** trace,
-                            volatile const u32** tracePublished) {
+int PspMe_StartGfxFrontend(const void* task, const Gfx* dl, u32 taskIndex) {
     (void) task;
     (void) dl;
     (void) taskIndex;
+    return -1;
+}
+
+int PspMe_SubmitGfxReadyPacket(const PspGfxMeReadyPacket* packet) {
+    (void) packet;
+    return 0;
+}
+
+int PspMe_StageGfxReadyVertices(const PspGfxMeVertex* vertices, u32 count,
+                                const PspGfxMeVertex** staged) {
+    (void) vertices;
+    (void) count;
+    (void) staged;
+    return 0;
+}
+
+void PspMe_WaitGfxReadyPackets(void) {
+}
+
+void PspMe_FinishGfxReadyPackets(void) {
+}
+
+int PspMe_AcquireGfxFrontend(const void* task,
+                             const PspGfxMeTransformTrace** trace,
+                             volatile const u32** tracePublished,
+                             const PspGfxMeTriangleCode** triangles,
+                             volatile const u32** trianglesPublished) {
+    (void) task;
     (void) trace;
     (void) tracePublished;
+    (void) triangles;
+    (void) trianglesPublished;
     return -1;
 }
 
@@ -1189,7 +1551,7 @@ u32 PspMe_GetGfxVmeStage(void) {
     return 0;
 }
 
-u32 PspMe_GetGfxSkippedLitVertices(void) {
+u32 PspMe_GetGfxPrivateLitVertices(void) {
     return 0;
 }
 
