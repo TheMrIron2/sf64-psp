@@ -9,9 +9,15 @@
 #ifndef PSP_AUDIO
 #define PSP_AUDIO 0
 #endif
+#ifndef PSP_AUDIO_VME
+#define PSP_AUDIO_VME 0
+#endif
 
 #if PSP_AUDIO
 #include <me-core-mapper/me-core.h>
+#if PSP_AUDIO_VME
+#include <me-core-mapper/vme-lib.h>
+#endif
 
 #define PSP_AUDIO_ME_TIMEOUT_US 250000
 #define PSP_AUDIO_ME_INTERRUPT_TIMEOUT_US 10000
@@ -21,11 +27,16 @@
 #define PSP_AUDIO_ME_CACHE_LINE_SIZE 64
 #define PSP_AUDIO_ME_MAX_INPUT_RANGES 16
 #define PSP_AUDIO_ME_MAX_WRITE_RANGES 512
+#define PSP_AUDIO_VME_SMOKE_SAMPLES 16
+#define PSP_AUDIO_VME_SMOKE_PROLOGUE 16
+#define PSP_AUDIO_VME_SMOKE_FACTOR -7
+#define PSP_AUDIO_VME_SMOKE_REPEATS 4
 
 typedef enum {
     PSP_AUDIO_ME_BOOTING,
     PSP_AUDIO_ME_IDLE,
     PSP_AUDIO_ME_RUN,
+    PSP_AUDIO_ME_VME_SMOKE,
     PSP_AUDIO_ME_STOP,
     PSP_AUDIO_ME_HALTED,
     PSP_AUDIO_ME_FAULT,
@@ -38,6 +49,18 @@ enum {
     PSP_AUDIO_ME_SHARED_RESULT,
     PSP_AUDIO_ME_SHARED_PROGRESS,
     PSP_AUDIO_ME_SHARED_COMPLETION_ENABLED,
+#if PSP_AUDIO_VME
+    PSP_AUDIO_ME_SHARED_VME_STATE,
+    PSP_AUDIO_ME_SHARED_VME_CHECKPOINT,
+    PSP_AUDIO_ME_SHARED_VME_RUNS,
+    PSP_AUDIO_ME_SHARED_VME_SAMPLES,
+    PSP_AUDIO_ME_SHARED_VME_MISMATCHES,
+    PSP_AUDIO_ME_SHARED_VME_FIRST_INDEX,
+    PSP_AUDIO_ME_SHARED_VME_INPUT,
+    PSP_AUDIO_ME_SHARED_VME_FACTOR,
+    PSP_AUDIO_ME_SHARED_VME_EXPECTED,
+    PSP_AUDIO_ME_SHARED_VME_ACTUAL,
+#endif
     PSP_AUDIO_ME_SHARED_COUNT,
 };
 
@@ -52,6 +75,18 @@ static volatile u32 sSharedStorage[PSP_AUDIO_ME_SHARED_COUNT]
 #define sMeResult PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_RESULT]
 #define sMeProgress PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_PROGRESS]
 #define sMeCompletionEnabled PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_COMPLETION_ENABLED]
+#if PSP_AUDIO_VME
+#define sVmeState PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_VME_STATE]
+#define sVmeCheckpoint PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_VME_CHECKPOINT]
+#define sVmeRuns PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_VME_RUNS]
+#define sVmeSamples PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_VME_SAMPLES]
+#define sVmeMismatches PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_VME_MISMATCHES]
+#define sVmeFirstIndex PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_VME_FIRST_INDEX]
+#define sVmeInput PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_VME_INPUT]
+#define sVmeFactor PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_VME_FACTOR]
+#define sVmeExpected PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_VME_EXPECTED]
+#define sVmeActual PSP_AUDIO_ME_SHARED[PSP_AUDIO_ME_SHARED_VME_ACTUAL]
+#endif
 
 typedef struct {
     void* address;
@@ -66,6 +101,9 @@ static s32 sBootStarted;
 static s32 sInitialized;
 static s32 sPending;
 static s32 sLastError;
+#if PSP_AUDIO_VME
+static s32 sVmeTimedOut;
+#endif
 static SceUID sCompletionSema = -1;
 static s32 sCompletionReady;
 static PspAudioMeCacheRange sInputRanges[PSP_AUDIO_ME_MAX_INPUT_RANGES];
@@ -367,6 +405,116 @@ static void psp_audio_me_writeback_outputs_me(const Acmd* commands, s32 commandC
 }
 #endif
 
+#if PSP_AUDIO_VME
+static int psp_audio_me_vme_smoke_once(void) {
+    static const s16 sInputs[PSP_AUDIO_VME_SMOKE_SAMPLES] = {
+        0, 1, -1, 0x7fff, -0x8000, 2, -2, 17,
+        -17, 255, -255, 4096, -4096, 16384, -16384, 30000,
+    };
+    volatile s32* top = (volatile s32*) VME_TOP_BUFFERS;
+    volatile s32* products = (volatile s32*) VME_BASE_BUFFERS;
+    const s32 count = PSP_AUDIO_VME_SMOKE_SAMPLES + PSP_AUDIO_VME_SMOKE_PROLOGUE;
+    s32 i;
+
+    for (i = 0; i < PSP_AUDIO_VME_SMOKE_SAMPLES; i++) {
+        top[i] = sInputs[i];
+    }
+    for (; i < count; i++) {
+        top[i] = 0;
+    }
+
+    sVmeCheckpoint = 6;
+    meLibSync();
+    sVmeCheckpoint = 7;
+    vmeLibStart();
+    vme_icn(FLOW, 0);
+    vme_icn(ARCH, VME_DEF_MAPPER);
+    vme_pe0(vme_fu(PRIMARY), vme_mux(TOP_0), VME_FU_OPCODE_MUL_CONST_RSHIFT_0, 0);
+    vme_pe0(fu_reg(PRIMARY, B), (u32) (s32) PSP_AUDIO_VME_SMOKE_FACTOR);
+    vme_pe0(agu_top(MODE), VME_DEF_MODE);
+    vme_pe0(agu_top(COUNT), VME_DEF_STEP, count - 1);
+    vme_pe0(agu_base(MODE), VME_DEF_MODE);
+    vme_pe0(agu_base(COUNT), VME_DEF_STEP, count - 1);
+    vme_pe0(agu_write(MODE), VME_DEF_MODE, VME_CYCLE_6);
+    vme_pe0(agu_write(COUNT), VME_DEF_STEP, count - 1);
+    vme_pe0(agu_write(FORMAT_0), PSP_AUDIO_VME_SMOKE_PROLOGUE);
+    vme_pe0(agu_write(FORMAT_1), VME_END_TOKEN);
+    vmeLibFinish();
+    sVmeCheckpoint = 8;
+    meLibSync();
+
+    products += PSP_AUDIO_VME_SMOKE_PROLOGUE;
+    sVmeRuns++;
+    for (i = 0; i < PSP_AUDIO_VME_SMOKE_SAMPLES; i++) {
+        s32 expected = (s32) sInputs[i] * PSP_AUDIO_VME_SMOKE_FACTOR;
+        s32 actual = products[i];
+
+        sVmeSamples++;
+        if (actual != expected) {
+            if (sVmeMismatches == 0) {
+                sVmeFirstIndex = i;
+                sVmeInput = (u32) (s32) sInputs[i];
+                sVmeFactor = (u32) (s32) PSP_AUDIO_VME_SMOKE_FACTOR;
+                sVmeExpected = (u32) expected;
+                sVmeActual = (u32) actual;
+            }
+            sVmeMismatches++;
+        }
+    }
+    sVmeCheckpoint = 9;
+    meLibSync();
+    return sVmeMismatches == 0 ? 0 : -1;
+}
+
+static int psp_audio_me_vme_smoke(void) {
+    s32 run;
+
+    sVmeState = PSP_AUDIO_VME_INITIALIZING;
+    sVmeCheckpoint = 1;
+    sVmeRuns = 0;
+    sVmeSamples = 0;
+    sVmeMismatches = 0;
+    sVmeFirstIndex = (u32) -1;
+    sVmeInput = 0;
+    sVmeFactor = PSP_AUDIO_VME_SMOKE_FACTOR;
+    sVmeExpected = 0;
+    sVmeActual = 0;
+    meLibSync();
+    meLibExceptionHandlerInit(0);
+    sVmeCheckpoint = 2;
+    meLibSync();
+
+    for (run = 0; run < PSP_AUDIO_VME_SMOKE_REPEATS; run++) {
+        sVmeCheckpoint = 3;
+        meLibSync();
+        vmeLibEnable();
+        sVmeCheckpoint = 4;
+        meLibSync();
+        vmeLibWipe();
+        sVmeCheckpoint = 5;
+        meLibSync();
+        if (psp_audio_me_vme_smoke_once() < 0) {
+            vmeLibDisable();
+            sVmeState = PSP_AUDIO_VME_FAULT;
+            meLibSync();
+            return -1;
+        }
+        if (run + 1 < PSP_AUDIO_VME_SMOKE_REPEATS) {
+            sVmeCheckpoint = 10;
+            meLibSync();
+            vmeLibDisable();
+            sVmeCheckpoint = 11;
+            meLibSync();
+        }
+    }
+
+    sVmeCheckpoint = 12;
+    sVmeState = PSP_AUDIO_VME_READY;
+    meLibSync();
+    return 0;
+}
+#endif
+
 __attribute__((noinline, aligned(4))) void meLibOnException(void) {
     sMeState = PSP_AUDIO_ME_FAULT;
     meLibSync();
@@ -422,6 +570,15 @@ __attribute__((noinline, aligned(4))) void meLibOnProcess(void) {
             if (sMeCompletionEnabled) {
                 meLibSendExternalSoftInterrupt();
             }
+#if PSP_AUDIO_VME
+        } else if (sMeState == PSP_AUDIO_ME_VME_SMOKE) {
+            sMeResult = psp_audio_me_vme_smoke();
+            sMeState = PSP_AUDIO_ME_IDLE;
+            meLibSync();
+            if (sMeCompletionEnabled) {
+                meLibSendExternalSoftInterrupt();
+            }
+#endif
         } else {
             meLibDelayPipeline();
         }
@@ -442,6 +599,11 @@ int PspAudioMe_Boot(void) {
     sMeResult = 0;
     sMeProgress = 0;
     sMeCompletionEnabled = 0;
+#if PSP_AUDIO_VME
+    sVmeState = PSP_AUDIO_VME_UNINITIALIZED;
+    sVmeCheckpoint = 0;
+    sVmeTimedOut = 0;
+#endif
     sMeState = PSP_AUDIO_ME_BOOTING;
     meLibSync();
 
@@ -482,6 +644,29 @@ int PspAudioMe_Init(void) {
     }
 
     sInitialized = 1;
+#if PSP_AUDIO_VME
+    psp_audio_me_drain_completion();
+    sMeResult = 0;
+    sMeState = PSP_AUDIO_ME_VME_SMOKE;
+    meLibSync();
+    start = sceKernelGetSystemTimeLow();
+    while (sMeState == PSP_AUDIO_ME_VME_SMOKE) {
+        if ((sceKernelGetSystemTimeLow() - start) >= PSP_AUDIO_ME_TIMEOUT_US) {
+            meLibEmitSoftwareInterrupt();
+            sVmeTimedOut = 1;
+            sInitialized = 0;
+            sLastError = -4;
+            return sLastError;
+        }
+        sceKernelDelayThread(PSP_AUDIO_ME_POLL_US);
+    }
+    if (sMeState != PSP_AUDIO_ME_IDLE) {
+        sVmeTimedOut = 1;
+        sInitialized = 0;
+        sLastError = -4;
+        return sLastError;
+    }
+#endif
     return 0;
 }
 
@@ -493,6 +678,10 @@ static void psp_audio_me_wait(PspAudioProfileWaitReason reason) {
 #if PSP_AUDIO_PROFILE
     u32 waitStart;
     s32 blocked;
+#endif
+
+#if !PSP_AUDIO_PROFILE
+    (void) reason;
 #endif
 
     if (!sPending) {
@@ -614,6 +803,35 @@ int PspAudioMe_GetLastError(void) {
     return sLastError;
 }
 
+void PspAudioMe_GetVmeSmokeResult(PspAudioVmeSmokeResult* result) {
+    if (result == NULL) {
+        return;
+    }
+#if PSP_AUDIO_VME
+    result->state = sVmeTimedOut ? PSP_AUDIO_VME_FAULT : (PspAudioVmeState) sVmeState;
+    result->checkpoint = sVmeCheckpoint;
+    result->runs = sVmeRuns;
+    result->samples = sVmeSamples;
+    result->mismatches = sVmeMismatches;
+    result->firstIndex = (s32) sVmeFirstIndex;
+    result->input = (s32) sVmeInput;
+    result->factor = (s32) sVmeFactor;
+    result->expected = (s32) sVmeExpected;
+    result->actual = (s32) sVmeActual;
+#else
+    result->state = PSP_AUDIO_VME_DISABLED;
+    result->checkpoint = 0;
+    result->runs = 0;
+    result->samples = 0;
+    result->mismatches = 0;
+    result->firstIndex = -1;
+    result->input = 0;
+    result->factor = 0;
+    result->expected = 0;
+    result->actual = 0;
+#endif
+}
+
 #else
 
 int PspAudioMe_Boot(void) {
@@ -638,6 +856,22 @@ int PspAudioMe_IsActive(void) {
 
 int PspAudioMe_GetLastError(void) {
     return 0;
+}
+
+void PspAudioMe_GetVmeSmokeResult(PspAudioVmeSmokeResult* result) {
+    if (result == NULL) {
+        return;
+    }
+    result->state = PSP_AUDIO_VME_DISABLED;
+    result->checkpoint = 0;
+    result->runs = 0;
+    result->samples = 0;
+    result->mismatches = 0;
+    result->firstIndex = -1;
+    result->input = 0;
+    result->factor = 0;
+    result->expected = 0;
+    result->actual = 0;
 }
 
 #endif

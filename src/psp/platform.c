@@ -47,7 +47,10 @@ float sqrtf(float x);
 #ifndef PSP_AUDIO_PROFILE
 #define PSP_AUDIO_PROFILE 0
 #endif
-#define PSP_FILE_LOG_ENABLED (PSP_LOG_ENABLED || PSP_AUDIO_PROFILE)
+#ifndef PSP_AUDIO_VME
+#define PSP_AUDIO_VME 0
+#endif
+#define PSP_FILE_LOG_ENABLED (PSP_LOG_ENABLED || PSP_AUDIO_PROFILE || PSP_AUDIO_VME)
 #ifndef PSP_DEBUG_OVERLAY_ENABLED
 #define PSP_DEBUG_OVERLAY_ENABLED 0
 #endif
@@ -220,6 +223,20 @@ static char* psp_append_u32(char* out, u32 value) {
     return out;
 }
 
+#if PSP_AUDIO_VME
+static char* psp_append_s32(char* out, s32 value) {
+    u32 magnitude;
+
+    if (value < 0) {
+        *out++ = '-';
+        magnitude = 0U - (u32) value;
+    } else {
+        magnitude = (u32) value;
+    }
+    return psp_append_u32(out, magnitude);
+}
+#endif
+
 #if PSP_FILE_LOG_ENABLED
 /* ms0 is absent on a PSP Go without an M2 card, ef0 is its internal flash
  * host0 is the PSPLINK host directory and catches both refusing writes */
@@ -287,6 +304,54 @@ void PspPlatform_LogAudioProfileLine(const char* line) {
 #endif
 }
 
+void PspPlatform_LogAudioVmeLine(const char* line) {
+#if PSP_AUDIO_VME
+    psp_log_line(line);
+#else
+    (void) line;
+#endif
+}
+
+#if PSP_AUDIO_VME
+static void psp_log_audio_vme_result(void) {
+    PspAudioVmeSmokeResult result;
+    char line[192];
+    char* out = line;
+
+    PspAudioMe_GetVmeSmokeResult(&result);
+    out = psp_append_text(out, "[audio-vme] smoke state=");
+    if (result.state == PSP_AUDIO_VME_READY) {
+        out = psp_append_text(out, "ready");
+    } else if (result.state == PSP_AUDIO_VME_FAULT) {
+        out = psp_append_text(out, "fault");
+    } else {
+        out = psp_append_text(out, "disabled");
+    }
+    out = psp_append_text(out, " checkpoint=");
+    out = psp_append_u32(out, result.checkpoint);
+    out = psp_append_text(out, " runs=");
+    out = psp_append_u32(out, result.runs);
+    out = psp_append_text(out, " samples=");
+    out = psp_append_u32(out, result.samples);
+    out = psp_append_text(out, " mismatches=");
+    out = psp_append_u32(out, result.mismatches);
+    if (result.mismatches != 0) {
+        out = psp_append_text(out, " first=");
+        out = psp_append_s32(out, result.firstIndex);
+        out = psp_append_text(out, " input=");
+        out = psp_append_s32(out, result.input);
+        out = psp_append_text(out, " factor=");
+        out = psp_append_s32(out, result.factor);
+        out = psp_append_text(out, " expected=");
+        out = psp_append_s32(out, result.expected);
+        out = psp_append_text(out, " actual=");
+        out = psp_append_s32(out, result.actual);
+    }
+    *out = '\0';
+    PspPlatform_LogAudioVmeLine(line);
+}
+#endif
+
 void PspPlatform_LogFrame(const char* phase, u32 frame) {
     char line[96];
     char* out = line;
@@ -332,10 +397,16 @@ void PspPlatform_Init(void) {
 #if PSP_AUDIO_PROFILE
     PspPlatform_LogAudioProfileLine("[audio-prof] log start cache=targeted");
 #endif
+#if PSP_AUDIO_VME
+    PspPlatform_LogAudioVmeLine("[audio-vme] log start");
+#endif
     PspInput_Init();
     PspProfiler_Init();
 #if PSP_AUDIO
     audioMeResult = PspAudioMe_Init();
+#if PSP_AUDIO_VME
+    psp_log_audio_vme_result();
+#endif
 #endif
     audioResult = PspAudioOutput_Init();
 #if PSP_LOG_ENABLED

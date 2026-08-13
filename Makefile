@@ -48,6 +48,7 @@ PSP_LOG := 1
 endif
 PSP_AUDIO ?= 0
 PSP_AUDIO_PROFILE ?= 0
+PSP_AUDIO_VME ?= 0
 PSP_FPS_OVERLAY ?= 1
 COLOR ?= 1
 VERBOSE ?= 0
@@ -93,6 +94,16 @@ endif
 ifeq ($(PSP_AUDIO_PROFILE),1)
 ifneq ($(PSP_AUDIO),1)
 $(error PSP_AUDIO_PROFILE=1 requires PSP_AUDIO=1)
+endif
+endif
+ifneq ($(PSP_AUDIO_VME),0)
+ifneq ($(PSP_AUDIO_VME),1)
+$(error PSP_AUDIO_VME must be 0 or 1)
+endif
+endif
+ifeq ($(PSP_AUDIO_VME),1)
+ifneq ($(PSP_AUDIO),1)
+$(error PSP_AUDIO_VME=1 requires PSP_AUDIO=1)
 endif
 endif
 ifneq ($(VTX_FUSED_TNL),0)
@@ -284,6 +295,7 @@ CFLAGS += -fno-asynchronous-unwind-tables -fno-ident
 CFLAGS += -DPSP_FPS_OVERLAY=$(PSP_FPS_OVERLAY)
 CFLAGS += -DPSP_AUDIO=$(PSP_AUDIO)
 CFLAGS += -DPSP_AUDIO_PROFILE=$(PSP_AUDIO_PROFILE)
+CFLAGS += -DPSP_AUDIO_VME=$(PSP_AUDIO_VME)
 CFLAGS += -DPROFILE_GPROF=$(if $(filter 1,$(PROFILE_PSP)),1,0)
 CFLAGS += -DPROFILE_PHASES=$(if $(filter 1,$(PROFILE_PHASES)),1,0)
 CFLAGS += -DPROFILE_CAPTURE_FRAMES=$(PROFILE_CAPTURE_FRAMES)
