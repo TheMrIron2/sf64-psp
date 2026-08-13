@@ -37,6 +37,20 @@ typedef struct {
     s32 actual;
 } PspAudioVmeMixResult;
 
+#define PSP_AUDIO_VME_BENCH_ROWS 8
+
+typedef struct {
+    u32 samples;
+    u32 calls;
+    u32 scalarCalls;
+    u64 scalarTicks;
+    u64 stageTicks;
+    u64 updateTicks;
+    u64 runTicks;
+    u64 readbackTicks;
+    u64 postTicks;
+} PspAudioVmeBenchRow;
+
 int PspAudioMe_Boot(void);
 int PspAudioMe_Init(void);
 void PspAudioMe_Submit(const Acmd* commands, s32 commandCount);
@@ -47,5 +61,8 @@ void PspAudioMe_GetVmeSmokeResult(PspAudioVmeSmokeResult* result);
 int PspAudioMe_ValidateVmeMix(u16 count, s16 gain, const s16* input,
                               const s16* output);
 void PspAudioMe_GetVmeMixResult(PspAudioVmeMixResult* result);
+u32 PspAudioMe_BenchReadCount(void);
+void PspAudioMe_RecordScalarMix(u32 samples, u32 ticks);
+void PspAudioMe_GetVmeBenchRow(u32 index, PspAudioVmeBenchRow* result);
 
 #endif

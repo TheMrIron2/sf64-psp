@@ -53,6 +53,9 @@ float sqrtf(float x);
 #ifndef PSP_AUDIO_VME_VALIDATE
 #define PSP_AUDIO_VME_VALIDATE 0
 #endif
+#ifndef PSP_AUDIO_VME_BENCH
+#define PSP_AUDIO_VME_BENCH 0
+#endif
 #define PSP_FILE_LOG_ENABLED (PSP_LOG_ENABLED || PSP_AUDIO_PROFILE || PSP_AUDIO_VME)
 #ifndef PSP_DEBUG_OVERLAY_ENABLED
 #define PSP_DEBUG_OVERLAY_ENABLED 0
@@ -359,12 +362,14 @@ void PspPlatform_ReportAudioVmeMix(void) {
 #if PSP_AUDIO_VME_VALIDATE
     static u32 sLastCalls;
     PspAudioVmeMixResult result;
+    const u32 startupCalls = 4;
     char line[224];
     char* out;
 
     PspAudioMe_GetVmeMixResult(&result);
     if ((result.calls == sLastCalls) ||
-        ((result.calls != 4) && ((result.calls - sLastCalls) < 256) &&
+        ((result.calls != startupCalls) &&
+         ((result.calls - sLastCalls) < 256) &&
          (result.mismatches == 0))) {
         return;
     }
@@ -392,6 +397,67 @@ void PspPlatform_ReportAudioVmeMix(void) {
     }
     *out = '\0';
     PspPlatform_LogAudioVmeLine(line);
+#endif
+}
+
+void PspPlatform_ReportAudioVmeBench(void) {
+#if PSP_AUDIO_VME_BENCH
+    static u32 sNextReport = 256;
+    PspAudioVmeBenchRow rows[PSP_AUDIO_VME_BENCH_ROWS];
+    u32 totalCalls = 0;
+    u32 i;
+
+    for (i = 0; i < PSP_AUDIO_VME_BENCH_ROWS; i++) {
+        PspAudioMe_GetVmeBenchRow(i, &rows[i]);
+        totalCalls += rows[i].calls;
+    }
+    if (totalCalls < sNextReport) {
+        return;
+    }
+    while (sNextReport <= totalCalls) {
+        sNextReport <<= 1;
+    }
+    for (i = 0; i < PSP_AUDIO_VME_BENCH_ROWS; i++) {
+        PspAudioVmeBenchRow* row = &rows[i];
+        u64 vmeTicks;
+        u32 scalarAvg;
+        u32 vmeAvg;
+        char line[256];
+        char* out;
+
+        if ((row->calls == 0) || (row->scalarCalls == 0)) {
+            continue;
+        }
+        vmeTicks = row->stageTicks + row->updateTicks + row->runTicks +
+                   row->readbackTicks + row->postTicks;
+        scalarAvg = row->scalarTicks / row->scalarCalls;
+        vmeAvg = vmeTicks / row->calls;
+        out = line;
+        out = psp_append_text(out, "[audio-vme-bench] samples=");
+        out = psp_append_u32(out, row->samples);
+        out = psp_append_text(out, " stage=stores");
+        out = psp_append_text(out, " calls=");
+        out = psp_append_u32(out, row->calls);
+        out = psp_append_text(out, " scalar=");
+        out = psp_append_u32(out, scalarAvg);
+        out = psp_append_text(out, " staging=");
+        out = psp_append_u32(out, row->stageTicks / row->calls);
+        out = psp_append_text(out, " update=");
+        out = psp_append_u32(out, row->updateTicks / row->calls);
+        out = psp_append_text(out, " run=");
+        out = psp_append_u32(out, row->runTicks / row->calls);
+        out = psp_append_text(out, " readback=");
+        out = psp_append_u32(out, row->readbackTicks / row->calls);
+        out = psp_append_text(out, " post=");
+        out = psp_append_u32(out, row->postTicks / row->calls);
+        out = psp_append_text(out, " vme=");
+        out = psp_append_u32(out, vmeAvg);
+        out = psp_append_text(out, " speed_x1000=");
+        out = psp_append_u32(out, vmeAvg ?
+            ((u64) scalarAvg * 1000) / vmeAvg : 0);
+        *out = '\0';
+        PspPlatform_LogAudioVmeLine(line);
+    }
 #endif
 }
 

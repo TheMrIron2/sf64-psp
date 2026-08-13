@@ -964,6 +964,10 @@ void aEnvMixerImpl(uint16_t in_addr, uint16_t n_samples, bool swap_reverb, bool 
 
 void aMixImpl(uint16_t count, int16_t gain, uint16_t in_addr, uint16_t out_addr) {
     int nbytes = ROUND_UP_32(ROUND_DOWN_16(count << 4));
+#if defined(TARGET_PSP) && PSP_AUDIO_VME_BENCH
+    int samples = nbytes / sizeof(int16_t);
+    u32 scalarStart;
+#endif
     int16_t* in = BUF_S16(in_addr);
     int16_t* out = BUF_S16(out_addr);
     int i;
@@ -971,6 +975,9 @@ void aMixImpl(uint16_t count, int16_t gain, uint16_t in_addr, uint16_t out_addr)
 
 #if defined(TARGET_PSP) && PSP_AUDIO_VME_VALIDATE
     PspAudioMe_ValidateVmeMix(count, gain, in, out);
+#endif
+#if defined(TARGET_PSP) && PSP_AUDIO_VME_BENCH
+    scalarStart = PspAudioMe_BenchReadCount();
 #endif
 
     if (gain == -0x8000) {
@@ -991,6 +998,10 @@ void aMixImpl(uint16_t count, int16_t gain, uint16_t in_addr, uint16_t out_addr)
 
         nbytes -= 16 * sizeof(int16_t);
     }
+#if defined(TARGET_PSP) && PSP_AUDIO_VME_BENCH
+    PspAudioMe_RecordScalarMix(samples,
+                               PspAudioMe_BenchReadCount() - scalarStart);
+#endif
 }
 
 #else
