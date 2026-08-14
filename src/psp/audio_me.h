@@ -47,6 +47,37 @@ typedef struct {
     s32 actual;
 } PspAudioVmeFilterResult;
 
+typedef struct {
+    u32 runs;
+    u32 products;
+    u32 mismatches;
+    s32 firstLane;
+    s32 firstIndex;
+    s32 input;
+    s32 coefficient;
+    s32 expected;
+    s32 actual;
+    u32 commands;
+    u32 outputs;
+    u32 pairMismatches;
+    u32 outputMismatches;
+    u32 stateMismatches;
+    u32 skipped;
+    s32 firstOutputIndex;
+    s32 outputExpected;
+    s32 outputActual;
+    s32 firstPairIndex;
+    s32 pair01Expected;
+    s32 pair01Actual;
+    s32 pair23Expected;
+    s32 pair23Actual;
+    s32 firstStateIndex;
+    s32 stateExpected;
+    s32 stateActual;
+} PspAudioVmeResampleResult;
+
+#define PSP_AUDIO_VME_RESAMPLE_MAX_SAMPLES 1024
+
 #define PSP_AUDIO_VME_BENCH_ROWS 8
 
 typedef struct {
@@ -72,6 +103,12 @@ int PspAudioMe_ValidateVmeMix(u16 count, s16 gain, const s16* input,
                               const s16* output);
 void PspAudioMe_GetVmeMixResult(PspAudioVmeMixResult* result);
 void PspAudioMe_GetVmeFilterResult(PspAudioVmeFilterResult* result);
+int PspAudioMe_ValidateVmeResample(u32 count, const s16* inputs,
+                                   const s16* coefficients,
+                                   const s16* output,
+                                   const s16* expectedState,
+                                   const s16* actualState);
+void PspAudioMe_GetVmeResampleResult(PspAudioVmeResampleResult* result);
 u32 PspAudioMe_BenchReadCount(void);
 void PspAudioMe_RecordScalarMix(u32 samples, u32 ticks);
 void PspAudioMe_GetVmeBenchRow(u32 index, PspAudioVmeBenchRow* result);

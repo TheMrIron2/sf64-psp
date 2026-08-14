@@ -428,6 +428,100 @@ void PspPlatform_ReportAudioVmeFilter(void) {
 #endif
 }
 
+void PspPlatform_ReportAudioVmeResample(void) {
+#if PSP_AUDIO_VME_VALIDATE
+    static u32 sLastCommands = (u32) -1;
+    static u32 sLastProductMismatches = (u32) -1;
+    static u32 sLastPairMismatches = (u32) -1;
+    static u32 sLastOutputMismatches = (u32) -1;
+    static u32 sLastStateMismatches = (u32) -1;
+    PspAudioVmeResampleResult result;
+    char line[512];
+    char* out;
+
+    PspAudioMe_GetVmeResampleResult(&result);
+    if ((result.commands == sLastCommands) &&
+        (result.mismatches == sLastProductMismatches) &&
+        (result.pairMismatches == sLastPairMismatches) &&
+        (result.outputMismatches == sLastOutputMismatches) &&
+        (result.stateMismatches == sLastStateMismatches)) {
+        return;
+    }
+    if ((sLastCommands != (u32) -1) && (result.commands > 1) &&
+        ((result.commands - sLastCommands) < 256) &&
+        (result.mismatches == 0) && (result.pairMismatches == 0) &&
+        (result.outputMismatches == 0) &&
+        (result.stateMismatches == 0)) {
+        return;
+    }
+    sLastCommands = result.commands;
+    sLastProductMismatches = result.mismatches;
+    sLastPairMismatches = result.pairMismatches;
+    sLastOutputMismatches = result.outputMismatches;
+    sLastStateMismatches = result.stateMismatches;
+    out = line;
+    out = psp_append_text(out, "[audio-vme] resample runs=");
+    out = psp_append_u32(out, result.runs);
+    out = psp_append_text(out, " products=");
+    out = psp_append_u32(out, result.products);
+    out = psp_append_text(out, " mismatches=");
+    out = psp_append_u32(out, result.mismatches);
+    out = psp_append_text(out, " commands=");
+    out = psp_append_u32(out, result.commands);
+    out = psp_append_text(out, " outputs=");
+    out = psp_append_u32(out, result.outputs);
+    out = psp_append_text(out, " pair_mismatches=");
+    out = psp_append_u32(out, result.pairMismatches);
+    out = psp_append_text(out, " pcm_mismatches=");
+    out = psp_append_u32(out, result.outputMismatches);
+    out = psp_append_text(out, " state_mismatches=");
+    out = psp_append_u32(out, result.stateMismatches);
+    out = psp_append_text(out, " skipped=");
+    out = psp_append_u32(out, result.skipped);
+    if (result.mismatches != 0) {
+        out = psp_append_text(out, " lane=");
+        out = psp_append_s32(out, result.firstLane);
+        out = psp_append_text(out, " first=");
+        out = psp_append_s32(out, result.firstIndex);
+        out = psp_append_text(out, " input=");
+        out = psp_append_s32(out, result.input);
+        out = psp_append_text(out, " coefficient=");
+        out = psp_append_s32(out, result.coefficient);
+        out = psp_append_text(out, " expected=");
+        out = psp_append_s32(out, result.expected);
+        out = psp_append_text(out, " actual=");
+        out = psp_append_s32(out, result.actual);
+    } else if (result.pairMismatches != 0) {
+        out = psp_append_text(out, " first_pair=");
+        out = psp_append_s32(out, result.firstPairIndex);
+        out = psp_append_text(out, " pair01_expected=");
+        out = psp_append_s32(out, result.pair01Expected);
+        out = psp_append_text(out, " pair01_actual=");
+        out = psp_append_s32(out, result.pair01Actual);
+        out = psp_append_text(out, " pair23_expected=");
+        out = psp_append_s32(out, result.pair23Expected);
+        out = psp_append_text(out, " pair23_actual=");
+        out = psp_append_s32(out, result.pair23Actual);
+    } else if (result.outputMismatches != 0) {
+        out = psp_append_text(out, " first_output=");
+        out = psp_append_s32(out, result.firstOutputIndex);
+        out = psp_append_text(out, " expected=");
+        out = psp_append_s32(out, result.outputExpected);
+        out = psp_append_text(out, " actual=");
+        out = psp_append_s32(out, result.outputActual);
+    } else if (result.stateMismatches != 0) {
+        out = psp_append_text(out, " first_state=");
+        out = psp_append_s32(out, result.firstStateIndex);
+        out = psp_append_text(out, " expected=");
+        out = psp_append_s32(out, result.stateExpected);
+        out = psp_append_text(out, " actual=");
+        out = psp_append_s32(out, result.stateActual);
+    }
+    *out = '\0';
+    PspPlatform_LogAudioVmeLine(line);
+#endif
+}
+
 void PspPlatform_ReportAudioVmeBench(void) {
 #if PSP_AUDIO_VME_BENCH
     static u32 sNextReport = 256;
@@ -546,6 +640,7 @@ void PspPlatform_Init(void) {
 #if PSP_AUDIO_VME_VALIDATE
     PspPlatform_ReportAudioVmeMix();
     PspPlatform_ReportAudioVmeFilter();
+    PspPlatform_ReportAudioVmeResample();
 #endif
 #endif
 #endif
