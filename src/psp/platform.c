@@ -653,6 +653,195 @@ void PspPlatform_ReportAudioVmeResampleBatchBench(void) {
 #endif
 }
 
+void PspPlatform_ReportAudioVmeTransportBench(void) {
+#if PSP_AUDIO_VME_BENCH
+    static s32 sReported;
+    PspAudioVmeTransportBenchResult firstResult;
+    u32 index;
+
+    if (sReported) {
+        return;
+    }
+    PspAudioMe_GetVmeTransportBenchResult(0, &firstResult);
+    if (firstResult.calls == 0) {
+        return;
+    }
+    sReported = 1;
+    for (index = 0; index < PSP_AUDIO_VME_TRANSPORT_BENCH_CASES; index++) {
+        PspAudioVmeTransportBenchResult result;
+        char line[384];
+        char* out = line;
+
+        PspAudioMe_GetVmeTransportBenchResult(index, &result);
+        if (result.calls == 0) {
+            break;
+        }
+        out = psp_append_text(out, "[audio-vme-transport] samples=");
+        out = psp_append_u32(out, result.samples);
+        out = psp_append_text(out, " calls=");
+        out = psp_append_u32(out, result.calls);
+        out = psp_append_text(out, " mismatches=");
+        out = psp_append_u32(out, result.mismatches);
+        out = psp_append_text(out, " main_addr=");
+        out = psp_append_u32(out, result.mainAddress);
+        out = psp_append_text(out, " local_addr=");
+        out = psp_append_u32(out, result.localAddress);
+        out = psp_append_text(out, " main_to=");
+        out = psp_append_u32(out, result.mainToTicks / result.calls);
+        out = psp_append_text(out, " local_to=");
+        out = psp_append_u32(out, result.localToTicks / result.calls);
+        out = psp_append_text(out, " main_from=");
+        out = psp_append_u32(out, result.mainFromTicks / result.calls);
+        out = psp_append_text(out, " local_from=");
+        out = psp_append_u32(out, result.localFromTicks / result.calls);
+        if (result.mismatches != 0) {
+            out = psp_append_text(out, " domain=");
+            out = psp_append_s32(out, result.firstDomain);
+            out = psp_append_text(out, " first=");
+            out = psp_append_s32(out, result.firstIndex);
+            out = psp_append_text(out, " expected=");
+            out = psp_append_s32(out, result.expected);
+            out = psp_append_text(out, " actual=");
+            out = psp_append_s32(out, result.actual);
+        }
+        *out = '\0';
+        PspPlatform_LogAudioVmeLine(line);
+    }
+#endif
+}
+
+void PspPlatform_ReportAudioVmeEnvBoundaryBench(void) {
+#if PSP_AUDIO_VME_BENCH
+    static s32 sReported;
+    PspAudioVmeEnvBoundaryBenchResult result;
+    u64 inclusive;
+    char line[512];
+    char* out = line;
+
+    if (sReported) {
+        return;
+    }
+    PspAudioMe_GetVmeEnvBoundaryBenchResult(&result);
+    if (result.calls == 0) {
+        return;
+    }
+    sReported = 1;
+    inclusive = result.prepareTicks + result.transferInTicks +
+        result.setupTicks + result.runTicks + result.transferOutTicks +
+        result.materializeTicks;
+    out = psp_append_text(out, "[audio-vme-env-boundary] samples=");
+    out = psp_append_u32(out, result.samples);
+    out = psp_append_text(out, " calls=");
+    out = psp_append_u32(out, result.calls);
+    out = psp_append_text(out, " mismatches=");
+    out = psp_append_u32(out, result.mismatches);
+    out = psp_append_text(out, " prepare=");
+    out = psp_append_u32(out, result.prepareTicks / result.calls);
+    out = psp_append_text(out, " transfer_in=");
+    out = psp_append_u32(out, result.transferInTicks / result.calls);
+    out = psp_append_text(out, " setup=");
+    out = psp_append_u32(out, result.setupTicks / result.calls);
+    out = psp_append_text(out, " run=");
+    out = psp_append_u32(out, result.runTicks / result.calls);
+    out = psp_append_text(out, " transfer_out=");
+    out = psp_append_u32(out, result.transferOutTicks / result.calls);
+    out = psp_append_text(out, " materialize=");
+    out = psp_append_u32(out, result.materializeTicks / result.calls);
+    out = psp_append_text(out, " inclusive=");
+    out = psp_append_u32(out, inclusive / result.calls);
+    out = psp_append_text(out, " target_20pct=10514");
+    out = psp_append_text(out, " ideal_routing=excluded");
+    if (result.mismatches != 0) {
+        out = psp_append_text(out, " output=");
+        out = psp_append_s32(out, result.firstOutput);
+        out = psp_append_text(out, " first=");
+        out = psp_append_s32(out, result.firstIndex);
+        out = psp_append_text(out, " expected=");
+        out = psp_append_s32(out, result.expected);
+        out = psp_append_text(out, " actual=");
+        out = psp_append_s32(out, result.actual);
+    }
+    *out = '\0';
+    PspPlatform_LogAudioVmeLine(line);
+#endif
+}
+
+void PspPlatform_ReportAudioVmeEnvBench(void) {
+#if PSP_AUDIO_VME_BENCH
+    static s32 sReported;
+    PspAudioVmeEnvBenchResult firstResult;
+    u32 index;
+
+    if (sReported) {
+        return;
+    }
+    PspAudioMe_GetVmeEnvBenchResult(0, &firstResult);
+    if (firstResult.calls == 0) {
+        return;
+    }
+    sReported = 1;
+    for (index = 0; index < PSP_AUDIO_VME_ENV_BENCH_CASES; index++) {
+        PspAudioVmeEnvBenchResult result;
+        char line[768];
+        char* out = line;
+
+        PspAudioMe_GetVmeEnvBenchResult(index, &result);
+        if (result.calls == 0) {
+            break;
+        }
+        out = psp_append_text(out, "[audio-vme-env-resident] samples=");
+        out = psp_append_u32(out, result.samples);
+        out = psp_append_text(out, " calls=");
+        out = psp_append_u32(out, result.calls);
+        out = psp_append_text(out, " outputs=");
+        out = psp_append_u32(out, result.samples * 4);
+        out = psp_append_text(out, " mismatches=");
+        out = psp_append_u32(out, result.mismatches);
+        out = psp_append_text(out, " multiply_mismatches=");
+        out = psp_append_u32(out, result.multiplyMismatches);
+        out = psp_append_text(out, " scalar=");
+        out = psp_append_u32(out, result.scalarTicks / result.calls);
+        out = psp_append_text(out, " vme=");
+        out = psp_append_u32(out, result.vmeTicks / result.calls);
+        out = psp_append_text(out, " validate=");
+        out = psp_append_u32(out, result.validateTicks / result.calls);
+        out = psp_append_text(out, " speed_x1000=");
+        out = psp_append_u32(out, result.vmeTicks ?
+            (result.scalarTicks * 1000) / result.vmeTicks : 0);
+        if (result.mismatches != 0) {
+            out = psp_append_text(out, " output=");
+            out = psp_append_s32(
+                out, result.firstMismatch / PSP_AUDIO_VME_ENV_MAX_SAMPLES);
+            out = psp_append_text(out, " first=");
+            out = psp_append_s32(
+                out, result.firstMismatch % PSP_AUDIO_VME_ENV_MAX_SAMPLES);
+            out = psp_append_text(out, " expected=");
+            out = psp_append_s32(out, result.expected);
+            out = psp_append_text(out, " actual=");
+            out = psp_append_s32(out, result.actual);
+            out = psp_append_text(out, " best_offset=");
+            out = psp_append_s32(out, result.bestOffset);
+            out = psp_append_text(out, " offset_mismatches=");
+            out = psp_append_u32(out, result.offsetMismatches);
+        }
+        if (result.multiplyMismatches != 0) {
+            out = psp_append_text(out, " multiply_output=");
+            out = psp_append_s32(out, result.multiplyFirstMismatch /
+                PSP_AUDIO_VME_ENV_MAX_SAMPLES);
+            out = psp_append_text(out, " multiply_first=");
+            out = psp_append_s32(out, result.multiplyFirstMismatch %
+                PSP_AUDIO_VME_ENV_MAX_SAMPLES);
+            out = psp_append_text(out, " multiply_expected=");
+            out = psp_append_s32(out, result.multiplyExpected);
+            out = psp_append_text(out, " multiply_actual=");
+            out = psp_append_s32(out, result.multiplyActual);
+        }
+        *out = '\0';
+        PspPlatform_LogAudioVmeLine(line);
+    }
+#endif
+}
+
 void PspPlatform_ReportAudioVmeResampleBench(void) {
 #if PSP_AUDIO_VME_BENCH
     static u32 sNextReport = 32;

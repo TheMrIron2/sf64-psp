@@ -110,6 +110,60 @@ typedef struct {
     u64 wipeTicks;
 } PspAudioVmeResampleBenchResult;
 
+#define PSP_AUDIO_VME_ENV_BENCH_CASES 5
+#define PSP_AUDIO_VME_ENV_MAX_SAMPLES 2048
+#define PSP_AUDIO_VME_TRANSPORT_BENCH_CASES 5
+
+typedef struct {
+    u32 samples;
+    u32 calls;
+    u32 multiplyMismatches;
+    s32 multiplyFirstMismatch;
+    s32 multiplyExpected;
+    s32 multiplyActual;
+    u32 mismatches;
+    s32 firstMismatch;
+    s32 expected;
+    s32 actual;
+    s32 bestOffset;
+    u32 offsetMismatches;
+    u64 scalarTicks;
+    u64 vmeTicks;
+    u64 validateTicks;
+} PspAudioVmeEnvBenchResult;
+
+typedef struct {
+    u32 samples;
+    u32 calls;
+    u32 mismatches;
+    u32 mainAddress;
+    u32 localAddress;
+    s32 firstDomain;
+    s32 firstIndex;
+    s32 expected;
+    s32 actual;
+    u64 mainToTicks;
+    u64 localToTicks;
+    u64 mainFromTicks;
+    u64 localFromTicks;
+} PspAudioVmeTransportBenchResult;
+
+typedef struct {
+    u32 calls;
+    u32 samples;
+    u32 mismatches;
+    s32 firstOutput;
+    s32 firstIndex;
+    s32 expected;
+    s32 actual;
+    u64 prepareTicks;
+    u64 transferInTicks;
+    u64 setupTicks;
+    u64 runTicks;
+    u64 transferOutTicks;
+    u64 materializeTicks;
+} PspAudioVmeEnvBoundaryBenchResult;
+
 int PspAudioMe_Boot(void);
 int PspAudioMe_Init(void);
 void PspAudioMe_Submit(const Acmd* commands, s32 commandCount);
@@ -134,6 +188,12 @@ void PspAudioMe_GetVmeResampleBatchBenchResult(
     PspAudioVmeResampleBenchResult* result);
 void PspAudioMe_GetVmeResampleDmacBenchResult(
     PspAudioVmeResampleBenchResult* result);
+void PspAudioMe_GetVmeEnvBenchResult(
+    u32 index, PspAudioVmeEnvBenchResult* result);
+void PspAudioMe_GetVmeTransportBenchResult(
+    u32 index, PspAudioVmeTransportBenchResult* result);
+void PspAudioMe_GetVmeEnvBoundaryBenchResult(
+    PspAudioVmeEnvBoundaryBenchResult* result);
 u32 PspAudioMe_BenchReadCount(void);
 void PspAudioMe_RecordScalarMix(u32 samples, u32 ticks);
 void PspAudioMe_GetVmeBenchRow(u32 index, PspAudioVmeBenchRow* result);

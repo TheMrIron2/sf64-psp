@@ -947,6 +947,12 @@ void aEnvMixerImpl(uint16_t in_addr, uint16_t n_samples, bool swap_reverb, bool 
     uint16_t vols[6] = { rspa.vol[0], rspa.vol[1], rspa.vol[2], rspa.vol[3], rspa.vol[4], rspa.vol[5] };
     int swapped[2] = { swap_reverb ? 1 : 0, swap_reverb ? 0 : 1 };
 
+    PspAudioProfile_RecordEnvMixer(
+        in_addr, n, ((u32) swap_reverb << 4) | ((u32) x0 << 3) |
+                        ((u32) x1 << 2) | ((u32) x2 << 1) | x3,
+        destinations, num_channels, rspa.vol[0], rspa.vol[1], rspa.vol_wet,
+        rspa.rate[0], rspa.rate[1], rspa.rate_wet);
+
     if (num_channels == 6) {
         // Calculate the filter coefficient
         float RC = 1.f / (2 * M_PI * cutoff_freq_lfe);
@@ -1495,8 +1501,8 @@ static s32 psp_audio_mixer_execute_command_list(const Acmd* commands,
 
 #if PSP_AUDIO_PROFILE
         if (profile) {
-            PspAudioProfile_MeBeginCommand(opcode,
-                                           psp_audio_profile_command_work(w0, w1));
+            PspAudioProfile_MeBeginCommand(
+                w0, w1, psp_audio_profile_command_work(w0, w1));
         }
 #endif
 
