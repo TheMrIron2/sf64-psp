@@ -583,62 +583,73 @@ void PspPlatform_ReportAudioVmeBench(void) {
 #endif
 }
 
+#if PSP_AUDIO_VME_BENCH
+static void psp_report_audio_vme_resample_transport(
+    const char* mode, const PspAudioVmeResampleBenchResult* result) {
+    u64 directTicks = result->stageTicks + result->updateTicks +
+                      result->runTicks + result->readbackTicks +
+                      result->wipeTicks;
+    u32 directAvg = directTicks / result->calls;
+    char line[352];
+    char* out = line;
+
+    out = psp_append_text(out, "[audio-vme-resample-transport] mode=");
+    out = psp_append_text(out, mode);
+    out = psp_append_text(out, " calls=");
+    out = psp_append_u32(out, result->calls);
+    out = psp_append_text(out, " samples=");
+    out = psp_append_u32(out, result->samples / result->calls);
+    out = psp_append_text(out, " mismatches=");
+    out = psp_append_u32(out, result->mismatches);
+    out = psp_append_text(out, " scalar=");
+    out = psp_append_u32(out, result->scalarTicks / result->calls);
+    out = psp_append_text(out, " staging=");
+    out = psp_append_u32(out, result->stageTicks / result->calls);
+    out = psp_append_text(out, " update=");
+    out = psp_append_u32(out, result->updateTicks / result->calls);
+    out = psp_append_text(out, " run=");
+    out = psp_append_u32(out, result->runTicks / result->calls);
+    out = psp_append_text(out, " readback=");
+    out = psp_append_u32(out, result->readbackTicks / result->calls);
+    out = psp_append_text(out, " wipe=");
+    out = psp_append_u32(out, result->wipeTicks / result->calls);
+    out = psp_append_text(out, " direct=");
+    out = psp_append_u32(out, directAvg);
+    out = psp_append_text(out, " validate=");
+    out = psp_append_u32(out, result->validateTicks / result->calls);
+    out = psp_append_text(out, " speed_x1000=");
+    out = psp_append_u32(out, directTicks ?
+        (result->scalarTicks * 1000) / directTicks : 0);
+    if (result->mismatches != 0) {
+        out = psp_append_text(out, " first=");
+        out = psp_append_s32(out, result->firstMismatch);
+        out = psp_append_text(out, " expected=");
+        out = psp_append_s32(out, result->expected);
+        out = psp_append_text(out, " actual=");
+        out = psp_append_s32(out, result->actual);
+    }
+    *out = '\0';
+    PspPlatform_LogAudioVmeLine(line);
+}
+#endif
+
 void PspPlatform_ReportAudioVmeResampleBatchBench(void) {
 #if PSP_AUDIO_VME_BENCH
     static s32 sReported;
-    PspAudioVmeResampleBenchResult result;
-    u64 directTicks;
-    u32 directAvg;
-    char line[320];
-    char* out;
+    PspAudioVmeResampleBenchResult storeResult;
+    PspAudioVmeResampleBenchResult dmacResult;
 
     if (sReported) {
         return;
     }
-    PspAudioMe_GetVmeResampleBatchBenchResult(&result);
-    if (result.calls == 0) {
+    PspAudioMe_GetVmeResampleBatchBenchResult(&storeResult);
+    PspAudioMe_GetVmeResampleDmacBenchResult(&dmacResult);
+    if ((storeResult.calls == 0) || (dmacResult.calls == 0)) {
         return;
     }
     sReported = 1;
-    directTicks = result.stageTicks + result.updateTicks + result.runTicks +
-                  result.readbackTicks + result.wipeTicks;
-    directAvg = directTicks / result.calls;
-    out = line;
-    out = psp_append_text(out, "[audio-vme-resample-batch] calls=");
-    out = psp_append_u32(out, result.calls);
-    out = psp_append_text(out, " samples=");
-    out = psp_append_u32(out, result.samples / result.calls);
-    out = psp_append_text(out, " mismatches=");
-    out = psp_append_u32(out, result.mismatches);
-    out = psp_append_text(out, " scalar=");
-    out = psp_append_u32(out, result.scalarTicks / result.calls);
-    out = psp_append_text(out, " staging=");
-    out = psp_append_u32(out, result.stageTicks / result.calls);
-    out = psp_append_text(out, " update=");
-    out = psp_append_u32(out, result.updateTicks / result.calls);
-    out = psp_append_text(out, " run=");
-    out = psp_append_u32(out, result.runTicks / result.calls);
-    out = psp_append_text(out, " readback=");
-    out = psp_append_u32(out, result.readbackTicks / result.calls);
-    out = psp_append_text(out, " wipe=");
-    out = psp_append_u32(out, result.wipeTicks / result.calls);
-    out = psp_append_text(out, " direct=");
-    out = psp_append_u32(out, directAvg);
-    out = psp_append_text(out, " validate=");
-    out = psp_append_u32(out, result.validateTicks / result.calls);
-    out = psp_append_text(out, " speed_x1000=");
-    out = psp_append_u32(out, directTicks ?
-        (result.scalarTicks * 1000) / directTicks : 0);
-    if (result.mismatches != 0) {
-        out = psp_append_text(out, " first=");
-        out = psp_append_s32(out, result.firstMismatch);
-        out = psp_append_text(out, " expected=");
-        out = psp_append_s32(out, result.expected);
-        out = psp_append_text(out, " actual=");
-        out = psp_append_s32(out, result.actual);
-    }
-    *out = '\0';
-    PspPlatform_LogAudioVmeLine(line);
+    psp_report_audio_vme_resample_transport("stores", &storeResult);
+    psp_report_audio_vme_resample_transport("dmac", &dmacResult);
 #endif
 }
 

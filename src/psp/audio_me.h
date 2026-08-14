@@ -132,6 +132,8 @@ void PspAudioMe_GetVmeResampleBenchResult(
     PspAudioVmeResampleBenchResult* result);
 void PspAudioMe_GetVmeResampleBatchBenchResult(
     PspAudioVmeResampleBenchResult* result);
+void PspAudioMe_GetVmeResampleDmacBenchResult(
+    PspAudioVmeResampleBenchResult* result);
 u32 PspAudioMe_BenchReadCount(void);
 void PspAudioMe_RecordScalarMix(u32 samples, u32 ticks);
 void PspAudioMe_GetVmeBenchRow(u32 index, PspAudioVmeBenchRow* result);
