@@ -45,6 +45,10 @@
 #define PSP_AUDIO_VME_RESAMPLE_LANES 4
 #define PSP_AUDIO_VME_RESAMPLE_WORDS 1024
 #define PSP_AUDIO_VME_RESAMPLE_COEFF_OFFSET 1024
+#define PSP_AUDIO_VME_RESAMPLE_BATCH_SAMPLES 2048
+#define PSP_AUDIO_VME_RESAMPLE_BATCH_REPEATS 4
+#define PSP_AUDIO_VME_RESAMPLE_BATCH_STRIDE \
+    (PSP_AUDIO_VME_RESAMPLE_BATCH_SAMPLES + 32)
 #define PSP_AUDIO_ROUND_UP_32(v) (((v) + 31) & ~31)
 #define PSP_AUDIO_ROUND_DOWN_16(v) ((v) & ~15)
 
@@ -193,6 +197,20 @@ static s32 sVmeResamplePair01[PSP_AUDIO_VME_RESAMPLE_MAX_SAMPLES]
     __attribute__((aligned(64)));
 static s32 sVmeResamplePair23[PSP_AUDIO_VME_RESAMPLE_MAX_SAMPLES]
     __attribute__((aligned(64)));
+static s16 sVmeResampleOutput[PSP_AUDIO_VME_RESAMPLE_MAX_SAMPLES]
+    __attribute__((aligned(64)));
+#if PSP_AUDIO_VME_BENCH
+static s16 sVmeResampleBatchInputs
+    [PSP_AUDIO_VME_RESAMPLE_LANES][PSP_AUDIO_VME_RESAMPLE_BATCH_STRIDE]
+    __attribute__((aligned(64)));
+static s16 sVmeResampleBatchCoefficients
+    [PSP_AUDIO_VME_RESAMPLE_LANES][PSP_AUDIO_VME_RESAMPLE_BATCH_STRIDE]
+    __attribute__((aligned(64)));
+static s16 sVmeResampleBatchExpected[PSP_AUDIO_VME_RESAMPLE_BATCH_SAMPLES]
+    __attribute__((aligned(64)));
+static s16 sVmeResampleBatchActual[PSP_AUDIO_VME_RESAMPLE_BATCH_SAMPLES]
+    __attribute__((aligned(64)));
+#endif
 #endif
 #endif
 
@@ -200,9 +218,21 @@ static s32 sVmeResamplePair23[PSP_AUDIO_VME_RESAMPLE_MAX_SAMPLES]
 static volatile PspAudioVmeBenchRow
     sVmeBenchStorage[PSP_AUDIO_VME_BENCH_ROWS]
     __attribute__((aligned(64), section(".uncached")));
+static volatile PspAudioVmeResampleBenchResult sVmeResampleBenchStorage
+    __attribute__((aligned(64), section(".uncached")));
+static volatile PspAudioVmeResampleBenchResult sVmeResampleBatchBenchStorage
+    __attribute__((aligned(64), section(".uncached")));
 #define PSP_AUDIO_VME_BENCH_STATS \
     ((volatile PspAudioVmeBenchRow*) \
         (PSP_AUDIO_ME_UNCACHED | (u32) (uintptr_t) sVmeBenchStorage))
+#define PSP_AUDIO_VME_RESAMPLE_BENCH_STATS \
+    ((volatile PspAudioVmeResampleBenchResult*) \
+        (PSP_AUDIO_ME_UNCACHED | \
+         (u32) (uintptr_t) &sVmeResampleBenchStorage))
+#define PSP_AUDIO_VME_RESAMPLE_BATCH_BENCH_STATS \
+    ((volatile PspAudioVmeResampleBenchResult*) \
+        (PSP_AUDIO_ME_UNCACHED | \
+         (u32) (uintptr_t) &sVmeResampleBatchBenchStorage))
 #endif
 
 typedef struct {
@@ -527,6 +557,9 @@ static void psp_audio_me_writeback_outputs_me(const Acmd* commands, s32 commandC
 static int psp_audio_me_vme_mix_synthetic(void);
 static int psp_audio_me_vme_filter_synthetic(void);
 static int psp_audio_me_vme_resample_synthetic(void);
+#if PSP_AUDIO_VME_BENCH
+static int psp_audio_me_vme_resample_batch_bench(void);
+#endif
 #endif
 
 static int psp_audio_me_vme_smoke_once(void) {
@@ -655,6 +688,14 @@ static int psp_audio_me_vme_smoke(void) {
         meLibSync();
         return -1;
     }
+#if PSP_AUDIO_VME_BENCH
+    if (psp_audio_me_vme_resample_batch_bench() < 0) {
+        vmeLibDisable();
+        sVmeState = PSP_AUDIO_VME_FAULT;
+        meLibSync();
+        return -1;
+    }
+#endif
 #endif
     return 0;
 }
@@ -699,6 +740,10 @@ static u32 psp_audio_me_bench_elapsed(u32 start) {
 
 static void psp_audio_me_bench_reset(void) {
     volatile u32* words = (volatile u32*) PSP_AUDIO_VME_BENCH_STATS;
+    volatile u32* resampleWords =
+        (volatile u32*) PSP_AUDIO_VME_RESAMPLE_BENCH_STATS;
+    volatile u32* batchWords =
+        (volatile u32*) PSP_AUDIO_VME_RESAMPLE_BATCH_BENCH_STATS;
     u32 count = (sizeof(sVmeBenchStorage) / sizeof(sVmeBenchStorage[0])) *
                 (sizeof(sVmeBenchStorage[0]) / sizeof(u32));
     u32 best = 0xffffffffU;
@@ -706,6 +751,12 @@ static void psp_audio_me_bench_reset(void) {
 
     for (i = 0; i < count; i++) {
         words[i] = 0;
+    }
+    for (i = 0;
+         i < sizeof(*PSP_AUDIO_VME_RESAMPLE_BENCH_STATS) / sizeof(u32);
+         i++) {
+        resampleWords[i] = 0;
+        batchWords[i] = 0;
     }
     for (i = 0; i < 32; i++) {
         u32 start = PspAudioMe_BenchReadCount();
@@ -1147,8 +1198,10 @@ static int psp_audio_me_vme_resample_synthetic(void) {
     return sVmeResampleMismatches == 0 ? 0 : -1;
 }
 
-static void psp_audio_me_vme_resample_command(u32 count, const s16* inputs,
-                                              const s16* coefficients) {
+static void psp_audio_me_vme_resample_command(
+    u32 count, const s16* inputs, const s16* coefficients, u32 inputStride,
+    u32 coefficientOffset, s32 capturePairs,
+    volatile PspAudioVmeResampleBenchResult* bench) {
     volatile s32* top = (volatile s32*) VME_TOP_BUFFERS;
     volatile s32* base = (volatile s32*) VME_BASE_BUFFERS;
     const u32 multiply = VME_FU_OPCODE_MUL_VEC_RSHIFT;
@@ -1157,20 +1210,29 @@ static void psp_audio_me_vme_resample_command(u32 count, const s16* inputs,
     const u32 round = 1 << 6;
     u32 lane;
     u32 index;
+#if PSP_AUDIO_VME_BENCH
+    u32 start = PspAudioMe_BenchReadCount();
+#else
+    (void) bench;
+#endif
 
     for (lane = 0; lane < PSP_AUDIO_VME_RESAMPLE_LANES; lane++) {
         volatile s32* laneInputs = top + lane * PSP_AUDIO_VME_BUFFER_WORDS;
         volatile s32* laneCoefficients =
             base + lane * PSP_AUDIO_VME_BUFFER_WORDS +
-            PSP_AUDIO_VME_RESAMPLE_COEFF_OFFSET;
+            coefficientOffset;
 
         for (index = 0; index < count; index++) {
-            laneInputs[index] = inputs[lane * PSP_AUDIO_VME_RESAMPLE_MAX_SAMPLES + index];
+            laneInputs[index] = inputs[lane * inputStride + index];
             laneCoefficients[index] =
-                coefficients[lane * PSP_AUDIO_VME_RESAMPLE_MAX_SAMPLES + index];
+                coefficients[lane * inputStride + index];
         }
     }
     meLibSync();
+#if PSP_AUDIO_VME_BENCH
+    bench->stageTicks += psp_audio_me_bench_elapsed(start);
+    start = PspAudioMe_BenchReadCount();
+#endif
 
     vmeLibStart();
     vme_set(ENABLE, FU_1, 0);
@@ -1182,7 +1244,7 @@ static void psp_audio_me_vme_resample_command(u32 count, const s16* inputs,
     vme_pe0(agu_top(MODE), VME_DEF_MODE);
     vme_pe0(agu_top(COUNT), VME_DEF_STEP, count - 1);
     vme_pe0(agu_base(MODE), VME_DEF_MODE,
-            PSP_AUDIO_VME_RESAMPLE_COEFF_OFFSET);
+            coefficientOffset);
     vme_pe0(agu_base(COUNT), VME_DEF_STEP, count - 1);
     vme_pe0(agu_write(MODE), VME_DEF_MODE, VME_CYCLE_6);
     vme_pe0(agu_write(COUNT), VME_DEF_STEP, count - 1);
@@ -1194,8 +1256,16 @@ static void psp_audio_me_vme_resample_command(u32 count, const s16* inputs,
             round);
     vme_pe3(vme_fu(PRIMARY), vme_mux(TOP_3, BASE_3), multiply, 15,
             round);
+#if PSP_AUDIO_VME_BENCH
+    bench->updateTicks += psp_audio_me_bench_elapsed(start);
+    start = PspAudioMe_BenchReadCount();
+#endif
     vmeLibFinish();
     meLibSync();
+#if PSP_AUDIO_VME_BENCH
+    bench->runTicks += psp_audio_me_bench_elapsed(start);
+    start = PspAudioMe_BenchReadCount();
+#endif
 
     vmeLibStart();
     vme_set(ENABLE, FU_1, 0);
@@ -1212,14 +1282,28 @@ static void psp_audio_me_vme_resample_command(u32 count, const s16* inputs,
     vme_pe1(vme_fu(PRIMARY), vme_mux(BASE_0, BASE_1), add, 0);
     vme_pe2(vme_fu(PRIMARY), vme_mux(BASE_2, BASE_3), add, 0);
     vme_pe3(vme_fu(PRIMARY), vme_mux(BASE_2, BASE_3), add, 0);
+#if PSP_AUDIO_VME_BENCH
+    bench->updateTicks += psp_audio_me_bench_elapsed(start);
+    start = PspAudioMe_BenchReadCount();
+#endif
     vmeLibFinish();
     meLibSync();
+#if PSP_AUDIO_VME_BENCH
+    bench->runTicks += psp_audio_me_bench_elapsed(start);
+    start = PspAudioMe_BenchReadCount();
+#endif
 
-    for (index = 0; index < count; index++) {
-        sVmeResamplePair01[index] = base[index];
-        sVmeResamplePair23[index] =
-            base[2 * PSP_AUDIO_VME_BUFFER_WORDS + index];
+    if (capturePairs) {
+        for (index = 0; index < count; index++) {
+            sVmeResamplePair01[index] = base[index];
+            sVmeResamplePair23[index] =
+                base[2 * PSP_AUDIO_VME_BUFFER_WORDS + index];
+        }
     }
+#if PSP_AUDIO_VME_BENCH
+    bench->pairTicks += psp_audio_me_bench_elapsed(start);
+    start = PspAudioMe_BenchReadCount();
+#endif
 
     vmeLibStart();
     vme_set(ENABLE, FU_1, 0xf << 28);
@@ -1248,16 +1332,111 @@ static void psp_audio_me_vme_resample_command(u32 count, const s16* inputs,
     vme_pe3(vme_fu(SECONDARY), vme_mux(NONE, STAGING_3), clamp);
     vme_pe3(fu_reg(SECONDARY, A), 32767);
     vme_pe3(fu_reg(SECONDARY, B), (u32) (s32) -32768);
+#if PSP_AUDIO_VME_BENCH
+    bench->updateTicks += psp_audio_me_bench_elapsed(start);
+    start = PspAudioMe_BenchReadCount();
+#endif
     vmeLibFinish();
     meLibSync();
+#if PSP_AUDIO_VME_BENCH
+    bench->runTicks += psp_audio_me_bench_elapsed(start);
+#endif
 }
+
+#if PSP_AUDIO_VME_BENCH
+static int psp_audio_me_vme_resample_batch_bench(void) {
+    volatile PspAudioVmeResampleBenchResult* bench =
+        PSP_AUDIO_VME_RESAMPLE_BATCH_BENCH_STATS;
+    volatile s32* vmeOutput = (volatile s32*) VME_BASE_BUFFERS;
+    u32 start;
+    u32 index;
+    u32 lane;
+    u32 run;
+
+    for (lane = 0; lane < PSP_AUDIO_VME_RESAMPLE_LANES; lane++) {
+        for (index = 0; index < PSP_AUDIO_VME_RESAMPLE_BATCH_SAMPLES;
+             index++) {
+            sVmeResampleBatchInputs[lane][index] =
+                psp_audio_me_vme_resample_input(lane, index);
+            sVmeResampleBatchCoefficients[lane][index] =
+                psp_audio_me_vme_resample_coefficient(lane, index);
+        }
+    }
+
+    for (run = 0; run < PSP_AUDIO_VME_RESAMPLE_BATCH_REPEATS; run++) {
+        start = PspAudioMe_BenchReadCount();
+        for (index = 0; index < PSP_AUDIO_VME_RESAMPLE_BATCH_SAMPLES;
+             index++) {
+            s32 sample = 0;
+
+            for (lane = 0; lane < PSP_AUDIO_VME_RESAMPLE_LANES; lane++) {
+                sample +=
+                    ((s32) sVmeResampleBatchInputs[lane][index] *
+                         sVmeResampleBatchCoefficients[lane][index] +
+                     0x4000) >> 15;
+            }
+            sVmeResampleBatchExpected[index] =
+                psp_audio_me_clamp16(sample);
+        }
+        bench->scalarTicks += psp_audio_me_bench_elapsed(start);
+
+        psp_audio_me_vme_resample_command(
+            PSP_AUDIO_VME_RESAMPLE_BATCH_SAMPLES,
+            &sVmeResampleBatchInputs[0][0],
+            &sVmeResampleBatchCoefficients[0][0],
+            PSP_AUDIO_VME_RESAMPLE_BATCH_STRIDE, 0, 0, bench);
+
+        start = PspAudioMe_BenchReadCount();
+        for (index = 0; index < PSP_AUDIO_VME_RESAMPLE_BATCH_SAMPLES;
+             index++) {
+            sVmeResampleBatchActual[index] = (s16) vmeOutput[index];
+        }
+        bench->readbackTicks += psp_audio_me_bench_elapsed(start);
+
+        start = PspAudioMe_BenchReadCount();
+        for (index = 0; index < PSP_AUDIO_VME_RESAMPLE_BATCH_SAMPLES;
+             index++) {
+            if (sVmeResampleBatchActual[index] !=
+                sVmeResampleBatchExpected[index]) {
+                if (bench->mismatches == 0) {
+                    bench->firstMismatch = index;
+                    bench->expected = sVmeResampleBatchExpected[index];
+                    bench->actual = sVmeResampleBatchActual[index];
+                }
+                bench->mismatches++;
+            }
+        }
+        bench->validateTicks += psp_audio_me_bench_elapsed(start);
+        bench->calls++;
+        bench->samples += PSP_AUDIO_VME_RESAMPLE_BATCH_SAMPLES;
+
+        start = PspAudioMe_BenchReadCount();
+        vmeLibWipe();
+        meLibSync();
+        bench->wipeTicks += psp_audio_me_bench_elapsed(start);
+        if (bench->mismatches != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+#endif
 
 int PspAudioMe_ValidateVmeResample(u32 count, const s16* inputs,
                                    const s16* coefficients,
                                    const s16* output,
                                    const s16* expectedState,
-                                   const s16* actualState) {
+                                   const s16* actualState,
+                                   u32 prepareTicks, u32 scalarTicks) {
     volatile s32* vmeOutput = (volatile s32*) VME_BASE_BUFFERS;
+#if PSP_AUDIO_VME_BENCH
+    volatile PspAudioVmeResampleBenchResult* bench =
+        PSP_AUDIO_VME_RESAMPLE_BENCH_STATS;
+    u32 start;
+#else
+    (void) prepareTicks;
+    (void) scalarTicks;
+#endif
     u32 index;
 
     if (sVmeState != PSP_AUDIO_VME_READY) {
@@ -1270,7 +1449,25 @@ int PspAudioMe_ValidateVmeResample(u32 count, const s16* inputs,
         return 0;
     }
 
-    psp_audio_me_vme_resample_command(count, inputs, coefficients);
+    psp_audio_me_vme_resample_command(
+        count, inputs, coefficients, PSP_AUDIO_VME_RESAMPLE_MAX_SAMPLES,
+        PSP_AUDIO_VME_RESAMPLE_COEFF_OFFSET, 1,
+#if PSP_AUDIO_VME_BENCH
+        PSP_AUDIO_VME_RESAMPLE_BENCH_STATS
+#else
+        NULL
+#endif
+    );
+#if PSP_AUDIO_VME_BENCH
+    start = PspAudioMe_BenchReadCount();
+#endif
+    for (index = 0; index < count; index++) {
+        sVmeResampleOutput[index] = (s16) vmeOutput[index];
+    }
+#if PSP_AUDIO_VME_BENCH
+    bench->readbackTicks += psp_audio_me_bench_elapsed(start);
+    start = PspAudioMe_BenchReadCount();
+#endif
     sVmeResampleCommands++;
     sVmeResampleProducts += count * PSP_AUDIO_VME_RESAMPLE_LANES;
     for (index = 0; index < count; index++) {
@@ -1290,7 +1487,7 @@ int PspAudioMe_ValidateVmeResample(u32 count, const s16* inputs,
              0x4000) >> 15;
         s32 pair01 = product0 + product1;
         s32 pair23 = product2 + product3;
-        s32 actual = vmeOutput[index];
+        s32 actual = sVmeResampleOutput[index];
 
         sVmeResampleOutputs++;
         if ((sVmeResamplePair01[index] != pair01) ||
@@ -1326,6 +1523,17 @@ int PspAudioMe_ValidateVmeResample(u32 count, const s16* inputs,
             sVmeResampleStateMismatches++;
         }
     }
+#if PSP_AUDIO_VME_BENCH
+    bench->validateTicks += psp_audio_me_bench_elapsed(start);
+    bench->calls++;
+    bench->samples += count;
+    bench->prepareTicks +=
+        prepareTicks > sVmeBenchReadOverhead ?
+            prepareTicks - sVmeBenchReadOverhead : 0;
+    bench->scalarTicks +=
+        scalarTicks > sVmeBenchReadOverhead ?
+            scalarTicks - sVmeBenchReadOverhead : 0;
+#endif
     if ((sVmeResamplePairMismatches != 0) ||
         (sVmeResampleOutputMismatches != 0) ||
         (sVmeResampleStateMismatches != 0)) {
@@ -1334,8 +1542,14 @@ int PspAudioMe_ValidateVmeResample(u32 count, const s16* inputs,
         meLibSync();
         return -1;
     }
+#if PSP_AUDIO_VME_BENCH
+    start = PspAudioMe_BenchReadCount();
+#endif
     vmeLibWipe();
     meLibSync();
+#if PSP_AUDIO_VME_BENCH
+    bench->wipeTicks += psp_audio_me_bench_elapsed(start);
+#endif
     return 1;
 }
 #else
@@ -1356,13 +1570,16 @@ int PspAudioMe_ValidateVmeResample(u32 count, const s16* inputs,
                                    const s16* coefficients,
                                    const s16* output,
                                    const s16* expectedState,
-                                   const s16* actualState) {
+                                   const s16* actualState,
+                                   u32 prepareTicks, u32 scalarTicks) {
     (void) count;
     (void) inputs;
     (void) coefficients;
     (void) output;
     (void) expectedState;
     (void) actualState;
+    (void) prepareTicks;
+    (void) scalarTicks;
     return 0;
 }
 
@@ -1881,6 +2098,56 @@ void PspAudioMe_GetVmeBenchRow(u32 index, PspAudioVmeBenchRow* result) {
     }
 }
 
+void PspAudioMe_GetVmeResampleBenchResult(
+    PspAudioVmeResampleBenchResult* result) {
+    volatile u32* out;
+    u32 i;
+
+    if (result == NULL) {
+        return;
+    }
+    out = (volatile u32*) result;
+#if PSP_AUDIO_VME_BENCH
+    {
+        volatile u32* in =
+            (volatile u32*) PSP_AUDIO_VME_RESAMPLE_BENCH_STATS;
+
+        for (i = 0; i < sizeof(*result) / sizeof(u32); i++) {
+            out[i] = in[i];
+        }
+    }
+#else
+    for (i = 0; i < sizeof(*result) / sizeof(u32); i++) {
+        out[i] = 0;
+    }
+#endif
+}
+
+void PspAudioMe_GetVmeResampleBatchBenchResult(
+    PspAudioVmeResampleBenchResult* result) {
+    volatile u32* out;
+    u32 i;
+
+    if (result == NULL) {
+        return;
+    }
+    out = (volatile u32*) result;
+#if PSP_AUDIO_VME_BENCH
+    {
+        volatile u32* in =
+            (volatile u32*) PSP_AUDIO_VME_RESAMPLE_BATCH_BENCH_STATS;
+
+        for (i = 0; i < sizeof(*result) / sizeof(u32); i++) {
+            out[i] = in[i];
+        }
+    }
+#else
+    for (i = 0; i < sizeof(*result) / sizeof(u32); i++) {
+        out[i] = 0;
+    }
+#endif
+}
+
 #else
 
 int PspAudioMe_Boot(void) {
@@ -1924,13 +2191,16 @@ int PspAudioMe_ValidateVmeResample(u32 count, const s16* inputs,
                                    const s16* coefficients,
                                    const s16* output,
                                    const s16* expectedState,
-                                   const s16* actualState) {
+                                   const s16* actualState,
+                                   u32 prepareTicks, u32 scalarTicks) {
     (void) count;
     (void) inputs;
     (void) coefficients;
     (void) output;
     (void) expectedState;
     (void) actualState;
+    (void) prepareTicks;
+    (void) scalarTicks;
     return 0;
 }
 
@@ -2020,6 +2290,34 @@ void PspAudioMe_GetVmeBenchRow(u32 index, PspAudioVmeBenchRow* result) {
     u32 i;
 
     (void) index;
+    if (result == NULL) {
+        return;
+    }
+    out = (volatile u32*) result;
+    for (i = 0; i < sizeof(*result) / sizeof(u32); i++) {
+        out[i] = 0;
+    }
+}
+
+void PspAudioMe_GetVmeResampleBenchResult(
+    PspAudioVmeResampleBenchResult* result) {
+    volatile u32* out;
+    u32 i;
+
+    if (result == NULL) {
+        return;
+    }
+    out = (volatile u32*) result;
+    for (i = 0; i < sizeof(*result) / sizeof(u32); i++) {
+        out[i] = 0;
+    }
+}
+
+void PspAudioMe_GetVmeResampleBatchBenchResult(
+    PspAudioVmeResampleBenchResult* result) {
+    volatile u32* out;
+    u32 i;
+
     if (result == NULL) {
         return;
     }

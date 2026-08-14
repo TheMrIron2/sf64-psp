@@ -92,6 +92,24 @@ typedef struct {
     u64 postTicks;
 } PspAudioVmeBenchRow;
 
+typedef struct {
+    u32 calls;
+    u32 samples;
+    u32 mismatches;
+    s32 firstMismatch;
+    s32 expected;
+    s32 actual;
+    u64 scalarTicks;
+    u64 prepareTicks;
+    u64 stageTicks;
+    u64 updateTicks;
+    u64 runTicks;
+    u64 pairTicks;
+    u64 readbackTicks;
+    u64 validateTicks;
+    u64 wipeTicks;
+} PspAudioVmeResampleBenchResult;
+
 int PspAudioMe_Boot(void);
 int PspAudioMe_Init(void);
 void PspAudioMe_Submit(const Acmd* commands, s32 commandCount);
@@ -107,8 +125,13 @@ int PspAudioMe_ValidateVmeResample(u32 count, const s16* inputs,
                                    const s16* coefficients,
                                    const s16* output,
                                    const s16* expectedState,
-                                   const s16* actualState);
+                                   const s16* actualState,
+                                   u32 prepareTicks, u32 scalarTicks);
 void PspAudioMe_GetVmeResampleResult(PspAudioVmeResampleResult* result);
+void PspAudioMe_GetVmeResampleBenchResult(
+    PspAudioVmeResampleBenchResult* result);
+void PspAudioMe_GetVmeResampleBatchBenchResult(
+    PspAudioVmeResampleBenchResult* result);
 u32 PspAudioMe_BenchReadCount(void);
 void PspAudioMe_RecordScalarMix(u32 samples, u32 ticks);
 void PspAudioMe_GetVmeBenchRow(u32 index, PspAudioVmeBenchRow* result);

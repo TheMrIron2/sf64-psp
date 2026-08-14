@@ -105,6 +105,8 @@ SPTask* AudioThread_CreateTask(void) {
     PspPlatform_ReportAudioVmeResample();
 #if PSP_AUDIO_VME_BENCH
     PspPlatform_ReportAudioVmeBench();
+    PspPlatform_ReportAudioVmeResampleBatchBench();
+    PspPlatform_ReportAudioVmeResampleBench();
 #endif
 #endif
     if (sPendingOutput != NULL) {

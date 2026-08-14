@@ -608,6 +608,11 @@ void aResampleImpl(uint8_t flags, uint16_t pitch, RESAMPLE_STATE state) {
         (sVmeResampleSequence++ & PSP_AUDIO_VME_RESAMPLE_SAMPLE_MASK) == 0;
     s32 validateVme = sampleVme &&
                       (vmeCount <= PSP_AUDIO_VME_RESAMPLE_MAX_SAMPLES);
+    u32 prepareTicks = 0;
+    u32 scalarTicks = 0;
+#if PSP_AUDIO_VME_BENCH
+    u32 timingStart;
+#endif
 
     memcpy(expectedState, state, sizeof(expectedState));
 #endif
@@ -627,9 +632,20 @@ void aResampleImpl(uint8_t flags, uint16_t pitch, RESAMPLE_STATE state) {
 
 #if defined(TARGET_PSP) && PSP_AUDIO_VME_VALIDATE
     if (validateVme) {
+#if PSP_AUDIO_VME_BENCH
+        timingStart = PspAudioMe_BenchReadCount();
+#endif
         psp_audio_prepare_vme_resample(in_initial, in, pitch_accumulator,
                                        pitch, vmeCount, expectedState);
+#if PSP_AUDIO_VME_BENCH
+        prepareTicks = PspAudioMe_BenchReadCount() - timingStart;
+#endif
     }
+#if PSP_AUDIO_VME_BENCH
+    if (sampleVme) {
+        timingStart = PspAudioMe_BenchReadCount();
+    }
+#endif
 #endif
 
     do {
@@ -656,11 +672,16 @@ void aResampleImpl(uint8_t flags, uint16_t pitch, RESAMPLE_STATE state) {
     state[5] = i;
     memcpy(state + 8, in, 8 * sizeof(int16_t));
 #if defined(TARGET_PSP) && PSP_AUDIO_VME_VALIDATE
+#if PSP_AUDIO_VME_BENCH
+    if (sampleVme) {
+        scalarTicks = PspAudioMe_BenchReadCount() - timingStart;
+    }
+#endif
     if (sampleVme) {
         PspAudioMe_ValidateVmeResample(
             vmeCount, validateVme ? &sVmeResampleInputs[0][0] : NULL,
             validateVme ? &sVmeResampleCoefficients[0][0] : NULL,
-            out_initial, expectedState, state);
+            out_initial, expectedState, state, prepareTicks, scalarTicks);
     }
 #endif
 #if PSP_LOG_ENABLED
