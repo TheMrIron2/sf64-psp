@@ -646,6 +646,9 @@ void PspAudioProfile_Report(void) {
     u32 topPair[4] = { 0, 0, 0, 0 };
     u32 topCount[4] = { 0, 0, 0, 0 };
 
+    if (PSP_AUDIO_VME_BENCH) {
+        return;
+    }
     if ((jobs < PSP_AUDIO_PROFILE_REPORT_FIRST) ||
         ((jobs & (jobs - 1)) != 0) || (jobs == sLastReportedJobs)) {
         return;

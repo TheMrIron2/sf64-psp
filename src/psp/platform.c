@@ -766,6 +766,76 @@ void PspPlatform_ReportAudioVmeEnvBoundaryBench(void) {
 #endif
 }
 
+void PspPlatform_ReportAudioVmeEnvPipeline(void) {
+#if PSP_AUDIO_VME_BENCH
+    static s32 sReported;
+    PspAudioVmeEnvPipelineResult result;
+    char line[384];
+    char* out = line;
+
+    if (sReported) {
+        return;
+    }
+    PspAudioMe_GetVmeEnvPipelineResult(&result);
+    if ((result.calls == 0) && (result.seedMismatches == 0) &&
+        (result.residentMismatches == 0)) {
+        return;
+    }
+    sReported = 1;
+    out = psp_append_text(out, "[audio-vme-env-pipeline] calls=");
+    out = psp_append_u32(out, result.calls);
+    out = psp_append_text(out, " voices=");
+    out = psp_append_u32(out, result.voices);
+    out = psp_append_text(out, " samples=");
+    out = psp_append_u32(out, result.samples);
+    out = psp_append_text(out, " seed_mismatches=");
+    out = psp_append_u32(out, result.seedMismatches);
+    out = psp_append_text(out, " resident_mismatches=");
+    out = psp_append_u32(out, result.residentMismatches);
+    out = psp_append_text(out, " best_offset=");
+    out = psp_append_s32(out, result.bestOffset);
+    out = psp_append_text(out, " offset_mismatches=");
+    out = psp_append_u32(out, result.offsetMismatches);
+    out = psp_append_text(out, " clamp_mismatches=");
+    out = psp_append_u32(out, result.clampMismatches);
+    out = psp_append_text(out, " clamp_best_offset=");
+    out = psp_append_s32(out, result.clampBestOffset);
+    out = psp_append_text(out, " clamp_offset_mismatches=");
+    out = psp_append_u32(out, result.clampOffsetMismatches);
+    out = psp_append_text(out, " clamp_masks=");
+    out = psp_append_s32(out, result.clampMaskBestOffset[0]);
+    *out++ = '/';
+    out = psp_append_u32(out, result.clampMaskOffsetMismatches[0]);
+    *out++ = ',';
+    out = psp_append_s32(out, result.clampMaskBestOffset[1]);
+    *out++ = '/';
+    out = psp_append_u32(out, result.clampMaskOffsetMismatches[1]);
+    *out++ = ',';
+    out = psp_append_s32(out, result.clampMaskBestOffset[2]);
+    *out++ = '/';
+    out = psp_append_u32(out, result.clampMaskOffsetMismatches[2]);
+    *out++ = ',';
+    out = psp_append_s32(out, result.clampMaskBestOffset[3]);
+    *out++ = '/';
+    out = psp_append_u32(out, result.clampMaskOffsetMismatches[3]);
+    out = psp_append_text(out, " clamp_pass=");
+    out = psp_append_u32(out, result.clampPassingMask);
+    if ((result.seedMismatches + result.residentMismatches +
+         result.clampMismatches) != 0) {
+        out = psp_append_text(out, " stage=");
+        out = psp_append_s32(out, result.firstStage);
+        out = psp_append_text(out, " first=");
+        out = psp_append_s32(out, result.firstIndex);
+        out = psp_append_text(out, " expected=");
+        out = psp_append_s32(out, result.expected);
+        out = psp_append_text(out, " actual=");
+        out = psp_append_s32(out, result.actual);
+    }
+    *out = '\0';
+    PspPlatform_LogAudioVmeLine(line);
+#endif
+}
+
 void PspPlatform_ReportAudioVmeEnvBench(void) {
 #if PSP_AUDIO_VME_BENCH
     static s32 sReported;

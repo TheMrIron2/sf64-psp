@@ -164,6 +164,26 @@ typedef struct {
     u64 materializeTicks;
 } PspAudioVmeEnvBoundaryBenchResult;
 
+typedef struct {
+    u32 calls;
+    u32 voices;
+    u32 samples;
+    u32 seedMismatches;
+    u32 residentMismatches;
+    s32 firstStage;
+    s32 firstIndex;
+    s32 expected;
+    s32 actual;
+    s32 bestOffset;
+    u32 offsetMismatches;
+    u32 clampMismatches;
+    s32 clampBestOffset;
+    u32 clampOffsetMismatches;
+    s32 clampMaskBestOffset[4];
+    u32 clampMaskOffsetMismatches[4];
+    u32 clampPassingMask;
+} PspAudioVmeEnvPipelineResult;
+
 int PspAudioMe_Boot(void);
 int PspAudioMe_Init(void);
 void PspAudioMe_Submit(const Acmd* commands, s32 commandCount);
@@ -194,6 +214,8 @@ void PspAudioMe_GetVmeTransportBenchResult(
     u32 index, PspAudioVmeTransportBenchResult* result);
 void PspAudioMe_GetVmeEnvBoundaryBenchResult(
     PspAudioVmeEnvBoundaryBenchResult* result);
+void PspAudioMe_GetVmeEnvPipelineResult(
+    PspAudioVmeEnvPipelineResult* result);
 u32 PspAudioMe_BenchReadCount(void);
 void PspAudioMe_RecordScalarMix(u32 samples, u32 ticks);
 void PspAudioMe_GetVmeBenchRow(u32 index, PspAudioVmeBenchRow* result);

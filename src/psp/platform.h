@@ -20,6 +20,7 @@ void PspPlatform_ReportAudioVmeResampleBatchBench(void);
 void PspPlatform_ReportAudioVmeEnvBench(void);
 void PspPlatform_ReportAudioVmeTransportBench(void);
 void PspPlatform_ReportAudioVmeEnvBoundaryBench(void);
+void PspPlatform_ReportAudioVmeEnvPipeline(void);
 void PspPlatform_ReportAudioVmeBench(void);
 void PspPlatform_LogFrame(const char* phase, u32 frame);
 void PspPlatform_LogValue(const char* label, u32 value);
