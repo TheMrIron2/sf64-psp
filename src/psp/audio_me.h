@@ -182,6 +182,28 @@ typedef struct {
     s32 clampMaskBestOffset[4];
     u32 clampMaskOffsetMismatches[4];
     u32 clampPassingMask;
+    u32 dryCalls;
+    u32 dryVoices;
+    u32 drySamples;
+    u32 drySeedMismatches[2];
+    u32 dryResidentMismatches[2];
+    s32 dryFirstLane;
+    s32 dryFirstStage;
+    s32 dryFirstIndex;
+    s32 dryExpected;
+    s32 dryActual;
+    u32 wetCalls;
+    u32 wetVoices;
+    u32 wetSamples;
+    u32 wetProductMismatches[2];
+    u32 wetSeedMismatches[2];
+    u32 wetResidentMismatches[2];
+    s32 wetFirstLane;
+    s32 wetFirstStage;
+    s32 wetFirstIndex;
+    s32 wetExpected;
+    s32 wetActual;
+    u64 wetTicks;
 } PspAudioVmeEnvPipelineResult;
 
 int PspAudioMe_Boot(void);

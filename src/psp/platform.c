@@ -436,7 +436,7 @@ void PspPlatform_ReportAudioVmeResample(void) {
     static u32 sLastOutputMismatches = (u32) -1;
     static u32 sLastStateMismatches = (u32) -1;
     PspAudioVmeResampleResult result;
-    char line[512];
+    char line[768];
     char* out;
 
     PspAudioMe_GetVmeResampleResult(&result);
@@ -770,7 +770,7 @@ void PspPlatform_ReportAudioVmeEnvPipeline(void) {
 #if PSP_AUDIO_VME_BENCH
     static s32 sReported;
     PspAudioVmeEnvPipelineResult result;
-    char line[384];
+    char line[512];
     char* out = line;
 
     if (sReported) {
@@ -820,8 +820,50 @@ void PspPlatform_ReportAudioVmeEnvPipeline(void) {
     out = psp_append_u32(out, result.clampMaskOffsetMismatches[3]);
     out = psp_append_text(out, " clamp_pass=");
     out = psp_append_u32(out, result.clampPassingMask);
+    out = psp_append_text(out, " dry_calls=");
+    out = psp_append_u32(out, result.dryCalls);
+    out = psp_append_text(out, " dry_voices=");
+    out = psp_append_u32(out, result.dryVoices);
+    out = psp_append_text(out, " dry_samples=");
+    out = psp_append_u32(out, result.drySamples);
+    out = psp_append_text(out, " dry_seed=");
+    out = psp_append_u32(out, result.drySeedMismatches[0]);
+    *out++ = '/';
+    out = psp_append_u32(out, result.drySeedMismatches[1]);
+    out = psp_append_text(out, " dry_resident=");
+    out = psp_append_u32(out, result.dryResidentMismatches[0]);
+    *out++ = '/';
+    out = psp_append_u32(out, result.dryResidentMismatches[1]);
+    out = psp_append_text(out, " wet_calls=");
+    out = psp_append_u32(out, result.wetCalls);
+    out = psp_append_text(out, " wet_voices=");
+    out = psp_append_u32(out, result.wetVoices);
+    out = psp_append_text(out, " wet_samples=");
+    out = psp_append_u32(out, result.wetSamples);
+    out = psp_append_text(out, " wet_product=");
+    out = psp_append_u32(out, result.wetProductMismatches[0]);
+    *out++ = '/';
+    out = psp_append_u32(out, result.wetProductMismatches[1]);
+    out = psp_append_text(out, " wet_seed=");
+    out = psp_append_u32(out, result.wetSeedMismatches[0]);
+    *out++ = '/';
+    out = psp_append_u32(out, result.wetSeedMismatches[1]);
+    out = psp_append_text(out, " wet_resident=");
+    out = psp_append_u32(out, result.wetResidentMismatches[0]);
+    *out++ = '/';
+    out = psp_append_u32(out, result.wetResidentMismatches[1]);
+    out = psp_append_text(out, " wet_ticks=");
+    out = psp_append_u32(out, result.wetCalls ?
+        result.wetTicks / result.wetCalls : 0);
     if ((result.seedMismatches + result.residentMismatches +
-         result.clampMismatches) != 0) {
+         result.clampMismatches + result.drySeedMismatches[0] +
+         result.drySeedMismatches[1] + result.dryResidentMismatches[0] +
+         result.dryResidentMismatches[1] +
+         result.wetProductMismatches[0] +
+         result.wetProductMismatches[1] + result.wetSeedMismatches[0] +
+         result.wetSeedMismatches[1] +
+         result.wetResidentMismatches[0] +
+         result.wetResidentMismatches[1]) != 0) {
         out = psp_append_text(out, " stage=");
         out = psp_append_s32(out, result.firstStage);
         out = psp_append_text(out, " first=");
@@ -830,6 +872,38 @@ void PspPlatform_ReportAudioVmeEnvPipeline(void) {
         out = psp_append_s32(out, result.expected);
         out = psp_append_text(out, " actual=");
         out = psp_append_s32(out, result.actual);
+        if ((result.drySeedMismatches[0] +
+             result.drySeedMismatches[1] +
+             result.dryResidentMismatches[0] +
+             result.dryResidentMismatches[1]) != 0) {
+            out = psp_append_text(out, " dry_first=");
+            out = psp_append_s32(out, result.dryFirstLane);
+            *out++ = '/';
+            out = psp_append_s32(out, result.dryFirstStage);
+            *out++ = '/';
+            out = psp_append_s32(out, result.dryFirstIndex);
+            out = psp_append_text(out, " dry_expected=");
+            out = psp_append_s32(out, result.dryExpected);
+            out = psp_append_text(out, " dry_actual=");
+            out = psp_append_s32(out, result.dryActual);
+        }
+        if ((result.wetProductMismatches[0] +
+             result.wetProductMismatches[1] +
+             result.wetSeedMismatches[0] +
+             result.wetSeedMismatches[1] +
+             result.wetResidentMismatches[0] +
+             result.wetResidentMismatches[1]) != 0) {
+            out = psp_append_text(out, " wet_first=");
+            out = psp_append_s32(out, result.wetFirstLane);
+            *out++ = '/';
+            out = psp_append_s32(out, result.wetFirstStage);
+            *out++ = '/';
+            out = psp_append_s32(out, result.wetFirstIndex);
+            out = psp_append_text(out, " wet_expected=");
+            out = psp_append_s32(out, result.wetExpected);
+            out = psp_append_text(out, " wet_actual=");
+            out = psp_append_s32(out, result.wetActual);
+        }
     }
     *out = '\0';
     PspPlatform_LogAudioVmeLine(line);
