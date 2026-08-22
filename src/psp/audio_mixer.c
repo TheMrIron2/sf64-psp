@@ -123,7 +123,7 @@ static __m128i m256i_clamp_to_m128i(m256i a) {
 
 #define SAMPLE_RATE 32000 // Adjusted to match the actual sample rate of 32 kHz
 
-static struct {
+typedef struct {
     uint16_t in;
     uint16_t out;
     uint16_t nbytes;
@@ -144,15 +144,20 @@ static struct {
     uint8_t buf[DMEM_BUF_SIZE];
     uint32_t guard_after;
     uint8_t cache_pad[20];
-} rspa __attribute__((aligned(64))) = {
+} PspAudioMixerState;
+
+static PspAudioMixerState sRspaStorage __attribute__((aligned(64))) = {
     .guard_before = DMEM_GUARD_VALUE,
     .guard_after = DMEM_GUARD_VALUE,
 };
+static PspAudioMixerState* sRspa = &sRspaStorage;
+static s32 sRspaIsolated;
+#define rspa (*sRspa)
 
 typedef char PspAudioMixerStateCacheCheck[(sizeof(rspa) % 64) == 0 ? 1 : -1];
 
 void* PspAudioMixer_GetStateAddress(void) {
-    return &rspa;
+    return &sRspaStorage;
 }
 
 u32 PspAudioMixer_GetStateSize(void) {
@@ -631,7 +636,7 @@ void aResampleImpl(uint8_t flags, uint16_t pitch, RESAMPLE_STATE state) {
     memcpy(in, tmp, 4 * sizeof(int16_t));
 
 #if defined(TARGET_PSP) && PSP_AUDIO_VME_VALIDATE
-    if (validateVme) {
+    if (validateVme && !sRspaIsolated) {
 #if PSP_AUDIO_VME_BENCH
         timingStart = PspAudioMe_BenchReadCount();
 #endif
@@ -642,7 +647,7 @@ void aResampleImpl(uint8_t flags, uint16_t pitch, RESAMPLE_STATE state) {
 #endif
     }
 #if PSP_AUDIO_VME_BENCH
-    if (sampleVme) {
+    if (sampleVme && !sRspaIsolated) {
         timingStart = PspAudioMe_BenchReadCount();
     }
 #endif
@@ -673,11 +678,11 @@ void aResampleImpl(uint8_t flags, uint16_t pitch, RESAMPLE_STATE state) {
     memcpy(state + 8, in, 8 * sizeof(int16_t));
 #if defined(TARGET_PSP) && PSP_AUDIO_VME_VALIDATE
 #if PSP_AUDIO_VME_BENCH
-    if (sampleVme) {
+    if (sampleVme && !sRspaIsolated) {
         scalarTicks = PspAudioMe_BenchReadCount() - timingStart;
     }
 #endif
-    if (sampleVme) {
+    if (sampleVme && !sRspaIsolated) {
         PspAudioMe_ValidateVmeResample(
             vmeCount, validateVme ? &sVmeResampleInputs[0][0] : NULL,
             validateVme ? &sVmeResampleCoefficients[0][0] : NULL,
@@ -1070,7 +1075,9 @@ void aMixImpl(uint16_t count, int16_t gain, uint16_t in_addr, uint16_t out_addr)
     int32_t sample;
 
 #if defined(TARGET_PSP) && PSP_AUDIO_VME_VALIDATE
-    PspAudioMe_ValidateVmeMix(count, gain, in, out);
+    if (!sRspaIsolated) {
+        PspAudioMe_ValidateVmeMix(count, gain, in, out);
+    }
 #endif
 #if defined(TARGET_PSP) && PSP_AUDIO_VME_BENCH
     scalarStart = PspAudioMe_BenchReadCount();
@@ -1095,8 +1102,10 @@ void aMixImpl(uint16_t count, int16_t gain, uint16_t in_addr, uint16_t out_addr)
         nbytes -= 16 * sizeof(int16_t);
     }
 #if defined(TARGET_PSP) && PSP_AUDIO_VME_BENCH
-    PspAudioMe_RecordScalarMix(samples,
-                               PspAudioMe_BenchReadCount() - scalarStart);
+    if (!sRspaIsolated) {
+        PspAudioMe_RecordScalarMix(
+            samples, PspAudioMe_BenchReadCount() - scalarStart);
+    }
 #endif
 }
 
@@ -1486,6 +1495,12 @@ static s32 psp_audio_mixer_execute_command_list(const Acmd* commands,
                                                 s32 commandCount) {
 #endif
     s32 i;
+    s32 segmentStart;
+    s32 segmentEnd;
+#if defined(TARGET_PSP) && PSP_AUDIO_VME_VALIDATE && PSP_AUDIO_VME_BENCH
+    s32 captureSegment;
+    u32 captureScalarStart;
+#endif
 #if PSP_AUDIO_PROFILE
     s32 result = 0;
 
@@ -1494,10 +1509,21 @@ static s32 psp_audio_mixer_execute_command_list(const Acmd* commands,
     }
 #endif
 
-    for (i = 0; i < commandCount; i++) {
-        u32 w0 = commands[i].words.w0;
-        u32 w1 = commands[i].words.w1;
-        u32 opcode = w0 >> 24;
+    for (segmentStart = 0; segmentStart < commandCount; segmentStart = segmentEnd) {
+        segmentEnd = segmentStart;
+        do {
+            segmentEnd++;
+        } while ((segmentEnd < commandCount) &&
+                 ((commands[segmentEnd - 1].words.w0 >> 24) != A_SAVEBUFF));
+
+#if defined(TARGET_PSP) && PSP_AUDIO_VME_VALIDATE && PSP_AUDIO_VME_BENCH
+        captureSegment = PspAudioMe_BeginEnvCapture(
+            commands + segmentStart, segmentEnd - segmentStart);
+#endif
+        for (i = segmentStart; i < segmentEnd; i++) {
+            u32 w0 = commands[i].words.w0;
+            u32 w1 = commands[i].words.w1;
+            u32 opcode = w0 >> 24;
 
 #if PSP_AUDIO_PROFILE
         if (profile) {
@@ -1558,13 +1584,42 @@ static s32 psp_audio_mixer_execute_command_list(const Acmd* commands,
                 aEnvSetup1Impl((w0 >> 16) & 0xFF, w0 & 0xFFFF, w1 >> 16, w1 & 0xFFFF, 0, 0, 0, 0);
                 break;
             case A_ENVMIXER:
-                aEnvMixerImpl(((w0 >> 16) & 0xFF) << 4, (w0 >> 8) & 0xFF, (w0 >> 4) & 1,
-                              (w0 >> 3) & 1, (w0 >> 2) & 1, (w0 >> 1) & 1, w0 & 1, w1, 2, 0);
+#if defined(TARGET_PSP) && PSP_AUDIO_VME_VALIDATE && PSP_AUDIO_VME_BENCH
+                if (captureSegment) {
+                    PspAudioMe_CaptureEnvVoice(
+                        BUF_S16(((w0 >> 16) & 0xff) << 4),
+                        (((w0 >> 8) & 0xff) + 15) & ~15,
+                        rspa.vol, rspa.rate, rspa.vol_wet, rspa.rate_wet,
+                        BUF_S16(((w1 >> 24) & 0xff) << 4),
+                        BUF_S16(((w1 >> 16) & 0xff) << 4),
+                        BUF_S16(((w1 >> 8) & 0xff) << 4),
+                        BUF_S16((w1 & 0xff) << 4));
+                    captureScalarStart = PspAudioMe_BenchReadCount();
+                }
+#endif
+#if defined(TARGET_PSP) && PSP_AUDIO_VME_VALIDATE && PSP_AUDIO_VME_BENCH
+                if (captureSegment != 2) {
+#endif
+                    aEnvMixerImpl(((w0 >> 16) & 0xFF) << 4, (w0 >> 8) & 0xFF, (w0 >> 4) & 1,
+                                  (w0 >> 3) & 1, (w0 >> 2) & 1, (w0 >> 1) & 1, w0 & 1, w1, 2, 0);
+#if defined(TARGET_PSP) && PSP_AUDIO_VME_VALIDATE && PSP_AUDIO_VME_BENCH
+                }
+                if (captureSegment == 1) {
+                    PspAudioMe_RecordEnvCaptureScalar(
+                        PspAudioMe_BenchReadCount() - captureScalarStart);
+                }
+#endif
                 break;
             case A_LOADBUFF:
                 aLoadBufferImpl((const void*) w1, w0 & 0xFFFF, ((w0 >> 16) & 0xFF) << 4);
                 break;
             case A_SAVEBUFF:
+#if defined(TARGET_PSP) && PSP_AUDIO_VME_VALIDATE && PSP_AUDIO_VME_BENCH
+                if (captureSegment && (i == segmentEnd - 1)) {
+                    PspAudioMe_EndEnvCapture();
+                    captureSegment = 0;
+                }
+#endif
                 aSaveBufferImpl(w0 & 0xFFFF, (s16*) w1, ((w0 >> 16) & 0xFF) << 4);
                 break;
             case A_ENVSETUP2:
@@ -1594,13 +1649,20 @@ static s32 psp_audio_mixer_execute_command_list(const Acmd* commands,
         if (result != 0) {
             break;
         }
+#endif
+        }
+#if PSP_AUDIO_PROFILE
+        if (result != 0) {
+            break;
+        }
+#endif
     }
+#if PSP_AUDIO_PROFILE
     if (profile) {
         PspAudioProfile_MeEndJob();
     }
     return result;
 #else
-    }
     return 0;
 #endif
 }
@@ -1619,4 +1681,26 @@ s32 PspAudioMixer_ExecuteCommandListMe(const Acmd* commands, s32 commandCount) {
 #else
     return psp_audio_mixer_execute_command_list(commands, commandCount);
 #endif
+}
+
+s32 PspAudioMixer_ExecuteCommandListState(
+    void* state, const Acmd* commands, s32 commandCount) {
+    PspAudioMixerState* previous = sRspa;
+    s32 previousIsolated = sRspaIsolated;
+    s32 result;
+
+    if (state == NULL) {
+        return -1;
+    }
+    sRspa = state;
+    sRspaIsolated = 1;
+#if PSP_AUDIO_PROFILE
+    result = psp_audio_mixer_execute_command_list(
+        commands, commandCount, false);
+#else
+    result = psp_audio_mixer_execute_command_list(commands, commandCount);
+#endif
+    sRspa = previous;
+    sRspaIsolated = previousIsolated;
+    return result;
 }

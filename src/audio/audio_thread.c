@@ -109,6 +109,8 @@ SPTask* AudioThread_CreateTask(void) {
     PspPlatform_ReportAudioVmeTransportBench();
     PspPlatform_ReportAudioVmeEnvBoundaryBench();
     PspPlatform_ReportAudioVmeEnvPipeline();
+    PspPlatform_ReportAudioVmeEnvRamp();
+    PspPlatform_ReportAudioVmeEnvRuns();
     PspPlatform_ReportAudioVmeEnvBench();
     PspPlatform_ReportAudioVmeResampleBench();
 #endif

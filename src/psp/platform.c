@@ -910,6 +910,177 @@ void PspPlatform_ReportAudioVmeEnvPipeline(void) {
 #endif
 }
 
+void PspPlatform_ReportAudioVmeEnvRamp(void) {
+#if PSP_AUDIO_VME_BENCH
+    static s32 sReported;
+    PspAudioVmeEnvRampResult result;
+    u64 inclusive;
+    char line[512];
+    char* out = line;
+
+    if (sReported) {
+        return;
+    }
+    PspAudioMe_GetVmeEnvRampResult(&result);
+    if ((result.calls == 0) && (result.mismatches == 0)) {
+        return;
+    }
+    sReported = 1;
+    inclusive = result.prepareTicks + result.accumulatorInTicks +
+        result.inputTicks + result.rampTicks + result.runTicks +
+        result.outputTicks + result.materializeTicks;
+    out = psp_append_text(out, "[audio-vme-env-ramp] calls=");
+    out = psp_append_u32(out, result.calls);
+    out = psp_append_text(out, " voices=");
+    out = psp_append_u32(out, result.voices);
+    out = psp_append_text(out, " samples=");
+    out = psp_append_u32(out, result.samples);
+    out = psp_append_text(out, " mismatches=");
+    out = psp_append_u32(out, result.mismatches);
+    if (result.calls != 0) {
+        out = psp_append_text(out, " prepare=");
+        out = psp_append_u32(out, result.prepareTicks / result.calls);
+        out = psp_append_text(out, " accum_in=");
+        out = psp_append_u32(out, result.accumulatorInTicks / result.calls);
+        out = psp_append_text(out, " input=");
+        out = psp_append_u32(out, result.inputTicks / result.calls);
+        out = psp_append_text(out, " ramps=");
+        out = psp_append_u32(out, result.rampTicks / result.calls);
+        out = psp_append_text(out, " run=");
+        out = psp_append_u32(out, result.runTicks / result.calls);
+        out = psp_append_text(out, " output=");
+        out = psp_append_u32(out, result.outputTicks / result.calls);
+        out = psp_append_text(out, " materialize=");
+        out = psp_append_u32(out, result.materializeTicks / result.calls);
+        out = psp_append_text(out, " inclusive=");
+        out = psp_append_u32(out, inclusive / result.calls);
+        out = psp_append_text(out, " validate=");
+        out = psp_append_u32(out, result.validateTicks / result.calls);
+    }
+    if (result.mismatches != 0) {
+        out = psp_append_text(out, " stage=");
+        out = psp_append_s32(out, result.firstStage);
+        out = psp_append_text(out, " lane=");
+        out = psp_append_s32(out, result.firstLane);
+        out = psp_append_text(out, " first=");
+        out = psp_append_s32(out, result.firstIndex);
+        out = psp_append_text(out, " expected=");
+        out = psp_append_s32(out, result.expected);
+        out = psp_append_text(out, " actual=");
+        out = psp_append_s32(out, result.actual);
+    }
+    *out = '\0';
+    PspPlatform_LogAudioVmeLine(line);
+#endif
+}
+
+void PspPlatform_ReportAudioVmeEnvRuns(void) {
+#if PSP_AUDIO_VME_BENCH
+    static u32 sLastJobs;
+    PspAudioVmeEnvRunResult result;
+    char line[768];
+    char* out = line;
+
+    PspAudioMe_GetVmeEnvRunResult(&result);
+    if ((result.jobs < 64) || ((result.jobs - sLastJobs) < 256)) {
+        return;
+    }
+    sLastJobs = result.jobs;
+    out = psp_append_text(out, "[audio-vme-env-runs] jobs=");
+    out = psp_append_u32(out, result.jobs);
+    out = psp_append_text(out, " commands=");
+    out = psp_append_u32(out, result.envCommands);
+    out = psp_append_text(out, " runs=");
+    out = psp_append_u32(out, result.compatibleRuns);
+    out = psp_append_text(out, " voices=");
+    out = psp_append_u32(out, result.compatibleVoices);
+    out = psp_append_text(out, " samples=");
+    out = psp_append_u32(out, result.compatibleSamples);
+    out = psp_append_text(out, " max_voices=");
+    out = psp_append_u32(out, result.maxVoices);
+    out = psp_append_text(out, " flagged=");
+    out = psp_append_u32(out, result.flaggedCommands);
+    out = psp_append_text(out, " topology_splits=");
+    out = psp_append_u32(out, result.destinationBreaks);
+    out = psp_append_text(out, " boundary_counts=");
+    out = psp_append_u32(out, result.saveBoundaries);
+    *out++ = '/';
+    out = psp_append_u32(out, result.addBoundaries);
+    *out++ = '/';
+    out = psp_append_u32(out, result.mixBoundaries);
+    *out++ = '/';
+    out = psp_append_u32(out, result.clearBoundaries);
+    *out++ = '/';
+    out = psp_append_u32(out, result.moveBoundaries);
+    *out++ = '/';
+    out = psp_append_u32(out, result.resampleBoundaries);
+    *out++ = '/';
+    out = psp_append_u32(out, result.otherBoundaries);
+    out = psp_append_text(out, " isolation=");
+    out = psp_append_u32(out, result.isolationRuns);
+    *out++ = '/';
+    out = psp_append_u32(out, result.isolationMismatches);
+    out = psp_append_text(out, " segments=");
+    out = psp_append_u32(out, result.segments);
+    *out++ = '/';
+    out = psp_append_u32(out, result.segmentCommands);
+    *out++ = '/';
+    out = psp_append_u32(out, result.maxSegmentCommands);
+    out = psp_append_text(out, " capture=");
+    out = psp_append_u32(out, result.captureRuns);
+    *out++ = '/';
+    out = psp_append_u32(out, result.captureVoices);
+    *out++ = '/';
+    out = psp_append_u32(out, result.captureBytes);
+    *out++ = '/';
+    out = psp_append_u32(out, result.captureMismatches);
+    out = psp_append_text(out, " shadow=");
+    out = psp_append_u32(out, result.shadowRuns);
+    *out++ = '/';
+    out = psp_append_u32(out, result.shadowVoices);
+    *out++ = '/';
+    out = psp_append_u32(out, result.shadowMismatches);
+    if (result.shadowMismatches != 0) {
+        *out++ = '/';
+        out = psp_append_u32(out, result.shadowFirstLane);
+        *out++ = '/';
+        out = psp_append_u32(out, result.shadowFirstIndex);
+        *out++ = '/';
+        out = psp_append_s32(out, result.shadowExpected);
+        *out++ = '/';
+        out = psp_append_s32(out, result.shadowActual);
+    }
+    out = psp_append_text(out, " timing=");
+    out = psp_append_u32(out, result.captureTicks);
+    *out++ = '/';
+    out = psp_append_u32(out, result.scalarTicks);
+    *out++ = '/';
+    out = psp_append_u32(out, result.shadowWipeTicks);
+    *out++ = '/';
+    out = psp_append_u32(out, result.shadowStageTicks);
+    *out++ = '/';
+    out = psp_append_u32(out, result.shadowRunTicks);
+    *out++ = '/';
+    out = psp_append_u32(out, result.shadowMaterializeTicks);
+    *out++ = '/';
+    out = psp_append_u32(out, result.shadowValidateTicks);
+    *out++ = '/';
+    out = psp_append_u32(out, result.shadowTotalTicks);
+    out = psp_append_text(out, " commit=");
+    out = psp_append_u32(out, result.commitRuns);
+    *out++ = '/';
+    out = psp_append_u32(out, result.commitDeclined);
+    out = psp_append_text(out, " authority=");
+    out = psp_append_u32(out, result.authoritativeRuns);
+    *out++ = '/';
+    out = psp_append_u32(out, result.authoritativeDeclined);
+    *out++ = '/';
+    out = psp_append_u32(out, result.fallbackRuns);
+    *out = '\0';
+    PspPlatform_LogAudioVmeLine(line);
+#endif
+}
+
 void PspPlatform_ReportAudioVmeEnvBench(void) {
 #if PSP_AUDIO_VME_BENCH
     static s32 sReported;

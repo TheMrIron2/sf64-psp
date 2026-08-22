@@ -206,6 +206,73 @@ typedef struct {
     u64 wetTicks;
 } PspAudioVmeEnvPipelineResult;
 
+typedef struct {
+    u32 calls;
+    u32 voices;
+    u32 samples;
+    u32 mismatches;
+    s32 firstStage;
+    s32 firstLane;
+    s32 firstIndex;
+    s32 expected;
+    s32 actual;
+    u64 prepareTicks;
+    u64 accumulatorInTicks;
+    u64 inputTicks;
+    u64 rampTicks;
+    u64 runTicks;
+    u64 outputTicks;
+    u64 materializeTicks;
+    u64 validateTicks;
+} PspAudioVmeEnvRampResult;
+
+typedef struct {
+    u32 jobs;
+    u32 envCommands;
+    u32 compatibleRuns;
+    u32 compatibleVoices;
+    u32 compatibleSamples;
+    u32 maxVoices;
+    u32 flaggedCommands;
+    u32 destinationBreaks;
+    u32 saveBoundaries;
+    u32 addBoundaries;
+    u32 mixBoundaries;
+    u32 clearBoundaries;
+    u32 moveBoundaries;
+    u32 resampleBoundaries;
+    u32 otherBoundaries;
+    u32 isolationRuns;
+    u32 isolationMismatches;
+    u32 segments;
+    u32 segmentCommands;
+    u32 maxSegmentCommands;
+    u32 captureRuns;
+    u32 captureVoices;
+    u32 captureBytes;
+    u32 captureMismatches;
+    u32 shadowRuns;
+    u32 shadowVoices;
+    u32 shadowMismatches;
+    u32 shadowFirstLane;
+    u32 shadowFirstIndex;
+    s32 shadowExpected;
+    s32 shadowActual;
+    u64 captureTicks;
+    u64 scalarTicks;
+    u64 shadowWipeTicks;
+    u64 shadowStageTicks;
+    u64 shadowRunTicks;
+    u64 shadowMaterializeTicks;
+    u64 shadowValidateTicks;
+    u64 shadowTotalTicks;
+    u32 commitRuns;
+    u32 commitDeclined;
+    u32 authoritativeRuns;
+    u32 authoritativeDeclined;
+    u32 fallbackRuns;
+} PspAudioVmeEnvRunResult;
+
 int PspAudioMe_Boot(void);
 int PspAudioMe_Init(void);
 void PspAudioMe_Submit(const Acmd* commands, s32 commandCount);
@@ -238,6 +305,16 @@ void PspAudioMe_GetVmeEnvBoundaryBenchResult(
     PspAudioVmeEnvBoundaryBenchResult* result);
 void PspAudioMe_GetVmeEnvPipelineResult(
     PspAudioVmeEnvPipelineResult* result);
+void PspAudioMe_GetVmeEnvRampResult(PspAudioVmeEnvRampResult* result);
+void PspAudioMe_GetVmeEnvRunResult(PspAudioVmeEnvRunResult* result);
+int PspAudioMe_BeginEnvCapture(const Acmd* commands, s32 commandCount);
+void PspAudioMe_CaptureEnvVoice(const s16* input, u32 samples,
+                                const u16* volumes, const u16* rates,
+                                u16 wetVolume, u16 wetRate,
+                                s16* dryLeft, s16* dryRight,
+                                s16* wetLeft, s16* wetRight);
+void PspAudioMe_EndEnvCapture(void);
+void PspAudioMe_RecordEnvCaptureScalar(u32 ticks);
 u32 PspAudioMe_BenchReadCount(void);
 void PspAudioMe_RecordScalarMix(u32 samples, u32 ticks);
 void PspAudioMe_GetVmeBenchRow(u32 index, PspAudioVmeBenchRow* result);
