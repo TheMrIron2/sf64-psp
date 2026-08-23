@@ -977,15 +977,25 @@ void PspPlatform_ReportAudioVmeEnvRamp(void) {
 void PspPlatform_ReportAudioVmeEnvRuns(void) {
 #if PSP_AUDIO_VME_BENCH
     static u32 sLastJobs;
+    static u32 sLastIncompleteCapture;
     PspAudioVmeEnvRunResult result;
-    char line[768];
+    s32 incomplete;
+    char line[1024];
     char* out = line;
 
     PspAudioMe_GetVmeEnvRunResult(&result);
-    if ((result.jobs < 64) || ((result.jobs - sLastJobs) < 256)) {
+    incomplete = (result.persistentPhase != 0) &&
+                 (result.persistentPhase != 12) &&
+                 (result.captureRuns != sLastIncompleteCapture);
+    if (!incomplete &&
+        ((result.jobs < 64) || ((result.jobs - sLastJobs) < 256))) {
         return;
     }
-    sLastJobs = result.jobs;
+    if (incomplete) {
+        sLastIncompleteCapture = result.captureRuns;
+    } else {
+        sLastJobs = result.jobs;
+    }
     out = psp_append_text(out, "[audio-vme-env-runs] jobs=");
     out = psp_append_u32(out, result.jobs);
     out = psp_append_text(out, " commands=");
@@ -1034,6 +1044,10 @@ void PspPlatform_ReportAudioVmeEnvRuns(void) {
     out = psp_append_u32(out, result.captureBytes);
     *out++ = '/';
     out = psp_append_u32(out, result.captureMismatches);
+    out = psp_append_text(out, " capture_range=");
+    out = psp_append_u32(out, result.captureMinVoices);
+    *out++ = '/';
+    out = psp_append_u32(out, result.captureMaxVoices);
     out = psp_append_text(out, " shadow=");
     out = psp_append_u32(out, result.shadowRuns);
     *out++ = '/';
@@ -1055,7 +1069,7 @@ void PspPlatform_ReportAudioVmeEnvRuns(void) {
     *out++ = '/';
     out = psp_append_u32(out, result.scalarTicks);
     *out++ = '/';
-    out = psp_append_u32(out, result.shadowWipeTicks);
+    out = psp_append_u32(out, result.shadowResetTicks);
     *out++ = '/';
     out = psp_append_u32(out, result.shadowStageTicks);
     *out++ = '/';
@@ -1066,6 +1080,30 @@ void PspPlatform_ReportAudioVmeEnvRuns(void) {
     out = psp_append_u32(out, result.shadowValidateTicks);
     *out++ = '/';
     out = psp_append_u32(out, result.shadowTotalTicks);
+    out = psp_append_text(out, " capture_costs=");
+    out = psp_append_u32(out, result.captureScanTicks);
+    *out++ = '/';
+    out = psp_append_u32(out, result.captureAccumulatorTicks);
+    *out++ = '/';
+    out = psp_append_u32(out, result.capturePcmTicks);
+    *out++ = '/';
+    out = psp_append_u32(out, result.captureParamTicks);
+    out = psp_append_text(out, " vme_costs=");
+    out = psp_append_u32(out, result.shadowContextTicks);
+    *out++ = '/';
+    out = psp_append_u32(out, result.shadowAccumulatorTicks);
+    *out++ = '/';
+    out = psp_append_u32(out, result.shadowPcmTicks);
+    *out++ = '/';
+    out = psp_append_u32(out, result.shadowRampTicks);
+    *out++ = '/';
+    out = psp_append_u32(out, result.shadowRunTicks);
+    *out++ = '/';
+    out = psp_append_u32(out, result.shadowOutputTicks);
+    *out++ = '/';
+    out = psp_append_u32(out, result.shadowMaterializeTicks);
+    *out++ = '/';
+    out = psp_append_u32(out, result.shadowValidateTicks);
     out = psp_append_text(out, " commit=");
     out = psp_append_u32(out, result.commitRuns);
     *out++ = '/';
@@ -1076,6 +1114,24 @@ void PspPlatform_ReportAudioVmeEnvRuns(void) {
     out = psp_append_u32(out, result.authoritativeDeclined);
     *out++ = '/';
     out = psp_append_u32(out, result.fallbackRuns);
+    out = psp_append_text(out, " persistent=");
+    out = psp_append_u32(out, result.persistentRuns);
+    *out++ = '/';
+    out = psp_append_u32(out, result.ownershipDeclined);
+    *out++ = '/';
+    out = psp_append_u32(out, result.notReadyDeclined);
+    *out++ = '/';
+    out = psp_append_u32(out, result.validatorDeclined);
+    *out++ = '/';
+    out = psp_append_u32(out, result.persistentCaptureTicks);
+    *out++ = '/';
+    out = psp_append_u32(out, result.scalarTicks);
+    *out++ = '/';
+    out = psp_append_u32(out, result.persistentVmeTicks);
+    out = psp_append_text(out, " checkpoint=");
+    out = psp_append_u32(out, result.persistentPhase);
+    *out++ = '/';
+    out = psp_append_u32(out, result.persistentVoice);
     *out = '\0';
     PspPlatform_LogAudioVmeLine(line);
 #endif

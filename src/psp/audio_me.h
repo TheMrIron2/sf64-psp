@@ -249,6 +249,8 @@ typedef struct {
     u32 maxSegmentCommands;
     u32 captureRuns;
     u32 captureVoices;
+    u32 captureMinVoices;
+    u32 captureMaxVoices;
     u32 captureBytes;
     u32 captureMismatches;
     u32 shadowRuns;
@@ -259,10 +261,19 @@ typedef struct {
     s32 shadowExpected;
     s32 shadowActual;
     u64 captureTicks;
+    u64 captureScanTicks;
+    u64 captureAccumulatorTicks;
+    u64 capturePcmTicks;
+    u64 captureParamTicks;
     u64 scalarTicks;
-    u64 shadowWipeTicks;
+    u64 shadowResetTicks;
     u64 shadowStageTicks;
+    u64 shadowContextTicks;
+    u64 shadowAccumulatorTicks;
+    u64 shadowPcmTicks;
+    u64 shadowRampTicks;
     u64 shadowRunTicks;
+    u64 shadowOutputTicks;
     u64 shadowMaterializeTicks;
     u64 shadowValidateTicks;
     u64 shadowTotalTicks;
@@ -271,6 +282,14 @@ typedef struct {
     u32 authoritativeRuns;
     u32 authoritativeDeclined;
     u32 fallbackRuns;
+    u32 persistentRuns;
+    u32 ownershipDeclined;
+    u32 notReadyDeclined;
+    u32 validatorDeclined;
+    u32 persistentPhase;
+    u32 persistentVoice;
+    u64 persistentCaptureTicks;
+    u64 persistentVmeTicks;
 } PspAudioVmeEnvRunResult;
 
 int PspAudioMe_Boot(void);
