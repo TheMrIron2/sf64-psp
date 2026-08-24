@@ -70,7 +70,7 @@ void Map_LevelSelect(void) {
         Map_CurrentLevel_Setup();
         Map_PositionCursor();
     }
-    if (contPress->button & L_TRIG) {
+    if (contPress->button & (L_TRIG | Z_TRIG)) {
         startOption ^= 1;
     }
 
