@@ -1161,6 +1161,89 @@ void PspPlatform_ReportAudioVmeEnvRamp(void) {
 #endif
 }
 
+void PspPlatform_ReportAudioVmeResidentTail(void) {
+#if PSP_AUDIO_VME_BENCH
+    static s32 sReported;
+    PspAudioVmeResidentTailResult result;
+    char line[768];
+    char* out = line;
+
+    if (sReported) {
+        return;
+    }
+    PspAudioMe_GetVmeResidentTailResult(&result);
+    if (result.calls == 0) {
+        return;
+    }
+    sReported = 1;
+    out = psp_append_text(out, "[audio-vme-resident-tail] calls=");
+    out = psp_append_u32(out, result.calls);
+    out = psp_append_text(out, " voices=");
+    out = psp_append_u32(out, result.voices);
+    out = psp_append_text(out, " samples=");
+    out = psp_append_u32(out, result.samples);
+    out = psp_append_text(out, " resample_mismatch=");
+    out = psp_append_u32(out, result.resampleMismatches);
+    out = psp_append_text(out, " state_mismatch=");
+    out = psp_append_u32(out, result.stateMismatches);
+    out = psp_append_text(out, " accum_mismatch=");
+    out = psp_append_u32(out, result.accumulatorMismatches);
+    out = psp_append_text(out, " stages=");
+    out = psp_append_u32(out, result.dryProductMismatches);
+    *out++ = '/';
+    out = psp_append_u32(out, result.wetProductMismatches);
+    *out++ = '/';
+    out = psp_append_u32(out, result.dryAccumulatorMismatches);
+    *out++ = '/';
+    out = psp_append_u32(out, result.wetAccumulatorMismatches);
+    out = psp_append_text(out, " source_prepare=");
+    out = psp_append_u32(out, result.sourcePrepareTicks / result.calls);
+    out = psp_append_text(out, " coefficient_prepare=");
+    out = psp_append_u32(out,
+                         result.coefficientPrepareTicks / result.calls);
+    out = psp_append_text(out, " resample_stage=");
+    out = psp_append_u32(out, result.resampleStageTicks / result.calls);
+    out = psp_append_text(out, " resample_setup=");
+    out = psp_append_u32(out, result.resampleSetupTicks / result.calls);
+    out = psp_append_text(out, " resample_run=");
+    out = psp_append_u32(out, result.resampleRunTicks / result.calls);
+    out = psp_append_text(out, " accum_in=");
+    out = psp_append_u32(out, result.accumulatorInTicks / result.calls);
+    out = psp_append_text(out, " ramp=");
+    out = psp_append_u32(out, result.rampTicks / result.calls);
+    out = psp_append_text(out, " env_setup=");
+    out = psp_append_u32(out, result.envSetupTicks / result.calls);
+    out = psp_append_text(out, " env_run=");
+    out = psp_append_u32(out, result.envRunTicks / result.calls);
+    out = psp_append_text(out, " accum_out=");
+    out = psp_append_u32(out, result.accumulatorOutTicks / result.calls);
+    out = psp_append_text(out, " state=");
+    out = psp_append_u32(out, result.stateTicks / result.calls);
+    out = psp_append_text(out, " reset=");
+    out = psp_append_u32(out, result.resetTicks / result.calls);
+    out = psp_append_text(out, " total=");
+    out = psp_append_u32(out, result.totalTicks / result.calls);
+    out = psp_append_text(out, " validate=");
+    out = psp_append_u32(out, result.validateTicks / result.calls);
+    if ((result.resampleMismatches + result.stateMismatches +
+         result.accumulatorMismatches + result.dryProductMismatches +
+         result.wetProductMismatches) != 0) {
+        out = psp_append_text(out, " first=");
+        out = psp_append_s32(out, result.firstStage);
+        *out++ = '/';
+        out = psp_append_s32(out, result.firstLane);
+        *out++ = '/';
+        out = psp_append_s32(out, result.firstIndex);
+        out = psp_append_text(out, " expected=");
+        out = psp_append_s32(out, result.expected);
+        out = psp_append_text(out, " actual=");
+        out = psp_append_s32(out, result.actual);
+    }
+    *out = '\0';
+    PspPlatform_LogAudioVmeLine(line);
+#endif
+}
+
 void PspPlatform_ReportAudioVmeEnvRuns(void) {
 #if PSP_AUDIO_VME_BENCH
     static u32 sLastJobs;

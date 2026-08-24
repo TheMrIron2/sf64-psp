@@ -275,6 +275,38 @@ typedef struct {
 } PspAudioVmeEnvRampResult;
 
 typedef struct {
+    u32 calls;
+    u32 voices;
+    u32 samples;
+    u32 resampleMismatches;
+    u32 stateMismatches;
+    u32 accumulatorMismatches;
+    u32 dryProductMismatches;
+    u32 wetProductMismatches;
+    u32 dryAccumulatorMismatches;
+    u32 wetAccumulatorMismatches;
+    s32 firstStage;
+    s32 firstLane;
+    s32 firstIndex;
+    s32 expected;
+    s32 actual;
+    u64 sourcePrepareTicks;
+    u64 coefficientPrepareTicks;
+    u64 resampleStageTicks;
+    u64 resampleSetupTicks;
+    u64 resampleRunTicks;
+    u64 accumulatorInTicks;
+    u64 rampTicks;
+    u64 envSetupTicks;
+    u64 envRunTicks;
+    u64 accumulatorOutTicks;
+    u64 stateTicks;
+    u64 resetTicks;
+    u64 totalTicks;
+    u64 validateTicks;
+} PspAudioVmeResidentTailResult;
+
+typedef struct {
     u32 jobs;
     u32 envCommands;
     u32 compatibleRuns;
@@ -426,6 +458,8 @@ void PspAudioMe_GetVmeEnvBoundaryBenchResult(
 void PspAudioMe_GetVmeEnvPipelineResult(
     PspAudioVmeEnvPipelineResult* result);
 void PspAudioMe_GetVmeEnvRampResult(PspAudioVmeEnvRampResult* result);
+void PspAudioMe_GetVmeResidentTailResult(
+    PspAudioVmeResidentTailResult* result);
 void PspAudioMe_GetVmeEnvRunResult(PspAudioVmeEnvRunResult* result);
 int PspAudioMe_BeginEnvCapture(const Acmd* commands, s32 commandCount);
 void PspAudioMe_CaptureEnvVoice(const s16* input, u32 samples,
