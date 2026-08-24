@@ -1590,6 +1590,40 @@ hit:
     return 0;
 }
 
+void PspGfxPspgl_InvalidateRgba16Texture(const u16* pixels) {
+    u32 i;
+
+    if (pixels == NULL) {
+        return;
+    }
+
+    for (i = 0; i < sRgba16TextureCacheCount;) {
+        PspGfxRgba16TextureCacheEntry* entry = &sRgba16TextureCache[i];
+
+        if (entry->pixels != pixels) {
+            i++;
+            continue;
+        }
+
+        psp_gfx_pspgl_invalidate_bound_texture();
+        psp_gfx_pspgl_invalidate_fallback_texture_parameter_state(entry->texture);
+        psp_gfx_pspgl_invalidate_texture_parameter_state(&entry->parameterState);
+        glDeleteTextures(1, &entry->texture);
+        sRgba16TextureCacheCount--;
+        if (i != sRgba16TextureCacheCount) {
+            *entry = sRgba16TextureCache[sRgba16TextureCacheCount];
+        }
+    }
+
+    memset(sRgba16TextureLookup, 0, sizeof(sRgba16TextureLookup));
+    for (i = 0; i < sRgba16TextureCacheCount; i++) {
+        PspGfxRgba16TextureCacheEntry* entry = &sRgba16TextureCache[i];
+
+        psp_gfx_pspgl_remember_rgba16_lookup(
+            psp_gfx_pspgl_rgba16_lookup_set(entry->pixels, entry->width, entry->height, entry->premultiplied), i);
+    }
+}
+
 u32 PspGfxPspgl_CreateRgba16Texture(const u16* pixels, u32 width, u32 height, int premultiply, u32* uploadWidth,
                                     u32* uploadHeight, PspGfxPspglTextureRef* textureRef) {
     PspGfxRgba16TextureCacheEntry* entry;

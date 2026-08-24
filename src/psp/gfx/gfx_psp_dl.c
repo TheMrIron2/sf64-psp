@@ -21,6 +21,9 @@
 static int sPspGfxDlBackgroundFeedbackPrimed = 0;
 static u32 sPspGfxDlBackgroundFeedbackSeedColor = 0xFF000000u;
 
+extern u16 aTrBackdropBottomTex[];
+extern u16 aTrBackdropTopTex[];
+
 #include <n64psp/math.h>
 #include <n64psp/lighting.h>
 #include <n64psp/tnl.h>
@@ -88,6 +91,7 @@ extern Gfx gMapVenomCloudRuntimeDL[];
 #define PSP_GFX_OP_F3D_SPNOOP 0x00
 #define PSP_GFX_OP_F3D_MTX 0x01
 #define PSP_GFX_OP_PORT_MTXF PSP_RENDERER_DL_OP_MTXF
+#define PSP_GFX_OP_PORT_INVALIDATE_RGBA16 PSP_RENDERER_DL_OP_INVALIDATE_RGBA16
 #define PSP_GFX_OP_F3D_MOVEMEM 0x03
 #define PSP_GFX_OP_F3D_VTX 0x04
 #define PSP_GFX_OP_F3D_DL 0x06
@@ -464,6 +468,10 @@ static n64psp_vec4f
     sPspGfxDlLightingOutput[PSP_GFX_DL_MAX_VERTICES]
     __attribute__((aligned(16)));
 
+static n64psp_texcoord_s10_5
+    sPspGfxDlTexgenOutput[PSP_GFX_DL_MAX_VERTICES]
+    __attribute__((aligned(16)));
+
 static n64psp_vec4f
     sPspGfxDlLightingAmbient
     __attribute__((aligned(16)));
@@ -663,7 +671,13 @@ static int psp_gfx_dl_alpha_test_enabled(PspGfxDlContext* ctx) {
 }
 
 static int psp_gfx_dl_effective_point_filter(PspGfxDlContext* ctx) {
-    return psp_gfx_dl_rgba16_coverage_alpha_enabled(ctx);
+    u32 filter = ctx->otherModeH & (3U << G_MDSFT_TEXTFILT);
+    int trainingBackdrop =
+        (ctx->textureImage == aTrBackdropBottomTex) ||
+        (ctx->textureImage == aTrBackdropTopTex);
+
+    return (filter == G_TF_POINT) ||
+           (trainingBackdrop && psp_gfx_dl_rgba16_coverage_alpha_enabled(ctx));
 }
 
 static int psp_gfx_dl_blend_enabled(PspGfxDlContext* ctx) {
@@ -2076,13 +2090,7 @@ static int psp_gfx_dl_resolve_effective_material_state(PspGfxDlContext* ctx) {
     material->alphaTest = psp_gfx_dl_alpha_test_enabled(ctx);
     material->blend = psp_gfx_dl_blend_enabled(ctx);
     material->premultiplied = premultiplied;
-    /*
-     * The PSP GE's ordinary linear filtering does not reproduce the N64's
-     * RGBA5551 coverage behavior for split transparent cloud-surface quads:
-     * interpolated alpha can reveal the underlying quads and their shared
-     * boundary. Keep decoding, blending and UVs unchanged, but sample this
-     * material class with point filtering.
-     */
+    // Preserve the Training backdrop coverage seam workaround
     material->pointFilter = psp_gfx_dl_effective_point_filter(ctx);
     material->valid = 1;
     material->dirty = 0;
@@ -3689,12 +3697,18 @@ static void psp_gfx_dl_handle_set_combine(PspGfxDlContext* ctx, const Gfx* gfx) 
                                                  G_CCMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_TEXEL0)) {
         ctx->combineMode = PSP_GFX_DL_COMBINE_MODULATE_PRIM_ALPHA;
         ctx->combineUsesTextureAlpha = 1;
-    } else if (psp_gfx_dl_combine_cycle0_matches(mux0, mux1, G_CCMUX_PRIMITIVE, G_CCMUX_ENVIRONMENT,
-                                                 G_CCMUX_TEXEL0, G_CCMUX_ENVIRONMENT, G_ACMUX_TEXEL0,
-                                                 G_ACMUX_0, G_ACMUX_PRIMITIVE, G_ACMUX_0) &&
-               psp_gfx_dl_combine_cycle1_matches(mux0, mux1, G_CCMUX_PRIMITIVE, G_CCMUX_ENVIRONMENT,
-                                                 G_CCMUX_TEXEL0, G_CCMUX_ENVIRONMENT, G_ACMUX_TEXEL0,
-                                                 G_ACMUX_0, G_ACMUX_PRIMITIVE, G_ACMUX_0)) {
+    } else if ((psp_gfx_dl_combine_cycle0_matches(mux0, mux1, G_CCMUX_PRIMITIVE, G_CCMUX_ENVIRONMENT,
+                                                  G_CCMUX_TEXEL0, G_CCMUX_ENVIRONMENT, G_ACMUX_TEXEL0,
+                                                  G_ACMUX_0, G_ACMUX_PRIMITIVE, G_ACMUX_0) &&
+                psp_gfx_dl_combine_cycle1_matches(mux0, mux1, G_CCMUX_PRIMITIVE, G_CCMUX_ENVIRONMENT,
+                                                  G_CCMUX_TEXEL0, G_CCMUX_ENVIRONMENT, G_ACMUX_TEXEL0,
+                                                  G_ACMUX_0, G_ACMUX_PRIMITIVE, G_ACMUX_0)) ||
+               (psp_gfx_dl_combine_cycle0_matches(mux0, mux1, G_CCMUX_PRIMITIVE, G_CCMUX_ENVIRONMENT,
+                                                  G_CCMUX_TEXEL0, G_CCMUX_ENVIRONMENT, G_ACMUX_PRIMITIVE,
+                                                  G_ACMUX_ENVIRONMENT, G_ACMUX_TEXEL0, G_ACMUX_ENVIRONMENT) &&
+                psp_gfx_dl_combine_cycle1_matches(mux0, mux1, G_CCMUX_PRIMITIVE, G_CCMUX_ENVIRONMENT,
+                                                  G_CCMUX_TEXEL0, G_CCMUX_ENVIRONMENT, G_ACMUX_PRIMITIVE,
+                                                  G_ACMUX_ENVIRONMENT, G_ACMUX_TEXEL0, G_ACMUX_ENVIRONMENT))) {
         ctx->combineMode = PSP_GFX_DL_COMBINE_ENV_TEX_PRIM_ALPHA_BLEND;
         ctx->combineUsesTextureAlpha = 1;
     } else {
@@ -3782,6 +3796,18 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
         PspProfiler_RenderPhaseEnd(PSP_PROFILE_PHASE_G_VTX_UNPACK, phaseStartUs);
         phaseStartUs = PspProfiler_RenderPhaseBegin();
         psp_gfx_dl_prepare_batch_matrices(ctx);
+        if ((ctx->geometryMode & (G_LIGHTING | G_TEXTURE_GEN)) ==
+            (G_LIGHTING | G_TEXTURE_GEN)) {
+            n64psp_texgen_snorm8_batch(
+                sPspGfxDlTexgenOutput,
+                &ctx->alignedMatrices.modelview,
+                src,
+                (ctx->geometryMode & G_TEXTURE_GEN_LINEAR) != 0
+                    ? N64PSP_TEXGEN_LINEAR
+                    : N64PSP_TEXGEN_SPHERICAL,
+                count
+            );
+        }
         projectionSnapshot = psp_gfx_dl_prepare_vertex_projection(ctx, count);
         PspProfiler_RenderPhaseEnd(PSP_PROFILE_PHASE_G_VTX_MATRIX_PREPARE, phaseStartUs);
     }
@@ -3987,8 +4013,14 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
                 out->b = psp_gfx_color_transfer_u8(in->v.cn[2]);
             }
             out->a = in->v.cn[3];
-            out->s = in->v.tc[0];
-            out->t = in->v.tc[1];
+            if ((ctx->geometryMode & (G_LIGHTING | G_TEXTURE_GEN)) ==
+                (G_LIGHTING | G_TEXTURE_GEN)) {
+                out->s = sPspGfxDlTexgenOutput[i].s;
+                out->t = sPspGfxDlTexgenOutput[i].t;
+            } else {
+                out->s = in->v.tc[0];
+                out->t = in->v.tc[1];
+            }
         }
     }
     PspProfiler_RenderPhaseEnd(PSP_PROFILE_PHASE_G_VTX_ATTRIBUTE_COPY, phaseStartUs);
@@ -4072,6 +4104,9 @@ static void psp_gfx_dl_handle_other_mode_h(PspGfxDlContext* ctx, const Gfx* gfx)
     }
     mask = (length == 32) ? 0xFFFFFFFFU : (((1U << length) - 1U) << shift);
     ctx->otherModeH = (ctx->otherModeH & ~mask) | (gfx->words.w1 & mask);
+    if ((mask & (3U << G_MDSFT_TEXTFILT)) != 0) {
+        psp_gfx_dl_mark_effective_material_dirty(ctx);
+    }
 }
 
 static void psp_gfx_dl_handle_geometry_mode(PspGfxDlContext* ctx, const Gfx* gfx, int set) {
@@ -4515,6 +4550,20 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
 
         if (opcode == PSP_GFX_OP_PORT_MTXF) {
             psp_gfx_dl_handle_mtx(ctx, cmd, 1);
+            continue;
+        }
+
+        if (opcode == PSP_GFX_OP_PORT_INVALIDATE_RGBA16) {
+            const u16* pixels = psp_gfx_dl_resolve_ptr(ctx, cmd->words.w1);
+
+            psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+            PspGfxPspgl_InvalidateRgba16Texture(pixels);
+            if (ctx->textureImage == pixels) {
+                ctx->textureId = 0;
+                ctx->textureRef = psp_gfx_dl_null_texture_ref();
+                ctx->textureUploadAttempted = 0;
+                psp_gfx_dl_mark_effective_material_dirty(ctx);
+            }
             continue;
         }
 

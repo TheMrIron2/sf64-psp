@@ -1,5 +1,6 @@
 #include "global.h"
 #include "assets/ast_text.h"
+#include "src/psp/renderer.h"
 
 char gGfxPrintBuffer[100];
 
@@ -69,6 +70,7 @@ void Lib_Texture_Scroll(u16* texture, s32 width, s32 height, u8 mode) {
             }
             break;
     }
+    PSP_RENDERER_DL_INVALIDATE_RGBA16(gMasterDisp++, pixel);
 }
 
 void Lib_Texture_Mottle(u16* dst, u16* src, u8 mode) {
@@ -128,6 +130,7 @@ void Lib_Texture_Mottle(u16* dst, u16* src, u8 mode) {
             }
             break;
     }
+    PSP_RENDERER_DL_INVALIDATE_RGBA16(gMasterDisp++, dst);
 }
 
 s32 Animation_GetLimbIndex(Limb* limb, Limb** skeleton) {

@@ -27,8 +27,11 @@
     gDPNoOpTag((pkt), PSP_RENDERER_DL_MARKER(PSP_RENDERER_DL_MARKER_HISTORY_REPLAY))
 
 #define PSP_RENDERER_DL_OP_MTXF G_RESERVED0
+#define PSP_RENDERER_DL_OP_INVALIDATE_RGBA16 G_RESERVED1
 #define PSP_RENDERER_DL_MTXF(pkt, m, p) \
     gDma1p((pkt), PSP_RENDERER_DL_OP_MTXF, (m), sizeof(Mtx), (p))
+#define PSP_RENDERER_DL_INVALIDATE_RGBA16(pkt, texture) \
+    gImmp1((pkt), PSP_RENDERER_DL_OP_INVALIDATE_RGBA16, (texture))
 
 void PspRenderer_Init(void);
 void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex);

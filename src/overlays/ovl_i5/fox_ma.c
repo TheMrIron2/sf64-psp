@@ -9,6 +9,7 @@
 #include "assets/ast_macbeth.h"
 #include "assets/ast_landmaster.h"
 #include "assets/ast_enmy_planet.h"
+#include "src/psp/renderer.h"
 // #include "prevent_bss_reordering2.h"
 
 typedef struct {
@@ -462,12 +463,13 @@ void Macbeth_Texture_Scroll2(u16* tex, s32 arg1, s32 arg2) {
     for (i = 0; i < arg1; i++) {
         a = texPtr[(arg2 - 1) * arg1 + i];
 
-        for (j = arg2; j > 0; j--) {
+        for (j = arg2 - 1; j > 0; j--) {
             texPtr[j * arg1 + i] = texPtr[(j - 1) * arg1 + i];
         }
 
         texPtr[i] = a;
     }
+    PSP_RENDERER_DL_INVALIDATE_RGBA16(gMasterDisp++, texPtr);
 }
 
 void Macbeth_Train_Init(Actor* this) {
