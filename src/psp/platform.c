@@ -978,12 +978,155 @@ void PspPlatform_ReportAudioVmeEnvRuns(void) {
 #if PSP_AUDIO_VME_BENCH
     static u32 sLastJobs;
     static u32 sLastIncompleteCapture;
+    static u32 sLastTransferLifetimeStarts;
+    static u32 sLastTransferLifetimePhase;
+    static u32 sLastTransferLifetimeTransaction;
     PspAudioVmeEnvRunResult result;
     s32 incomplete;
+    s32 transferLifetimeIncomplete;
     char line[1024];
     char* out = line;
 
     PspAudioMe_GetVmeEnvRunResult(&result);
+    transferLifetimeIncomplete =
+        (result.transferLifetimePhase != 0) &&
+        (result.transferLifetimePhase != 12) &&
+        (result.transferLifetimePhase != 14);
+    if ((result.transferLifetimeStarts != 0) &&
+        ((result.transferLifetimeStarts != sLastTransferLifetimeStarts) ||
+         (transferLifetimeIncomplete &&
+          ((result.transferLifetimePhase != sLastTransferLifetimePhase) ||
+           (result.transferLifetimeTransaction !=
+            sLastTransferLifetimeTransaction)))) &&
+        (transferLifetimeIncomplete ||
+         (result.transferLifetimeTransactions ==
+          result.transferLifetimeTargetTransactions) ||
+         ((result.transferLifetimeTransactions & 7) == 0))) {
+        char transferLine[512];
+        char* transferOut = transferLine;
+
+        sLastTransferLifetimeStarts = result.transferLifetimeStarts;
+        sLastTransferLifetimePhase = result.transferLifetimePhase;
+        sLastTransferLifetimeTransaction =
+            result.transferLifetimeTransaction;
+        transferOut = psp_append_text(
+            transferOut, "[audio-vme-env-transfer-life] target=");
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeTargetTransactions);
+        *transferOut++ = '/';
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeVoices);
+        *transferOut++ = '/';
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeSamples);
+        transferOut = psp_append_text(transferOut, " progress=");
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeTransactions);
+        *transferOut++ = '/';
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeStarts);
+        *transferOut++ = '/';
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeCompletions);
+        transferOut = psp_append_text(transferOut, " accumulator=");
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeAccumulatorStarts);
+        *transferOut++ = '/';
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeAccumulatorCompletions);
+        *transferOut++ = '/';
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeAccumulatorTicks);
+        transferOut = psp_append_text(transferOut, " pcm=");
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimePcmStarts);
+        *transferOut++ = '/';
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimePcmCompletions);
+        *transferOut++ = '/';
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeTicks);
+        transferOut = psp_append_text(transferOut, " ramp_ticks=");
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeRampTicks);
+        transferOut = psp_append_text(transferOut, " dry=");
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeDryRuns);
+        *transferOut++ = '/';
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeContextTicks);
+        *transferOut++ = '/';
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeDryTicks);
+        transferOut = psp_append_text(transferOut, " wet=");
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeWetRuns);
+        *transferOut++ = '/';
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeWetContextTicks);
+        *transferOut++ = '/';
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeWetTicks);
+        transferOut = psp_append_text(transferOut, " add=");
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeAddRuns);
+        *transferOut++ = '/';
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeAddContextTicks);
+        *transferOut++ = '/';
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeAddTicks);
+        transferOut = psp_append_text(transferOut, " output=");
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeOutputStarts);
+        *transferOut++ = '/';
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeOutputCompletions);
+        *transferOut++ = '/';
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeOutputTicks);
+        transferOut = psp_append_text(transferOut, " restore=");
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeRestoreStarts);
+        *transferOut++ = '/';
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeRestores);
+        *transferOut++ = '/';
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeRestoreTicks);
+        transferOut = psp_append_text(transferOut, " full_restore=");
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeFullRestoreStarts);
+        *transferOut++ = '/';
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeFullRestores);
+        *transferOut++ = '/';
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeFullRestoreTicks);
+        transferOut = psp_append_text(transferOut, " probe=");
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeFullRestoreProbeStopped);
+        *transferOut++ = '/';
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeFullRestoreStep);
+        *transferOut++ = '/';
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeFullRestoreProbeTicks);
+        transferOut = psp_append_text(transferOut, " checkpoint=");
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimePhase);
+        *transferOut++ = '/';
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeTransaction);
+        *transferOut++ = '/';
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeVoice);
+        *transferOut++ = '/';
+        transferOut = psp_append_u32(
+            transferOut, result.transferLifetimeFullRestoreStep);
+        *transferOut = '\0';
+        PspPlatform_LogAudioVmeLine(transferLine);
+    }
     incomplete = (result.persistentPhase != 0) &&
                  (result.persistentPhase != 12) &&
                  (result.captureRuns != sLastIncompleteCapture);
@@ -1080,6 +1223,31 @@ void PspPlatform_ReportAudioVmeEnvRuns(void) {
     out = psp_append_u32(out, result.shadowValidateTicks);
     *out++ = '/';
     out = psp_append_u32(out, result.shadowTotalTicks);
+    out = psp_append_text(out, " restore=");
+    out = psp_append_u32(out, result.restorationRuns);
+    *out++ = '/';
+    out = psp_append_u32(out, result.restorationInterval);
+    *out++ = '/';
+    out = psp_append_u32(out, result.restorationTicks);
+    *out++ = '/';
+    out = psp_append_u32(
+        out, (result.restorationRuns != 0) &&
+                 (result.restorationInterval != 0) ?
+            result.restorationTicks /
+                (result.restorationRuns * result.restorationInterval) : 0);
+    out = psp_append_text(out, " full_restore=");
+    out = psp_append_u32(out, result.fullRestorationRuns);
+    *out++ = '/';
+    out = psp_append_u32(out, result.fullRestorationInterval);
+    *out++ = '/';
+    out = psp_append_u32(out, result.fullRestorationTicks);
+    *out++ = '/';
+    out = psp_append_u32(
+        out, (result.fullRestorationRuns != 0) &&
+                 (result.fullRestorationInterval != 0) ?
+            result.fullRestorationTicks /
+                (result.fullRestorationRuns *
+                 result.fullRestorationInterval) : 0);
     out = psp_append_text(out, " capture_costs=");
     out = psp_append_u32(out, result.captureScanTicks);
     *out++ = '/';
@@ -1132,6 +1300,14 @@ void PspPlatform_ReportAudioVmeEnvRuns(void) {
     out = psp_append_u32(out, result.persistentPhase);
     *out++ = '/';
     out = psp_append_u32(out, result.persistentVoice);
+    out = psp_append_text(out, " transfers=");
+    out = psp_append_u32(out, result.accumulatorTransferStarts);
+    *out++ = '/';
+    out = psp_append_u32(out, result.accumulatorTransferCompletions);
+    *out++ = '/';
+    out = psp_append_u32(out, result.pcmTransferStarts);
+    *out++ = '/';
+    out = psp_append_u32(out, result.pcmTransferCompletions);
     *out = '\0';
     PspPlatform_LogAudioVmeLine(line);
 #endif

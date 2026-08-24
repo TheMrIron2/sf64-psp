@@ -6,6 +6,10 @@
 #include "src/psp/audio_mixer.h"
 #include "src/psp/audio_profile.h"
 
+#if PSP_AUDIO_VME_BENCH
+void PspPlatform_ReportAudioVmeEnvRuns(void);
+#endif
+
 #ifndef PSP_AUDIO
 #define PSP_AUDIO 0
 #endif
@@ -51,7 +55,13 @@
     (PSP_AUDIO_VME_RESAMPLE_BATCH_SAMPLES + 32)
 #define PSP_AUDIO_VME_ENV_BENCH_REPEATS 4
 #define PSP_AUDIO_VME_ENV_MIN_VOICES 16
-#define PSP_AUDIO_VME_ENV_CAPTURE_RUNS 2
+#define PSP_AUDIO_VME_ENV_CAPTURE_RUNS 32
+#define PSP_AUDIO_VME_ENV_RESTORE_INTERVAL 2
+#define PSP_AUDIO_VME_ENV_FULL_RESTORE_INTERVAL 8
+#define PSP_AUDIO_VME_ENV_TRANSFER_LIFETIME 0
+#define PSP_AUDIO_VME_ENV_TRANSFER_LIFETIME_TRANSACTIONS 128
+#define PSP_AUDIO_VME_ENV_TRANSFER_LIFETIME_VOICES 17
+#define PSP_AUDIO_VME_ENV_FULL_RESTORE_PROBE_STEP 0
 #define PSP_AUDIO_VME_ENV_WET_OFFSET 256
 #define PSP_AUDIO_VME_ENV_WET_PRODUCT_OFFSET 512
 #define PSP_AUDIO_VME_TRANSPORT_BENCH_REPEATS 4
@@ -3821,6 +3831,391 @@ static s32 psp_audio_me_env_segment_eligible(
     const Acmd* commands, s32 commandCount, u32 requiredVoices,
     u32* voiceCount, u32* sampleCount);
 
+static void psp_audio_me_vme_env_restore_without_buffers(void) {
+    vmeLibConfigTransfer(0);
+    vmeLibStart();
+    vme_icn(INPUT, 0x3210);
+    vme_icn(FLOW, 0x3210);
+    vme_icn(ARCH, 0x3210);
+    vme_set(ENABLE, FU_1, 0xf0000000);
+    vme_pe0(agu_top(MODE), 0x84000000);
+    vme_pe0(agu_top(COUNT), 0x00010000, 2048 - 1);
+    vme_pe0(vme_fu(PRIMARY), 0x00004000);
+    vme_pe0(vme_fu(SECONDARY), 0x00004000);
+    vme_pe1(vme_fu(PRIMARY), 0x00004000);
+    vme_pe1(vme_fu(SECONDARY), 0x00004000);
+    vme_pe2(vme_fu(PRIMARY), 0x00004000);
+    vme_pe2(vme_fu(SECONDARY), 0x00004000);
+    vme_pe3(vme_fu(PRIMARY), 0x00004000);
+    vme_pe3(vme_fu(SECONDARY), 0x00004000);
+    vmeLibFinish();
+    _vmeLibStart();
+    meCoreMemset((void*) VME_DATAPATH_BASE, 0, 0x01a8);
+    _vmeLibFinish();
+    vmeLibSetInnerAGU1(0, 0, 0);
+    vmeLibSetInnerAGU2(0, 0, 0);
+    *(volatile u32*) 0x440ff01c = 0;
+    *(volatile u32*) 0x440ff02c = 0;
+    *(volatile u32*) 0x440ff03c = 0;
+    meLibSync();
+}
+
+#if PSP_AUDIO_VME_ENV_TRANSFER_LIFETIME
+static s32 psp_audio_me_vme_env_full_restore_diagnostic(
+    volatile PspAudioVmeEnvRunResult* result) {
+    result->transferLifetimeFullRestoreStep = 1;
+    vmeLibConfigTransfer(0);
+    result->transferLifetimeFullRestoreStep = 2;
+    vmeLibStart();
+    vme_icn(INPUT, 0x3210);
+    vme_icn(FLOW, 0x3210);
+    vme_icn(ARCH, 0x3210);
+    vme_set(ENABLE, FU_1, 0xf0000000);
+    vme_pe0(agu_top(MODE), 0x84000000);
+    vme_pe0(agu_top(COUNT), 0x00010000, 2048 - 1);
+    vme_pe0(vme_fu(PRIMARY), 0x00004000);
+    vme_pe0(vme_fu(SECONDARY), 0x00004000);
+    vme_pe1(vme_fu(PRIMARY), 0x00004000);
+    vme_pe1(vme_fu(SECONDARY), 0x00004000);
+    vme_pe2(vme_fu(PRIMARY), 0x00004000);
+    vme_pe2(vme_fu(SECONDARY), 0x00004000);
+    vme_pe3(vme_fu(PRIMARY), 0x00004000);
+    vme_pe3(vme_fu(SECONDARY), 0x00004000);
+    result->transferLifetimeFullRestoreStep = 3;
+    vmeLibFinish();
+    result->transferLifetimeFullRestoreStep = 4;
+    _vmeLibStart();
+    meCoreMemset((void*) VME_DATAPATH_BASE, 0, 0x01a8);
+    result->transferLifetimeFullRestoreStep = 5;
+    _vmeLibFinish();
+#if PSP_AUDIO_VME_ENV_FULL_RESTORE_PROBE_STEP == 5
+    if (result->transferLifetimeFullRestoreStarts == 8) {
+        result->transferLifetimeFullRestoreProbeStopped = 1;
+        return 0;
+    }
+#endif
+    result->transferLifetimeFullRestoreStep = 6;
+    vmeLibClearLocalBuffer(0, 0x2000);
+#if PSP_AUDIO_VME_ENV_FULL_RESTORE_PROBE_STEP == 6
+    if (result->transferLifetimeFullRestoreStarts == 8) {
+        result->transferLifetimeFullRestoreProbeStopped = 1;
+        return 0;
+    }
+#endif
+    result->transferLifetimeFullRestoreStep = 7;
+    vmeLibClearLocalBuffer(0x8000, 0x2000);
+#if PSP_AUDIO_VME_ENV_FULL_RESTORE_PROBE_STEP == 7
+    if (result->transferLifetimeFullRestoreStarts == 8) {
+        result->transferLifetimeFullRestoreProbeStopped = 1;
+        return 0;
+    }
+#endif
+    result->transferLifetimeFullRestoreStep = 8;
+    *(volatile u32*) 0x440ff020 = 0;
+    *(volatile u32*) 0x440ff024 = 0;
+    *(volatile u32*) 0x440ff028 = 0;
+    *(volatile u32*) 0x440ff030 = 0;
+    *(volatile u32*) 0x440ff034 = 0;
+    *(volatile u32*) 0x440ff038 = 0;
+    *(volatile u32*) 0x440ff01c = 0;
+    *(volatile u32*) 0x440ff02c = 0;
+    *(volatile u32*) 0x440ff03c = 0;
+#if PSP_AUDIO_VME_ENV_FULL_RESTORE_PROBE_STEP == 8
+    if (result->transferLifetimeFullRestoreStarts == 8) {
+        result->transferLifetimeFullRestoreProbeStopped = 1;
+        return 0;
+    }
+#endif
+    meLibSync();
+    result->transferLifetimeFullRestoreStep = 9;
+#if PSP_AUDIO_VME_ENV_FULL_RESTORE_PROBE_STEP == 9
+    if (result->transferLifetimeFullRestoreStarts == 8) {
+        result->transferLifetimeFullRestoreProbeStopped = 1;
+        return 0;
+    }
+#endif
+    return 1;
+}
+
+static void psp_audio_me_vme_env_transfer_lifetime(void) {
+    s16 localPcm[192] __attribute__((aligned(64)));
+    volatile s32 *top = (volatile s32 *)VME_TOP_BUFFERS;
+    volatile PspAudioVmeEnvRunResult *result = PSP_AUDIO_VME_ENV_RUN_STATS;
+    PspAudioVmeEnvRampContextParam rampParam;
+    PspAudioVmeEnvContextParam addParam;
+    void *dryContext;
+    void *wetContext;
+    void *addContext;
+    u32 transaction;
+    u32 voice;
+    u32 index;
+    u32 start;
+
+    if (result->transferLifetimeTargetTransactions == 0) {
+        result->transferLifetimeTargetTransactions =
+            PSP_AUDIO_VME_ENV_TRANSFER_LIFETIME_TRANSACTIONS;
+        result->transferLifetimeVoices =
+            PSP_AUDIO_VME_ENV_TRANSFER_LIFETIME_VOICES;
+        result->transferLifetimeSamples = 176;
+    }
+    transaction = result->transferLifetimeTransactions;
+    if (transaction >= PSP_AUDIO_VME_ENV_TRANSFER_LIFETIME_TRANSACTIONS) {
+        return;
+    }
+    result->transferLifetimePhase = 1;
+    result->transferLifetimeTransaction = transaction + 1;
+    result->transferLifetimeVoice = 0;
+    if ((transaction != 0) &&
+        ((transaction % PSP_AUDIO_VME_ENV_FULL_RESTORE_INTERVAL) == 0)) {
+        result->transferLifetimePhase = 2;
+        result->transferLifetimeFullRestoreStarts++;
+        start = PspAudioMe_BenchReadCount();
+        if (!psp_audio_me_vme_env_full_restore_diagnostic(result)) {
+            result->transferLifetimeFullRestoreProbeTicks +=
+                psp_audio_me_bench_elapsed(start);
+            result->transferLifetimePhase = 15;
+            return;
+        }
+        result->transferLifetimeFullRestoreTicks +=
+            psp_audio_me_bench_elapsed(start);
+        result->transferLifetimeFullRestores++;
+    } else if ((transaction != 0) &&
+               ((transaction % PSP_AUDIO_VME_ENV_RESTORE_INTERVAL) == 0)) {
+        result->transferLifetimePhase = 3;
+        result->transferLifetimeRestoreStarts++;
+        start = PspAudioMe_BenchReadCount();
+        psp_audio_me_vme_env_restore_without_buffers();
+        result->transferLifetimeRestoreTicks +=
+            psp_audio_me_bench_elapsed(start);
+        result->transferLifetimeRestores++;
+    }
+    result->transferLifetimePhase = 4;
+    start = PspAudioMe_BenchReadCount();
+    rampParam.count = 176;
+    dryContext = psp_audio_me_vme_env_ramp_dry_context(&rampParam);
+    result->transferLifetimeContextTicks += psp_audio_me_bench_elapsed(start);
+    start = PspAudioMe_BenchReadCount();
+    wetContext = psp_audio_me_vme_env_ramp_wet_context(&rampParam);
+    result->transferLifetimeWetContextTicks +=
+        psp_audio_me_bench_elapsed(start);
+    start = PspAudioMe_BenchReadCount();
+    addParam.count = 176;
+    addContext = psp_audio_me_vme_env_wet_add_context(&addParam);
+    result->transferLifetimeAddContextTicks +=
+        psp_audio_me_bench_elapsed(start);
+#if PSP_AUDIO_VME_ENV_FULL_RESTORE_PROBE_STEP == 10
+    if (result->transferLifetimeFullRestoreStarts == 8) {
+        result->transferLifetimeFullRestoreStep = 10;
+        result->transferLifetimeFullRestoreProbeStopped = 1;
+        result->transferLifetimePhase = 15;
+        return;
+    }
+#endif
+    result->transferLifetimePhase = 4;
+    for (voice = 0; voice < 4; voice++) {
+        for (index = 0; index < 176; index++) {
+            sEnvCaptureAccumulators[voice][index] =
+                (s16)(index * 1973 + transaction * 7919 + voice * 2377);
+        }
+    }
+    meCoreDcacheWritebackRange(sEnvCaptureAccumulators,
+                               sizeof(sEnvCaptureAccumulators));
+#if PSP_AUDIO_VME_ENV_FULL_RESTORE_PROBE_STEP == 11
+    if (result->transferLifetimeFullRestoreStarts == 8) {
+        result->transferLifetimeFullRestoreStep = 11;
+        result->transferLifetimeFullRestoreProbeStopped = 1;
+        result->transferLifetimePhase = 15;
+        return;
+    }
+#endif
+    result->transferLifetimePhase = 5;
+    result->transferLifetimeVoice = 1;
+    result->transferLifetimeAccumulatorStarts++;
+    result->transferLifetimeStarts++;
+    start = PspAudioMe_BenchReadCount();
+    vmeLibMemTo16((u32)(uintptr_t)sEnvCaptureAccumulators[0],
+                  PSP_AUDIO_VME_BASE_WORD_OFFSET + 2 * PSP_AUDIO_VME_LANE_WORDS,
+                  176, VME_DMAC_TRANSFERT_NO_WAIT);
+#if PSP_AUDIO_VME_ENV_FULL_RESTORE_PROBE_STEP == 12
+    if (result->transferLifetimeFullRestoreStarts == 8) {
+        result->transferLifetimeFullRestoreStep = 12;
+        result->transferLifetimeFullRestoreProbeStopped = 1;
+        result->transferLifetimePhase = 15;
+        return;
+    }
+#endif
+    result->transferLifetimeVoice = 2;
+    result->transferLifetimeAccumulatorStarts++;
+    result->transferLifetimeStarts++;
+    vmeLibMemTo16((u32)(uintptr_t)sEnvCaptureAccumulators[1],
+                  PSP_AUDIO_VME_BASE_WORD_OFFSET + 3 * PSP_AUDIO_VME_LANE_WORDS,
+                  176, VME_DMAC_TRANSFERT_WAIT_FINISH);
+    result->transferLifetimeAccumulatorTicks +=
+        psp_audio_me_bench_elapsed(start);
+    result->transferLifetimeAccumulatorCompletions += 2;
+    result->transferLifetimeCompletions += 2;
+#if PSP_AUDIO_VME_ENV_FULL_RESTORE_PROBE_STEP == 13
+    if (result->transferLifetimeFullRestoreStarts == 8) {
+        result->transferLifetimeFullRestoreStep = 13;
+        result->transferLifetimeFullRestoreProbeStopped = 1;
+        result->transferLifetimePhase = 15;
+        return;
+    }
+#endif
+    result->transferLifetimeVoice = 3;
+    result->transferLifetimeAccumulatorStarts++;
+    result->transferLifetimeStarts++;
+    start = PspAudioMe_BenchReadCount();
+    vmeLibMemTo16((u32)(uintptr_t)sEnvCaptureAccumulators[2],
+                  PSP_AUDIO_VME_BASE_WORD_OFFSET +
+                      2 * PSP_AUDIO_VME_LANE_WORDS +
+                      PSP_AUDIO_VME_ENV_WET_OFFSET,
+                  176, VME_DMAC_TRANSFERT_NO_WAIT);
+    result->transferLifetimeVoice = 4;
+    result->transferLifetimeAccumulatorStarts++;
+    result->transferLifetimeStarts++;
+    vmeLibMemTo16((u32)(uintptr_t)sEnvCaptureAccumulators[3],
+                  PSP_AUDIO_VME_BASE_WORD_OFFSET +
+                      3 * PSP_AUDIO_VME_LANE_WORDS +
+                      PSP_AUDIO_VME_ENV_WET_OFFSET,
+                  176, VME_DMAC_TRANSFERT_WAIT_FINISH);
+    result->transferLifetimeAccumulatorTicks +=
+        psp_audio_me_bench_elapsed(start);
+    result->transferLifetimeAccumulatorCompletions += 2;
+    result->transferLifetimeCompletions += 2;
+    for (voice = 0; voice < PSP_AUDIO_VME_ENV_TRANSFER_LIFETIME_VOICES;
+         voice++) {
+        result->transferLifetimePhase = 6;
+        result->transferLifetimeVoice = voice + 1;
+        for (index = 0; index < 176; index++) {
+            localPcm[index] =
+                (s16)(index * 1973 + transaction * 7919 + voice * 2377);
+        }
+        meCoreDcacheWritebackRange(localPcm, sizeof(localPcm));
+        result->transferLifetimePhase = 7;
+        result->transferLifetimePcmStarts++;
+        result->transferLifetimeStarts++;
+        start = PspAudioMe_BenchReadCount();
+        vmeLibMemTo16((u32)(uintptr_t)localPcm, PSP_AUDIO_VME_TOP_WORD_OFFSET,
+                      176, VME_DMAC_TRANSFERT_WAIT_FINISH);
+        result->transferLifetimeTicks += psp_audio_me_bench_elapsed(start);
+        result->transferLifetimePcmCompletions++;
+        result->transferLifetimeCompletions++;
+        result->transferLifetimePhase = 8;
+        start = PspAudioMe_BenchReadCount();
+        {
+            volatile s32 *leftRamp = top + PSP_AUDIO_VME_LANE_WORDS;
+            volatile s32 *rightRamp = top + 2 * PSP_AUDIO_VME_LANE_WORDS;
+            volatile s32 *wetRamp = top + 3 * PSP_AUDIO_VME_LANE_WORDS;
+            u16 leftVolume =
+                (u16)(0x1234 + transaction * 0x111 + voice * 0x321);
+            u16 rightVolume =
+                (u16)(0x8765 + transaction * 0x209 + voice * 0x173);
+            u16 wetVolume = (u16)(0x4567 + transaction * 0x151 + voice * 0x283);
+            u16 leftRate = (u16)(0x101 + transaction + voice * 3);
+            u16 rightRate = (u16)(0xfed3 - transaction - voice * 5);
+            u16 wetRate = (u16)(0x207 + transaction + voice * 7);
+
+            for (index = 0; index < 176; index += 8) {
+                u32 repeat;
+
+                for (repeat = 0; repeat < 8; repeat++) {
+                    *leftRamp++ = leftVolume;
+                    *rightRamp++ = rightVolume;
+                    *wetRamp++ = wetVolume;
+                }
+                leftVolume = (u16)(leftVolume + leftRate);
+                rightVolume = (u16)(rightVolume + rightRate);
+                wetVolume = (u16)(wetVolume + wetRate);
+            }
+        }
+        meLibSync();
+        result->transferLifetimeRampTicks += psp_audio_me_bench_elapsed(start);
+#if PSP_AUDIO_VME_ENV_FULL_RESTORE_PROBE_STEP == 14
+        if ((result->transferLifetimeFullRestoreStarts == 8) &&
+            (voice == 0)) {
+            result->transferLifetimeFullRestoreStep = 14;
+            result->transferLifetimeFullRestoreProbeStopped = 1;
+            result->transferLifetimePhase = 15;
+            return;
+        }
+#endif
+        result->transferLifetimePhase = 9;
+        start = PspAudioMe_BenchReadCount();
+        vmeLibStart();
+        vmeLibLoadCustomContext(dryContext);
+        vmeLibFinish();
+        result->transferLifetimeDryTicks += psp_audio_me_bench_elapsed(start);
+        result->transferLifetimeDryRuns++;
+#if PSP_AUDIO_VME_ENV_FULL_RESTORE_PROBE_STEP == 15
+        if ((result->transferLifetimeFullRestoreStarts == 8) &&
+            (voice == 0)) {
+            result->transferLifetimeFullRestoreStep = 15;
+            result->transferLifetimeFullRestoreProbeStopped = 1;
+            result->transferLifetimePhase = 15;
+            return;
+        }
+#endif
+        result->transferLifetimePhase = 10;
+        start = PspAudioMe_BenchReadCount();
+        vmeLibStart();
+        vmeLibLoadCustomContext(wetContext);
+        vmeLibFinish();
+        result->transferLifetimeWetTicks += psp_audio_me_bench_elapsed(start);
+        result->transferLifetimeWetRuns++;
+        result->transferLifetimePhase = 11;
+        start = PspAudioMe_BenchReadCount();
+        vmeLibStart();
+        vmeLibLoadCustomContext(addContext);
+        vmeLibFinish();
+        result->transferLifetimeAddTicks += psp_audio_me_bench_elapsed(start);
+        result->transferLifetimeAddRuns++;
+    }
+    result->transferLifetimePhase = 13;
+    result->transferLifetimeVoice = 1;
+    start = PspAudioMe_BenchReadCount();
+    meCoreDcacheWritebackInvalidateRange(sEnvShadowOutput,
+                                         sizeof(sEnvShadowOutput));
+    result->transferLifetimeOutputStarts++;
+    vmeLibMemFrom16((u32)(uintptr_t)sEnvShadowOutput[0],
+                    PSP_AUDIO_VME_BASE_WORD_OFFSET +
+                        2 * PSP_AUDIO_VME_LANE_WORDS,
+                    176, VME_DMAC_TRANSFERT_NO_WAIT);
+    result->transferLifetimeVoice = 2;
+    result->transferLifetimeOutputStarts++;
+    vmeLibMemFrom16((u32)(uintptr_t)sEnvShadowOutput[1],
+                    PSP_AUDIO_VME_BASE_WORD_OFFSET +
+                        3 * PSP_AUDIO_VME_LANE_WORDS,
+                    176, VME_DMAC_TRANSFERT_WAIT_FINISH);
+    result->transferLifetimeOutputCompletions += 2;
+    result->transferLifetimeVoice = 3;
+    result->transferLifetimeOutputStarts++;
+    vmeLibMemFrom16((u32)(uintptr_t)sEnvShadowOutput[2],
+                    PSP_AUDIO_VME_BASE_WORD_OFFSET +
+                        2 * PSP_AUDIO_VME_LANE_WORDS +
+                        PSP_AUDIO_VME_ENV_WET_OFFSET,
+                    176, VME_DMAC_TRANSFERT_NO_WAIT);
+    result->transferLifetimeVoice = 4;
+    result->transferLifetimeOutputStarts++;
+    vmeLibMemFrom16((u32)(uintptr_t)sEnvShadowOutput[3],
+                    PSP_AUDIO_VME_BASE_WORD_OFFSET +
+                        3 * PSP_AUDIO_VME_LANE_WORDS +
+                        PSP_AUDIO_VME_ENV_WET_OFFSET,
+                    176, VME_DMAC_TRANSFERT_WAIT_FINISH);
+    result->transferLifetimeOutputCompletions += 2;
+    meCoreDcacheInvalidateRange(sEnvShadowOutput, sizeof(sEnvShadowOutput));
+    meLibSync();
+    result->transferLifetimeOutputTicks += psp_audio_me_bench_elapsed(start);
+    result->transferLifetimeTransactions++;
+    if (result->transferLifetimeTransactions ==
+        PSP_AUDIO_VME_ENV_TRANSFER_LIFETIME_TRANSACTIONS) {
+        result->transferLifetimePhase = 14;
+    } else {
+        result->transferLifetimePhase = 12;
+    }
+}
+#endif
+
 int PspAudioMe_BeginEnvCapture(const Acmd* commands, s32 commandCount) {
     volatile PspAudioVmeEnvRunResult* result = PSP_AUDIO_VME_ENV_RUN_STATS;
     u32 start;
@@ -3838,11 +4233,26 @@ int PspAudioMe_BeginEnvCapture(const Acmd* commands, s32 commandCount) {
         (voices > PSP_AUDIO_VME_ENV_CAPTURE_MAX_VOICES)) {
         return 0;
     }
+#if PSP_AUDIO_VME_ENV_TRANSFER_LIFETIME
+    if ((result->transferLifetimeTargetTransactions == 0) ||
+        (result->transferLifetimeTransactions <
+         result->transferLifetimeTargetTransactions)) {
+        if (result->transferLifetimeFullRestoreProbeStopped != 0) {
+            return 0;
+        }
+        sVmeLiveOwner = PSP_AUDIO_VME_SCRATCH_ENV_CAPTURE;
+        psp_audio_me_vme_env_transfer_lifetime();
+    }
+    return 0;
+#endif
     sVmeLiveOwner = PSP_AUDIO_VME_SCRATCH_ENV_CAPTURE;
     sEnvCaptureExpected = voices;
     sEnvCaptureCount = 0;
     sEnvCaptureSamples = samples;
     sEnvCaptureMode = result->captureRuns == 0 ? 1 : 2;
+    result->restorationInterval = PSP_AUDIO_VME_ENV_RESTORE_INTERVAL;
+    result->fullRestorationInterval =
+        PSP_AUDIO_VME_ENV_FULL_RESTORE_INTERVAL;
     result->captureScanTicks += psp_audio_me_bench_elapsed(start);
     return sEnvCaptureMode;
 }
@@ -3941,6 +4351,31 @@ static int psp_audio_me_run_env_capture_shadow(void) {
         return 0;
     }
     sVmeScratchOwner = PSP_AUDIO_VME_SCRATCH_ENV_CAPTURE;
+    if ((result->persistentRuns != 0) &&
+        ((result->persistentRuns %
+          PSP_AUDIO_VME_ENV_FULL_RESTORE_INTERVAL) == 0)) {
+        result->persistentPhase = 13;
+        result->persistentVoice = result->persistentRuns;
+        timingStart = PspAudioMe_BenchReadCount();
+        vmeLibWipe();
+        totalTicks = psp_audio_me_bench_elapsed(timingStart);
+        result->shadowResetTicks += totalTicks;
+        result->fullRestorationTicks += totalTicks;
+        result->fullRestorationRuns++;
+        result->persistentPhase = 14;
+    } else if ((result->persistentRuns != 0) &&
+               ((result->persistentRuns %
+                 PSP_AUDIO_VME_ENV_RESTORE_INTERVAL) == 0)) {
+        result->persistentPhase = 13;
+        result->persistentVoice = result->persistentRuns;
+        timingStart = PspAudioMe_BenchReadCount();
+        psp_audio_me_vme_env_restore_without_buffers();
+        totalTicks = psp_audio_me_bench_elapsed(timingStart);
+        result->shadowResetTicks += totalTicks;
+        result->restorationTicks += totalTicks;
+        result->restorationRuns++;
+        result->persistentPhase = 14;
+    }
     result->persistentRuns++;
     result->persistentPhase = 1;
     result->persistentVoice = 0;
@@ -3956,24 +4391,30 @@ static int psp_audio_me_run_env_capture_shadow(void) {
     result->persistentPhase = 2;
     meCoreDcacheWritebackRange(
         sEnvCaptureAccumulators, sizeof(sEnvCaptureAccumulators));
+    result->accumulatorTransferStarts++;
     vmeLibMemTo16(
         (u32) (uintptr_t) sEnvCaptureAccumulators[0],
         PSP_AUDIO_VME_BASE_WORD_OFFSET + 2 * PSP_AUDIO_VME_LANE_WORDS,
         samples, VME_DMAC_TRANSFERT_NO_WAIT);
+    result->accumulatorTransferStarts++;
     vmeLibMemTo16(
         (u32) (uintptr_t) sEnvCaptureAccumulators[1],
         PSP_AUDIO_VME_BASE_WORD_OFFSET + 3 * PSP_AUDIO_VME_LANE_WORDS,
         samples, VME_DMAC_TRANSFERT_WAIT_FINISH);
+    result->accumulatorTransferCompletions += 2;
+    result->accumulatorTransferStarts++;
     vmeLibMemTo16(
         (u32) (uintptr_t) sEnvCaptureAccumulators[2],
         PSP_AUDIO_VME_BASE_WORD_OFFSET + 2 * PSP_AUDIO_VME_LANE_WORDS +
             PSP_AUDIO_VME_ENV_WET_OFFSET,
         samples, VME_DMAC_TRANSFERT_NO_WAIT);
+    result->accumulatorTransferStarts++;
     vmeLibMemTo16(
         (u32) (uintptr_t) sEnvCaptureAccumulators[3],
         PSP_AUDIO_VME_BASE_WORD_OFFSET + 3 * PSP_AUDIO_VME_LANE_WORDS +
             PSP_AUDIO_VME_ENV_WET_OFFSET,
         samples, VME_DMAC_TRANSFERT_WAIT_FINISH);
+    result->accumulatorTransferCompletions += 2;
     meLibSync();
     result->persistentPhase = 3;
     totalTicks = psp_audio_me_bench_elapsed(timingStart);
@@ -3988,10 +4429,12 @@ static int psp_audio_me_run_env_capture_shadow(void) {
             localPcm, sEnvCaptureInputs[voice], samples * sizeof(s16));
         meCoreDcacheWritebackRange(
             localPcm, 192 * sizeof(s16));
+        result->pcmTransferStarts++;
         vmeLibMemTo16(
             (u32) (uintptr_t) localPcm,
             PSP_AUDIO_VME_TOP_WORD_OFFSET,
             samples, VME_DMAC_TRANSFERT_WAIT_FINISH);
+        result->pcmTransferCompletions++;
         totalTicks = psp_audio_me_bench_elapsed(timingStart);
         result->shadowPcmTicks += totalTicks;
         result->shadowStageTicks += totalTicks;
@@ -4690,6 +5133,9 @@ static void psp_audio_me_wait(PspAudioProfileWaitReason reason) {
     if (psp_audio_me_is_running()) {
         u32 interruptStart;
 
+#if PSP_AUDIO_VME_BENCH
+        PspPlatform_ReportAudioVmeEnvRuns();
+#endif
         meLibEmitSoftwareInterrupt();
         interruptStart = sceKernelGetSystemTimeLow();
         while (psp_audio_me_is_running() &&
