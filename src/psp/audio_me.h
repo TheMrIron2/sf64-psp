@@ -286,6 +286,7 @@ typedef struct {
     u32 dryAccumulatorMismatches;
     u32 wetAccumulatorMismatches;
     u32 materializeMismatches;
+    u32 scalarMismatches;
     s32 firstStage;
     s32 firstLane;
     s32 firstIndex;
@@ -304,6 +305,7 @@ typedef struct {
     u64 stateTicks;
     u64 resetTicks;
     u64 totalTicks;
+    u64 scalarTailTicks;
     u64 validateTicks;
     u32 counterTicks;
     u32 counterOverhead;

@@ -3328,6 +3328,7 @@ static u16 psp_audio_me_vme_env_ramp_volume(
 }
 
 #define PSP_AUDIO_VME_ENV_RAMP_VOICES 16
+#define PSP_AUDIO_VME_RESIDENT_TAIL_VOICES 17
 
 static u16 psp_audio_me_vme_env_ramp_initial(u32 voice, u32 lane) {
     static const u16 sBase[3] = { 0xf000, 0x5100, 0xb000 };
@@ -3403,6 +3404,57 @@ static void psp_audio_me_vme_resident_tail_mismatch(
     }
 }
 
+static void psp_audio_me_scalar_resident_tail(
+    s16 accumulators[4][192], u32 run) {
+    const u32 samples = 176;
+    u32 voice;
+    u32 index;
+    u32 lane;
+
+    for (index = 0; index < samples; index++) {
+        accumulators[0][index] =
+            psp_audio_me_vme_env_dry_accumulator(0, index, run);
+        accumulators[1][index] =
+            psp_audio_me_vme_env_dry_accumulator(1, index, run);
+        accumulators[2][index] =
+            psp_audio_me_vme_env_wet_accumulator(0, index, run);
+        accumulators[3][index] =
+            psp_audio_me_vme_env_wet_accumulator(1, index, run);
+    }
+    for (voice = 0; voice < PSP_AUDIO_VME_RESIDENT_TAIL_VOICES; voice++) {
+        u32 fixture = run * PSP_AUDIO_VME_RESIDENT_TAIL_VOICES + voice;
+
+        for (index = 0; index < samples; index++) {
+            s32 output = 0;
+            u16 wetVolume = psp_audio_me_vme_env_ramp_volume(
+                psp_audio_me_vme_env_ramp_initial(voice, 2),
+                psp_audio_me_vme_env_ramp_rate(voice, 2), index);
+
+            for (lane = 0; lane < PSP_AUDIO_VME_RESAMPLE_LANES; lane++) {
+                s16 input = psp_audio_me_vme_resident_tail_source(
+                    lane, index, fixture);
+                s16 coefficient = psp_audio_me_vme_resident_tail_coefficient(
+                    lane, index, fixture);
+
+                output += ((s32) input * coefficient + 0x4000) >> 15;
+            }
+            output = psp_audio_me_clamp16(output);
+            for (lane = 0; lane < 2; lane++) {
+                u16 dryVolume = psp_audio_me_vme_env_ramp_volume(
+                    psp_audio_me_vme_env_ramp_initial(voice, lane),
+                    psp_audio_me_vme_env_ramp_rate(voice, lane), index);
+                s16 dry = (s16) ((output * (s32) dryVolume) >> 16);
+                s16 wet = (s16) ((dry * (s32) wetVolume) >> 16);
+
+                accumulators[lane][index] = psp_audio_me_clamp16(
+                    accumulators[lane][index] + dry);
+                accumulators[lane + 2][index] = psp_audio_me_clamp16(
+                    accumulators[lane + 2][index] + wet);
+            }
+        }
+    }
+}
+
 __attribute__((noinline))
 static void psp_audio_me_vme_resident_tail_probe(void) {
     const u32 samples = 176;
@@ -3411,12 +3463,13 @@ static void psp_audio_me_vme_resident_tail_probe(void) {
     volatile s32* top = (volatile s32*) VME_TOP_BUFFERS;
     volatile s32* base = (volatile s32*) VME_BASE_BUFFERS;
     s16 expectedAccumulators[4][192] __attribute__((aligned(64)));
+    s16 scalarAccumulators[4][192] __attribute__((aligned(64)));
     s16 expectedState[16];
     s16 actualState[16];
     u32 run;
 
-    result->voices = 2;
-    result->samples = samples * 2;
+    result->voices = PSP_AUDIO_VME_RESIDENT_TAIL_VOICES;
+    result->samples = samples * PSP_AUDIO_VME_RESIDENT_TAIL_VOICES;
     result->firstStage = -1;
     result->firstLane = -1;
     result->firstIndex = -1;
@@ -3437,6 +3490,9 @@ static void psp_audio_me_vme_resident_tail_probe(void) {
         u32 voice;
 
         sVmeBenchReadOverhead = 0;
+        start = PspAudioMe_BenchReadCount();
+        psp_audio_me_scalar_resident_tail(scalarAccumulators, run);
+        result->scalarTailTicks += psp_audio_me_bench_elapsed(start);
         totalStart = PspAudioMe_BenchReadCount();
         result->counterOverhead = benchReadOverhead;
 
@@ -3488,8 +3544,10 @@ static void psp_audio_me_vme_resident_tail_probe(void) {
         meLibSync();
         result->accumulatorInTicks += psp_audio_me_bench_elapsed(start);
 
-        for (voice = 0; voice < 2; voice++) {
-            u32 fixture = run * 2 + voice;
+        for (voice = 0;
+             voice < PSP_AUDIO_VME_RESIDENT_TAIL_VOICES; voice++) {
+            u32 fixture =
+                run * PSP_AUDIO_VME_RESIDENT_TAIL_VOICES + voice;
 
             start = PspAudioMe_BenchReadCount();
             for (index = 0; index < samples; index++) {
@@ -3789,6 +3847,9 @@ static void psp_audio_me_vme_resident_tail_probe(void) {
                 if (actual != expected) {
                     psp_audio_me_vme_resident_tail_mismatch(
                         result, 7, lane, index, expected, actual);
+                }
+                if (scalarAccumulators[lane][index] != expected) {
+                    result->scalarMismatches++;
                 }
             }
         }

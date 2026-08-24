@@ -1164,18 +1164,18 @@ void PspPlatform_ReportAudioVmeEnvRamp(void) {
 void PspPlatform_ReportAudioVmeResidentTail(void) {
 #if PSP_AUDIO_VME_BENCH
     static s32 sReported;
+    static s32 sInclusiveReported;
     PspAudioVmeResidentTailResult result;
+    PspAudioVmeAdpcmHandoffResult handoff;
     char line[768];
     char* out = line;
 
-    if (sReported) {
-        return;
-    }
     PspAudioMe_GetVmeResidentTailResult(&result);
     if (result.calls == 0) {
         return;
     }
-    sReported = 1;
+    if (!sReported) {
+        sReported = 1;
     out = psp_append_text(out, "[audio-vme-resident-tail] calls=");
     out = psp_append_u32(out, result.calls);
     out = psp_append_text(out, " voices=");
@@ -1190,6 +1190,8 @@ void PspPlatform_ReportAudioVmeResidentTail(void) {
     out = psp_append_u32(out, result.accumulatorMismatches);
     out = psp_append_text(out, " materialize_mismatch=");
     out = psp_append_u32(out, result.materializeMismatches);
+    out = psp_append_text(out, " scalar_mismatch=");
+    out = psp_append_u32(out, result.scalarMismatches);
     out = psp_append_text(out, " stages=");
     out = psp_append_u32(out, result.dryProductMismatches);
     *out++ = '/';
@@ -1231,6 +1233,12 @@ void PspPlatform_ReportAudioVmeResidentTail(void) {
     out = psp_append_u32(out, result.counterTicks / result.calls);
     *out++ = '/';
     out = psp_append_u32(out, result.counterOverhead);
+    out = psp_append_text(out, " per_voice=");
+    out = psp_append_u32(
+        out, result.totalTicks / result.calls / result.voices);
+    *out++ = '/';
+    out = psp_append_u32(
+        out, result.resetTicks / result.calls / result.voices);
     if ((result.resampleMismatches + result.stateMismatches +
          result.accumulatorMismatches + result.dryProductMismatches +
          result.wetProductMismatches + result.materializeMismatches) != 0) {
@@ -1244,6 +1252,43 @@ void PspPlatform_ReportAudioVmeResidentTail(void) {
         out = psp_append_s32(out, result.expected);
         out = psp_append_text(out, " actual=");
         out = psp_append_s32(out, result.actual);
+    }
+        *out = '\0';
+        PspPlatform_LogAudioVmeLine(line);
+    }
+
+    PspAudioMe_GetVmeAdpcmHandoffResult(&handoff);
+    if (sInclusiveReported || (handoff.commands < 256)) {
+        return;
+    }
+    sInclusiveReported = 1;
+    out = line;
+    out = psp_append_text(out, "[audio-vme-resident-inclusive] voices=");
+    out = psp_append_u32(out, result.voices);
+    out = psp_append_text(out, " adpcm_commands=");
+    out = psp_append_u32(out, handoff.commands);
+    if ((result.voices != 0) && (handoff.commands != 0)) {
+        u64 decode = handoff.decodeTicks / handoff.commands;
+        u64 local = (handoff.localCopyTicks + handoff.localPrepareTicks +
+                     handoff.localTransferTicks) / handoff.commands;
+        u64 scalarTail = result.scalarTailTicks / result.calls /
+                         result.voices;
+        u64 hybridTail = result.totalTicks / result.calls / result.voices;
+
+        out = psp_append_text(out, " adpcm_samples=");
+        out = psp_append_u32(out, handoff.samples / handoff.commands);
+        out = psp_append_text(out, " decode=");
+        out = psp_append_u64(out, decode);
+        out = psp_append_text(out, " handoff=");
+        out = psp_append_u64(out, local);
+        out = psp_append_text(out, " scalar_tail=");
+        out = psp_append_u64(out, scalarTail);
+        out = psp_append_text(out, " hybrid_tail=");
+        out = psp_append_u64(out, hybridTail);
+        out = psp_append_text(out, " scalar_total=");
+        out = psp_append_u64(out, decode + scalarTail);
+        out = psp_append_text(out, " hybrid_total=");
+        out = psp_append_u64(out, decode + local + hybridTail);
     }
     *out = '\0';
     PspPlatform_LogAudioVmeLine(line);
