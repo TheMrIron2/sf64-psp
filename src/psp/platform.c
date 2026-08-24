@@ -1188,6 +1188,8 @@ void PspPlatform_ReportAudioVmeResidentTail(void) {
     out = psp_append_u32(out, result.stateMismatches);
     out = psp_append_text(out, " accum_mismatch=");
     out = psp_append_u32(out, result.accumulatorMismatches);
+    out = psp_append_text(out, " materialize_mismatch=");
+    out = psp_append_u32(out, result.materializeMismatches);
     out = psp_append_text(out, " stages=");
     out = psp_append_u32(out, result.dryProductMismatches);
     *out++ = '/';
@@ -1225,9 +1227,13 @@ void PspPlatform_ReportAudioVmeResidentTail(void) {
     out = psp_append_u32(out, result.totalTicks / result.calls);
     out = psp_append_text(out, " validate=");
     out = psp_append_u32(out, result.validateTicks / result.calls);
+    out = psp_append_text(out, " counter=");
+    out = psp_append_u32(out, result.counterTicks / result.calls);
+    *out++ = '/';
+    out = psp_append_u32(out, result.counterOverhead);
     if ((result.resampleMismatches + result.stateMismatches +
          result.accumulatorMismatches + result.dryProductMismatches +
-         result.wetProductMismatches) != 0) {
+         result.wetProductMismatches + result.materializeMismatches) != 0) {
         out = psp_append_text(out, " first=");
         out = psp_append_s32(out, result.firstStage);
         *out++ = '/';

@@ -285,6 +285,7 @@ typedef struct {
     u32 wetProductMismatches;
     u32 dryAccumulatorMismatches;
     u32 wetAccumulatorMismatches;
+    u32 materializeMismatches;
     s32 firstStage;
     s32 firstLane;
     s32 firstIndex;
@@ -304,6 +305,8 @@ typedef struct {
     u64 resetTicks;
     u64 totalTicks;
     u64 validateTicks;
+    u32 counterTicks;
+    u32 counterOverhead;
 } PspAudioVmeResidentTailResult;
 
 typedef struct {
