@@ -1497,7 +1497,7 @@ static s32 psp_audio_mixer_execute_command_list(const Acmd* commands,
     s32 i;
     s32 segmentStart;
     s32 segmentEnd;
-#if defined(TARGET_PSP) && PSP_AUDIO_VME_VALIDATE && PSP_AUDIO_VME_BENCH
+#if defined(TARGET_PSP) && PSP_AUDIO_VME
     s32 captureSegment;
     u32 captureScalarStart;
 #endif
@@ -1516,7 +1516,7 @@ static s32 psp_audio_mixer_execute_command_list(const Acmd* commands,
         } while ((segmentEnd < commandCount) &&
                  ((commands[segmentEnd - 1].words.w0 >> 24) != A_SAVEBUFF));
 
-#if defined(TARGET_PSP) && PSP_AUDIO_VME_VALIDATE && PSP_AUDIO_VME_BENCH
+#if defined(TARGET_PSP) && PSP_AUDIO_VME
         captureSegment = PspAudioMe_BeginEnvCapture(
             commands + segmentStart, segmentEnd - segmentStart);
 #endif
@@ -1536,7 +1536,7 @@ static s32 psp_audio_mixer_execute_command_list(const Acmd* commands,
             case A_SPNOOP:
                 break;
             case A_ADPCM:
-#if defined(TARGET_PSP) && PSP_AUDIO_VME_VALIDATE && PSP_AUDIO_VME_BENCH
+#if defined(TARGET_PSP) && PSP_AUDIO_VME_RESEARCH
                 {
                     s16* output = BUF_S16(rspa.out);
                     u32 samples = ROUND_UP_32(rspa.nbytes) /
@@ -1599,7 +1599,7 @@ static s32 psp_audio_mixer_execute_command_list(const Acmd* commands,
                 aEnvSetup1Impl((w0 >> 16) & 0xFF, w0 & 0xFFFF, w1 >> 16, w1 & 0xFFFF, 0, 0, 0, 0);
                 break;
             case A_ENVMIXER:
-#if defined(TARGET_PSP) && PSP_AUDIO_VME_VALIDATE && PSP_AUDIO_VME_BENCH
+#if defined(TARGET_PSP) && PSP_AUDIO_VME
                 if (captureSegment) {
                     PspAudioMe_CaptureEnvVoice(
                         BUF_S16(((w0 >> 16) & 0xff) << 4),
@@ -1612,12 +1612,12 @@ static s32 psp_audio_mixer_execute_command_list(const Acmd* commands,
                     captureScalarStart = PspAudioMe_BenchReadCount();
                 }
 #endif
-#if defined(TARGET_PSP) && PSP_AUDIO_VME_VALIDATE && PSP_AUDIO_VME_BENCH
+#if defined(TARGET_PSP) && PSP_AUDIO_VME
                 if (captureSegment != 2) {
 #endif
                     aEnvMixerImpl(((w0 >> 16) & 0xFF) << 4, (w0 >> 8) & 0xFF, (w0 >> 4) & 1,
                                   (w0 >> 3) & 1, (w0 >> 2) & 1, (w0 >> 1) & 1, w0 & 1, w1, 2, 0);
-#if defined(TARGET_PSP) && PSP_AUDIO_VME_VALIDATE && PSP_AUDIO_VME_BENCH
+#if defined(TARGET_PSP) && PSP_AUDIO_VME
                 }
                 if (captureSegment == 1) {
                     PspAudioMe_RecordEnvCaptureScalar(
@@ -1629,7 +1629,7 @@ static s32 psp_audio_mixer_execute_command_list(const Acmd* commands,
                 aLoadBufferImpl((const void*) w1, w0 & 0xFFFF, ((w0 >> 16) & 0xFF) << 4);
                 break;
             case A_SAVEBUFF:
-#if defined(TARGET_PSP) && PSP_AUDIO_VME_VALIDATE && PSP_AUDIO_VME_BENCH
+#if defined(TARGET_PSP) && PSP_AUDIO_VME
                 if (captureSegment && (i == segmentEnd - 1)) {
                     PspAudioMe_EndEnvCapture();
                     captureSegment = 0;
