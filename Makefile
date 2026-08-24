@@ -8,6 +8,7 @@
 #   make PSP_FULL=0 psp    # debug/bootstrap EBOOT only
 #   make bootstrap         # same, isolated under build/psp-bootstrap
 #   make PROFILE_PSP=1 psp # profiling-friendly ELF packaging
+#   make PSP_AUDIO=1 PSP_AUDIO_VME_RESEARCH=1 psp # VME validation build
 
 -include .make_options
 
@@ -47,6 +48,8 @@ ifeq ($(PSP_RENDERER_DIAGNOSTICS),1)
 PSP_LOG := 1
 endif
 PSP_AUDIO ?= 0
+PSP_AUDIO_PROFILE ?= 0
+PSP_AUDIO_VME_RESEARCH ?= 0
 PSP_FPS_OVERLAY ?= 1
 COLOR ?= 1
 VERBOSE ?= 0
@@ -84,6 +87,30 @@ ifneq ($(PSP_AUDIO),1)
 $(error PSP_AUDIO must be 0 or 1)
 endif
 endif
+ifneq ($(PSP_AUDIO_PROFILE),0)
+ifneq ($(PSP_AUDIO_PROFILE),1)
+$(error PSP_AUDIO_PROFILE must be 0 or 1)
+endif
+endif
+ifeq ($(PSP_AUDIO_PROFILE),1)
+ifneq ($(PSP_AUDIO),1)
+$(error PSP_AUDIO_PROFILE=1 requires PSP_AUDIO=1)
+endif
+endif
+ifneq ($(PSP_AUDIO_VME_RESEARCH),0)
+ifneq ($(PSP_AUDIO_VME_RESEARCH),1)
+$(error PSP_AUDIO_VME_RESEARCH must be 0 or 1)
+endif
+endif
+ifeq ($(PSP_AUDIO_VME_RESEARCH),1)
+ifneq ($(PSP_AUDIO),1)
+$(error PSP_AUDIO_VME_RESEARCH=1 requires PSP_AUDIO=1)
+endif
+override PSP_AUDIO_PROFILE := 1
+endif
+override PSP_AUDIO_VME := $(PSP_AUDIO)
+override PSP_AUDIO_VME_VALIDATE := $(PSP_AUDIO_VME)
+override PSP_AUDIO_VME_BENCH := $(PSP_AUDIO_VME)
 ifneq ($(VTX_FUSED_TNL),0)
 ifneq ($(VTX_FUSED_TNL),1)
 $(error VTX_FUSED_TNL must be 0 or 1)
@@ -272,6 +299,11 @@ CFLAGS += -fno-exceptions -fno-unwind-tables
 CFLAGS += -fno-asynchronous-unwind-tables -fno-ident
 CFLAGS += -DPSP_FPS_OVERLAY=$(PSP_FPS_OVERLAY)
 CFLAGS += -DPSP_AUDIO=$(PSP_AUDIO)
+CFLAGS += -DPSP_AUDIO_PROFILE=$(PSP_AUDIO_PROFILE)
+CFLAGS += -DPSP_AUDIO_VME=$(PSP_AUDIO_VME)
+CFLAGS += -DPSP_AUDIO_VME_RESEARCH=$(PSP_AUDIO_VME_RESEARCH)
+CFLAGS += -DPSP_AUDIO_VME_VALIDATE=$(PSP_AUDIO_VME_VALIDATE)
+CFLAGS += -DPSP_AUDIO_VME_BENCH=$(PSP_AUDIO_VME_BENCH)
 CFLAGS += -DPROFILE_GPROF=$(if $(filter 1,$(PROFILE_PSP)),1,0)
 CFLAGS += -DPROFILE_PHASES=$(if $(filter 1,$(PROFILE_PHASES)),1,0)
 CFLAGS += -DPROFILE_CAPTURE_FRAMES=$(PROFILE_CAPTURE_FRAMES)

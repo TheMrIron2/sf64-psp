@@ -100,6 +100,23 @@ SPTask* AudioThread_CreateTask(void) {
 
 #if defined(TARGET_PSP) && PSP_AUDIO
     PspAudioMe_Wait();
+#if PSP_AUDIO_VME_RESEARCH
+    PspPlatform_ReportAudioVmeMix();
+    PspPlatform_ReportAudioVmeResample();
+#if PSP_AUDIO_VME_BENCH
+    PspPlatform_ReportAudioVmeAdpcmHandoff();
+    PspPlatform_ReportAudioVmeBench();
+    PspPlatform_ReportAudioVmeResampleBatchBench();
+    PspPlatform_ReportAudioVmeTransportBench();
+    PspPlatform_ReportAudioVmeEnvBoundaryBench();
+    PspPlatform_ReportAudioVmeEnvPipeline();
+    PspPlatform_ReportAudioVmeEnvRamp();
+    PspPlatform_ReportAudioVmeResidentTail();
+    PspPlatform_ReportAudioVmeEnvRuns();
+    PspPlatform_ReportAudioVmeEnvBench();
+    PspPlatform_ReportAudioVmeResampleBench();
+#endif
+#endif
     if (sPendingOutput != NULL) {
         if (PspAudioMe_GetLastError() < 0) {
             memset(sPendingOutput, 0, sPendingOutputSize);

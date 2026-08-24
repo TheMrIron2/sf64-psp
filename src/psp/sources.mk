@@ -43,6 +43,10 @@ PSP_AUDIO_C_FILES := \
     src/psp/audio_mixer.c \
     src/psp/audio_output.c
 
+ifeq ($(PSP_AUDIO_PROFILE),1)
+PSP_AUDIO_C_FILES += src/psp/audio_profile.c
+endif
+
 PSP_GAME_S_FILES := \
     src/psp/audio_assets.S
 

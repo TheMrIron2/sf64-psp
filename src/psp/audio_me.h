@@ -4,11 +4,478 @@
 #include "PR/abi.h"
 #include "PR/ultratypes.h"
 
+typedef enum {
+    PSP_AUDIO_VME_UNINITIALIZED,
+    PSP_AUDIO_VME_DISABLED,
+    PSP_AUDIO_VME_INITIALIZING,
+    PSP_AUDIO_VME_READY,
+    PSP_AUDIO_VME_FAULT,
+} PspAudioVmeState;
+
+typedef struct {
+    PspAudioVmeState state;
+    u32 checkpoint;
+    u32 runs;
+    u32 samples;
+    u32 mismatches;
+    s32 firstIndex;
+    s32 input;
+    s32 factor;
+    s32 expected;
+    s32 actual;
+} PspAudioVmeSmokeResult;
+
+typedef struct {
+    u32 calls;
+    u32 samples;
+    u32 mismatches;
+    s32 firstIndex;
+    s32 input;
+    s32 oldOutput;
+    s32 gain;
+    s32 expected;
+    s32 actual;
+} PspAudioVmeMixResult;
+
+typedef struct {
+    u32 runs;
+    u32 outputs;
+    u32 mismatches;
+    s32 firstCase;
+    s32 firstIndex;
+    s32 expected;
+    s32 actual;
+} PspAudioVmeFilterResult;
+
+typedef struct {
+    u32 runs;
+    u32 vectors;
+    u32 mismatches;
+    s32 firstCase;
+    u32 firstTerms;
+    u32 termRuns;
+    u32 termMismatches;
+    s32 firstTermCount;
+    s32 firstTermExpected;
+    s32 firstTermActual;
+    s64 minAccumulator;
+    s64 maxAccumulator;
+    s64 firstWideAccumulator;
+    s32 firstScalarAccumulator;
+    s32 firstExpected;
+    s32 firstActualRaw;
+    s32 firstActual;
+    u32 explicitRuns;
+    u32 explicitMismatches;
+    s32 firstExplicitCase;
+    s32 firstExplicitExpected;
+    s32 firstExplicitRaw;
+    s32 firstExplicitActual;
+} PspAudioVmeAdpcmAuditResult;
+
+typedef struct {
+    u32 runs;
+    u32 products;
+    u32 mismatches;
+    s32 firstLane;
+    s32 firstIndex;
+    s32 input;
+    s32 coefficient;
+    s32 expected;
+    s32 actual;
+    u32 commands;
+    u32 outputs;
+    u32 pairMismatches;
+    u32 outputMismatches;
+    u32 stateMismatches;
+    u32 skipped;
+    s32 firstOutputIndex;
+    s32 outputExpected;
+    s32 outputActual;
+    s32 firstPairIndex;
+    s32 pair01Expected;
+    s32 pair01Actual;
+    s32 pair23Expected;
+    s32 pair23Actual;
+    s32 firstStateIndex;
+    s32 stateExpected;
+    s32 stateActual;
+} PspAudioVmeResampleResult;
+
+#define PSP_AUDIO_VME_RESAMPLE_MAX_SAMPLES 1024
+
+#define PSP_AUDIO_VME_BENCH_ROWS 8
+
+typedef struct {
+    u32 samples;
+    u32 calls;
+    u32 scalarCalls;
+    u64 scalarTicks;
+    u64 stageTicks;
+    u64 updateTicks;
+    u64 runTicks;
+    u64 readbackTicks;
+    u64 postTicks;
+} PspAudioVmeBenchRow;
+
+typedef struct {
+    u32 calls;
+    u32 samples;
+    u32 mismatches;
+    s32 firstMismatch;
+    s32 expected;
+    s32 actual;
+    u64 scalarTicks;
+    u64 prepareTicks;
+    u64 stageTicks;
+    u64 updateTicks;
+    u64 runTicks;
+    u64 pairTicks;
+    u64 readbackTicks;
+    u64 validateTicks;
+    u64 wipeTicks;
+} PspAudioVmeResampleBenchResult;
+
+typedef struct {
+    u32 commands;
+    u32 samples;
+    u32 skipped;
+    u32 pcmMismatches;
+    u32 stateMismatches;
+    u32 firstMode;
+    s32 firstIndex;
+    s32 expected;
+    s32 actual;
+    u32 mainAddress;
+    u32 localAddress;
+    u64 decodeTicks;
+    u64 mainCopyTicks;
+    u64 mainPrepareTicks;
+    u64 mainTransferTicks;
+    u64 localCopyTicks;
+    u64 localPrepareTicks;
+    u64 localTransferTicks;
+    u64 validateTicks;
+} PspAudioVmeAdpcmHandoffResult;
+
+#define PSP_AUDIO_VME_ENV_BENCH_CASES 5
+#define PSP_AUDIO_VME_ENV_MAX_SAMPLES 2048
+#define PSP_AUDIO_VME_TRANSPORT_BENCH_CASES 5
+
+typedef struct {
+    u32 samples;
+    u32 calls;
+    u32 multiplyMismatches;
+    s32 multiplyFirstMismatch;
+    s32 multiplyExpected;
+    s32 multiplyActual;
+    u32 mismatches;
+    s32 firstMismatch;
+    s32 expected;
+    s32 actual;
+    s32 bestOffset;
+    u32 offsetMismatches;
+    u64 scalarTicks;
+    u64 vmeTicks;
+    u64 validateTicks;
+} PspAudioVmeEnvBenchResult;
+
+typedef struct {
+    u32 samples;
+    u32 calls;
+    u32 mismatches;
+    u32 mainAddress;
+    u32 localAddress;
+    s32 firstDomain;
+    s32 firstIndex;
+    s32 expected;
+    s32 actual;
+    u64 mainToTicks;
+    u64 localToTicks;
+    u64 mainFromTicks;
+    u64 localFromTicks;
+} PspAudioVmeTransportBenchResult;
+
+typedef struct {
+    u32 calls;
+    u32 samples;
+    u32 mismatches;
+    s32 firstOutput;
+    s32 firstIndex;
+    s32 expected;
+    s32 actual;
+    u64 prepareTicks;
+    u64 transferInTicks;
+    u64 setupTicks;
+    u64 runTicks;
+    u64 transferOutTicks;
+    u64 materializeTicks;
+} PspAudioVmeEnvBoundaryBenchResult;
+
+typedef struct {
+    u32 calls;
+    u32 voices;
+    u32 samples;
+    u32 seedMismatches;
+    u32 residentMismatches;
+    s32 firstStage;
+    s32 firstIndex;
+    s32 expected;
+    s32 actual;
+    s32 bestOffset;
+    u32 offsetMismatches;
+    u32 clampMismatches;
+    s32 clampBestOffset;
+    u32 clampOffsetMismatches;
+    s32 clampMaskBestOffset[4];
+    u32 clampMaskOffsetMismatches[4];
+    u32 clampPassingMask;
+    u32 dryCalls;
+    u32 dryVoices;
+    u32 drySamples;
+    u32 drySeedMismatches[2];
+    u32 dryResidentMismatches[2];
+    s32 dryFirstLane;
+    s32 dryFirstStage;
+    s32 dryFirstIndex;
+    s32 dryExpected;
+    s32 dryActual;
+    u32 wetCalls;
+    u32 wetVoices;
+    u32 wetSamples;
+    u32 wetProductMismatches[2];
+    u32 wetSeedMismatches[2];
+    u32 wetResidentMismatches[2];
+    s32 wetFirstLane;
+    s32 wetFirstStage;
+    s32 wetFirstIndex;
+    s32 wetExpected;
+    s32 wetActual;
+    u64 wetTicks;
+} PspAudioVmeEnvPipelineResult;
+
+typedef struct {
+    u32 calls;
+    u32 voices;
+    u32 samples;
+    u32 mismatches;
+    s32 firstStage;
+    s32 firstLane;
+    s32 firstIndex;
+    s32 expected;
+    s32 actual;
+    u64 prepareTicks;
+    u64 accumulatorInTicks;
+    u64 inputTicks;
+    u64 rampTicks;
+    u64 runTicks;
+    u64 outputTicks;
+    u64 materializeTicks;
+    u64 validateTicks;
+} PspAudioVmeEnvRampResult;
+
+typedef struct {
+    u32 calls;
+    u32 voices;
+    u32 samples;
+    u32 resampleMismatches;
+    u32 stateMismatches;
+    u32 accumulatorMismatches;
+    u32 dryProductMismatches;
+    u32 wetProductMismatches;
+    u32 dryAccumulatorMismatches;
+    u32 wetAccumulatorMismatches;
+    u32 materializeMismatches;
+    u32 scalarMismatches;
+    s32 firstStage;
+    s32 firstLane;
+    s32 firstIndex;
+    s32 expected;
+    s32 actual;
+    u64 sourcePrepareTicks;
+    u64 coefficientPrepareTicks;
+    u64 resampleStageTicks;
+    u64 resampleSetupTicks;
+    u64 resampleRunTicks;
+    u64 accumulatorInTicks;
+    u64 rampTicks;
+    u64 envSetupTicks;
+    u64 envRunTicks;
+    u64 accumulatorOutTicks;
+    u64 stateTicks;
+    u64 resetTicks;
+    u64 totalTicks;
+    u64 scalarTailTicks;
+    u64 validateTicks;
+    u32 counterTicks;
+    u32 counterOverhead;
+} PspAudioVmeResidentTailResult;
+
+typedef struct {
+    u32 jobs;
+    u32 envCommands;
+    u32 compatibleRuns;
+    u32 compatibleVoices;
+    u32 compatibleSamples;
+    u32 maxVoices;
+    u32 flaggedCommands;
+    u32 destinationBreaks;
+    u32 saveBoundaries;
+    u32 addBoundaries;
+    u32 mixBoundaries;
+    u32 clearBoundaries;
+    u32 moveBoundaries;
+    u32 resampleBoundaries;
+    u32 otherBoundaries;
+    u32 isolationRuns;
+    u32 isolationMismatches;
+    u32 segments;
+    u32 segmentCommands;
+    u32 maxSegmentCommands;
+    u32 captureRuns;
+    u32 captureVoices;
+    u32 captureMinVoices;
+    u32 captureMaxVoices;
+    u32 captureBytes;
+    u32 captureMismatches;
+    u32 shadowRuns;
+    u32 shadowVoices;
+    u32 shadowMismatches;
+    u32 shadowFirstLane;
+    u32 shadowFirstIndex;
+    s32 shadowExpected;
+    s32 shadowActual;
+    u64 captureTicks;
+    u64 captureScanTicks;
+    u64 captureAccumulatorTicks;
+    u64 capturePcmTicks;
+    u64 captureParamTicks;
+    u64 scalarTicks;
+    u64 shadowResetTicks;
+    u32 restorationRuns;
+    u32 restorationInterval;
+    u64 restorationTicks;
+    u32 fullRestorationRuns;
+    u32 fullRestorationInterval;
+    u64 fullRestorationTicks;
+    u64 shadowStageTicks;
+    u64 shadowContextTicks;
+    u64 shadowAccumulatorTicks;
+    u64 shadowPcmTicks;
+    u64 shadowRampTicks;
+    u64 shadowRunTicks;
+    u64 shadowOutputTicks;
+    u64 shadowMaterializeTicks;
+    u64 shadowValidateTicks;
+    u64 shadowTotalTicks;
+    u32 commitRuns;
+    u32 commitDeclined;
+    u32 authoritativeRuns;
+    u32 authoritativeDeclined;
+    u32 fallbackRuns;
+    u32 persistentRuns;
+    u32 ownershipDeclined;
+    u32 notReadyDeclined;
+    u32 validatorDeclined;
+    u32 persistentPhase;
+    u32 persistentVoice;
+    u32 accumulatorTransferStarts;
+    u32 accumulatorTransferCompletions;
+    u32 pcmTransferStarts;
+    u32 pcmTransferCompletions;
+    u32 transferLifetimeTargetTransactions;
+    u32 transferLifetimeTransactions;
+    u32 transferLifetimeVoices;
+    u32 transferLifetimeSamples;
+    u32 transferLifetimeStarts;
+    u32 transferLifetimeCompletions;
+    u32 transferLifetimeAccumulatorStarts;
+    u32 transferLifetimeAccumulatorCompletions;
+    u32 transferLifetimePcmStarts;
+    u32 transferLifetimePcmCompletions;
+    u32 transferLifetimeDryRuns;
+    u32 transferLifetimeWetRuns;
+    u32 transferLifetimeAddRuns;
+    u32 transferLifetimeOutputStarts;
+    u32 transferLifetimeOutputCompletions;
+    u32 transferLifetimeRestores;
+    u32 transferLifetimeFullRestores;
+    u32 transferLifetimeRestoreStarts;
+    u32 transferLifetimeFullRestoreStarts;
+    u32 transferLifetimeFullRestoreStep;
+    u32 transferLifetimeFullRestoreProbeStopped;
+    u32 transferLifetimePhase;
+    u32 transferLifetimeTransaction;
+    u32 transferLifetimeVoice;
+    u64 transferLifetimeTicks;
+    u64 transferLifetimeAccumulatorTicks;
+    u64 transferLifetimeRampTicks;
+    u64 transferLifetimeContextTicks;
+    u64 transferLifetimeDryTicks;
+    u64 transferLifetimeWetContextTicks;
+    u64 transferLifetimeWetTicks;
+    u64 transferLifetimeAddContextTicks;
+    u64 transferLifetimeAddTicks;
+    u64 transferLifetimeOutputTicks;
+    u64 transferLifetimeRestoreTicks;
+    u64 transferLifetimeFullRestoreTicks;
+    u64 transferLifetimeFullRestoreProbeTicks;
+    u64 persistentCaptureTicks;
+    u64 persistentVmeTicks;
+} PspAudioVmeEnvRunResult;
+
 int PspAudioMe_Boot(void);
 int PspAudioMe_Init(void);
 void PspAudioMe_Submit(const Acmd* commands, s32 commandCount);
 void PspAudioMe_Wait(void);
 int PspAudioMe_IsActive(void);
 int PspAudioMe_GetLastError(void);
+void PspAudioMe_GetVmeSmokeResult(PspAudioVmeSmokeResult* result);
+int PspAudioMe_ValidateVmeMix(u16 count, s16 gain, const s16* input,
+                              const s16* output);
+void PspAudioMe_GetVmeMixResult(PspAudioVmeMixResult* result);
+void PspAudioMe_GetVmeFilterResult(PspAudioVmeFilterResult* result);
+void PspAudioMe_GetVmeAdpcmAuditResult(
+    PspAudioVmeAdpcmAuditResult* result);
+void PspAudioMe_BenchmarkAdpcmHandoff(
+    const s16* pcm, u32 samples, const s16* state, u32 decodeTicks);
+void PspAudioMe_GetVmeAdpcmHandoffResult(
+    PspAudioVmeAdpcmHandoffResult* result);
+int PspAudioMe_ValidateVmeResample(u32 count, const s16* inputs,
+                                   const s16* coefficients,
+                                   const s16* output,
+                                   const s16* expectedState,
+                                   const s16* actualState,
+                                   u32 prepareTicks, u32 scalarTicks);
+void PspAudioMe_GetVmeResampleResult(PspAudioVmeResampleResult* result);
+void PspAudioMe_GetVmeResampleBenchResult(
+    PspAudioVmeResampleBenchResult* result);
+void PspAudioMe_GetVmeResampleBatchBenchResult(
+    PspAudioVmeResampleBenchResult* result);
+void PspAudioMe_GetVmeResampleDmacBenchResult(
+    PspAudioVmeResampleBenchResult* result);
+void PspAudioMe_GetVmeEnvBenchResult(
+    u32 index, PspAudioVmeEnvBenchResult* result);
+void PspAudioMe_GetVmeTransportBenchResult(
+    u32 index, PspAudioVmeTransportBenchResult* result);
+void PspAudioMe_GetVmeEnvBoundaryBenchResult(
+    PspAudioVmeEnvBoundaryBenchResult* result);
+void PspAudioMe_GetVmeEnvPipelineResult(
+    PspAudioVmeEnvPipelineResult* result);
+void PspAudioMe_GetVmeEnvRampResult(PspAudioVmeEnvRampResult* result);
+void PspAudioMe_GetVmeResidentTailResult(
+    PspAudioVmeResidentTailResult* result);
+void PspAudioMe_GetVmeEnvRunResult(PspAudioVmeEnvRunResult* result);
+int PspAudioMe_BeginEnvCapture(const Acmd* commands, s32 commandCount);
+void PspAudioMe_CaptureEnvVoice(const s16* input, u32 samples,
+                                const u16* volumes, const u16* rates,
+                                u16 wetVolume, u16 wetRate,
+                                s16* dryLeft, s16* dryRight,
+                                s16* wetLeft, s16* wetRight);
+void PspAudioMe_EndEnvCapture(void);
+void PspAudioMe_RecordEnvCaptureScalar(u32 ticks);
+u32 PspAudioMe_BenchReadCount(void);
+void PspAudioMe_RecordScalarMix(u32 samples, u32 ticks);
+void PspAudioMe_GetVmeBenchRow(u32 index, PspAudioVmeBenchRow* result);
 
 #endif
