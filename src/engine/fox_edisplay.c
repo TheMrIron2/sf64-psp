@@ -1638,7 +1638,9 @@ void Display_SetSecondLight(Vec3f* pos) {
         sp9C.z = pos->z - gLight3z;
 
         lightDist = VEC3F_MAG(&sp9C);
-        if (gPlayer[0].state == PLAYERSTATE_LEVEL_INTRO) {
+        if (lightDist < 0.001f) {
+            lightFade = 1.0f;
+        } else if (gPlayer[0].state == PLAYERSTATE_LEVEL_INTRO) {
             lightFade = 700.0f / lightDist;
         } else {
             lightFade = 200.0f / lightDist;
