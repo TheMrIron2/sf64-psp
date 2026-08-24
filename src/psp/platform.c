@@ -241,6 +241,38 @@ static char* psp_append_s32(char* out, s32 value) {
     }
     return psp_append_u32(out, magnitude);
 }
+
+#if PSP_AUDIO_VME_VALIDATE
+static char* psp_append_u64(char* out, u64 value) {
+    char digits[20];
+    s32 count = 0;
+
+    if (value == 0) {
+        *out++ = '0';
+        return out;
+    }
+    while (value != 0) {
+        digits[count++] = (char) ('0' + (value % 10));
+        value /= 10;
+    }
+    while (count > 0) {
+        *out++ = digits[--count];
+    }
+    return out;
+}
+
+static char* psp_append_s64(char* out, s64 value) {
+    u64 magnitude;
+
+    if (value < 0) {
+        *out++ = '-';
+        magnitude = 0ULL - (u64) value;
+    } else {
+        magnitude = (u64) value;
+    }
+    return psp_append_u64(out, magnitude);
+}
+#endif
 #endif
 
 #if PSP_FILE_LOG_ENABLED
@@ -416,6 +448,161 @@ void PspPlatform_ReportAudioVmeFilter(void) {
     if (result.mismatches != 0) {
         out = psp_append_text(out, " run=");
         out = psp_append_s32(out, result.firstCase);
+        out = psp_append_text(out, " first=");
+        out = psp_append_s32(out, result.firstIndex);
+        out = psp_append_text(out, " expected=");
+        out = psp_append_s32(out, result.expected);
+        out = psp_append_text(out, " actual=");
+        out = psp_append_s32(out, result.actual);
+    }
+    *out = '\0';
+    PspPlatform_LogAudioVmeLine(line);
+#endif
+}
+
+void PspPlatform_ReportAudioVmeAdpcmAudit(void) {
+#if PSP_AUDIO_VME_VALIDATE
+    PspAudioVmeAdpcmAuditResult result;
+    char line[768];
+    char* out = line;
+
+    PspAudioMe_GetVmeAdpcmAuditResult(&result);
+    out = psp_append_text(out, "[audio-vme-adpcm-width] runs=");
+    out = psp_append_u32(out, result.runs);
+    out = psp_append_text(out, " vectors=");
+    out = psp_append_u32(out, result.vectors);
+    out = psp_append_text(out, " min_acc=");
+    out = psp_append_s64(out, result.minAccumulator);
+    out = psp_append_text(out, " max_acc=");
+    out = psp_append_s64(out, result.maxAccumulator);
+    out = psp_append_text(out, " mismatches=");
+    out = psp_append_u32(out, result.mismatches);
+    out = psp_append_text(out, " term_runs=");
+    out = psp_append_u32(out, result.termRuns);
+    out = psp_append_text(out, " term_mismatches=");
+    out = psp_append_u32(out, result.termMismatches);
+    out = psp_append_text(out, " explicit_runs=");
+    out = psp_append_u32(out, result.explicitRuns);
+    out = psp_append_text(out, " explicit_mismatches=");
+    out = psp_append_u32(out, result.explicitMismatches);
+    if (result.termMismatches != 0) {
+        out = psp_append_text(out, " first_terms=");
+        out = psp_append_s32(out, result.firstTermCount);
+        out = psp_append_text(out, " term_expected=");
+        out = psp_append_s32(out, result.firstTermExpected);
+        out = psp_append_text(out, " term_actual=");
+        out = psp_append_s32(out, result.firstTermActual);
+    }
+    if (result.mismatches != 0) {
+        out = psp_append_text(out, " case=");
+        out = psp_append_s32(out, result.firstCase);
+        out = psp_append_text(out, " terms=");
+        out = psp_append_u32(out, result.firstTerms);
+        out = psp_append_text(out, " wide_acc=");
+        out = psp_append_s64(out, result.firstWideAccumulator);
+        out = psp_append_text(out, " scalar_acc=");
+        out = psp_append_s32(out, result.firstScalarAccumulator);
+        out = psp_append_text(out, " expected=");
+        out = psp_append_s32(out, result.firstExpected);
+        out = psp_append_text(out, " raw_actual=");
+        out = psp_append_s32(out, result.firstActualRaw);
+        out = psp_append_text(out, " actual=");
+        out = psp_append_s32(out, result.firstActual);
+    }
+    if (result.explicitMismatches != 0) {
+        out = psp_append_text(out, " explicit_case=");
+        out = psp_append_s32(out, result.firstExplicitCase);
+        out = psp_append_text(out, " explicit_expected=");
+        out = psp_append_s32(out, result.firstExplicitExpected);
+        out = psp_append_text(out, " explicit_raw=");
+        out = psp_append_s32(out, result.firstExplicitRaw);
+        out = psp_append_text(out, " explicit_actual=");
+        out = psp_append_s32(out, result.firstExplicitActual);
+    }
+    *out = '\0';
+    PspPlatform_LogAudioVmeLine(line);
+#endif
+}
+
+void PspPlatform_ReportAudioVmeAdpcmHandoff(void) {
+#if PSP_AUDIO_VME_BENCH
+    static u32 sNextReport = 32;
+    static u32 sLastCommands;
+    static u32 sLastPcmMismatches;
+    static u32 sLastStateMismatches;
+    PspAudioVmeAdpcmHandoffResult result;
+    u64 mainTotal;
+    u64 localTotal;
+    u64 mainEntry;
+    u64 localEntry;
+    char line[896];
+    char* out = line;
+
+    PspAudioMe_GetVmeAdpcmHandoffResult(&result);
+    if ((result.commands == sLastCommands) &&
+        (result.pcmMismatches == sLastPcmMismatches) &&
+        (result.stateMismatches == sLastStateMismatches)) {
+        return;
+    }
+    if ((result.commands < sNextReport) &&
+        (result.pcmMismatches == sLastPcmMismatches) &&
+        (result.stateMismatches == sLastStateMismatches)) {
+        return;
+    }
+    while ((sNextReport <= result.commands) && (sNextReport < 256)) {
+        sNextReport <<= 1;
+    }
+    sLastCommands = result.commands;
+    sLastPcmMismatches = result.pcmMismatches;
+    sLastStateMismatches = result.stateMismatches;
+    mainTotal = result.mainCopyTicks + result.mainPrepareTicks +
+                result.mainTransferTicks;
+    localTotal = result.localCopyTicks + result.localPrepareTicks +
+                 result.localTransferTicks;
+    mainEntry = result.decodeTicks + mainTotal;
+    localEntry = result.decodeTicks + localTotal;
+
+    out = psp_append_text(
+        out, "[audio-vme-adpcm-handoff] mode=compare commands=");
+    out = psp_append_u32(out, result.commands);
+    out = psp_append_text(out, " samples=");
+    out = psp_append_u32(out, result.samples);
+    out = psp_append_text(out, " skipped=");
+    out = psp_append_u32(out, result.skipped);
+    out = psp_append_text(out, " pcm_mismatches=");
+    out = psp_append_u32(out, result.pcmMismatches);
+    out = psp_append_text(out, " state_mismatches=");
+    out = psp_append_u32(out, result.stateMismatches);
+    if (result.commands != 0) {
+        out = psp_append_text(out, " decode_materialize=");
+        out = psp_append_u64(out, result.decodeTicks / result.commands);
+        out = psp_append_text(out, " main_copy=");
+        out = psp_append_u64(out, result.mainCopyTicks / result.commands);
+        out = psp_append_text(out, " main_prepare=");
+        out = psp_append_u64(out, result.mainPrepareTicks / result.commands);
+        out = psp_append_text(out, " main_transfer=");
+        out = psp_append_u64(out, result.mainTransferTicks / result.commands);
+        out = psp_append_text(out, " main_total=");
+        out = psp_append_u64(out, mainTotal / result.commands);
+        out = psp_append_text(out, " main_entry=");
+        out = psp_append_u64(out, mainEntry / result.commands);
+        out = psp_append_text(out, " local_copy=");
+        out = psp_append_u64(out, result.localCopyTicks / result.commands);
+        out = psp_append_text(out, " local_prepare=");
+        out = psp_append_u64(out, result.localPrepareTicks / result.commands);
+        out = psp_append_text(out, " local_transfer=");
+        out = psp_append_u64(out, result.localTransferTicks / result.commands);
+        out = psp_append_text(out, " local_total=");
+        out = psp_append_u64(out, localTotal / result.commands);
+        out = psp_append_text(out, " local_entry=");
+        out = psp_append_u64(out, localEntry / result.commands);
+        out = psp_append_text(out, " validate=");
+        out = psp_append_u64(out, result.validateTicks / result.commands);
+    }
+    if ((result.pcmMismatches != 0) ||
+        (result.stateMismatches != 0)) {
+        out = psp_append_text(out, " first_mode=");
+        out = psp_append_u32(out, result.firstMode);
         out = psp_append_text(out, " first=");
         out = psp_append_s32(out, result.firstIndex);
         out = psp_append_text(out, " expected=");
@@ -1506,6 +1693,7 @@ void PspPlatform_Init(void) {
     PspPlatform_ReportAudioVmeMix();
     PspPlatform_ReportAudioVmeFilter();
     PspPlatform_ReportAudioVmeResample();
+    PspPlatform_ReportAudioVmeAdpcmAudit();
 #endif
 #endif
 #endif

@@ -1536,7 +1536,22 @@ static s32 psp_audio_mixer_execute_command_list(const Acmd* commands,
             case A_SPNOOP:
                 break;
             case A_ADPCM:
+#if defined(TARGET_PSP) && PSP_AUDIO_VME_VALIDATE && PSP_AUDIO_VME_BENCH
+                {
+                    s16* output = BUF_S16(rspa.out);
+                    u32 samples = ROUND_UP_32(rspa.nbytes) /
+                                  sizeof(s16) + 16;
+                    u32 start;
+
+                    start = PspAudioMe_BenchReadCount();
+                    aADPCMdecImpl((w0 >> 16) & 0xFF, (s16*) w1);
+                    PspAudioMe_BenchmarkAdpcmHandoff(
+                        output, samples, (const s16*) w1,
+                        PspAudioMe_BenchReadCount() - start);
+                }
+#else
                 aADPCMdecImpl((w0 >> 16) & 0xFF, (s16*) w1);
+#endif
                 break;
             case A_CLEARBUFF:
                 aClearBufferImpl(w0 & 0xFFFF, w1);

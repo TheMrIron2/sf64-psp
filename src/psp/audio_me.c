@@ -46,6 +46,10 @@ void PspPlatform_ReportAudioVmeEnvRuns(void);
 #define PSP_AUDIO_VME_FILTER_TAPS 8
 #define PSP_AUDIO_VME_FILTER_OUTPUTS 4
 #define PSP_AUDIO_VME_FILTER_COEFF_OFFSET 32
+#define PSP_AUDIO_VME_ADPCM_AUDIT_CASES 16
+#define PSP_AUDIO_VME_ADPCM_AUDIT_TERMS 10
+#define PSP_AUDIO_VME_ADPCM_HANDOFF_COMMANDS 256
+#define PSP_AUDIO_VME_ADPCM_HANDOFF_MAX_SAMPLES 2048
 #define PSP_AUDIO_VME_RESAMPLE_LANES 4
 #define PSP_AUDIO_VME_RESAMPLE_WORDS 1024
 #define PSP_AUDIO_VME_RESAMPLE_COEFF_OFFSET 1024
@@ -218,6 +222,12 @@ static s32 sVmeResamplePair23[PSP_AUDIO_VME_RESAMPLE_MAX_SAMPLES]
     __attribute__((aligned(64)));
 static s16 sVmeResampleOutput[PSP_AUDIO_VME_RESAMPLE_MAX_SAMPLES]
     __attribute__((aligned(64)));
+static volatile PspAudioVmeAdpcmAuditResult sVmeAdpcmAuditStorage
+    __attribute__((aligned(64), section(".uncached")));
+#define PSP_AUDIO_VME_ADPCM_AUDIT_STATS \
+    ((volatile PspAudioVmeAdpcmAuditResult*) \
+        (PSP_AUDIO_ME_UNCACHED | \
+         (u32) (uintptr_t) &sVmeAdpcmAuditStorage))
 #if PSP_AUDIO_VME_BENCH
 static s16 sVmeResampleBatchInputs
     [PSP_AUDIO_VME_RESAMPLE_LANES][PSP_AUDIO_VME_RESAMPLE_BATCH_STRIDE]
@@ -242,6 +252,8 @@ static PspAudioVmeEnvSample
     sVmeEnvSamples[PSP_AUDIO_VME_ENV_MAX_SAMPLES]
     __attribute__((aligned(64)));
 static s16 sVmeTransportMain[PSP_AUDIO_VME_ENV_MAX_SAMPLES]
+    __attribute__((aligned(64)));
+static s16 sVmeAdpcmHandoffMain[PSP_AUDIO_VME_ADPCM_HANDOFF_MAX_SAMPLES]
     __attribute__((aligned(64)));
 static s16 sVmeEnvBoundaryOutput[4][192]
     __attribute__((aligned(64)));
@@ -283,6 +295,9 @@ static volatile PspAudioVmeResampleBenchResult sVmeResampleBatchBenchStorage
     __attribute__((aligned(64), section(".uncached")));
 static volatile PspAudioVmeResampleBenchResult sVmeResampleDmacBenchStorage
     __attribute__((aligned(64), section(".uncached")));
+static volatile PspAudioVmeAdpcmHandoffResult
+    sVmeAdpcmHandoffStorage
+    __attribute__((aligned(64), section(".uncached")));
 static volatile PspAudioVmeEnvBenchResult
     sVmeEnvBenchStorage[PSP_AUDIO_VME_ENV_BENCH_CASES]
     __attribute__((aligned(64), section(".uncached")));
@@ -316,6 +331,10 @@ static volatile PspAudioVmeEnvRunResult
     ((volatile PspAudioVmeResampleBenchResult*) \
         (PSP_AUDIO_ME_UNCACHED | \
          (u32) (uintptr_t) &sVmeResampleDmacBenchStorage))
+#define PSP_AUDIO_VME_ADPCM_HANDOFF_STATS \
+    ((volatile PspAudioVmeAdpcmHandoffResult*) \
+        (PSP_AUDIO_ME_UNCACHED | \
+         (u32) (uintptr_t) &sVmeAdpcmHandoffStorage))
 #define PSP_AUDIO_VME_ENV_BENCH_STATS \
     ((volatile PspAudioVmeEnvBenchResult*) \
         (PSP_AUDIO_ME_UNCACHED | \
@@ -1007,6 +1026,7 @@ static void psp_audio_me_writeback_outputs_me(const Acmd* commands, s32 commandC
 static int psp_audio_me_vme_mix_synthetic(void);
 static int psp_audio_me_vme_filter_synthetic(void);
 static int psp_audio_me_vme_resample_synthetic(void);
+static void psp_audio_me_vme_adpcm_width_audit(void);
 #if PSP_AUDIO_VME_BENCH
 static int psp_audio_me_vme_resample_batch_bench(void);
 static int psp_audio_me_vme_env_bench(void);
@@ -1147,6 +1167,7 @@ static int psp_audio_me_vme_smoke(void) {
         meLibSync();
         return -1;
     }
+    psp_audio_me_vme_adpcm_width_audit();
 #if PSP_AUDIO_VME_BENCH
     if (psp_audio_me_vme_resample_batch_bench() < 0) {
         vmeLibDisable();
@@ -1264,6 +1285,8 @@ static void psp_audio_me_bench_reset(void) {
         (volatile u32*) PSP_AUDIO_VME_RESAMPLE_BATCH_BENCH_STATS;
     volatile u32* dmacWords =
         (volatile u32*) PSP_AUDIO_VME_RESAMPLE_DMAC_BENCH_STATS;
+    volatile u32* handoffWords =
+        (volatile u32*) PSP_AUDIO_VME_ADPCM_HANDOFF_STATS;
     volatile u32* envWords =
         (volatile u32*) PSP_AUDIO_VME_ENV_BENCH_STATS;
     volatile u32* transportWords =
@@ -1292,6 +1315,11 @@ static void psp_audio_me_bench_reset(void) {
         resampleWords[i] = 0;
         batchWords[i] = 0;
         dmacWords[i] = 0;
+    }
+    for (i = 0;
+         i < sizeof(*PSP_AUDIO_VME_ADPCM_HANDOFF_STATS) / sizeof(u32);
+         i++) {
+        handoffWords[i] = 0;
     }
     envWordCount /= sizeof(*envWords);
     for (i = 0; i < envWordCount; i++) {
@@ -1331,6 +1359,115 @@ static void psp_audio_me_bench_reset(void) {
     }
     sVmeBenchReadOverhead = best;
     sVmeBenchLastRow = NULL;
+}
+
+static void psp_audio_me_adpcm_handoff_mismatch(
+    volatile PspAudioVmeAdpcmHandoffResult* result, u32 mode,
+    s32 index, s32 expected, s32 actual) {
+    if ((result->pcmMismatches == 0) &&
+        (result->stateMismatches == 0)) {
+        result->firstMode = mode;
+        result->firstIndex = index;
+        result->expected = expected;
+        result->actual = actual;
+    }
+    result->pcmMismatches++;
+}
+
+void PspAudioMe_BenchmarkAdpcmHandoff(
+    const s16* pcm, u32 samples, const s16* state, u32 decodeTicks) {
+    s16 localPcm[PSP_AUDIO_VME_ADPCM_HANDOFF_MAX_SAMPLES]
+        __attribute__((aligned(64)));
+    s16 expectedState[16];
+    volatile PspAudioVmeAdpcmHandoffResult* result =
+        PSP_AUDIO_VME_ADPCM_HANDOFF_STATS;
+    volatile s32* top = (volatile s32*) VME_TOP_BUFFERS;
+    u32 size = samples * sizeof(s16);
+    u32 start;
+    u32 index;
+
+    if (result->commands >= PSP_AUDIO_VME_ADPCM_HANDOFF_COMMANDS) {
+        return;
+    }
+    if ((pcm == NULL) || (state == NULL) || (samples == 0) ||
+        (samples > PSP_AUDIO_VME_ADPCM_HANDOFF_MAX_SAMPLES) ||
+        (sMeState != PSP_AUDIO_ME_RUN) ||
+        (sVmeState != PSP_AUDIO_VME_READY) ||
+        (sVmeScratchOwner != PSP_AUDIO_VME_SCRATCH_NONE) ||
+        (sVmeLiveOwner != PSP_AUDIO_VME_SCRATCH_NONE)) {
+        result->skipped++;
+        return;
+    }
+
+    meCoreMemcpy(expectedState, (void*) state, sizeof(expectedState));
+    result->mainAddress = (u32) (uintptr_t) sVmeAdpcmHandoffMain;
+    result->localAddress = (u32) (uintptr_t) localPcm;
+    result->decodeTicks +=
+        decodeTicks > sVmeBenchReadOverhead ?
+            decodeTicks - sVmeBenchReadOverhead : 0;
+
+    start = PspAudioMe_BenchReadCount();
+    meCoreMemcpy(sVmeAdpcmHandoffMain, (void*) pcm, size);
+    result->mainCopyTicks += psp_audio_me_bench_elapsed(start);
+    start = PspAudioMe_BenchReadCount();
+    meCoreDcacheWritebackRange(sVmeAdpcmHandoffMain, size);
+    result->mainPrepareTicks += psp_audio_me_bench_elapsed(start);
+    start = PspAudioMe_BenchReadCount();
+    vmeLibMemTo16(
+        (u32) (uintptr_t) sVmeAdpcmHandoffMain,
+        PSP_AUDIO_VME_TOP_WORD_OFFSET,
+        samples, VME_DMAC_TRANSFERT_WAIT_FINISH);
+    meLibSync();
+    result->mainTransferTicks += psp_audio_me_bench_elapsed(start);
+
+    start = PspAudioMe_BenchReadCount();
+    for (index = 0; index < samples; index++) {
+        if (top[index] != pcm[index]) {
+            psp_audio_me_adpcm_handoff_mismatch(
+                result, 0, index, pcm[index], top[index]);
+            break;
+        }
+    }
+    result->validateTicks += psp_audio_me_bench_elapsed(start);
+
+    start = PspAudioMe_BenchReadCount();
+    meCoreMemcpy(localPcm, (void*) pcm, size);
+    result->localCopyTicks += psp_audio_me_bench_elapsed(start);
+    start = PspAudioMe_BenchReadCount();
+    meCoreDcacheWritebackRange(localPcm, size);
+    result->localPrepareTicks += psp_audio_me_bench_elapsed(start);
+    start = PspAudioMe_BenchReadCount();
+    vmeLibMemTo16(
+        (u32) (uintptr_t) localPcm, PSP_AUDIO_VME_TOP_WORD_OFFSET,
+        samples, VME_DMAC_TRANSFERT_WAIT_FINISH);
+    meLibSync();
+    result->localTransferTicks += psp_audio_me_bench_elapsed(start);
+
+    start = PspAudioMe_BenchReadCount();
+    for (index = 0; index < samples; index++) {
+        if (top[index] != pcm[index]) {
+            psp_audio_me_adpcm_handoff_mismatch(
+                result, 1, index, pcm[index], top[index]);
+            break;
+        }
+    }
+    for (index = 0; index < 16; index++) {
+        if (state[index] != expectedState[index]) {
+            if ((result->pcmMismatches == 0) &&
+                (result->stateMismatches == 0)) {
+                result->firstMode = 2;
+                result->firstIndex = index;
+                result->expected = expectedState[index];
+                result->actual = state[index];
+            }
+            result->stateMismatches++;
+            break;
+        }
+    }
+    result->validateTicks += psp_audio_me_bench_elapsed(start);
+
+    result->commands++;
+    result->samples += samples;
 }
 
 static volatile PspAudioVmeBenchRow* psp_audio_me_bench_row(u32 samples) {
@@ -1676,6 +1813,264 @@ static int psp_audio_me_vme_filter_synthetic(void) {
         }
     }
     return 0;
+}
+
+typedef struct {
+    s16 inputs[PSP_AUDIO_VME_ADPCM_AUDIT_TERMS];
+    s16 coefficients[PSP_AUDIO_VME_ADPCM_AUDIT_TERMS];
+} PspAudioVmeAdpcmAuditCase;
+
+static void psp_audio_me_vme_adpcm_term_audit(
+    volatile PspAudioVmeAdpcmAuditResult* result) {
+    volatile s32* top = (volatile s32*) VME_TOP_BUFFERS;
+    volatile s32* base = (volatile s32*) VME_BASE_BUFFERS;
+    const u32 op = VME_FU_OPCODE_MAC_INNER_PRODUCT_BIAS;
+    s32 terms;
+
+    for (terms = 1; terms <= PSP_AUDIO_VME_ADPCM_AUDIT_TERMS; terms++) {
+        s32 expected = (1 << terms) - 1;
+        s32 actual;
+        s32 term;
+
+        for (term = 0; term < terms; term++) {
+            top[term] = 1 << term;
+            base[term] = 1;
+        }
+        meLibSync();
+        vmeLibStart();
+        vme_set(ENABLE, FU_1, 0);
+        vme_icn(AGU_TOP, 0);
+        vme_icn(AGU_BASE, VME_DEF_MAPPER);
+        vme_icn(AGU_WRITE, 0);
+        vme_pe0(vme_fu(PRIMARY), op, vme_mux(TOP_0, BASE_0), 0);
+        vme_pe0(fu_reg(PRIMARY, B), 0);
+        vme_pe0(agu_top(MODE), VME_DEF_MODE);
+        vme_pe0(agu_top(COUNT), VME_DEF_STEP, terms - 1);
+        vme_pe0(agu_base(MODE), VME_DEF_MODE);
+        vme_pe0(agu_base(COUNT), VME_DEF_STEP, terms - 1);
+        vme_pe0(agu_write(MODE), VME_DEF_MODE, VME_CYCLE_6);
+        vme_pe0(agu_write(COUNT), VME_DEF_STEP, terms - 1);
+        vme_pe0(agu_write(FORMAT_0), 0);
+        vme_pe0(agu_write(FORMAT_1), 0);
+        vmeLibFinish();
+        meLibSync();
+
+        actual = base[terms - 1];
+        result->termRuns++;
+        if (actual != expected) {
+            if (result->termMismatches == 0) {
+                result->firstTermCount = terms;
+                result->firstTermExpected = expected;
+                result->firstTermActual = actual;
+            }
+            result->termMismatches++;
+        }
+    }
+}
+
+static void psp_audio_me_vme_adpcm_audit_batch(
+    const PspAudioVmeAdpcmAuditCase* cases, s32 run, u32 saturation) {
+    volatile s32* top = (volatile s32*) VME_TOP_BUFFERS;
+    volatile s32* base = (volatile s32*) VME_BASE_BUFFERS;
+    const u32 op = VME_FU_OPCODE_MAC_INNER_PRODUCT_BIAS;
+    s32 lane;
+
+    for (lane = 0; lane < 4; lane++) {
+        const PspAudioVmeAdpcmAuditCase* test = &cases[run * 4 + lane];
+        volatile s32* laneInputs = top + lane * PSP_AUDIO_VME_BUFFER_WORDS;
+        volatile s32* laneCoefficients = base + lane * PSP_AUDIO_VME_BUFFER_WORDS;
+        s32 term;
+
+        for (term = 0; term < PSP_AUDIO_VME_ADPCM_AUDIT_TERMS; term++) {
+            laneInputs[term] = test->inputs[term];
+            laneCoefficients[term] = test->coefficients[term];
+        }
+    }
+    meLibSync();
+
+    vmeLibStart();
+    vme_set(ENABLE, FU_1, 0);
+    vme_icn(AGU_TOP, 0);
+    vme_icn(AGU_BASE, VME_DEF_MAPPER);
+    vme_icn(AGU_WRITE, 0);
+    vme_pe0(vme_fu(PRIMARY), op, vme_mux(TOP_0, BASE_0), saturation, 11);
+    vme_pe0(fu_reg(PRIMARY, B), 0);
+    vme_pe0(agu_top(MODE), VME_DEF_MODE);
+    vme_pe0(agu_top(COUNT), VME_DEF_STEP,
+            PSP_AUDIO_VME_ADPCM_AUDIT_TERMS - 1);
+    vme_pe0(agu_base(MODE), VME_DEF_MODE);
+    vme_pe0(agu_base(COUNT), VME_DEF_STEP,
+            PSP_AUDIO_VME_ADPCM_AUDIT_TERMS - 1);
+    vme_pe0(agu_write(MODE), VME_DEF_MODE, VME_CYCLE_6);
+    vme_pe0(agu_write(COUNT), VME_DEF_STEP,
+            PSP_AUDIO_VME_ADPCM_AUDIT_TERMS - 1);
+    vme_pe0(agu_write(FORMAT_0), 0);
+    vme_pe0(agu_write(FORMAT_1), 0);
+    vme_pe1(vme_fu(PRIMARY), op, vme_mux(TOP_1, BASE_1), saturation, 11);
+    vme_pe1(fu_reg(PRIMARY, B), 0);
+    vme_pe2(vme_fu(PRIMARY), op, vme_mux(TOP_2, BASE_2), saturation, 11);
+    vme_pe2(fu_reg(PRIMARY, B), 0);
+    vme_pe3(vme_fu(PRIMARY), op, vme_mux(TOP_3, BASE_3), saturation, 11);
+    vme_pe3(fu_reg(PRIMARY, B), 0);
+    vmeLibFinish();
+    meLibSync();
+}
+
+static void psp_audio_me_vme_adpcm_width_audit(void) {
+    static const PspAudioVmeAdpcmAuditCase sCases[PSP_AUDIO_VME_ADPCM_AUDIT_CASES] = {
+        { { 0 }, { 0 } },
+        {
+            { 32767, 32767, 28672, 28672, 28672, 28672, 28672, 28672, 28672, 28672 },
+            { 32767, 32767, 2048, 32767, 32767, 32767, 32767, 32767, 32767, 32767 },
+        },
+        {
+            { -32768, -32768, -32768, -32768, -32768, -32768, -32768, -32768, -32768, -32768 },
+            { 32767, 32767, 2048, 32767, 32767, 32767, 32767, 32767, 32767, 32767 },
+        },
+        {
+            { 32767, -32768, 28672, -32768, 28672, -32768, 28672, -32768, 28672, -32768 },
+            { 32767, -32768, 2048, -32768, 32767, -32768, 32767, -32768, 32767, -32768 },
+        },
+        {
+            { 32767, -32768, 28672, -32768, 28672, -32768, 28672, -32768, 28672, -32768 },
+            { -32768, 32767, 2048, 32767, -32768, 32767, -32768, 32767, -32768, 32767 },
+        },
+        {
+            { 32767, 32767, 28672, 28672, 28672, 28672, 28672, 28672, 28672, 28672 },
+            { 2048, 2048, 2048, 2048, 2048, 2048, 2048, 2048, 2048, 2048 },
+        },
+        {
+            { -32768, -32768, -32768, -32768, -32768, -32768, -32768, -32768, -32768, -32768 },
+            { 2048, 2048, 2048, 2048, 2048, 2048, 2048, 2048, 2048, 2048 },
+        },
+        { { 1 }, { -1 } },
+        { { 2047 }, { 1 } },
+        { { 2049 }, { -1 } },
+        { { 0, 0, 28672 }, { 0, 0, 2048 } },
+        { { 0, 0, -32768 }, { 0, 0, 2048 } },
+        { { 32767, 32767, 28672 }, { 32767, 32767, 2048 } },
+        { { -32768, -32768, -32768 }, { 32767, 32767, 2048 } },
+        {
+            { 32767, -32768, 16384, -16384, 8192, -8192, 4096, -4096, 2048, -2048 },
+            { 32767, 32767, 2048, 32767, 32767, 32767, 32767, 32767, 32767, 32767 },
+        },
+        {
+            { 30000, -30000, -32768, 12345, -23456, 32767, -32768, 8192, -16384, 1 },
+            { -32768, 32767, 2048, -24576, 24576, -16384, 16384, -8192, 8192, 32767 },
+        },
+    };
+    volatile PspAudioVmeAdpcmAuditResult* result =
+        PSP_AUDIO_VME_ADPCM_AUDIT_STATS;
+    volatile s32* base = (volatile s32*) VME_BASE_BUFFERS;
+    s32 run;
+
+    result->runs = 0;
+    result->vectors = 0;
+    result->mismatches = 0;
+    result->firstCase = -1;
+    result->firstTerms = PSP_AUDIO_VME_ADPCM_AUDIT_TERMS;
+    result->termRuns = 0;
+    result->termMismatches = 0;
+    result->firstTermCount = -1;
+    result->firstTermExpected = 0;
+    result->firstTermActual = 0;
+    result->minAccumulator = 0;
+    result->maxAccumulator = 0;
+    result->firstWideAccumulator = 0;
+    result->firstScalarAccumulator = 0;
+    result->firstExpected = 0;
+    result->firstActualRaw = 0;
+    result->firstActual = 0;
+    result->explicitRuns = 0;
+    result->explicitMismatches = 0;
+    result->firstExplicitCase = -1;
+    result->firstExplicitExpected = 0;
+    result->firstExplicitRaw = 0;
+    result->firstExplicitActual = 0;
+
+    psp_audio_me_vme_adpcm_term_audit(result);
+
+    for (run = 0; run < PSP_AUDIO_VME_ADPCM_AUDIT_CASES / 4; run++) {
+        s32 lane;
+
+        psp_audio_me_vme_adpcm_audit_batch(sCases, run, 0);
+        result->runs++;
+
+        for (lane = 0; lane < 4; lane++) {
+            const PspAudioVmeAdpcmAuditCase* test = &sCases[run * 4 + lane];
+            s64 wideAccumulator = 0;
+            s32 scalarAccumulator = 0;
+            s32 actualRaw;
+            s32 actual;
+            s32 expected;
+            s32 term;
+
+            for (term = 0; term < PSP_AUDIO_VME_ADPCM_AUDIT_TERMS; term++) {
+                s32 product = (s32) test->inputs[term] *
+                              test->coefficients[term];
+
+                wideAccumulator += product;
+                scalarAccumulator = (s32) ((u32) scalarAccumulator +
+                                           (u32) product);
+            }
+            if ((result->vectors == 0) ||
+                (wideAccumulator < result->minAccumulator)) {
+                result->minAccumulator = wideAccumulator;
+            }
+            if ((result->vectors == 0) ||
+                (wideAccumulator > result->maxAccumulator)) {
+                result->maxAccumulator = wideAccumulator;
+            }
+            expected = psp_audio_me_clamp16(scalarAccumulator >> 11);
+            actualRaw = base[lane * PSP_AUDIO_VME_BUFFER_WORDS +
+                             PSP_AUDIO_VME_ADPCM_AUDIT_TERMS - 1];
+            actual = psp_audio_me_clamp16(actualRaw);
+            result->vectors++;
+            if (actual != expected) {
+                if (result->mismatches == 0) {
+                    result->firstCase = run * 4 + lane;
+                    result->firstWideAccumulator = wideAccumulator;
+                    result->firstScalarAccumulator = scalarAccumulator;
+                    result->firstExpected = expected;
+                    result->firstActualRaw = actualRaw;
+                    result->firstActual = actual;
+                }
+                result->mismatches++;
+            }
+        }
+
+        psp_audio_me_vme_adpcm_audit_batch(sCases, run, 24 << 7);
+        result->explicitRuns++;
+        for (lane = 0; lane < 4; lane++) {
+            const PspAudioVmeAdpcmAuditCase* test = &sCases[run * 4 + lane];
+            s32 scalarAccumulator = 0;
+            s32 actualRaw;
+            s32 actual;
+            s32 expected;
+            s32 term;
+
+            for (term = 0; term < PSP_AUDIO_VME_ADPCM_AUDIT_TERMS; term++) {
+                s32 product = (s32) test->inputs[term] *
+                              test->coefficients[term];
+
+                scalarAccumulator = (s32) ((u32) scalarAccumulator +
+                                           (u32) product);
+            }
+            expected = psp_audio_me_clamp16(scalarAccumulator >> 11);
+            actualRaw = base[lane * PSP_AUDIO_VME_BUFFER_WORDS +
+                             PSP_AUDIO_VME_ADPCM_AUDIT_TERMS - 1];
+            actual = psp_audio_me_clamp16(actualRaw);
+            if (actual != expected) {
+                if (result->explicitMismatches == 0) {
+                    result->firstExplicitCase = run * 4 + lane;
+                    result->firstExplicitExpected = expected;
+                    result->firstExplicitRaw = actualRaw;
+                    result->firstExplicitActual = actual;
+                }
+                result->explicitMismatches++;
+            }
+        }
+    }
 }
 
 static s32 psp_audio_me_vme_resample_input(s32 lane, s32 index) {
@@ -4222,7 +4617,9 @@ int PspAudioMe_BeginEnvCapture(const Acmd* commands, s32 commandCount) {
     u32 samples = 0;
     u32 voices = 0;
 
-    if ((result->captureRuns >= PSP_AUDIO_VME_ENV_CAPTURE_RUNS) ||
+    if ((PSP_AUDIO_VME_ADPCM_HANDOFF_STATS->commands <
+         PSP_AUDIO_VME_ADPCM_HANDOFF_COMMANDS) ||
+        (result->captureRuns >= PSP_AUDIO_VME_ENV_CAPTURE_RUNS) ||
         (sMeState != PSP_AUDIO_ME_RUN)) {
         return 0;
     }
@@ -5308,6 +5705,92 @@ void PspAudioMe_GetVmeFilterResult(PspAudioVmeFilterResult* result) {
 #endif
 }
 
+void PspAudioMe_GetVmeAdpcmAuditResult(
+    PspAudioVmeAdpcmAuditResult* result) {
+    if (result == NULL) {
+        return;
+    }
+#if PSP_AUDIO_VME_VALIDATE
+    {
+        volatile PspAudioVmeAdpcmAuditResult* source =
+            PSP_AUDIO_VME_ADPCM_AUDIT_STATS;
+
+        result->runs = source->runs;
+        result->vectors = source->vectors;
+        result->mismatches = source->mismatches;
+        result->firstCase = source->firstCase;
+        result->firstTerms = source->firstTerms;
+        result->termRuns = source->termRuns;
+        result->termMismatches = source->termMismatches;
+        result->firstTermCount = source->firstTermCount;
+        result->firstTermExpected = source->firstTermExpected;
+        result->firstTermActual = source->firstTermActual;
+        result->minAccumulator = source->minAccumulator;
+        result->maxAccumulator = source->maxAccumulator;
+        result->firstWideAccumulator = source->firstWideAccumulator;
+        result->firstScalarAccumulator = source->firstScalarAccumulator;
+        result->firstExpected = source->firstExpected;
+        result->firstActualRaw = source->firstActualRaw;
+        result->firstActual = source->firstActual;
+        result->explicitRuns = source->explicitRuns;
+        result->explicitMismatches = source->explicitMismatches;
+        result->firstExplicitCase = source->firstExplicitCase;
+        result->firstExplicitExpected = source->firstExplicitExpected;
+        result->firstExplicitRaw = source->firstExplicitRaw;
+        result->firstExplicitActual = source->firstExplicitActual;
+    }
+#else
+    result->runs = 0;
+    result->vectors = 0;
+    result->mismatches = 0;
+    result->firstCase = -1;
+    result->firstTerms = 0;
+    result->termRuns = 0;
+    result->termMismatches = 0;
+    result->firstTermCount = -1;
+    result->firstTermExpected = 0;
+    result->firstTermActual = 0;
+    result->minAccumulator = 0;
+    result->maxAccumulator = 0;
+    result->firstWideAccumulator = 0;
+    result->firstScalarAccumulator = 0;
+    result->firstExpected = 0;
+    result->firstActualRaw = 0;
+    result->firstActual = 0;
+    result->explicitRuns = 0;
+    result->explicitMismatches = 0;
+    result->firstExplicitCase = -1;
+    result->firstExplicitExpected = 0;
+    result->firstExplicitRaw = 0;
+    result->firstExplicitActual = 0;
+#endif
+}
+
+void PspAudioMe_GetVmeAdpcmHandoffResult(
+    PspAudioVmeAdpcmHandoffResult* result) {
+    volatile u32* out;
+    u32 i;
+
+    if (result == NULL) {
+        return;
+    }
+    out = (volatile u32*) result;
+#if PSP_AUDIO_VME_BENCH
+    {
+        volatile u32* in =
+            (volatile u32*) PSP_AUDIO_VME_ADPCM_HANDOFF_STATS;
+
+        for (i = 0; i < sizeof(*result) / sizeof(u32); i++) {
+            out[i] = in[i];
+        }
+    }
+#else
+    for (i = 0; i < sizeof(*result) / sizeof(u32); i++) {
+        out[i] = 0;
+    }
+#endif
+}
+
 void PspAudioMe_GetVmeResampleResult(PspAudioVmeResampleResult* result) {
     if (result == NULL) {
         return;
@@ -5735,6 +6218,58 @@ void PspAudioMe_GetVmeFilterResult(PspAudioVmeFilterResult* result) {
     result->firstIndex = -1;
     result->expected = 0;
     result->actual = 0;
+}
+
+void PspAudioMe_GetVmeAdpcmAuditResult(
+    PspAudioVmeAdpcmAuditResult* result) {
+    if (result == NULL) {
+        return;
+    }
+    result->runs = 0;
+    result->vectors = 0;
+    result->mismatches = 0;
+    result->firstCase = -1;
+    result->firstTerms = 0;
+    result->termRuns = 0;
+    result->termMismatches = 0;
+    result->firstTermCount = -1;
+    result->firstTermExpected = 0;
+    result->firstTermActual = 0;
+    result->minAccumulator = 0;
+    result->maxAccumulator = 0;
+    result->firstWideAccumulator = 0;
+    result->firstScalarAccumulator = 0;
+    result->firstExpected = 0;
+    result->firstActualRaw = 0;
+    result->firstActual = 0;
+    result->explicitRuns = 0;
+    result->explicitMismatches = 0;
+    result->firstExplicitCase = -1;
+    result->firstExplicitExpected = 0;
+    result->firstExplicitRaw = 0;
+    result->firstExplicitActual = 0;
+}
+
+void PspAudioMe_BenchmarkAdpcmHandoff(
+    const s16* pcm, u32 samples, const s16* state, u32 decodeTicks) {
+    (void) pcm;
+    (void) samples;
+    (void) state;
+    (void) decodeTicks;
+}
+
+void PspAudioMe_GetVmeAdpcmHandoffResult(
+    PspAudioVmeAdpcmHandoffResult* result) {
+    volatile u32* out;
+    u32 i;
+
+    if (result == NULL) {
+        return;
+    }
+    out = (volatile u32*) result;
+    for (i = 0; i < sizeof(*result) / sizeof(u32); i++) {
+        out[i] = 0;
+    }
 }
 
 void PspAudioMe_GetVmeResampleResult(PspAudioVmeResampleResult* result) {

@@ -49,6 +49,32 @@ typedef struct {
 
 typedef struct {
     u32 runs;
+    u32 vectors;
+    u32 mismatches;
+    s32 firstCase;
+    u32 firstTerms;
+    u32 termRuns;
+    u32 termMismatches;
+    s32 firstTermCount;
+    s32 firstTermExpected;
+    s32 firstTermActual;
+    s64 minAccumulator;
+    s64 maxAccumulator;
+    s64 firstWideAccumulator;
+    s32 firstScalarAccumulator;
+    s32 firstExpected;
+    s32 firstActualRaw;
+    s32 firstActual;
+    u32 explicitRuns;
+    u32 explicitMismatches;
+    s32 firstExplicitCase;
+    s32 firstExplicitExpected;
+    s32 firstExplicitRaw;
+    s32 firstExplicitActual;
+} PspAudioVmeAdpcmAuditResult;
+
+typedef struct {
+    u32 runs;
     u32 products;
     u32 mismatches;
     s32 firstLane;
@@ -109,6 +135,28 @@ typedef struct {
     u64 validateTicks;
     u64 wipeTicks;
 } PspAudioVmeResampleBenchResult;
+
+typedef struct {
+    u32 commands;
+    u32 samples;
+    u32 skipped;
+    u32 pcmMismatches;
+    u32 stateMismatches;
+    u32 firstMode;
+    s32 firstIndex;
+    s32 expected;
+    s32 actual;
+    u32 mainAddress;
+    u32 localAddress;
+    u64 decodeTicks;
+    u64 mainCopyTicks;
+    u64 mainPrepareTicks;
+    u64 mainTransferTicks;
+    u64 localCopyTicks;
+    u64 localPrepareTicks;
+    u64 localTransferTicks;
+    u64 validateTicks;
+} PspAudioVmeAdpcmHandoffResult;
 
 #define PSP_AUDIO_VME_ENV_BENCH_CASES 5
 #define PSP_AUDIO_VME_ENV_MAX_SAMPLES 2048
@@ -350,6 +398,12 @@ int PspAudioMe_ValidateVmeMix(u16 count, s16 gain, const s16* input,
                               const s16* output);
 void PspAudioMe_GetVmeMixResult(PspAudioVmeMixResult* result);
 void PspAudioMe_GetVmeFilterResult(PspAudioVmeFilterResult* result);
+void PspAudioMe_GetVmeAdpcmAuditResult(
+    PspAudioVmeAdpcmAuditResult* result);
+void PspAudioMe_BenchmarkAdpcmHandoff(
+    const s16* pcm, u32 samples, const s16* state, u32 decodeTicks);
+void PspAudioMe_GetVmeAdpcmHandoffResult(
+    PspAudioVmeAdpcmHandoffResult* result);
 int PspAudioMe_ValidateVmeResample(u32 count, const s16* inputs,
                                    const s16* coefficients,
                                    const s16* output,
