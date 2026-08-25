@@ -52,6 +52,8 @@ typedef struct {
     PspGfxPspglTextureWrap wrapT;
     int alphaTest, blend, premultiplied, depthTest, depthWrite, fog, pretransformed, pointFilter;
     float fogColor[4];
+    float fogStart;
+    float fogEnd;
     float projection[16];
     u32 projectionSerial;
 } PspGfxPspglReplayDraw;
@@ -2437,9 +2439,9 @@ void PspGfxPspgl_ReplayCache(void) {
         PspGfxPspgl_DrawColoredTriangles(&sReplayCacheVertices[draw->first], draw->count, draw->textureId,
                                          draw->textureRef, draw->textureEnv, draw->textureEnvColor, draw->wrapS,
                                          draw->wrapT, draw->alphaTest, draw->blend, draw->premultiplied,
-                                         draw->depthTest, draw->depthWrite, draw->fog, draw->fogColor, 0.0f, 0.0f,
-                                         draw->projection, draw->projectionSerial, draw->pretransformed,
-                                         draw->pointFilter);
+                                         draw->depthTest, draw->depthWrite, draw->fog, draw->fogColor,
+                                         draw->fogStart, draw->fogEnd, draw->projection, draw->projectionSerial,
+                                         draw->pretransformed, draw->pointFilter);
     }
 }
 
@@ -2469,6 +2471,8 @@ void PspGfxPspgl_DrawReservedColoredTriangles(const PspGfxPspglVertexReservation
         draw->depthTest = depthTest; draw->depthWrite = depthWrite; draw->fog = fog;
         draw->pretransformed = pretransformed; draw->pointFilter = pointFilter;
         memcpy(draw->fogColor, fogColor, sizeof(draw->fogColor));
+        draw->fogStart = fogStart;
+        draw->fogEnd = fogEnd;
         memcpy(draw->projection, projectionMatrix, sizeof(draw->projection));
         draw->projectionSerial = projectionSerial;
         memcpy(&sReplayCacheVertices[sReplayCacheVertexCount], reservation->vertices,
