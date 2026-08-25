@@ -661,7 +661,8 @@ static int psp_gfx_dl_soft_coverage_texture_enabled(PspGfxDlContext* ctx) {
 
 static int psp_gfx_dl_alpha_test_enabled(PspGfxDlContext* ctx) {
     if (psp_gfx_dl_rgba16_coverage_alpha_enabled(ctx)) {
-        return 2;
+        return ((ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_PRIM_ALPHA) &&
+                ((ctx->otherModeH & (3U << G_MDSFT_CYCLETYPE)) == G_CYC_1CYCLE)) ? 0 : 2;
     }
     if (psp_gfx_dl_soft_coverage_texture_enabled(ctx)) {
         return 1;
