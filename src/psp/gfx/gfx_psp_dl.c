@@ -38,6 +38,7 @@ extern u16 aTrBackdropTopTex[];
 
 #if PSP_RENDERER_DIAGNOSTICS
 #include "assets/ast_map.h"
+#include <pspctrl.h>
 
 extern Gfx gMapVenomCloudRuntimeDL[];
 #endif
@@ -87,6 +88,10 @@ extern Gfx gMapVenomCloudRuntimeDL[];
 #define PSP_GFX_DL_PERSPECTIVE_MAX_DEPTH 5
 #define PSP_GFX_DL_DEPTH_BIAS_NDC 0.0005f
 #define PSP_GFX_DL_DEPTH_BIAS_VIEW 0.5f
+
+#if PSP_RENDERER_DIAGNOSTICS
+#define PSP_GFX_DL_TRACE_MAX_RECORDS 320
+#endif
 
 #define PSP_GFX_OP_F3D_SPNOOP 0x00
 #define PSP_GFX_OP_F3D_MTX 0x01
@@ -292,6 +297,10 @@ typedef struct {
     u32 textureCmt;
     u32 textureMaskS;
     u32 textureMaskT;
+#if PSP_RENDERER_DIAGNOSTICS
+    u32 textureShiftS;
+    u32 textureShiftT;
+#endif
     u32 textureId;
     PspGfxPspglTextureRef textureRef;
     int textureUploadAttempted;
@@ -319,6 +328,11 @@ typedef struct {
     u8 environmentG;
     u8 environmentB;
     u8 environmentA;
+#if PSP_RENDERER_DIAGNOSTICS
+    u32 primitiveColorRaw;
+    u32 environmentColorRaw;
+    u32 fogColorRaw;
+#endif
     u32 fillColor;
     const void* colorImage;
     u32 colorImageFormat;
@@ -326,6 +340,10 @@ typedef struct {
     u32 colorImageWidth;
     int colorImageIsDisplay;
     PspGfxDlCombineMode combineMode;
+#if PSP_RENDERER_DIAGNOSTICS
+    u32 combineMux0;
+    u32 combineMux1;
+#endif
     PspGfxDlCombineMode batchCombineMode;
     PspGfxPspglTextureEnv batchTextureEnv;
     u32 batchTextureEnvColor;
@@ -390,6 +408,12 @@ typedef struct {
     int trivialRejectDiagnosticActive;
 #endif
 #if PSP_RENDERER_DIAGNOSTICS
+    int traceActive;
+    u32 traceDrawIndex;
+    u32 traceRecordCount;
+    u32 traceDroppedCount;
+    u32 traceLastStateHash;
+    int traceHasStateHash;
     u32 vtxCommandCount;
     u32 vtxBatchSizeHistogram[PSP_GFX_DL_MAX_VERTICES + 1];
     u32 vtxLightCountHistogram[8];
@@ -401,6 +425,9 @@ typedef struct {
 static PspGfxDlContext sPspGfxDlContext;
 
 #if PSP_RENDERER_DIAGNOSTICS
+static volatile int sPspGfxDlTraceArmed;
+static u32 sPspGfxDlTracePreviousButtons;
+
 // SF64 material corpus capture; measures how finite the effective material set is
 // Storage is file static so it accumulates across tasks rather than per-task reset
 #define PSP_GFX_DL_MATERIAL_CORPUS_ENTRIES 96
@@ -661,6 +688,9 @@ static int psp_gfx_dl_soft_coverage_texture_enabled(PspGfxDlContext* ctx) {
 
 static int psp_gfx_dl_alpha_test_enabled(PspGfxDlContext* ctx) {
     if (psp_gfx_dl_rgba16_coverage_alpha_enabled(ctx)) {
+        if (ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_SHADE_PRIM_ALPHA) {
+            return 1;
+        }
         return ((ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_PRIM_ALPHA) &&
                 ((ctx->otherModeH & (3U << G_MDSFT_CYCLETYPE)) == G_CYC_1CYCLE)) ? 0 : 2;
     }
@@ -2290,6 +2320,228 @@ static int psp_gfx_dl_vertex_is_valid(PspGfxDlContext* ctx, u8 index) {
     return (index < PSP_GFX_DL_MAX_VERTICES) && ctx->vertices[index].valid;
 }
 
+#if PSP_RENDERER_DIAGNOSTICS
+static u32 psp_gfx_dl_trace_hash_mix(u32 hash, u32 value) {
+    hash ^= value;
+    return hash * 16777619U;
+}
+
+static const char* psp_gfx_dl_trace_combine_name(PspGfxDlCombineMode mode) {
+    static const char* const names[] = {
+        "unknown", "shade", "primitive", "decal-rgb", "decal-rgba",
+        "mod-shade-decal-a", "mod-shade-a", "mod-prim-a", "mod-shade-prim-a", "env-tex-prim-a"
+    };
+
+    return ((u32) mode < ARRAY_COUNT(names)) ? names[mode] : "invalid";
+}
+
+static const char* psp_gfx_dl_trace_wrap_name(PspGfxPspglTextureWrap wrap) {
+    return (wrap == PSP_GFX_PSPGL_WRAP_CLAMP) ? "clamp" : "repeat";
+}
+
+static u32 psp_gfx_dl_trace_state_hash(const PspGfxDlContext* ctx, int fog, float fogStart, float fogEnd) {
+    union {
+        float f;
+        u32 u;
+    } startBits, endBits;
+    u32 hash = 2166136261U;
+
+    startBits.f = fogStart;
+    endBits.f = fogEnd;
+    hash = psp_gfx_dl_trace_hash_mix(hash, ctx->combineMux0);
+    hash = psp_gfx_dl_trace_hash_mix(hash, ctx->combineMux1);
+    hash = psp_gfx_dl_trace_hash_mix(hash, ctx->otherModeH);
+    hash = psp_gfx_dl_trace_hash_mix(hash, ctx->otherModeL);
+    hash = psp_gfx_dl_trace_hash_mix(hash, ctx->geometryMode);
+    hash = psp_gfx_dl_trace_hash_mix(hash, ctx->primitiveColorRaw);
+    hash = psp_gfx_dl_trace_hash_mix(hash, ctx->environmentColorRaw);
+    hash = psp_gfx_dl_trace_hash_mix(hash, ctx->fogColorRaw);
+    hash = psp_gfx_dl_trace_hash_mix(hash, (u32) (uintptr_t) ctx->textureImage);
+    hash = psp_gfx_dl_trace_hash_mix(hash, (ctx->textureFormat << 28) | (ctx->textureSize << 24) |
+                                           (ctx->textureCms << 20) | (ctx->textureCmt << 18) |
+                                           (ctx->textureMaskS << 12) | (ctx->textureMaskT << 8) |
+                                           (ctx->textureShiftS << 4) | ctx->textureShiftT);
+    hash = psp_gfx_dl_trace_hash_mix(hash, (ctx->textureWidth << 16) ^ ctx->textureHeight);
+    hash = psp_gfx_dl_trace_hash_mix(hash, (u32) ctx->textureTileUls);
+    hash = psp_gfx_dl_trace_hash_mix(hash, (u32) ctx->textureTileUlt);
+    hash = psp_gfx_dl_trace_hash_mix(hash, (u32) fog);
+    hash = psp_gfx_dl_trace_hash_mix(hash, startBits.u);
+    return psp_gfx_dl_trace_hash_mix(hash, endBits.u);
+}
+
+static int psp_gfx_dl_trace_state(PspGfxDlContext* ctx, const char* kind, const Gfx* cmd, u32 depth,
+                                  int force, int fog, float fogStart, float fogEnd) {
+    PspGfxPspglTextureWrap wrapS;
+    PspGfxPspglTextureWrap wrapT;
+    u32 hash;
+    char line[768];
+
+    if (!ctx->traceActive) {
+        return 0;
+    }
+    hash = psp_gfx_dl_trace_state_hash(ctx, fog, fogStart, fogEnd);
+    if (!force && ctx->traceHasStateHash && (ctx->traceLastStateHash == hash)) {
+        return 0;
+    }
+    ctx->traceLastStateHash = hash;
+    ctx->traceHasStateHash = 1;
+    if (ctx->traceRecordCount >= PSP_GFX_DL_TRACE_MAX_RECORDS) {
+        ctx->traceDroppedCount++;
+        return 0;
+    }
+    ctx->traceRecordCount++;
+    wrapS = psp_gfx_dl_texture_wrap(ctx->textureCms, ctx->textureMaskS);
+    wrapT = psp_gfx_dl_texture_wrap(ctx->textureCmt, ctx->textureMaskT);
+
+    snprintf(line, sizeof(line),
+             "[rdp-trace-state] task=%lu draw=%lu kind=%s depth=%lu cmd=%p mux=%06lx,%08lx combine=%s "
+             "unknown=%d otherH=%08lx otherL=%08lx cycle=%lu prim=%08lx env=%08lx fogColor=%08lx "
+             "alphaCmp=%lu alphaTest=%d forceBl=%d blend=%d premul=%d texA=%d blender=%04lx "
+             "zGeom=%d zCmp=%d zTest=%d zWrite=%d "
+             "geom=%08lx texgen=%d fog=%d fogFactor=%d,%d fogRange=%.2f..%.2f",
+             (unsigned long) ctx->taskIndex, (unsigned long) ctx->traceDrawIndex, kind,
+             (unsigned long) depth, (const void*) cmd, (unsigned long) ctx->combineMux0,
+             (unsigned long) ctx->combineMux1, psp_gfx_dl_trace_combine_name(ctx->combineMode),
+             ctx->combineMode == PSP_GFX_DL_COMBINE_UNKNOWN, (unsigned long) ctx->otherModeH,
+             (unsigned long) ctx->otherModeL,
+             (unsigned long) ((ctx->otherModeH >> G_MDSFT_CYCLETYPE) & 3U),
+             (unsigned long) ctx->primitiveColorRaw, (unsigned long) ctx->environmentColorRaw,
+             (unsigned long) ctx->fogColorRaw, (unsigned long) (ctx->otherModeL & 3U),
+             psp_gfx_dl_alpha_test_enabled(ctx), (ctx->otherModeL & FORCE_BL) != 0,
+             psp_gfx_dl_blend_enabled(ctx), psp_gfx_dl_premultiplied_blend_enabled(ctx),
+             ctx->combineUsesTextureAlpha, (unsigned long) (ctx->otherModeL >> 16),
+             (ctx->geometryMode & G_ZBUFFER) != 0,
+             (ctx->otherModeL & Z_CMP) != 0, (ctx->geometryMode & G_ZBUFFER) != 0,
+             (ctx->otherModeL & Z_UPD) != 0, (unsigned long) ctx->geometryMode,
+             (ctx->geometryMode & G_TEXTURE_GEN) != 0, fog, ctx->fogMul, ctx->fogOffset,
+             fogStart, fogEnd);
+    PspPlatform_LogLine(line);
+
+    snprintf(line, sizeof(line),
+             "[rdp-trace-tile] task=%lu draw=%lu image=%p enabled=%d fmt=%lu size=%lu tile=%lux%lu "
+             "upload=%lux%lu+%lu,%lu origin=%ld,%ld scale=%ld,%ld "
+             "S(cm=%lu clamp=%d mirror=%d mask=%lu shift=%lu ->%s) "
+             "T(cm=%lu clamp=%d mirror=%d mask=%lu shift=%lu ->%s) filter=%s",
+             (unsigned long) ctx->taskIndex, (unsigned long) ctx->traceDrawIndex, ctx->textureImage,
+             ctx->textureEnabled, (unsigned long) ctx->textureFormat, (unsigned long) ctx->textureSize,
+             (unsigned long) ctx->textureWidth, (unsigned long) ctx->textureHeight,
+             (unsigned long) ctx->textureUploadWidth, (unsigned long) ctx->textureUploadHeight,
+             (unsigned long) ctx->textureUploadX, (unsigned long) ctx->textureUploadY,
+             (long) ctx->textureTileUls, (long) ctx->textureTileUlt,
+             (long) ctx->textureScaleS, (long) ctx->textureScaleT,
+             (unsigned long) ctx->textureCms, (ctx->textureCms & G_TX_CLAMP) != 0,
+             (ctx->textureCms & G_TX_MIRROR) != 0, (unsigned long) ctx->textureMaskS,
+             (unsigned long) ctx->textureShiftS, psp_gfx_dl_trace_wrap_name(wrapS),
+             (unsigned long) ctx->textureCmt, (ctx->textureCmt & G_TX_CLAMP) != 0,
+             (ctx->textureCmt & G_TX_MIRROR) != 0, (unsigned long) ctx->textureMaskT,
+             (unsigned long) ctx->textureShiftT, psp_gfx_dl_trace_wrap_name(wrapT),
+             psp_gfx_dl_effective_point_filter(ctx) ? "point" : "bilerp");
+    PspPlatform_LogLine(line);
+    return 1;
+}
+
+static void psp_gfx_dl_trace_triangle(PspGfxDlContext* ctx, const Gfx* cmd, u32 depth, u8 a, u8 b, u8 c) {
+    const PspGfxDlVertex* vertices[3];
+    float fogColor[4];
+    float fogStart = 0.0f;
+    float fogEnd = 0.0f;
+    float u[3] = { 0.0f, 0.0f, 0.0f };
+    float v[3] = { 0.0f, 0.0f, 0.0f };
+    int pretransformed;
+    int fog;
+    int force;
+    char line[768];
+    u32 i;
+
+    if (!ctx->traceActive) {
+        return;
+    }
+    ctx->traceDrawIndex++;
+    if (!psp_gfx_dl_vertex_is_valid(ctx, a) || !psp_gfx_dl_vertex_is_valid(ctx, b) ||
+        !psp_gfx_dl_vertex_is_valid(ctx, c)) {
+        if (psp_gfx_dl_trace_state(ctx, "tri-invalid", cmd, depth, 1, 0, 0.0f, 0.0f)) {
+            snprintf(line, sizeof(line), "[rdp-trace-geom] task=%lu draw=%lu indices=%u,%u,%u invalid=1",
+                     (unsigned long) ctx->taskIndex, (unsigned long) ctx->traceDrawIndex, a, b, c);
+            PspPlatform_LogLine(line);
+        }
+        return;
+    }
+
+    vertices[0] = &ctx->vertices[a];
+    vertices[1] = &ctx->vertices[b];
+    vertices[2] = &ctx->vertices[c];
+    pretransformed = !ctx->hasProjection || (vertices[0]->projectionSerial == 0) ||
+                     (vertices[0]->projectionSerial != vertices[1]->projectionSerial) ||
+                     (vertices[0]->projectionSerial != vertices[2]->projectionSerial);
+    fog = psp_gfx_dl_resolve_fog_state_values(ctx, vertices[0], pretransformed,
+                                              fogColor, &fogStart, &fogEnd);
+    force = (ctx->combineMode == PSP_GFX_DL_COMBINE_UNKNOWN);
+    for (i = 0; i < 3; i++) {
+        force |= (vertices[i]->clipW <= 0.0f) || (vertices[i]->clipCode != 0);
+        if ((ctx->textureUploadWidth != 0) && (ctx->textureUploadHeight != 0)) {
+            u[i] = psp_gfx_dl_normalize_s10_5_s(ctx, vertices[i]->s, ctx->textureUploadWidth,
+                                                ctx->textureTileUls);
+            v[i] = psp_gfx_dl_normalize_s10_5_t(ctx, vertices[i]->t, ctx->textureUploadHeight,
+                                                ctx->textureTileUlt);
+        }
+    }
+    if (!psp_gfx_dl_trace_state(ctx, "tri", cmd, depth, force, fog, fogStart, fogEnd)) {
+        return;
+    }
+
+    snprintf(line, sizeof(line),
+             "[rdp-trace-geom] task=%lu draw=%lu indices=%u,%u,%u "
+             "clip0=%.3f,%.3f,%.3f,%.3f/%02lx clip1=%.3f,%.3f,%.3f,%.3f/%02lx "
+             "clip2=%.3f,%.3f,%.3f,%.3f/%02lx st=%d,%d;%d,%d;%d,%d uv=%.4f,%.4f;%.4f,%.4f;%.4f,%.4f",
+             (unsigned long) ctx->taskIndex, (unsigned long) ctx->traceDrawIndex, a, b, c,
+             vertices[0]->clipX, vertices[0]->clipY, vertices[0]->clipZ, vertices[0]->clipW,
+             (unsigned long) vertices[0]->clipCode,
+             vertices[1]->clipX, vertices[1]->clipY, vertices[1]->clipZ, vertices[1]->clipW,
+             (unsigned long) vertices[1]->clipCode,
+             vertices[2]->clipX, vertices[2]->clipY, vertices[2]->clipZ, vertices[2]->clipW,
+             (unsigned long) vertices[2]->clipCode,
+             vertices[0]->s, vertices[0]->t, vertices[1]->s, vertices[1]->t, vertices[2]->s, vertices[2]->t,
+             u[0], v[0], u[1], v[1], u[2], v[2]);
+    PspPlatform_LogLine(line);
+}
+
+static void psp_gfx_dl_trace_rectangle(PspGfxDlContext* ctx, const Gfx* cmd, u32 depth, int textured) {
+    float x0;
+    float y0;
+    float x1;
+    float y1;
+    float area;
+    char line[256];
+
+    if (!ctx->traceActive) {
+        return;
+    }
+    ctx->traceDrawIndex++;
+    if (textured) {
+        x0 = (float) ((cmd->words.w1 >> 12) & 0xFFF) * 0.25f;
+        y0 = (float) (cmd->words.w1 & 0xFFF) * 0.25f;
+        x1 = (float) ((cmd->words.w0 >> 12) & 0xFFF) * 0.25f;
+        y1 = (float) (cmd->words.w0 & 0xFFF) * 0.25f;
+    } else {
+        x0 = (float) ((cmd->words.w1 >> 14) & 0x3FF);
+        y0 = (float) ((cmd->words.w1 >> 2) & 0x3FF);
+        x1 = (float) (((cmd->words.w0 >> 14) & 0x3FF) + 1U);
+        y1 = (float) (((cmd->words.w0 >> 2) & 0x3FF) + 1U);
+    }
+    area = (x1 - x0) * (y1 - y0);
+    if (!psp_gfx_dl_trace_state(ctx, textured ? "texrect" : "fillrect", cmd, depth,
+                                area >= ((float) SCREEN_WIDTH * (float) SCREEN_HEIGHT * 0.5f),
+                                0, 0.0f, 0.0f)) {
+        return;
+    }
+    snprintf(line, sizeof(line),
+             "[rdp-trace-rect] task=%lu draw=%lu textured=%d xy=%.2f,%.2f..%.2f,%.2f area=%.2f fill=%08lx",
+             (unsigned long) ctx->taskIndex, (unsigned long) ctx->traceDrawIndex, textured,
+             x0, y0, x1, y1, area, (unsigned long) ctx->fillColor);
+    PspPlatform_LogLine(line);
+}
+#endif
+
 #if PROFILE_TRIVIAL_REJECTS
 static PspProfileTriOutcome psp_gfx_dl_classify_triangle_outcome(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
     const PspGfxDlVertex* va;
@@ -3466,6 +3718,10 @@ static void psp_gfx_dl_handle_set_primitive_color(PspGfxDlContext* ctx, const Gf
     u8 b = psp_gfx_color_transfer_u8((u8) (gfx->words.w1 >> 8));
     u8 a = (u8) gfx->words.w1;
 
+#if PSP_RENDERER_DIAGNOSTICS
+    ctx->primitiveColorRaw = gfx->words.w1;
+#endif
+
     int rgbChanged = (ctx->primitiveR != r) || (ctx->primitiveG != g) || (ctx->primitiveB != b);
 
     if (rgbChanged || (ctx->primitiveA != a)) {
@@ -3486,6 +3742,10 @@ static void psp_gfx_dl_handle_set_environment_color(PspGfxDlContext* ctx, const 
     u8 g = psp_gfx_color_transfer_u8((u8) (gfx->words.w1 >> 16));
     u8 b = psp_gfx_color_transfer_u8((u8) (gfx->words.w1 >> 8));
     u8 a = (u8) gfx->words.w1;
+
+#if PSP_RENDERER_DIAGNOSTICS
+    ctx->environmentColorRaw = gfx->words.w1;
+#endif
 
     int rgbChanged = (ctx->environmentR != r) || (ctx->environmentG != g) || (ctx->environmentB != b);
 
@@ -3607,6 +3867,9 @@ static void psp_gfx_dl_handle_set_scissor(PspGfxDlContext* ctx, const Gfx* gfx) 
 
 static void psp_gfx_dl_handle_set_fog_color(PspGfxDlContext* ctx, const Gfx* gfx) {
     psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+#if PSP_RENDERER_DIAGNOSTICS
+    ctx->fogColorRaw = gfx->words.w1;
+#endif
     ctx->fogR = psp_gfx_color_transfer_u8((u8) (gfx->words.w1 >> 24));
     ctx->fogG = psp_gfx_color_transfer_u8((u8) (gfx->words.w1 >> 16));
     ctx->fogB = psp_gfx_color_transfer_u8((u8) (gfx->words.w1 >> 8));
@@ -3648,6 +3911,11 @@ static void psp_gfx_dl_handle_set_combine(PspGfxDlContext* ctx, const Gfx* gfx) 
     u32 mux0 = gfx->words.w0 & 0x00FFFFFF;
     u32 mux1 = gfx->words.w1;
     PspGfxDlCombineMode oldCombineMode = ctx->combineMode;
+
+#if PSP_RENDERER_DIAGNOSTICS
+    ctx->combineMux0 = mux0;
+    ctx->combineMux1 = mux1;
+#endif
 
     if (psp_gfx_dl_combine_cycle0_matches(mux0, mux1, G_CCMUX_TEXEL0, G_CCMUX_0, G_CCMUX_SHADE,
                                           G_CCMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_0, G_ACMUX_TEXEL0) &&
@@ -4183,6 +4451,10 @@ static void psp_gfx_dl_handle_set_tile(PspGfxDlContext* ctx, const Gfx* gfx) {
     ctx->textureMaskT = (gfx->words.w1 >> 14) & 0xF;
     ctx->textureCms = (gfx->words.w1 >> 8) & 0x3;
     ctx->textureMaskS = (gfx->words.w1 >> 4) & 0xF;
+#if PSP_RENDERER_DIAGNOSTICS
+    ctx->textureShiftT = (gfx->words.w1 >> 10) & 0xF;
+    ctx->textureShiftS = gfx->words.w1 & 0xF;
+#endif
     ctx->textureUploadAttempted = 0;
     psp_gfx_dl_mark_effective_material_dirty(ctx);
 }
@@ -4674,11 +4946,17 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
             half1 = pc++;
             half2 = pc++;
             ctx->stats.commandCount += 2;
+#if PSP_RENDERER_DIAGNOSTICS
+            psp_gfx_dl_trace_rectangle(ctx, cmd, depth, 1);
+#endif
             psp_gfx_dl_handle_texture_rectangle(ctx, cmd, half1, half2, opcode == G_TEXRECTFLIP);
             continue;
         }
 
         if (opcode == G_FILLRECT) {
+#if PSP_RENDERER_DIAGNOSTICS
+            psp_gfx_dl_trace_rectangle(ctx, cmd, depth, 0);
+#endif
             psp_gfx_dl_handle_fill_rectangle(ctx, cmd);
             continue;
         }
@@ -4690,12 +4968,16 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
 
         if (opcode == PSP_GFX_OP_F3D_TRI1) {
             u32 w1 = cmd->words.w1;
+            u8 a = psp_gfx_dl_decode_tri_index((w1 >> 16) & 0xFF);
+            u8 b = psp_gfx_dl_decode_tri_index((w1 >> 8) & 0xFF);
+            u8 c = psp_gfx_dl_decode_tri_index(w1 & 0xFF);
             PspProfiler_CountTriangleCommand(1, 1, 0);
             PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_TRIANGLE);
             PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TRIANGLE);
-            psp_gfx_dl_emit_tri(ctx, psp_gfx_dl_decode_tri_index((w1 >> 16) & 0xFF),
-                                psp_gfx_dl_decode_tri_index((w1 >> 8) & 0xFF),
-                                psp_gfx_dl_decode_tri_index(w1 & 0xFF));
+#if PSP_RENDERER_DIAGNOSTICS
+            psp_gfx_dl_trace_triangle(ctx, cmd, depth, a, b, c);
+#endif
+            psp_gfx_dl_emit_tri(ctx, a, b, c);
             PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TRIANGLE);
             PspHwCounterProfile_InnerScopeEnd(PSP_HW_SCOPE_TRIANGLE);
             continue;
@@ -4714,6 +4996,10 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
             PspProfiler_CountTriangleCommand(2, 0, 1);
             PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_TRIANGLE);
             PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TRIANGLE);
+#if PSP_RENDERER_DIAGNOSTICS
+            psp_gfx_dl_trace_triangle(ctx, cmd, depth, a0, b0, c0);
+            psp_gfx_dl_trace_triangle(ctx, cmd, depth, a1, b1, c1);
+#endif
 #if PROFILE_TRIVIAL_REJECTS
             PspProfiler_CountTri2OutcomeMatrix(psp_gfx_dl_classify_triangle_outcome(ctx, a0, b0, c0),
                                                psp_gfx_dl_classify_triangle_outcome(ctx, a1, b1, c1));
@@ -4764,6 +5050,11 @@ static void psp_gfx_dl_reset_context(PspGfxDlContext* ctx) {
     ctx->environmentG = 255;
     ctx->environmentB = 255;
     ctx->environmentA = 255;
+#if PSP_RENDERER_DIAGNOSTICS
+    ctx->primitiveColorRaw = 0xFFFFFFFFU;
+    ctx->environmentColorRaw = 0xFFFFFFFFU;
+    ctx->fogColorRaw = 0x000000FFU;
+#endif
     ctx->fillColor = psp_gfx_dl_pack_rgba_u8(0, 0, 0, 255, 0);
     ctx->colorImage = NULL;
     ctx->colorImageWidth = SCREEN_WIDTH;
@@ -4875,6 +5166,21 @@ static void psp_gfx_dl_pool_report(u32 taskIndex) {
 }
 #endif
 
+#if PSP_RENDERER_DIAGNOSTICS
+int PspGfxDl_TracePollControls(u32 rawButtons) {
+    const u32 combo = PSP_CTRL_SELECT | PSP_CTRL_TRIANGLE;
+    int pressed = ((rawButtons & combo) == combo) && ((sPspGfxDlTracePreviousButtons & combo) != combo);
+    int consumed = (rawButtons & combo) == combo;
+
+    sPspGfxDlTracePreviousButtons = rawButtons;
+    if (pressed) {
+        sPspGfxDlTraceArmed = 1;
+        PspPlatform_LogLine("[rdp-trace] armed next graphics task");
+    }
+    return consumed;
+}
+#endif
+
 int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
     PspGfxDlContext* ctx = &sPspGfxDlContext;
 #if PSP_LOG_ENABLED || PSP_RENDERER_DIAGNOSTICS
@@ -4885,6 +5191,15 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
     PspGfxPspgl_InitColorTransfer();
     psp_gfx_dl_reset_context(ctx);
     ctx->taskIndex = taskIndex;
+#if PSP_RENDERER_DIAGNOSTICS
+    if (sPspGfxDlTraceArmed) {
+        ctx->traceActive = 1;
+        sPspGfxDlTraceArmed = 0;
+        snprintf(line, sizeof(line), "[rdp-trace] begin task=%lu dl=%p cap=%u",
+                 (unsigned long) taskIndex, (const void*) dl, PSP_GFX_DL_TRACE_MAX_RECORDS);
+        PspPlatform_LogLine(line);
+    }
+#endif
     PspProfiler_CountDisplayListTask();
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_DL_TRAVERSAL);
     psp_gfx_dl_run_internal(ctx, dl, 0);
@@ -4906,6 +5221,15 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
     }
 
 #if PSP_LOG_ENABLED || PSP_RENDERER_DIAGNOSTICS
+#if PSP_RENDERER_DIAGNOSTICS
+    if (ctx->traceActive) {
+        snprintf(line, sizeof(line), "[rdp-trace] end task=%lu draws=%lu records=%lu dropped=%lu",
+                 (unsigned long) taskIndex, (unsigned long) ctx->traceDrawIndex,
+                 (unsigned long) ctx->traceRecordCount, (unsigned long) ctx->traceDroppedCount);
+        PspPlatform_LogLine(line);
+    }
+#endif
+
     if ((taskIndex < 4) || ((taskIndex % 30) == 0) || (ctx->stats.commandLimitHit != 0) ||
         (ctx->stats.depthLimitHit != 0)) {
         snprintf(line, sizeof(line),

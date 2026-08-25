@@ -1,5 +1,6 @@
 #include <pspctrl.h>
 
+#include "src/psp/gfx/gfx_psp_dl.h"
 #include "src/psp/input.h"
 #include "src/psp/hw_counter_profile.h"
 #include "src/psp/profiler.h"
@@ -103,7 +104,9 @@ int PspInput_Poll(OSContPad* pads) {
     }
 
     if (sceCtrlPeekBufferPositive(&pad, 1) > 0) {
-        if (PspHwCounterProfile_PollControls(pad.Buttons)) {
+        if (PspGfxDl_TracePollControls(pad.Buttons)) {
+            pad.Buttons &= ~(PSP_CTRL_SELECT | PSP_CTRL_TRIANGLE);
+        } else if (PspHwCounterProfile_PollControls(pad.Buttons)) {
             pad.Buttons &= ~(PSP_CTRL_SELECT | PSP_CTRL_LTRIGGER | PSP_CTRL_RTRIGGER | PSP_CTRL_LEFT |
                              PSP_CTRL_RIGHT);
         } else if (PspProfiler_PollControls(pad.Buttons)) {

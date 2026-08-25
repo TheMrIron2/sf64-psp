@@ -73,6 +73,12 @@ typedef struct {
 
 int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats);
 
+#if PSP_RENDERER_DIAGNOSTICS
+int PspGfxDl_TracePollControls(u32 rawButtons);
+#else
+#define PspGfxDl_TracePollControls(rawButtons) (0)
+#endif
+
 #if PROFILE_HW_COUNTERS
 /* Work totals for the task that just ran, normalises counter captures */
 void PspGfxDl_GetLastWork(u32* commands, u32* loadedVertices, u32* submittedVertices);
