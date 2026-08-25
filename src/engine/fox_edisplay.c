@@ -52,6 +52,10 @@ void Object_SetCullDirection(s32 cullDirection) {
     }
 }
 
+static bool Scenery_ShouldDistortWaterReflection(Scenery* scenery) {
+    return (scenery->obj.id < OBJ_SCENERY_CO_BUMP_1) || (scenery->obj.id > OBJ_SCENERY_CO_BUMP_5);
+}
+
 void Graphics_SetScaleMtx(f32 scale) {
     Matrix_Scale(gGfxMatrix, scale, scale, scale, MTXF_APPLY);
     Matrix_SetGfxMtx(&gMasterDisp);
@@ -1057,7 +1061,7 @@ void Scenery_Draw(Scenery* this, s32 cullDirection) {
             RCP_SetupDL_57(gFogRed, gFogGreen, gFogBlue, gFogAlpha, gFogNear, gFogFar);
             gSPClearGeometryMode(gMasterDisp++, G_CULL_BACK);
 
-            if (cullDirection < 0) {
+            if ((cullDirection < 0) && Scenery_ShouldDistortWaterReflection(this)) {
                 Object_ApplyWaterDistortion();
             }
 
@@ -1073,7 +1077,7 @@ void Scenery_Draw(Scenery* this, s32 cullDirection) {
 
             Object_SetCullDirection(cullDirection);
 
-            if (cullDirection < 0) {
+            if ((cullDirection < 0) && Scenery_ShouldDistortWaterReflection(this)) {
                 Object_ApplyWaterDistortion();
             }
 
