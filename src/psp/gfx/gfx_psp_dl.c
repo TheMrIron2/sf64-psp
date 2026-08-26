@@ -41,6 +41,10 @@ extern u16 aTrBackdropTopTex[];
 #define PSP_ORIGINAL_FOG 0
 #endif
 
+#ifndef PSP_FOG_DISABLED
+#define PSP_FOG_DISABLED 0
+#endif
+
 #ifndef PSP_FOG_ALPHA_VISUALIZE
 #define PSP_FOG_ALPHA_VISUALIZE 0
 #endif
@@ -461,6 +465,7 @@ typedef struct {
     u32 fogCoverageTriangleCount;
     u32 fogCoverageOverlayCount;
     u32 fogCoverageExclusions[PSP_GFX_DL_FOG_COVERAGE_REASONS];
+    u32 fogInterpolationSampleCount;
     PspGfxDlFogTransformSample fogTransformSamples[3];
     u32 traceLastStateHash;
     int traceHasStateHash;
@@ -2219,11 +2224,12 @@ static void psp_gfx_dl_set_batch_fog(PspGfxDlContext* ctx, int fog, const float 
     float color[4];
     float start;
     float end;
-    int originalFog = PSP_ORIGINAL_FOG && fog;
+    int originalFog = PSP_ORIGINAL_FOG && !PSP_FOG_DISABLED && fog;
 
     psp_gfx_dl_resolve_fog_values(ctx, fog, projection, color, &start, &end);
     fog = fog && (ctx->fogMul != 0) && (end > start) && (start >= 0.0f);
-    psp_gfx_dl_set_batch_fog_resolved(ctx, originalFog ? 0 : fog, originalFog, color, start, end);
+    psp_gfx_dl_set_batch_fog_resolved(ctx, (originalFog || PSP_FOG_DISABLED) ? 0 : fog,
+                                      originalFog, color, start, end);
 }
 
 static void psp_gfx_dl_set_batch_transform(PspGfxDlContext* ctx, int pretransformed, u32 projectionSerial,
@@ -2460,10 +2466,11 @@ static u32 psp_gfx_dl_apply_effective_batch_state(PspGfxDlContext* ctx, const Ps
     psp_gfx_dl_set_batch_depth(ctx, ctx->effectiveDepth.depthTest, ctx->effectiveDepth.depthWrite,
                                ctx->effectiveDepth.depthBias);
     {
-        int originalFog = PSP_ORIGINAL_FOG && !pretransformed &&
+        int originalFog = PSP_ORIGINAL_FOG && !PSP_FOG_DISABLED && !pretransformed &&
                           ((ctx->otherModeL >> 30) == G_BL_CLR_FOG);
 
-        psp_gfx_dl_set_batch_fog_resolved(ctx, originalFog ? 0 : ctx->effectiveFog.fog,
+        psp_gfx_dl_set_batch_fog_resolved(ctx,
+                                          (originalFog || PSP_FOG_DISABLED) ? 0 : ctx->effectiveFog.fog,
                                           originalFog, ctx->effectiveFog.color,
                                           ctx->effectiveFog.start, ctx->effectiveFog.end);
     }
@@ -2626,6 +2633,92 @@ static const char* psp_gfx_dl_fog_exclusion_name(u32 reason) {
     return reason < PSP_GFX_DL_FOG_COVERAGE_REASONS ? names[reason] : "other";
 }
 
+#if PSP_ORIGINAL_FOG
+static float psp_gfx_dl_fog_interpolate_affine(const PspGfxDlVertex* const vertices[3],
+                                               const float weights[3]) {
+    return weights[0] * vertices[0]->state.fields.fogAlpha +
+           weights[1] * vertices[1]->state.fields.fogAlpha +
+           weights[2] * vertices[2]->state.fields.fogAlpha;
+}
+
+static float psp_gfx_dl_fog_interpolate_perspective(const PspGfxDlVertex* const vertices[3],
+                                                    const float weights[3]) {
+    float weightedFog = 0.0f;
+    float weightedInverseW = 0.0f;
+    u32 i;
+
+    for (i = 0; i < 3; i++) {
+        float inverseW = 1.0f / vertices[i]->clipW;
+
+        weightedFog += weights[i] * vertices[i]->state.fields.fogAlpha * inverseW;
+        weightedInverseW += weights[i] * inverseW;
+    }
+    return weightedFog / weightedInverseW;
+}
+
+static void psp_gfx_dl_trace_fog_interpolation(PspGfxDlContext* ctx,
+                                               const PspGfxDlVertex* const vertices[3]) {
+    float centroidWeights[3] = { 1.0f / 3.0f, 1.0f / 3.0f, 1.0f / 3.0f };
+    float nearWeights[3] = { 0.2f, 0.2f, 0.2f };
+    float edgeWeights[3] = { 0.45f, 0.45f, 0.45f };
+    float affine[3];
+    float perspective[3];
+    u32 order[3] = { 0, 1, 2 };
+    u32 minAlpha = vertices[0]->state.fields.fogAlpha;
+    u32 maxAlpha = minAlpha;
+    u32 i;
+    u32 j;
+    char line[640];
+
+    for (i = 1; i < 3; i++) {
+        if (vertices[i]->state.fields.fogAlpha < minAlpha) {
+            minAlpha = vertices[i]->state.fields.fogAlpha;
+        }
+        if (vertices[i]->state.fields.fogAlpha > maxAlpha) {
+            maxAlpha = vertices[i]->state.fields.fogAlpha;
+        }
+    }
+    if ((ctx->fogInterpolationSampleCount >= 12) || ((maxAlpha - minAlpha) < 64U)) {
+        return;
+    }
+    for (i = 0; i < 3; i++) {
+        for (j = i + 1; j < 3; j++) {
+            if (vertices[order[j]]->state.fields.fogAlpha < vertices[order[i]]->state.fields.fogAlpha) {
+                u32 swap = order[i];
+                order[i] = order[j];
+                order[j] = swap;
+            }
+        }
+    }
+    nearWeights[order[0]] = 0.6f;
+    edgeWeights[order[2]] = 0.1f;
+    affine[0] = psp_gfx_dl_fog_interpolate_affine(vertices, centroidWeights);
+    perspective[0] = psp_gfx_dl_fog_interpolate_perspective(vertices, centroidWeights);
+    affine[1] = psp_gfx_dl_fog_interpolate_affine(vertices, nearWeights);
+    perspective[1] = psp_gfx_dl_fog_interpolate_perspective(vertices, nearWeights);
+    affine[2] = psp_gfx_dl_fog_interpolate_affine(vertices, edgeWeights);
+    perspective[2] = psp_gfx_dl_fog_interpolate_perspective(vertices, edgeWeights);
+    snprintf(line, sizeof(line),
+             "[fog-interpolation] task=%lu draw=%lu "
+             "screen=%.2f,%.2f/%.2f,%.2f/%.2f,%.2f "
+             "clipW=%.6f,%.6f,%.6f fogAlpha=%u,%u,%u "
+             "centroid=%.2f,%.2f,%+.2f near=%.2f,%.2f,%+.2f edge=%.2f,%.2f,%+.2f",
+             (unsigned long) ctx->taskIndex, (unsigned long) ctx->traceDrawIndex,
+             (vertices[0]->x + 1.0f) * 240.0f, (1.0f - vertices[0]->y) * 136.0f,
+             (vertices[1]->x + 1.0f) * 240.0f, (1.0f - vertices[1]->y) * 136.0f,
+             (vertices[2]->x + 1.0f) * 240.0f, (1.0f - vertices[2]->y) * 136.0f,
+             vertices[0]->clipW, vertices[1]->clipW, vertices[2]->clipW,
+             (unsigned int) vertices[0]->state.fields.fogAlpha,
+             (unsigned int) vertices[1]->state.fields.fogAlpha,
+             (unsigned int) vertices[2]->state.fields.fogAlpha,
+             affine[0], perspective[0], perspective[0] - affine[0],
+             affine[1], perspective[1], perspective[1] - affine[1],
+             affine[2], perspective[2], perspective[2] - affine[2]);
+    PspPlatform_LogLine(line);
+    ctx->fogInterpolationSampleCount++;
+}
+#endif
+
 static void psp_gfx_dl_trace_fog_coverage(PspGfxDlContext* ctx, int pretransformed,
                                           const PspGfxDlVertex* const vertices[3]) {
     u32 reason = PSP_GFX_DL_FOG_EXCLUDE_OTHER;
@@ -2693,6 +2786,12 @@ static void psp_gfx_dl_trace_fog_coverage(PspGfxDlContext* ctx, int pretransform
              overlay ? "none" : psp_gfx_dl_fog_exclusion_name(reason),
              (unsigned long) minAlpha, (unsigned long) maxAlpha, (float) sumAlpha / 3.0f);
     PspPlatform_LogLine(line);
+#if PSP_ORIGINAL_FOG
+    if (!pretransformed && ((ctx->geometryMode & G_FOG) != 0) &&
+        ((ctx->geometryMode & G_ZBUFFER) == 0) && !alphaTest && !blend) {
+        psp_gfx_dl_trace_fog_interpolation(ctx, vertices);
+    }
+#endif
 }
 
 static void psp_gfx_dl_trace_triangle(PspGfxDlContext* ctx, const Gfx* cmd, u32 depth, u8 a, u8 b, u8 c) {
