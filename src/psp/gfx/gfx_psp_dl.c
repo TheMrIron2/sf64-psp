@@ -1214,6 +1214,7 @@ static int __attribute__((used)) psp_gfx_dl_store_transformed_vertex(
     return 1;
 }
 
+#if PSP_ORIGINAL_FOG
 static u8 psp_gfx_dl_calculate_fog_alpha(const PspGfxDlContext* ctx, const PspGfxDlVertex* vertex) {
     n64psp_fog_coefficients coefficients;
 
@@ -1225,6 +1226,7 @@ static u8 psp_gfx_dl_calculate_fog_alpha(const PspGfxDlContext* ctx, const PspGf
     coefficients.offset = ctx->fogOffset;
     return n64psp_fog_alpha(&coefficients, vertex->clipZ, vertex->clipW);
 }
+#endif
 
 // the only G_MTX flag bits this GBI defines
 #define PSP_GFX_DL_MTX_FLAG_MASK ((u32) (G_MTX_PROJECTION | G_MTX_LOAD | G_MTX_PUSH))
@@ -1638,11 +1640,20 @@ static void psp_gfx_dl_weld_flat_batch_seams(PspGfxDlContext* ctx) {
 }
 
 #if PSP_ORIGINAL_FOG
+static int psp_gfx_dl_original_fog_eligible(int sprites, int alphaTest, int blend,
+                                            int depthTest, int depthWrite, int pretransformed) {
+    return !sprites && !blend && !pretransformed &&
+           (!depthTest || depthWrite) &&
+           (!alphaTest || (depthTest && depthWrite));
+}
+
 static int psp_gfx_dl_build_original_fog_batch(PspGfxDlContext* ctx) {
     u32 i;
 
-    if (!ctx->batchOriginalFog || ctx->batchSprites || ctx->batchAlphaTest || ctx->batchBlend ||
-        (ctx->batchDepthTest && !ctx->batchDepthWrite) || ctx->batchPretransformed) {
+    if (!ctx->batchOriginalFog ||
+        !psp_gfx_dl_original_fog_eligible(ctx->batchSprites, ctx->batchAlphaTest,
+                                          ctx->batchBlend, ctx->batchDepthTest,
+                                          ctx->batchDepthWrite, ctx->batchPretransformed)) {
         return 0;
     }
     for (i = 0; i < ctx->batchCount; i++) {
@@ -2621,6 +2632,10 @@ static void psp_gfx_dl_trace_fog_coverage(PspGfxDlContext* ctx, int pretransform
     u32 minAlpha;
     u32 maxAlpha;
     u32 sumAlpha;
+    int alphaTest;
+    int blend;
+    int depthTest;
+    int depthWrite;
     int overlay;
     char line[320];
 
@@ -2643,21 +2658,24 @@ static void psp_gfx_dl_trace_fog_coverage(PspGfxDlContext* ctx, int pretransform
     }
     sumAlpha += vertices[1]->state.fields.fogAlpha + vertices[2]->state.fields.fogAlpha;
 
-    overlay = PSP_ORIGINAL_FOG;
-    if (psp_gfx_dl_alpha_test_enabled(ctx)) {
+    alphaTest = psp_gfx_dl_alpha_test_enabled(ctx);
+    blend = psp_gfx_dl_blend_enabled(ctx);
+    depthTest = (ctx->geometryMode & G_ZBUFFER) != 0;
+    depthWrite = (ctx->otherModeL & Z_UPD) != 0;
+#if PSP_ORIGINAL_FOG
+    overlay = psp_gfx_dl_original_fog_eligible(0, alphaTest, blend, depthTest,
+                                               depthWrite, pretransformed);
+#else
+    overlay = 0;
+#endif
+    if (alphaTest && (!depthTest || !depthWrite)) {
         reason = PSP_GFX_DL_FOG_EXCLUDE_ALPHA_TEST;
-        overlay = 0;
-    } else if (psp_gfx_dl_blend_enabled(ctx)) {
+    } else if (blend) {
         reason = PSP_GFX_DL_FOG_EXCLUDE_BLEND;
-        overlay = 0;
-    } else if (((ctx->geometryMode & G_ZBUFFER) != 0) && ((ctx->otherModeL & Z_UPD) == 0)) {
+    } else if (depthTest && !depthWrite) {
         reason = PSP_GFX_DL_FOG_EXCLUDE_NO_DEPTH_WRITE;
-        overlay = 0;
     } else if (pretransformed) {
         reason = PSP_GFX_DL_FOG_EXCLUDE_PRETRANSFORMED;
-        overlay = 0;
-    } else if (!PSP_ORIGINAL_FOG) {
-        overlay = 0;
     }
 
     ctx->fogCoverageDrawCount++;
@@ -2902,8 +2920,10 @@ static void psp_gfx_dl_build_clip_vertex(PspGfxDlContext* ctx, const PspGfxDlVer
         dst->v = 0.0f;
     }
     dst->generated = 0;
+#if PSP_ORIGINAL_FOG
     dst->fogAlpha = src->state.fields.fogAlpha;
     dst->reserved = 0;
+#endif
 }
 
 static void psp_gfx_dl_emit_clip_vertex(PspGfxDlContext* ctx, const PspGfxDlClipVertex* src) {
@@ -3421,8 +3441,10 @@ static void psp_gfx_dl_interpolate_clip_vertex(PspGfxDlClipVertex* out, const Ps
     out->u = from->u + ((to->u - from->u) * t);
     out->v = from->v + ((to->v - from->v) * t);
     out->generated = 1;
+#if PSP_ORIGINAL_FOG
     out->fogAlpha = n64psp_fog_alpha_lerp(from->fogAlpha, to->fogAlpha, t);
     out->reserved = 0;
+#endif
 }
 
 static float psp_gfx_dl_triangle_w_ratio(const PspGfxDlClipVertex* a, const PspGfxDlClipVertex* b,
@@ -4322,7 +4344,7 @@ static void psp_gfx_dl_handle_set_combine(PspGfxDlContext* ctx, const Gfx* gfx) 
     psp_gfx_dl_mark_effective_material_dirty(ctx);
 }
 
-#if PSP_RENDERER_DIAGNOSTICS
+#if PSP_RENDERER_DIAGNOSTICS && PSP_ORIGINAL_FOG
 static void psp_gfx_dl_note_fog_transform_sample(PspGfxDlContext* ctx, const Vtx* src,
                                                  const PspGfxDlVertex* out) {
     static const u8 targets[3] = { 32, 128, 224 };
@@ -4535,9 +4557,11 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
             }
 #endif
 
+#if PSP_ORIGINAL_FOG
             out->state.fields.fogAlpha = psp_gfx_dl_calculate_fog_alpha(ctx, out);
+#endif
 
-#if PSP_RENDERER_DIAGNOSTICS
+#if PSP_RENDERER_DIAGNOSTICS && PSP_ORIGINAL_FOG
             psp_gfx_dl_note_fog_transform_sample(ctx, &src[i], out);
 #endif
 

@@ -2443,6 +2443,7 @@ void PspGfxPspgl_DrawFogTriangles(const PspGfxPspglFogVertex* vertices, u32 vert
     GLenum restoreBlendSrc = sStateCache.blendSrc;
     GLenum restoreBlendDst = sStateCache.blendDst;
     int restoreBlendFunc = sStateCache.blendFuncValid;
+    int restoreAlphaTest = sStateCache.alphaTestEnabled;
     u32 smallDraw;
     u32 largeDraw;
 
@@ -2496,6 +2497,7 @@ void PspGfxPspgl_DrawFogTriangles(const PspGfxPspglFogVertex* vertices, u32 vert
     psp_gfx_pspgl_depth_test(restoreDepthTest);
     psp_gfx_pspgl_depth_mask(restoreDepthWrite ? GL_TRUE : GL_FALSE);
     psp_gfx_pspgl_texture_2d(restoreTextureId != 0);
+    psp_gfx_pspgl_alpha_test(restoreAlphaTest);
     psp_gfx_pspgl_blend(0);
     if (restoreBlendFunc) {
         psp_gfx_pspgl_blend_func(restoreBlendSrc, restoreBlendDst);
