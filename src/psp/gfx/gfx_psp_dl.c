@@ -25,6 +25,7 @@ extern u16 aTrBackdropBottomTex[];
 extern u16 aTrBackdropTopTex[];
 
 #include <n64psp/math.h>
+#include <n64psp/fog.h>
 #include <n64psp/lighting.h>
 #include <n64psp/tnl.h>
 
@@ -91,6 +92,7 @@ extern Gfx gMapVenomCloudRuntimeDL[];
 
 #if PSP_RENDERER_DIAGNOSTICS
 #define PSP_GFX_DL_TRACE_MAX_RECORDS 320
+#define PSP_GFX_DL_FOG_SAMPLE_MAX 32
 #endif
 
 #define PSP_GFX_OP_F3D_SPNOOP 0x00
@@ -128,6 +130,19 @@ typedef struct {
     u32 refCount;
 } PspGfxDlProjectionSnapshot;
 
+typedef union {
+    u32 raw;
+    struct {
+        u8 valid;
+        u8 fogAlpha;
+        u16 reserved;
+    } fields;
+} PspGfxDlVertexState;
+
+typedef char PspGfxDlVertexStateSizeCheck[
+    (sizeof(PspGfxDlVertexState) == 4) ? 1 : -1
+];
+
 typedef struct {
     float x;
     float y;
@@ -150,7 +165,7 @@ typedef struct {
     s16 s;
     s16 t;
     u32 clipCode;
-    int valid;
+    PspGfxDlVertexState state;
 } PspGfxDlVertex;
 
 typedef char PspGfxDlVertexSizeCheck[
@@ -172,8 +187,14 @@ typedef struct {
     float a;
     float u;
     float v;
-    int generated;
+    u8 generated;
+    u8 fogAlpha;
+    u16 reserved;
 } PspGfxDlClipVertex;
+
+typedef char PspGfxDlClipVertexSizeCheck[
+    (sizeof(PspGfxDlClipVertex) == 60) ? 1 : -1
+];
 
 typedef struct {
     float x;
@@ -412,6 +433,7 @@ typedef struct {
     u32 traceDrawIndex;
     u32 traceRecordCount;
     u32 traceDroppedCount;
+    u32 fogSampleCount;
     u32 traceLastStateHash;
     int traceHasStateHash;
     u32 vtxCommandCount;
@@ -427,6 +449,7 @@ static PspGfxDlContext sPspGfxDlContext;
 #if PSP_RENDERER_DIAGNOSTICS
 static volatile int sPspGfxDlTraceArmed;
 static u32 sPspGfxDlTracePreviousButtons;
+static int sPspGfxDlTraceHintLogged;
 
 // SF64 material corpus capture; measures how finite the effective material set is
 // Storage is file static so it accumulates across tasks rather than per-task reset
@@ -1154,6 +1177,18 @@ static int __attribute__((used)) psp_gfx_dl_store_transformed_vertex(
     }
 
     return 1;
+}
+
+static u8 psp_gfx_dl_calculate_fog_alpha(const PspGfxDlContext* ctx, const PspGfxDlVertex* vertex) {
+    n64psp_fog_coefficients coefficients;
+
+    if (!vertex->state.fields.valid || ((ctx->geometryMode & G_FOG) == 0)) {
+        return 0;
+    }
+
+    coefficients.multiplier = ctx->fogMul;
+    coefficients.offset = ctx->fogOffset;
+    return n64psp_fog_alpha(&coefficients, vertex->clipZ, vertex->clipW);
 }
 
 // the only G_MTX flag bits this GBI defines
@@ -2335,7 +2370,7 @@ static u32 psp_gfx_dl_apply_effective_batch_state(PspGfxDlContext* ctx, const Ps
 #endif
 
 static int psp_gfx_dl_vertex_is_valid(PspGfxDlContext* ctx, u8 index) {
-    return (index < PSP_GFX_DL_MAX_VERTICES) && ctx->vertices[index].valid;
+    return (index < PSP_GFX_DL_MAX_VERTICES) && ctx->vertices[index].state.fields.valid;
 }
 
 #if PSP_RENDERER_DIAGNOSTICS
@@ -2466,10 +2501,12 @@ static void psp_gfx_dl_trace_triangle(PspGfxDlContext* ctx, const Gfx* cmd, u32 
     float fogColor[4];
     float fogStart = 0.0f;
     float fogEnd = 0.0f;
+    float fogNdc[3];
     float u[3] = { 0.0f, 0.0f, 0.0f };
     float v[3] = { 0.0f, 0.0f, 0.0f };
     int pretransformed;
     int fog;
+    int rdpFog;
     int force;
     char line[768];
     u32 i;
@@ -2496,8 +2533,10 @@ static void psp_gfx_dl_trace_triangle(PspGfxDlContext* ctx, const Gfx* cmd, u32 
                      (vertices[0]->projectionSerial != vertices[2]->projectionSerial);
     fog = psp_gfx_dl_resolve_fog_state_values(ctx, vertices[0], pretransformed,
                                               fogColor, &fogStart, &fogEnd);
+    rdpFog = !pretransformed && ((ctx->otherModeL >> 30) == G_BL_CLR_FOG);
     force = (ctx->combineMode == PSP_GFX_DL_COMBINE_UNKNOWN);
     for (i = 0; i < 3; i++) {
+        fogNdc[i] = (vertices[i]->clipW > 0.0f) ? (vertices[i]->clipZ / vertices[i]->clipW) : 0.0f;
         force |= (vertices[i]->clipW <= 0.0f) || (vertices[i]->clipCode != 0);
         if ((ctx->textureUploadWidth != 0) && (ctx->textureUploadHeight != 0)) {
             u[i] = psp_gfx_dl_normalize_s10_5_s(ctx, vertices[i]->s, ctx->textureUploadWidth,
@@ -2523,6 +2562,16 @@ static void psp_gfx_dl_trace_triangle(PspGfxDlContext* ctx, const Gfx* cmd, u32 
              (unsigned long) vertices[2]->clipCode,
              vertices[0]->s, vertices[0]->t, vertices[1]->s, vertices[1]->t, vertices[2]->s, vertices[2]->t,
              u[0], v[0], u[1], v[1], u[2], v[2]);
+    PspPlatform_LogLine(line);
+
+    snprintf(line, sizeof(line),
+             "[rdp-trace-fog] task=%lu draw=%lu rspFog=%d rdpFog=%d mul=%d offset=%d "
+             "zOverW=%.6f,%.6f,%.6f fogAlpha=%u,%u,%u",
+             (unsigned long) ctx->taskIndex, (unsigned long) ctx->traceDrawIndex,
+             (ctx->geometryMode & G_FOG) != 0, rdpFog, ctx->fogMul, ctx->fogOffset,
+             fogNdc[0], fogNdc[1], fogNdc[2], (unsigned int) vertices[0]->state.fields.fogAlpha,
+             (unsigned int) vertices[1]->state.fields.fogAlpha,
+             (unsigned int) vertices[2]->state.fields.fogAlpha);
     PspPlatform_LogLine(line);
 }
 
@@ -2654,6 +2703,8 @@ static void psp_gfx_dl_build_clip_vertex(PspGfxDlContext* ctx, const PspGfxDlVer
         dst->v = 0.0f;
     }
     dst->generated = 0;
+    dst->fogAlpha = src->state.fields.fogAlpha;
+    dst->reserved = 0;
 }
 
 static void psp_gfx_dl_emit_clip_vertex(PspGfxDlContext* ctx, const PspGfxDlClipVertex* src) {
@@ -3158,6 +3209,8 @@ static void psp_gfx_dl_interpolate_clip_vertex(PspGfxDlClipVertex* out, const Ps
     out->u = from->u + ((to->u - from->u) * t);
     out->v = from->v + ((to->v - from->v) * t);
     out->generated = 1;
+    out->fogAlpha = n64psp_fog_alpha_lerp(from->fogAlpha, to->fogAlpha, t);
+    out->reserved = 0;
 }
 
 static float psp_gfx_dl_triangle_w_ratio(const PspGfxDlClipVertex* a, const PspGfxDlClipVertex* b,
@@ -3891,7 +3944,7 @@ static void psp_gfx_dl_handle_fill_rectangle(PspGfxDlContext* ctx, const Gfx* gf
 
     if (!ctx->colorImageIsDisplay) {
 #if PSP_RENDERER_DIAGNOSTICS
-        if (activeBackgroundRect) {
+        if (ctx->traceActive && activeBackgroundRect) {
             psp_gfx_dl_log_active_background_fill(ctx, color, primitiveFill, blend);
         }
 #endif
@@ -3901,7 +3954,7 @@ static void psp_gfx_dl_handle_fill_rectangle(PspGfxDlContext* ctx, const Gfx* gf
 
     psp_gfx_dl_flush_all(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
 #if PSP_RENDERER_DIAGNOSTICS
-    if (activeBackgroundRect) {
+    if (ctx->traceActive && activeBackgroundRect) {
         psp_gfx_dl_log_active_background_fill(ctx, color, primitiveFill, blend);
     }
 #endif
@@ -4153,7 +4206,7 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
         directOutput.projected = &firstOutput->x;
         directOutput.lighting = sPspGfxDlLightingOutput;
         directOutput.clip_code = &firstOutput->clipCode;
-        directOutput.valid = &firstOutput->valid;
+        directOutput.valid = &firstOutput->state.raw;
         directOutput.vertex_stride = sizeof(*firstOutput);
         directOutput.lighting_stride = sizeof(sPspGfxDlLightingOutput[0]);
 
@@ -4211,7 +4264,7 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
             clip.z = sPspGfxDlTransformOutput[i].second.z;
             clip.w = sPspGfxDlTransformOutput[i].second.w;
 
-            out->valid =
+            out->state.raw =
                 psp_gfx_dl_store_transformed_vertex(
                     ctx,
                     out,
@@ -4219,15 +4272,34 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
                     &clip
                 );
 #elif PSP_GFX_DL_HOT_STATS
-            if (!out->valid) {
+            if (!out->state.fields.valid) {
                 ctx->stats.nearZeroWCount++;
             } else if (ctx->hasProjection && (out->clipW < 0.0f)) {
                 ctx->stats.behindEyeVertexCount++;
             }
 #endif
 
+            out->state.fields.fogAlpha = psp_gfx_dl_calculate_fog_alpha(ctx, out);
+
+#if PSP_RENDERER_DIAGNOSTICS
+            if (ctx->traceActive && ((ctx->geometryMode & G_FOG) != 0) &&
+                (ctx->fogSampleCount < PSP_GFX_DL_FOG_SAMPLE_MAX)) {
+                char fogLine[256];
+                float fogNdc = (out->clipW > 0.0f) ? (out->clipZ / out->clipW) : 0.0f;
+
+                snprintf(fogLine, sizeof(fogLine),
+                         "[rsp-trace-fog] task=%lu sample=%lu vertex=%lu mul=%d offset=%d "
+                         "clipZ=%.6f clipW=%.6f zOverW=%.6f fogAlpha=%u",
+                         (unsigned long) ctx->taskIndex, (unsigned long) ctx->fogSampleCount,
+                         (unsigned long) (v0 + (s32) i), ctx->fogMul, ctx->fogOffset,
+                         out->clipZ, out->clipW, fogNdc, (unsigned int) out->state.fields.fogAlpha);
+                PspPlatform_LogLine(fogLine);
+                ctx->fogSampleCount++;
+            }
+#endif
+
 #if PSP_GFX_DL_HOT_STATS
-            if (!out->valid) {
+            if (!out->state.fields.valid) {
                 ctx->stats.invalidVertexCount++;
             }
 #endif
@@ -5093,7 +5165,7 @@ static void psp_gfx_dl_reset_context(PspGfxDlContext* ctx) {
     }
     for (i = 0; i < ARRAY_COUNT(ctx->vertices); i++) {
         ctx->vertices[i].projectionSerial = 0;
-        ctx->vertices[i].valid = 0;
+        ctx->vertices[i].state.raw = 0;
     }
     for (i = 0; i < ARRAY_COUNT(ctx->projectionSnapshots); i++) {
         ctx->projectionSnapshots[i].refCount = 0;
@@ -5254,6 +5326,10 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
     psp_gfx_dl_reset_context(ctx);
     ctx->taskIndex = taskIndex;
 #if PSP_RENDERER_DIAGNOSTICS
+    if (!sPspGfxDlTraceHintLogged) {
+        PspPlatform_LogLine("[rdp-trace] press SELECT+TRIANGLE to capture the next graphics task");
+        sPspGfxDlTraceHintLogged = 1;
+    }
     if (sPspGfxDlTraceArmed) {
         ctx->traceActive = 1;
         sPspGfxDlTraceArmed = 0;
