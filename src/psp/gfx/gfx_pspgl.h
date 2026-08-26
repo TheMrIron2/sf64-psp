@@ -74,6 +74,15 @@ typedef char PspGfxPspglColorVertexYOffsetCheck[(offsetof(PspGfxPspglColorVertex
 typedef char PspGfxPspglColorVertexZOffsetCheck[(offsetof(PspGfxPspglColorVertex, z) == 20) ? 1 : -1];
 
 typedef struct {
+    u32 color;
+    float x;
+    float y;
+    float z;
+} PspGfxPspglFogVertex;
+
+typedef char PspGfxPspglFogVertexSizeCheck[(sizeof(PspGfxPspglFogVertex) == 16) ? 1 : -1];
+
+typedef struct {
     PspGfxPspglColorVertex* vertices;
     u32 firstVertex;
     u32 capacity;
@@ -183,6 +192,11 @@ void PspGfxPspgl_DrawReservedColoredTriangles(const PspGfxPspglVertexReservation
                                               int depthWrite, int fog, const float* fogColor, float fogStart,
                                               float fogEnd, const float* projectionMatrix, u32 projectionSerial,
                                               int pretransformed, int pointFilter);
+void PspGfxPspgl_DrawFogTriangles(const PspGfxPspglFogVertex* vertices, u32 vertexCount,
+                                  const float* projectionMatrix, u32 projectionSerial,
+                                  int pretransformed, int restoreDepthTest, int restoreDepthWrite,
+                                  u32 restoreTextureId,
+                                  const PspGfxPspglColorVertex* restoreVertices);
 void PspGfxPspgl_DrawColoredSprites(const PspGfxPspglColorVertex* vertices, u32 vertexCount, u32 textureId,
                                     PspGfxPspglTextureRef textureRef, PspGfxPspglTextureEnv textureEnv,
                                     u32 textureEnvColor, PspGfxPspglTextureWrap wrapS, PspGfxPspglTextureWrap wrapT,

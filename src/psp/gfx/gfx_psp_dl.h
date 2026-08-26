@@ -69,6 +69,10 @@ typedef struct {
     u32 depthLimitHit;
     u32 maxDepthReached;
     u32 drawVertexCount;
+    u32 originalFogDrawCount;
+    u32 originalFogTriangleCount;
+    u32 originalFogVertexBytes;
+    u32 originalFogVertexCopies;
 } PspGfxDlStats;
 
 int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats);

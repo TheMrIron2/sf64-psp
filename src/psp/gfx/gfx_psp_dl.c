@@ -37,6 +37,14 @@ extern u16 aTrBackdropTopTex[];
 #define PSP_RENDERER_DIAGNOSTICS 0
 #endif
 
+#ifndef PSP_ORIGINAL_FOG
+#define PSP_ORIGINAL_FOG 0
+#endif
+
+#ifndef PSP_FOG_ALPHA_VISUALIZE
+#define PSP_FOG_ALPHA_VISUALIZE 0
+#endif
+
 #if PSP_RENDERER_DIAGNOSTICS
 #include "assets/ast_map.h"
 #include <pspctrl.h>
@@ -92,7 +100,22 @@ extern Gfx gMapVenomCloudRuntimeDL[];
 
 #if PSP_RENDERER_DIAGNOSTICS
 #define PSP_GFX_DL_TRACE_MAX_RECORDS 320
-#define PSP_GFX_DL_FOG_SAMPLE_MAX 32
+#define PSP_GFX_DL_FOG_COVERAGE_REASONS 8
+
+typedef struct {
+    int valid;
+    u32 distance;
+    s16 objectX;
+    s16 objectY;
+    s16 objectZ;
+    float modelview[4][4];
+    float projection[4][4];
+    float view[4];
+    float clip[4];
+    s16 fogMul;
+    s16 fogOffset;
+    u8 fogAlpha;
+} PspGfxDlFogTransformSample;
 #endif
 
 #define PSP_GFX_OP_F3D_SPNOOP 0x00
@@ -382,6 +405,7 @@ typedef struct {
     int batchDepthWrite;
     int batchDepthBias;
     int batchFog;
+    int batchOriginalFog;
     int batchPointFilter;
     PspGfxPspglVertexReservation batchReservation;
     int batchReserved;
@@ -433,7 +457,11 @@ typedef struct {
     u32 traceDrawIndex;
     u32 traceRecordCount;
     u32 traceDroppedCount;
-    u32 fogSampleCount;
+    u32 fogCoverageDrawCount;
+    u32 fogCoverageTriangleCount;
+    u32 fogCoverageOverlayCount;
+    u32 fogCoverageExclusions[PSP_GFX_DL_FOG_COVERAGE_REASONS];
+    PspGfxDlFogTransformSample fogTransformSamples[3];
     u32 traceLastStateHash;
     int traceHasStateHash;
     u32 vtxCommandCount;
@@ -501,6 +529,13 @@ static PspGfxPspglColorVertex* sPspGfxDlBatchCursor = sPspGfxDlBatch;
 static u32 sPspGfxDlBatchCapacity = PSP_GFX_DL_BATCH_VERTICES;
 #define PSP_GFX_DL_BATCH sPspGfxDlBatchCursor
 #define PSP_GFX_DL_BATCH_CAP sPspGfxDlBatchCapacity
+
+#if PSP_ORIGINAL_FOG
+static u8 sPspGfxDlBatchFogAlpha[PSP_GFX_DL_BATCH_VERTICES] __attribute__((aligned(16)));
+static u8* sPspGfxDlBatchFogAlphaCursor = sPspGfxDlBatchFogAlpha;
+static PspGfxPspglFogVertex sPspGfxDlFogBatch[PSP_GFX_DL_BATCH_VERTICES] __attribute__((aligned(16)));
+#define PSP_GFX_DL_BATCH_FOG_ALPHA sPspGfxDlBatchFogAlphaCursor
+#endif
 
 static n64psp_vec4f
     sPspGfxDlTransformInput[PSP_GFX_DL_MAX_VERTICES]
@@ -1602,7 +1637,38 @@ static void psp_gfx_dl_weld_flat_batch_seams(PspGfxDlContext* ctx) {
     }
 }
 
+#if PSP_ORIGINAL_FOG
+static int psp_gfx_dl_build_original_fog_batch(PspGfxDlContext* ctx) {
+    u32 i;
+
+    if (!ctx->batchOriginalFog || ctx->batchSprites || ctx->batchAlphaTest || ctx->batchBlend ||
+        (ctx->batchDepthTest && !ctx->batchDepthWrite) || ctx->batchPretransformed) {
+        return 0;
+    }
+    for (i = 0; i < ctx->batchCount; i++) {
+        const PspGfxPspglColorVertex* src = &PSP_GFX_DL_BATCH[i];
+        PspGfxPspglFogVertex* dst = &sPspGfxDlFogBatch[i];
+
+#if PSP_FOG_ALPHA_VISUALIZE
+        dst->color = psp_gfx_dl_pack_rgba_u8(PSP_GFX_DL_BATCH_FOG_ALPHA[i],
+                                             PSP_GFX_DL_BATCH_FOG_ALPHA[i],
+                                             PSP_GFX_DL_BATCH_FOG_ALPHA[i], 255, 0);
+#else
+        dst->color = psp_gfx_dl_pack_rgba_u8(ctx->fogR, ctx->fogG, ctx->fogB,
+                                             PSP_GFX_DL_BATCH_FOG_ALPHA[i], 0);
+#endif
+        dst->x = src->x;
+        dst->y = src->y;
+        dst->z = src->z;
+    }
+    return 1;
+}
+#endif
+
 static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason reason) {
+#if PSP_ORIGINAL_FOG
+    int drawOriginalFog;
+#endif
 #if PROFILE_COMPONENTS
     u32 ownerComponent;
     u32 ownerMask;
@@ -1623,6 +1689,9 @@ static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason 
     psp_gfx_dl_weld_flat_batch_seams(ctx);
     PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_SUBMIT);
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_BATCH_FLUSH);
+#if PSP_ORIGINAL_FOG
+    drawOriginalFog = psp_gfx_dl_build_original_fog_batch(ctx);
+#endif
     if (ctx->batchSprites) {
         PspGfxPspgl_DrawColoredSprites(
             PSP_GFX_DL_BATCH, ctx->batchCount, ctx->batchTextureId, ctx->batchTextureRef,
@@ -1648,6 +1717,18 @@ static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason 
             &ctx->batchProjection[0][0], ctx->batchProjectionSerial, ctx->batchPretransformed,
             ctx->batchPointFilter);
     }
+#if PSP_ORIGINAL_FOG
+    if (drawOriginalFog) {
+        PspGfxPspgl_DrawFogTriangles(sPspGfxDlFogBatch, ctx->batchCount,
+                                     &ctx->batchProjection[0][0], ctx->batchProjectionSerial,
+                                     ctx->batchPretransformed, ctx->batchDepthTest,
+                                     ctx->batchDepthWrite, ctx->batchTextureId, PSP_GFX_DL_BATCH);
+        ctx->stats.originalFogDrawCount++;
+        ctx->stats.originalFogTriangleCount += ctx->batchCount / 3;
+        ctx->stats.originalFogVertexBytes += ctx->batchCount * sizeof(PspGfxPspglFogVertex);
+        ctx->stats.originalFogVertexCopies += ctx->batchCount;
+    }
+#endif
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_BATCH_FLUSH);
     PspHwCounterProfile_InnerScopeEnd(PSP_HW_SCOPE_SUBMIT);
     PspProfiler_CountBatchFlush(reason, ctx->batchCount);
@@ -1686,6 +1767,9 @@ static int psp_gfx_dl_texture_ref_equal(PspGfxPspglTextureRef a, PspGfxPspglText
 // the whole pool first, so all open slots always share that state by construction
 typedef struct {
     PspGfxPspglColorVertex vertices[PSP_BATCH_POOL_VERTICES] __attribute__((aligned(16)));
+#if PSP_ORIGINAL_FOG
+    u8 fogAlpha[PSP_BATCH_POOL_VERTICES] __attribute__((aligned(16)));
+#endif
     PspGfxPspglVertexReservation reservation;
     int reserved;
     u32 count;
@@ -1766,6 +1850,9 @@ static void psp_gfx_dl_pool_select(PspGfxDlContext* ctx, u32 index) {
     ctx->batchReserved = sPspGfxDlPool[index].reserved;
     PSP_GFX_DL_BATCH = ctx->batchReserved ? ctx->batchReservation.vertices : sPspGfxDlPool[index].vertices;
     PSP_GFX_DL_BATCH_CAP = PSP_BATCH_POOL_VERTICES;
+#if PSP_ORIGINAL_FOG
+    PSP_GFX_DL_BATCH_FOG_ALPHA = sPspGfxDlPool[index].fogAlpha;
+#endif
 }
 
 // geometry that may not be reordered keeps the standalone buffer
@@ -1774,6 +1861,9 @@ static void psp_gfx_dl_pool_use_direct(PspGfxDlContext* ctx) {
     ctx->batchReserved = 0;
     PSP_GFX_DL_BATCH = sPspGfxDlBatch;
     PSP_GFX_DL_BATCH_CAP = PSP_GFX_DL_BATCH_VERTICES;
+#if PSP_ORIGINAL_FOG
+    PSP_GFX_DL_BATCH_FOG_ALPHA = sPspGfxDlBatchFogAlpha;
+#endif
 }
 
 static void psp_gfx_dl_pool_park(PspGfxDlContext* ctx) {
@@ -2058,10 +2148,11 @@ static void psp_gfx_dl_set_batch_depth(PspGfxDlContext* ctx, int depthTest, int 
     ctx->batchDepthBias = depthBias;
 }
 
-static void psp_gfx_dl_set_batch_fog_resolved(PspGfxDlContext* ctx, int fog, const float color[4], float start,
-                                              float end) {
+static void psp_gfx_dl_set_batch_fog_resolved(PspGfxDlContext* ctx, int fog, int originalFog,
+                                              const float color[4], float start, float end) {
     if (psp_gfx_dl_texture_barrier_has_pending(ctx) &&
-        ((ctx->batchFog != fog) || (ctx->batchFogColor[0] != color[0]) ||
+        ((ctx->batchFog != fog) || (ctx->batchOriginalFog != originalFog) ||
+         (ctx->batchFogColor[0] != color[0]) ||
          (ctx->batchFogColor[1] != color[1]) || (ctx->batchFogColor[2] != color[2]) ||
          (ctx->batchFogColor[3] != color[3]) || (ctx->batchFogStart != start) ||
          (ctx->batchFogEnd != end))) {
@@ -2074,6 +2165,7 @@ static void psp_gfx_dl_set_batch_fog_resolved(PspGfxDlContext* ctx, int fog, con
         psp_gfx_dl_flush_all(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
     }
     ctx->batchFog = fog;
+    ctx->batchOriginalFog = originalFog;
     ctx->batchFogColor[0] = color[0];
     ctx->batchFogColor[1] = color[1];
     ctx->batchFogColor[2] = color[2];
@@ -2116,10 +2208,11 @@ static void psp_gfx_dl_set_batch_fog(PspGfxDlContext* ctx, int fog, const float 
     float color[4];
     float start;
     float end;
+    int originalFog = PSP_ORIGINAL_FOG && fog;
 
     psp_gfx_dl_resolve_fog_values(ctx, fog, projection, color, &start, &end);
     fog = fog && (ctx->fogMul != 0) && (end > start) && (start >= 0.0f);
-    psp_gfx_dl_set_batch_fog_resolved(ctx, fog, color, start, end);
+    psp_gfx_dl_set_batch_fog_resolved(ctx, originalFog ? 0 : fog, originalFog, color, start, end);
 }
 
 static void psp_gfx_dl_set_batch_transform(PspGfxDlContext* ctx, int pretransformed, u32 projectionSerial,
@@ -2355,8 +2448,14 @@ static u32 psp_gfx_dl_apply_effective_batch_state(PspGfxDlContext* ctx, const Ps
     psp_gfx_dl_set_batch_transform(ctx, pretransformed, vertex->projectionSerial, vertex->projection);
     psp_gfx_dl_set_batch_depth(ctx, ctx->effectiveDepth.depthTest, ctx->effectiveDepth.depthWrite,
                                ctx->effectiveDepth.depthBias);
-    psp_gfx_dl_set_batch_fog_resolved(ctx, ctx->effectiveFog.fog, ctx->effectiveFog.color,
-                                      ctx->effectiveFog.start, ctx->effectiveFog.end);
+    {
+        int originalFog = PSP_ORIGINAL_FOG && !pretransformed &&
+                          ((ctx->otherModeL >> 30) == G_BL_CLR_FOG);
+
+        psp_gfx_dl_set_batch_fog_resolved(ctx, originalFog ? 0 : ctx->effectiveFog.fog,
+                                          originalFog, ctx->effectiveFog.color,
+                                          ctx->effectiveFog.start, ctx->effectiveFog.end);
+    }
     psp_gfx_dl_set_batch_texture(ctx, ctx->effectiveMaterial.textureId, ctx->effectiveMaterial.textureRef,
                                  ctx->effectiveMaterial.textureEnv, ctx->effectiveMaterial.textureEnvColor,
                                  ctx->combineMode, psp_gfx_dl_primitive_color(ctx),
@@ -2496,6 +2595,88 @@ static int psp_gfx_dl_trace_state(PspGfxDlContext* ctx, const char* kind, const 
     return 1;
 }
 
+enum {
+    PSP_GFX_DL_FOG_EXCLUDE_ALPHA_TEST,
+    PSP_GFX_DL_FOG_EXCLUDE_BLEND,
+    PSP_GFX_DL_FOG_EXCLUDE_NO_DEPTH_TEST,
+    PSP_GFX_DL_FOG_EXCLUDE_NO_DEPTH_WRITE,
+    PSP_GFX_DL_FOG_EXCLUDE_SPRITE,
+    PSP_GFX_DL_FOG_EXCLUDE_RECTANGLE,
+    PSP_GFX_DL_FOG_EXCLUDE_PRETRANSFORMED,
+    PSP_GFX_DL_FOG_EXCLUDE_OTHER,
+};
+
+static const char* psp_gfx_dl_fog_exclusion_name(u32 reason) {
+    static const char* names[PSP_GFX_DL_FOG_COVERAGE_REASONS] = {
+        "alpha-test", "blending", "no-depth-test", "no-depth-write",
+        "sprite", "rectangle", "pretransformed", "other",
+    };
+
+    return reason < PSP_GFX_DL_FOG_COVERAGE_REASONS ? names[reason] : "other";
+}
+
+static void psp_gfx_dl_trace_fog_coverage(PspGfxDlContext* ctx, int pretransformed,
+                                          const PspGfxDlVertex* const vertices[3]) {
+    u32 reason = PSP_GFX_DL_FOG_EXCLUDE_OTHER;
+    u32 minAlpha;
+    u32 maxAlpha;
+    u32 sumAlpha;
+    int overlay;
+    char line[320];
+
+    if (!ctx->traceActive || ((ctx->otherModeL >> 30) != G_BL_CLR_FOG)) {
+        return;
+    }
+    minAlpha = maxAlpha = vertices[0]->state.fields.fogAlpha;
+    sumAlpha = minAlpha;
+    if (vertices[1]->state.fields.fogAlpha < minAlpha) {
+        minAlpha = vertices[1]->state.fields.fogAlpha;
+    }
+    if (vertices[2]->state.fields.fogAlpha < minAlpha) {
+        minAlpha = vertices[2]->state.fields.fogAlpha;
+    }
+    if (vertices[1]->state.fields.fogAlpha > maxAlpha) {
+        maxAlpha = vertices[1]->state.fields.fogAlpha;
+    }
+    if (vertices[2]->state.fields.fogAlpha > maxAlpha) {
+        maxAlpha = vertices[2]->state.fields.fogAlpha;
+    }
+    sumAlpha += vertices[1]->state.fields.fogAlpha + vertices[2]->state.fields.fogAlpha;
+
+    overlay = PSP_ORIGINAL_FOG;
+    if (psp_gfx_dl_alpha_test_enabled(ctx)) {
+        reason = PSP_GFX_DL_FOG_EXCLUDE_ALPHA_TEST;
+        overlay = 0;
+    } else if (psp_gfx_dl_blend_enabled(ctx)) {
+        reason = PSP_GFX_DL_FOG_EXCLUDE_BLEND;
+        overlay = 0;
+    } else if (((ctx->geometryMode & G_ZBUFFER) != 0) && ((ctx->otherModeL & Z_UPD) == 0)) {
+        reason = PSP_GFX_DL_FOG_EXCLUDE_NO_DEPTH_WRITE;
+        overlay = 0;
+    } else if (pretransformed) {
+        reason = PSP_GFX_DL_FOG_EXCLUDE_PRETRANSFORMED;
+        overlay = 0;
+    } else if (!PSP_ORIGINAL_FOG) {
+        overlay = 0;
+    }
+
+    ctx->fogCoverageDrawCount++;
+    ctx->fogCoverageTriangleCount++;
+    if (overlay) {
+        ctx->fogCoverageOverlayCount++;
+    } else {
+        ctx->fogCoverageExclusions[reason]++;
+    }
+    snprintf(line, sizeof(line),
+             "[fog-coverage] task=%lu draw=%lu rspFog=%d rdpFog=1 overlay=%s exclude=%s "
+             "tri=1 alphaMin=%lu alphaMax=%lu alphaAvg=%.2f",
+             (unsigned long) ctx->taskIndex, (unsigned long) ctx->traceDrawIndex,
+             (ctx->geometryMode & G_FOG) != 0, overlay ? "yes" : "no",
+             overlay ? "none" : psp_gfx_dl_fog_exclusion_name(reason),
+             (unsigned long) minAlpha, (unsigned long) maxAlpha, (float) sumAlpha / 3.0f);
+    PspPlatform_LogLine(line);
+}
+
 static void psp_gfx_dl_trace_triangle(PspGfxDlContext* ctx, const Gfx* cmd, u32 depth, u8 a, u8 b, u8 c) {
     const PspGfxDlVertex* vertices[3];
     float fogColor[4];
@@ -2545,6 +2726,7 @@ static void psp_gfx_dl_trace_triangle(PspGfxDlContext* ctx, const Gfx* cmd, u32 
                                                 ctx->textureTileUlt);
         }
     }
+    psp_gfx_dl_trace_fog_coverage(ctx, pretransformed, vertices);
     if (!psp_gfx_dl_trace_state(ctx, "tri", cmd, depth, force, fog, fogStart, fogEnd)) {
         return;
     }
@@ -2587,6 +2769,23 @@ static void psp_gfx_dl_trace_rectangle(PspGfxDlContext* ctx, const Gfx* cmd, u32
         return;
     }
     ctx->traceDrawIndex++;
+    if ((ctx->otherModeL >> 30) == G_BL_CLR_FOG) {
+        u32 reason = textured && (ctx->textureFormat == G_IM_FMT_CI) &&
+                             (ctx->textureSize == G_IM_SIZ_4b) &&
+                             (ctx->textureWidth == 16) && (ctx->textureHeight == 13)
+                         ? PSP_GFX_DL_FOG_EXCLUDE_SPRITE
+                         : PSP_GFX_DL_FOG_EXCLUDE_RECTANGLE;
+        char fogLine[256];
+
+        ctx->fogCoverageDrawCount++;
+        ctx->fogCoverageExclusions[reason]++;
+        snprintf(fogLine, sizeof(fogLine),
+                 "[fog-coverage] task=%lu draw=%lu rspFog=%d rdpFog=1 overlay=no exclude=%s "
+                 "tri=0 alphaMin=na alphaMax=na alphaAvg=na",
+                 (unsigned long) ctx->taskIndex, (unsigned long) ctx->traceDrawIndex,
+                 (ctx->geometryMode & G_FOG) != 0, psp_gfx_dl_fog_exclusion_name(reason));
+        PspPlatform_LogLine(fogLine);
+    }
     if (textured) {
         x0 = (float) ((cmd->words.w1 >> 12) & 0xFFF) * 0.25f;
         y0 = (float) (cmd->words.w1 & 0xFFF) * 0.25f;
@@ -2721,7 +2920,11 @@ static void psp_gfx_dl_emit_clip_vertex(PspGfxDlContext* ctx, const PspGfxDlClip
         psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_BUFFER_FULL);
     }
 
-    dst = &PSP_GFX_DL_BATCH[ctx->batchCount++];
+    dst = &PSP_GFX_DL_BATCH[ctx->batchCount];
+#if PSP_ORIGINAL_FOG
+    PSP_GFX_DL_BATCH_FOG_ALPHA[ctx->batchCount] = src->fogAlpha;
+#endif
+    ctx->batchCount++;
     psp_gfx_dl_mark_batch_component(ctx);
 
     if (ctx->batchPretransformed) {
@@ -2900,7 +3103,11 @@ static void psp_gfx_dl_emit_direct_vertex(PspGfxDlContext* ctx, const PspGfxDlVe
         psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_BUFFER_FULL);
     }
 
-    dst = &PSP_GFX_DL_BATCH[ctx->batchCount++];
+    dst = &PSP_GFX_DL_BATCH[ctx->batchCount];
+#if PSP_ORIGINAL_FOG
+    PSP_GFX_DL_BATCH_FOG_ALPHA[ctx->batchCount] = src->state.fields.fogAlpha;
+#endif
+    ctx->batchCount++;
     psp_gfx_dl_mark_batch_component(ctx);
 
     if (ctx->batchPretransformed) {
@@ -2970,7 +3177,12 @@ static void psp_gfx_dl_build_direct_vertex(PspGfxDlContext* ctx, const PspGfxDlV
 
 static void psp_gfx_dl_emit_direct_vertex_unchecked(PspGfxDlContext* ctx, const PspGfxDlVertex* src,
                                                     float uScale, float vScale) {
-    PspGfxPspglColorVertex* dst = &PSP_GFX_DL_BATCH[ctx->batchCount++];
+    PspGfxPspglColorVertex* dst = &PSP_GFX_DL_BATCH[ctx->batchCount];
+
+#if PSP_ORIGINAL_FOG
+    PSP_GFX_DL_BATCH_FOG_ALPHA[ctx->batchCount] = src->state.fields.fogAlpha;
+#endif
+    ctx->batchCount++;
 
     psp_gfx_dl_mark_batch_component(ctx);
     psp_gfx_dl_build_direct_vertex(ctx, src, uScale, vScale, dst);
@@ -3718,7 +3930,11 @@ static void psp_gfx_dl_emit_rect_vertex(PspGfxDlContext* ctx,
         psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_BUFFER_FULL);
     }
 
-    dst = &PSP_GFX_DL_BATCH[ctx->batchCount++];
+    dst = &PSP_GFX_DL_BATCH[ctx->batchCount];
+#if PSP_ORIGINAL_FOG
+    PSP_GFX_DL_BATCH_FOG_ALPHA[ctx->batchCount] = 0;
+#endif
+    ctx->batchCount++;
     psp_gfx_dl_mark_batch_component(ctx);
     dst->u = psp_gfx_dl_normalize_texel_coord(u, ctx->textureUploadWidth, ctx->textureUploadX,
                                              ctx->textureTileUls);
@@ -4106,6 +4322,46 @@ static void psp_gfx_dl_handle_set_combine(PspGfxDlContext* ctx, const Gfx* gfx) 
     psp_gfx_dl_mark_effective_material_dirty(ctx);
 }
 
+#if PSP_RENDERER_DIAGNOSTICS
+static void psp_gfx_dl_note_fog_transform_sample(PspGfxDlContext* ctx, const Vtx* src,
+                                                 const PspGfxDlVertex* out) {
+    static const u8 targets[3] = { 32, 128, 224 };
+    u32 i;
+
+    if (!ctx->traceActive || !out->state.fields.valid || ((ctx->geometryMode & G_FOG) == 0)) {
+        return;
+    }
+    for (i = 0; i < 3; i++) {
+        PspGfxDlFogTransformSample* sample = &ctx->fogTransformSamples[i];
+        u32 distance = out->state.fields.fogAlpha > targets[i]
+                           ? out->state.fields.fogAlpha - targets[i]
+                           : targets[i] - out->state.fields.fogAlpha;
+
+        if (sample->valid && (sample->distance <= distance)) {
+            continue;
+        }
+        sample->valid = 1;
+        sample->distance = distance;
+        sample->objectX = src->v.ob[0];
+        sample->objectY = src->v.ob[1];
+        sample->objectZ = src->v.ob[2];
+        psp_gfx_dl_mtx_copy(sample->modelview, ctx->alignedMatrices.modelview.m);
+        psp_gfx_dl_mtx_copy(sample->projection, ctx->alignedMatrices.projection.m);
+        sample->view[0] = out->viewX;
+        sample->view[1] = out->viewY;
+        sample->view[2] = out->viewZ;
+        sample->view[3] = out->viewW;
+        sample->clip[0] = out->clipX;
+        sample->clip[1] = out->clipY;
+        sample->clip[2] = out->clipZ;
+        sample->clip[3] = out->clipW;
+        sample->fogMul = ctx->fogMul;
+        sample->fogOffset = ctx->fogOffset;
+        sample->fogAlpha = out->state.fields.fogAlpha;
+    }
+}
+#endif
+
 static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
     const Vtx* src = (const Vtx*) psp_gfx_dl_resolve_ptr(ctx, gfx->words.w1);
     u32 w0 = gfx->words.w0;
@@ -4282,20 +4538,7 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
             out->state.fields.fogAlpha = psp_gfx_dl_calculate_fog_alpha(ctx, out);
 
 #if PSP_RENDERER_DIAGNOSTICS
-            if (ctx->traceActive && ((ctx->geometryMode & G_FOG) != 0) &&
-                (ctx->fogSampleCount < PSP_GFX_DL_FOG_SAMPLE_MAX)) {
-                char fogLine[256];
-                float fogNdc = (out->clipW > 0.0f) ? (out->clipZ / out->clipW) : 0.0f;
-
-                snprintf(fogLine, sizeof(fogLine),
-                         "[rsp-trace-fog] task=%lu sample=%lu vertex=%lu mul=%d offset=%d "
-                         "clipZ=%.6f clipW=%.6f zOverW=%.6f fogAlpha=%u",
-                         (unsigned long) ctx->taskIndex, (unsigned long) ctx->fogSampleCount,
-                         (unsigned long) (v0 + (s32) i), ctx->fogMul, ctx->fogOffset,
-                         out->clipZ, out->clipW, fogNdc, (unsigned int) out->state.fields.fogAlpha);
-                PspPlatform_LogLine(fogLine);
-                ctx->fogSampleCount++;
-            }
+            psp_gfx_dl_note_fog_transform_sample(ctx, &src[i], out);
 #endif
 
 #if PSP_GFX_DL_HOT_STATS
@@ -5315,6 +5558,64 @@ int PspGfxDl_TracePollControls(u32 rawButtons) {
 }
 #endif
 
+#if PSP_RENDERER_DIAGNOSTICS
+static void psp_gfx_dl_report_fog_investigation(PspGfxDlContext* ctx) {
+    static const char* sampleNames[3] = { "near", "middle", "far" };
+    char line[512];
+    u32 i;
+    u32 row;
+
+    snprintf(line, sizeof(line),
+             "[fog-coverage-summary] task=%lu draws=%lu triangles=%lu overlay=%lu "
+             "alpha-test=%lu blending=%lu no-depth-test=%lu no-depth-write=%lu sprite=%lu "
+             "rectangle=%lu pretransformed=%lu other=%lu",
+             (unsigned long) ctx->taskIndex, (unsigned long) ctx->fogCoverageDrawCount,
+             (unsigned long) ctx->fogCoverageTriangleCount,
+             (unsigned long) ctx->fogCoverageOverlayCount,
+             (unsigned long) ctx->fogCoverageExclusions[PSP_GFX_DL_FOG_EXCLUDE_ALPHA_TEST],
+             (unsigned long) ctx->fogCoverageExclusions[PSP_GFX_DL_FOG_EXCLUDE_BLEND],
+             (unsigned long) ctx->fogCoverageExclusions[PSP_GFX_DL_FOG_EXCLUDE_NO_DEPTH_TEST],
+             (unsigned long) ctx->fogCoverageExclusions[PSP_GFX_DL_FOG_EXCLUDE_NO_DEPTH_WRITE],
+             (unsigned long) ctx->fogCoverageExclusions[PSP_GFX_DL_FOG_EXCLUDE_SPRITE],
+             (unsigned long) ctx->fogCoverageExclusions[PSP_GFX_DL_FOG_EXCLUDE_RECTANGLE],
+             (unsigned long) ctx->fogCoverageExclusions[PSP_GFX_DL_FOG_EXCLUDE_PRETRANSFORMED],
+             (unsigned long) ctx->fogCoverageExclusions[PSP_GFX_DL_FOG_EXCLUDE_OTHER]);
+    PspPlatform_LogLine(line);
+
+    for (i = 0; i < 3; i++) {
+        const PspGfxDlFogTransformSample* sample = &ctx->fogTransformSamples[i];
+        float zOverW;
+
+        if (!sample->valid) {
+            continue;
+        }
+        zOverW = sample->clip[3] > 0.0f ? sample->clip[2] / sample->clip[3] : 0.0f;
+        snprintf(line, sizeof(line),
+                 "[fog-transform] sample=%s object=%d,%d,%d view=%.6f,%.6f,%.6f,%.6f "
+                 "clip=%.6f,%.6f,%.6f,%.6f zOverW=%.9f mul=%d offset=%d alpha=%u",
+                 sampleNames[i], sample->objectX, sample->objectY, sample->objectZ,
+                 sample->view[0], sample->view[1], sample->view[2], sample->view[3],
+                 sample->clip[0], sample->clip[1], sample->clip[2], sample->clip[3], zOverW,
+                 sample->fogMul, sample->fogOffset, (unsigned int) sample->fogAlpha);
+        PspPlatform_LogLine(line);
+        for (row = 0; row < 4; row++) {
+            snprintf(line, sizeof(line),
+                     "[fog-transform-mv] sample=%s row=%lu %.9f %.9f %.9f %.9f",
+                     sampleNames[i], (unsigned long) row, sample->modelview[row][0],
+                     sample->modelview[row][1], sample->modelview[row][2], sample->modelview[row][3]);
+            PspPlatform_LogLine(line);
+        }
+        for (row = 0; row < 4; row++) {
+            snprintf(line, sizeof(line),
+                     "[fog-transform-proj] sample=%s row=%lu %.9f %.9f %.9f %.9f",
+                     sampleNames[i], (unsigned long) row, sample->projection[row][0],
+                     sample->projection[row][1], sample->projection[row][2], sample->projection[row][3]);
+            PspPlatform_LogLine(line);
+        }
+    }
+}
+#endif
+
 int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
     PspGfxDlContext* ctx = &sPspGfxDlContext;
 #if PSP_LOG_ENABLED || PSP_RENDERER_DIAGNOSTICS
@@ -5361,6 +5662,7 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
 #if PSP_LOG_ENABLED || PSP_RENDERER_DIAGNOSTICS
 #if PSP_RENDERER_DIAGNOSTICS
     if (ctx->traceActive) {
+        psp_gfx_dl_report_fog_investigation(ctx);
         snprintf(line, sizeof(line), "[rdp-trace] end task=%lu draws=%lu records=%lu dropped=%lu",
                  (unsigned long) taskIndex, (unsigned long) ctx->traceDrawIndex,
                  (unsigned long) ctx->traceRecordCount, (unsigned long) ctx->traceDroppedCount);
@@ -5375,6 +5677,7 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
                  "push=%lu pop=%lu mtxReject=%lu vp=%lu invalid=%lu outside=%lu tex=%lu texReject=%lu "
                  "rgba16=%lu rgba32=%lu ci4=%lu ia8=%lu ia16=%lu texTri=%lu alphaTestTri=%lu blendTri=%lu "
                  "texRect=%lu rectReject=%lu fillRect=%lu fillPrim=%lu fillUnsup=%lu "
+                 "origFogDraw=%lu origFogTri=%lu origFogBytes=%lu origFogCopies=%lu "
                  "firstUnsup=0x%02lx "
                  "cmdLimit=%lu depthLimit=%lu",
                  (unsigned long) taskIndex, (unsigned long) ctx->stats.commandCount,
@@ -5396,6 +5699,10 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
                  (unsigned long) ctx->stats.fillRectangleCount,
                  (unsigned long) ctx->stats.fillRectanglePrimitiveColorCount,
                  (unsigned long) ctx->stats.fillRectangleUnsupportedCount,
+                 (unsigned long) ctx->stats.originalFogDrawCount,
+                 (unsigned long) ctx->stats.originalFogTriangleCount,
+                 (unsigned long) ctx->stats.originalFogVertexBytes,
+                 (unsigned long) ctx->stats.originalFogVertexCopies,
                  (unsigned long) ctx->stats.firstUnsupportedOpcode,
                  (unsigned long) ctx->stats.commandLimitHit, (unsigned long) ctx->stats.depthLimitHit);
         PspPlatform_LogLine(line);
