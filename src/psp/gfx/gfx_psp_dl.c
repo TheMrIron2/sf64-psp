@@ -45,8 +45,29 @@ extern u16 aTrBackdropTopTex[];
 #define PSP_FOG_DISABLED 0
 #endif
 
-#ifndef PSP_FOG_ALPHA_VISUALIZE
+#ifndef PSP_FOG_ALPHA_VISUALIZE // remove
 #define PSP_FOG_ALPHA_VISUALIZE 0
+#endif
+
+#ifndef PSP_FOG_TRANSFER_COMPENSATE
+#define PSP_FOG_TRANSFER_COMPENSATE 0
+#endif
+
+#ifndef PSP_FOG_RDP_BLEND_QUANTIZE
+#define PSP_FOG_RDP_BLEND_QUANTIZE 0
+#endif
+
+#if PSP_ORIGINAL_FOG && PSP_FOG_TRANSFER_COMPENSATE
+static u8 psp_gfx_dl_present_fog_alpha(u8 alpha) {
+#if PSP_FOG_RDP_BLEND_QUANTIZE
+    float a = (float) (alpha >> 3) / 32.0f;
+#else
+    float a = (float) alpha / 255.0f;
+#endif
+    float presented = 1.0f - sqrtf(1.0f - a);
+
+    return (u8) (presented * 255.0f + 0.5f);
+}
 #endif
 
 #if PSP_RENDERER_DIAGNOSTICS
@@ -1670,8 +1691,19 @@ static int psp_gfx_dl_build_original_fog_batch(PspGfxDlContext* ctx) {
                                              PSP_GFX_DL_BATCH_FOG_ALPHA[i],
                                              PSP_GFX_DL_BATCH_FOG_ALPHA[i], 255, 0);
 #else
-        dst->color = psp_gfx_dl_pack_rgba_u8(ctx->fogR, ctx->fogG, ctx->fogB,
-                                             PSP_GFX_DL_BATCH_FOG_ALPHA[i], 0);
+        {
+            u8 fogAlpha = PSP_GFX_DL_BATCH_FOG_ALPHA[i];
+
+#if PSP_FOG_TRANSFER_COMPENSATE
+            /* Diagnostic for fog applied after the colour transfer */
+            if ((ctx->fogR == 0) && (ctx->fogG == 0) && (ctx->fogB == 0)) {
+                fogAlpha = psp_gfx_dl_present_fog_alpha(fogAlpha);
+            }
+#endif
+
+            dst->color = psp_gfx_dl_pack_rgba_u8(ctx->fogR, ctx->fogG, ctx->fogB,
+                                                 fogAlpha, 0);
+        }
 #endif
         dst->x = src->x;
         dst->y = src->y;
