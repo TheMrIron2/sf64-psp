@@ -109,7 +109,6 @@ extern Gfx gMapVenomCloudRuntimeDL[];
 
 #if PSP_RENDERER_DIAGNOSTICS
 #define PSP_GFX_DL_TRACE_MAX_RECORDS 320
-#define PSP_GFX_DL_FOG_COVERAGE_REASONS 8
 
 typedef struct {
     int valid;
@@ -466,10 +465,6 @@ typedef struct {
     u32 traceDrawIndex;
     u32 traceRecordCount;
     u32 traceDroppedCount;
-    u32 fogCoverageDrawCount;
-    u32 fogCoverageTriangleCount;
-    u32 fogCoverageOverlayCount;
-    u32 fogCoverageExclusions[PSP_GFX_DL_FOG_COVERAGE_REASONS];
     u32 fogInterpolationSampleCount;
     PspGfxDlFogTransformSample fogTransformSamples[3];
     u32 traceLastStateHash;
@@ -2717,26 +2712,6 @@ static int psp_gfx_dl_trace_state(PspGfxDlContext* ctx, const char* kind, const 
     return 1;
 }
 
-enum {
-    PSP_GFX_DL_FOG_EXCLUDE_ALPHA_TEST,
-    PSP_GFX_DL_FOG_EXCLUDE_BLEND,
-    PSP_GFX_DL_FOG_EXCLUDE_NO_DEPTH_TEST,
-    PSP_GFX_DL_FOG_EXCLUDE_NO_DEPTH_WRITE,
-    PSP_GFX_DL_FOG_EXCLUDE_SPRITE,
-    PSP_GFX_DL_FOG_EXCLUDE_RECTANGLE,
-    PSP_GFX_DL_FOG_EXCLUDE_PRETRANSFORMED,
-    PSP_GFX_DL_FOG_EXCLUDE_OTHER,
-};
-
-static const char* psp_gfx_dl_fog_exclusion_name(u32 reason) {
-    static const char* names[PSP_GFX_DL_FOG_COVERAGE_REASONS] = {
-        "alpha-test", "blending", "no-depth-test", "no-depth-write",
-        "sprite", "rectangle", "pretransformed", "other",
-    };
-
-    return reason < PSP_GFX_DL_FOG_COVERAGE_REASONS ? names[reason] : "other";
-}
-
 #if PSP_ORIGINAL_FOG
 static float psp_gfx_dl_fog_interpolate_affine(const PspGfxDlVertex* const vertices[3],
                                                const float weights[3]) {
@@ -2823,80 +2798,17 @@ static void psp_gfx_dl_trace_fog_interpolation(PspGfxDlContext* ctx,
 }
 #endif
 
-static void psp_gfx_dl_trace_fog_coverage(PspGfxDlContext* ctx, int pretransformed,
-                                          const PspGfxDlVertex* const vertices[3]) {
-    u32 reason = PSP_GFX_DL_FOG_EXCLUDE_OTHER;
-    u32 minAlpha;
-    u32 maxAlpha;
-    u32 sumAlpha;
-    int alphaTest;
-    int blend;
-    int depthTest;
-    int depthWrite;
-    int overlay;
-    char line[320];
-
-    if (!ctx->traceActive || ((ctx->otherModeL >> 30) != G_BL_CLR_FOG)) {
-        return;
-    }
-    minAlpha = maxAlpha = vertices[0]->state.fields.fogAlpha;
-    sumAlpha = minAlpha;
-    if (vertices[1]->state.fields.fogAlpha < minAlpha) {
-        minAlpha = vertices[1]->state.fields.fogAlpha;
-    }
-    if (vertices[2]->state.fields.fogAlpha < minAlpha) {
-        minAlpha = vertices[2]->state.fields.fogAlpha;
-    }
-    if (vertices[1]->state.fields.fogAlpha > maxAlpha) {
-        maxAlpha = vertices[1]->state.fields.fogAlpha;
-    }
-    if (vertices[2]->state.fields.fogAlpha > maxAlpha) {
-        maxAlpha = vertices[2]->state.fields.fogAlpha;
-    }
-    sumAlpha += vertices[1]->state.fields.fogAlpha + vertices[2]->state.fields.fogAlpha;
-
-    alphaTest = psp_gfx_dl_alpha_test_enabled(ctx);
-    blend = psp_gfx_dl_blend_enabled(ctx);
-    depthTest = (ctx->geometryMode & G_ZBUFFER) != 0;
-    depthWrite = (ctx->otherModeL & Z_UPD) != 0;
 #if PSP_ORIGINAL_FOG
-    overlay = psp_gfx_dl_original_fog_eligible(0, alphaTest, blend, depthTest,
-                                               depthWrite, pretransformed);
-#else
-    overlay = 0;
-#endif
-    if (alphaTest && (!depthTest || !depthWrite)) {
-        reason = PSP_GFX_DL_FOG_EXCLUDE_ALPHA_TEST;
-    } else if (blend) {
-        reason = PSP_GFX_DL_FOG_EXCLUDE_BLEND;
-    } else if (depthTest && !depthWrite) {
-        reason = PSP_GFX_DL_FOG_EXCLUDE_NO_DEPTH_WRITE;
-    } else if (pretransformed) {
-        reason = PSP_GFX_DL_FOG_EXCLUDE_PRETRANSFORMED;
-    }
-
-    ctx->fogCoverageDrawCount++;
-    ctx->fogCoverageTriangleCount++;
-    if (overlay) {
-        ctx->fogCoverageOverlayCount++;
-    } else {
-        ctx->fogCoverageExclusions[reason]++;
-    }
-    snprintf(line, sizeof(line),
-             "[fog-coverage] task=%lu draw=%lu rspFog=%d rdpFog=1 overlay=%s exclude=%s "
-             "tri=1 alphaMin=%lu alphaMax=%lu alphaAvg=%.2f",
-             (unsigned long) ctx->taskIndex, (unsigned long) ctx->traceDrawIndex,
-             (ctx->geometryMode & G_FOG) != 0, overlay ? "yes" : "no",
-             overlay ? "none" : psp_gfx_dl_fog_exclusion_name(reason),
-             (unsigned long) minAlpha, (unsigned long) maxAlpha, (float) sumAlpha / 3.0f);
-    PspPlatform_LogLine(line);
-#if PSP_ORIGINAL_FOG
-    if (!pretransformed && ((ctx->geometryMode & G_FOG) != 0) &&
-        ((ctx->geometryMode & G_ZBUFFER) == 0) && !alphaTest && !blend) {
+static void psp_gfx_dl_trace_fog_interpolation_if_needed(
+    PspGfxDlContext* ctx, int pretransformed, const PspGfxDlVertex* const vertices[3]) {
+    if (((ctx->otherModeL >> 30) == G_BL_CLR_FOG) && !pretransformed &&
+        ((ctx->geometryMode & G_FOG) != 0) &&
+        ((ctx->geometryMode & G_ZBUFFER) == 0) && !psp_gfx_dl_alpha_test_enabled(ctx) &&
+        !psp_gfx_dl_blend_enabled(ctx)) {
         psp_gfx_dl_trace_fog_interpolation(ctx, vertices);
     }
-#endif
 }
+#endif
 
 static void psp_gfx_dl_trace_triangle(PspGfxDlContext* ctx, const Gfx* cmd, u32 depth, u8 a, u8 b, u8 c) {
     const PspGfxDlVertex* vertices[3];
@@ -2947,7 +2859,9 @@ static void psp_gfx_dl_trace_triangle(PspGfxDlContext* ctx, const Gfx* cmd, u32 
                                                 ctx->textureTileUlt);
         }
     }
-    psp_gfx_dl_trace_fog_coverage(ctx, pretransformed, vertices);
+#if PSP_ORIGINAL_FOG
+    psp_gfx_dl_trace_fog_interpolation_if_needed(ctx, pretransformed, vertices);
+#endif
     if (!psp_gfx_dl_trace_state(ctx, "tri", cmd, depth, force, fog, fogStart, fogEnd)) {
         return;
     }
@@ -2990,23 +2904,6 @@ static void psp_gfx_dl_trace_rectangle(PspGfxDlContext* ctx, const Gfx* cmd, u32
         return;
     }
     ctx->traceDrawIndex++;
-    if ((ctx->otherModeL >> 30) == G_BL_CLR_FOG) {
-        u32 reason = textured && (ctx->textureFormat == G_IM_FMT_CI) &&
-                             (ctx->textureSize == G_IM_SIZ_4b) &&
-                             (ctx->textureWidth == 16) && (ctx->textureHeight == 13)
-                         ? PSP_GFX_DL_FOG_EXCLUDE_SPRITE
-                         : PSP_GFX_DL_FOG_EXCLUDE_RECTANGLE;
-        char fogLine[256];
-
-        ctx->fogCoverageDrawCount++;
-        ctx->fogCoverageExclusions[reason]++;
-        snprintf(fogLine, sizeof(fogLine),
-                 "[fog-coverage] task=%lu draw=%lu rspFog=%d rdpFog=1 overlay=no exclude=%s "
-                 "tri=0 alphaMin=na alphaMax=na alphaAvg=na",
-                 (unsigned long) ctx->taskIndex, (unsigned long) ctx->traceDrawIndex,
-                 (ctx->geometryMode & G_FOG) != 0, psp_gfx_dl_fog_exclusion_name(reason));
-        PspPlatform_LogLine(fogLine);
-    }
     if (textured) {
         x0 = (float) ((cmd->words.w1 >> 12) & 0xFFF) * 0.25f;
         y0 = (float) (cmd->words.w1 & 0xFFF) * 0.25f;
@@ -5791,23 +5688,6 @@ static void psp_gfx_dl_report_fog_investigation(PspGfxDlContext* ctx) {
     char line[512];
     u32 i;
     u32 row;
-
-    snprintf(line, sizeof(line),
-             "[fog-coverage-summary] task=%lu draws=%lu triangles=%lu overlay=%lu "
-             "alpha-test=%lu blending=%lu no-depth-test=%lu no-depth-write=%lu sprite=%lu "
-             "rectangle=%lu pretransformed=%lu other=%lu",
-             (unsigned long) ctx->taskIndex, (unsigned long) ctx->fogCoverageDrawCount,
-             (unsigned long) ctx->fogCoverageTriangleCount,
-             (unsigned long) ctx->fogCoverageOverlayCount,
-             (unsigned long) ctx->fogCoverageExclusions[PSP_GFX_DL_FOG_EXCLUDE_ALPHA_TEST],
-             (unsigned long) ctx->fogCoverageExclusions[PSP_GFX_DL_FOG_EXCLUDE_BLEND],
-             (unsigned long) ctx->fogCoverageExclusions[PSP_GFX_DL_FOG_EXCLUDE_NO_DEPTH_TEST],
-             (unsigned long) ctx->fogCoverageExclusions[PSP_GFX_DL_FOG_EXCLUDE_NO_DEPTH_WRITE],
-             (unsigned long) ctx->fogCoverageExclusions[PSP_GFX_DL_FOG_EXCLUDE_SPRITE],
-             (unsigned long) ctx->fogCoverageExclusions[PSP_GFX_DL_FOG_EXCLUDE_RECTANGLE],
-             (unsigned long) ctx->fogCoverageExclusions[PSP_GFX_DL_FOG_EXCLUDE_PRETRANSFORMED],
-             (unsigned long) ctx->fogCoverageExclusions[PSP_GFX_DL_FOG_EXCLUDE_OTHER]);
-    PspPlatform_LogLine(line);
 
     for (i = 0; i < 3; i++) {
         const PspGfxDlFogTransformSample* sample = &ctx->fogTransformSamples[i];
