@@ -41,16 +41,16 @@ extern u16 aTrBackdropTopTex[];
 #define PSP_ORIGINAL_FOG 0
 #endif
 
+static const u8 sPspGfxDlPresentedFogAlpha[32] = {
+    0, 4, 8, 12, 16, 21, 25, 30,
+    34, 39, 44, 48, 53, 59, 64, 69,
+    75, 80, 86, 92, 99, 105, 112, 120,
+    128, 136, 145, 154, 165, 177, 191, 210,
+};
+
 #if PSP_ORIGINAL_FOG
 static u8 psp_gfx_dl_present_fog_alpha(u8 alpha) {
-    static const u8 sPresentedFogAlpha[32] = {
-        0, 4, 8, 12, 16, 21, 25, 30,
-        34, 39, 44, 48, 53, 59, 64, 69,
-        75, 80, 86, 92, 99, 105, 112, 120,
-        128, 136, 145, 154, 165, 177, 191, 210,
-    };
-
-    return sPresentedFogAlpha[alpha >> 3];
+    return sPspGfxDlPresentedFogAlpha[alpha >> 3];
 }
 #endif
 
@@ -681,6 +681,83 @@ static float psp_gfx_dl_fog_distance(const float projection[4][4], float ndcZ) {
     }
     return (projection[3][2] - (ndcZ * projection[3][3])) / denominator;
 }
+
+#if !PSP_ORIGINAL_FOG
+typedef struct {
+    float projection22;
+    float projection23;
+    float projection32;
+    float projection33;
+    float start;
+    float end;
+    s16 fogMul;
+    s16 fogOffset;
+    int valid;
+} PspGfxDlApproxFogFit;
+
+static PspGfxDlApproxFogFit sPspGfxDlApproxFogFit;
+
+static int psp_gfx_dl_fit_black_fog_curve(const float projection[4][4], s16 fogMul,
+                                          s16 fogOffset, float* start, float* end) {
+    float sumX = 0.0f;
+    float sumY = 0.0f;
+    float sumXX = 0.0f;
+    float sumXY = 0.0f;
+    float denominator;
+    float slope;
+    float intercept;
+    u32 q;
+
+    for (q = 0; q < 32; q++) {
+        float alpha = (float) ((q << 3) + 4U);
+        float ndcZ = (alpha - (float) fogOffset) / (float) fogMul;
+        float distance = psp_gfx_dl_fog_distance(projection, ndcZ);
+        float weight = (float) sPspGfxDlPresentedFogAlpha[q] / 255.0f;
+
+        sumX += distance;
+        sumY += weight;
+        sumXX += distance * distance;
+        sumXY += distance * weight;
+    }
+    denominator = (32.0f * sumXX) - (sumX * sumX);
+    if ((denominator > -0.000001f) && (denominator < 0.000001f)) {
+        return 0;
+    }
+    slope = ((32.0f * sumXY) - (sumX * sumY)) / denominator;
+    if (slope <= 0.000001f) {
+        return 0;
+    }
+    intercept = (sumY - (slope * sumX)) / 32.0f;
+    *start = -intercept / slope;
+    *end = (1.0f - intercept) / slope;
+    return (*start >= 0.0f) && (*end > *start);
+}
+
+static int psp_gfx_dl_get_black_fog_curve(const float projection[4][4], s16 fogMul,
+                                          s16 fogOffset, float* start, float* end) {
+    PspGfxDlApproxFogFit* fit = &sPspGfxDlApproxFogFit;
+
+    if (!fit->valid || (fit->fogMul != fogMul) || (fit->fogOffset != fogOffset) ||
+        (fit->projection22 != projection[2][2]) || (fit->projection23 != projection[2][3]) ||
+        (fit->projection32 != projection[3][2]) || (fit->projection33 != projection[3][3])) {
+        if (!psp_gfx_dl_fit_black_fog_curve(projection, fogMul, fogOffset,
+                                            &fit->start, &fit->end)) {
+            fit->valid = 0;
+            return 0;
+        }
+        fit->projection22 = projection[2][2];
+        fit->projection23 = projection[2][3];
+        fit->projection32 = projection[3][2];
+        fit->projection33 = projection[3][3];
+        fit->fogMul = fogMul;
+        fit->fogOffset = fogOffset;
+        fit->valid = 1;
+    }
+    *start = fit->start;
+    *end = fit->end;
+    return 1;
+}
+#endif
 
 static PspGfxPspglTextureWrap psp_gfx_dl_texture_wrap(u32 mode, u32 mask) {
     if ((mode & G_TX_CLAMP) != 0) {
@@ -2211,11 +2288,27 @@ static void psp_gfx_dl_resolve_fog_values(PspGfxDlContext* ctx, int fog, const f
     color[2] = (float) ctx->fogB / 255.0f;
     color[3] = (float) ctx->fogA / 255.0f;
     if (fog) {
+#if PSP_ORIGINAL_FOG
         float startNdc = -(float) ctx->fogOffset / (float) ctx->fogMul;
         float endNdc = (255.0f - (float) ctx->fogOffset) / (float) ctx->fogMul;
 
         *start = psp_gfx_dl_fog_distance(projection, startNdc);
         *end = psp_gfx_dl_fog_distance(projection, endNdc);
+#else
+        if ((ctx->fogR == 0) && (ctx->fogG == 0) && (ctx->fogB == 0)) {
+            if (!psp_gfx_dl_get_black_fog_curve(projection, ctx->fogMul, ctx->fogOffset,
+                                                start, end)) {
+                *start = 0.0f;
+                *end = 0.0f;
+            }
+        } else {
+            float startNdc = -(float) ctx->fogOffset / (float) ctx->fogMul;
+            float endNdc = (255.0f - (float) ctx->fogOffset) / (float) ctx->fogMul;
+
+            *start = psp_gfx_dl_fog_distance(projection, startNdc) * 0.45f;
+            *end = psp_gfx_dl_fog_distance(projection, endNdc) * 0.5f;
+        }
+#endif
         if ((*start < 0.0f) || (*end <= *start)) {
             *start = 0.0f;
             *end = 0.0f;

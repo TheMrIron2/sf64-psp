@@ -2329,7 +2329,7 @@ static void psp_gfx_pspgl_draw_colored(const PspGfxPspglColorVertex* vertices, u
         (fogColor != NULL) &&
         (fogEnd > fogStart)) {
 
-        psp_gfx_pspgl_fog_linear(fogColor, fogStart * 0.45f, fogEnd * 0.5f);
+        psp_gfx_pspgl_fog_linear(fogColor, fogStart, fogEnd);
     } else {
         psp_gfx_pspgl_fog_disabled();
     }
