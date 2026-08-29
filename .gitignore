@@ -32,7 +32,6 @@ m2cfiles/
 TempComp.bin.mio0
 torch.hash.yml
 *.code-workspace
-docs/psp-port-strategy.md
-src/psp/PORT_STRATEGY.md
 AGENTS.md
 .DS_Store
+docs/codex/*

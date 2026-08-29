@@ -8,7 +8,7 @@ This port has a few key goals:
 
 - **Reference quality** codebase
 - **GPU acceleration** with two renderers - PSPGL first, followed by native sceGu
-- Optional **Media Engine** audio
+- **Media Engine** audio
 - Experimental implementation of **Virtual Mobile Engine** (VME)
 
 Contributions are welcome! This is an educational project that welcomes other contributors and aims to be a high quality port that can serve other PSP developers well in the long term.
@@ -24,10 +24,12 @@ Special thanks:
 - jnmartin84: sf64-dc, used as reference and initial `ultra_reimpl.c`
 - DaedalusX64: VFPU implementations and architectural guidance
 
+And to everyone else in the PSP scene that helped make this a reality!
+
 > [!NOTE]
 > Codex has been used as a development aid.
 
-The original README continues below. Follow the build instructions and compile with `make psp`.
+The original README continues below. Follow the build instructions up to `make init`, and compile with `make psp`.
 
 [![Discord Invitation](https://discordapp.com/api/guilds/1190102597521133700/widget.png?style=banner2 'Starfox 64')](https://discord.gg/tuwdmuTTqc)
 
