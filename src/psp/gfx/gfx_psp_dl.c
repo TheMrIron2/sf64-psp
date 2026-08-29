@@ -41,32 +41,16 @@ extern u16 aTrBackdropTopTex[];
 #define PSP_ORIGINAL_FOG 0
 #endif
 
-#ifndef PSP_FOG_DISABLED
-#define PSP_FOG_DISABLED 0
-#endif
-
-#ifndef PSP_FOG_ALPHA_VISUALIZE // remove
-#define PSP_FOG_ALPHA_VISUALIZE 0
-#endif
-
-#ifndef PSP_FOG_TRANSFER_COMPENSATE
-#define PSP_FOG_TRANSFER_COMPENSATE 0
-#endif
-
-#ifndef PSP_FOG_RDP_BLEND_QUANTIZE
-#define PSP_FOG_RDP_BLEND_QUANTIZE 0
-#endif
-
-#if PSP_ORIGINAL_FOG && PSP_FOG_TRANSFER_COMPENSATE
+#if PSP_ORIGINAL_FOG
 static u8 psp_gfx_dl_present_fog_alpha(u8 alpha) {
-#if PSP_FOG_RDP_BLEND_QUANTIZE
-    float a = (float) (alpha >> 3) / 32.0f;
-#else
-    float a = (float) alpha / 255.0f;
-#endif
-    float presented = 1.0f - sqrtf(1.0f - a);
+    static const u8 sPresentedFogAlpha[32] = {
+        0, 4, 8, 12, 16, 21, 25, 30,
+        34, 39, 44, 48, 53, 59, 64, 69,
+        75, 80, 86, 92, 99, 105, 112, 120,
+        128, 136, 145, 154, 165, 177, 191, 210,
+    };
 
-    return (u8) (presented * 255.0f + 0.5f);
+    return sPresentedFogAlpha[alpha >> 3];
 }
 #endif
 
@@ -1673,7 +1657,24 @@ static int psp_gfx_dl_original_fog_eligible(int sprites, int alphaTest, int blen
            (!alphaTest || (depthTest && depthWrite));
 }
 
-static int psp_gfx_dl_build_original_fog_batch(PspGfxDlContext* ctx) {
+static u32 psp_gfx_dl_original_fog_color(const PspGfxDlContext* ctx, u8 fogAlpha) {
+    if ((ctx->fogR == 0) && (ctx->fogG == 0) && (ctx->fogB == 0)) {
+        fogAlpha = psp_gfx_dl_present_fog_alpha(fogAlpha);
+    }
+    return psp_gfx_dl_pack_rgba_u8(ctx->fogR, ctx->fogG, ctx->fogB, fogAlpha, 0);
+}
+
+static void psp_gfx_dl_original_fog_vertex(const PspGfxDlContext* ctx,
+                                           const PspGfxPspglColorVertex* src,
+                                           u8 fogAlpha,
+                                           PspGfxPspglFogVertex* dst) {
+    dst->color = psp_gfx_dl_original_fog_color(ctx, fogAlpha);
+    dst->x = src->x;
+    dst->y = src->y;
+    dst->z = src->z;
+}
+
+static u32 psp_gfx_dl_build_original_fog_batch(PspGfxDlContext* ctx) {
     u32 i;
 
     if (!ctx->batchOriginalFog ||
@@ -1683,39 +1684,17 @@ static int psp_gfx_dl_build_original_fog_batch(PspGfxDlContext* ctx) {
         return 0;
     }
     for (i = 0; i < ctx->batchCount; i++) {
-        const PspGfxPspglColorVertex* src = &PSP_GFX_DL_BATCH[i];
-        PspGfxPspglFogVertex* dst = &sPspGfxDlFogBatch[i];
-
-#if PSP_FOG_ALPHA_VISUALIZE
-        dst->color = psp_gfx_dl_pack_rgba_u8(PSP_GFX_DL_BATCH_FOG_ALPHA[i],
-                                             PSP_GFX_DL_BATCH_FOG_ALPHA[i],
-                                             PSP_GFX_DL_BATCH_FOG_ALPHA[i], 255, 0);
-#else
-        {
-            u8 fogAlpha = PSP_GFX_DL_BATCH_FOG_ALPHA[i];
-
-#if PSP_FOG_TRANSFER_COMPENSATE
-            /* Diagnostic for fog applied after the colour transfer */
-            if ((ctx->fogR == 0) && (ctx->fogG == 0) && (ctx->fogB == 0)) {
-                fogAlpha = psp_gfx_dl_present_fog_alpha(fogAlpha);
-            }
-#endif
-
-            dst->color = psp_gfx_dl_pack_rgba_u8(ctx->fogR, ctx->fogG, ctx->fogB,
-                                                 fogAlpha, 0);
-        }
-#endif
-        dst->x = src->x;
-        dst->y = src->y;
-        dst->z = src->z;
+        psp_gfx_dl_original_fog_vertex(ctx, &PSP_GFX_DL_BATCH[i],
+                                       PSP_GFX_DL_BATCH_FOG_ALPHA[i],
+                                       &sPspGfxDlFogBatch[i]);
     }
-    return 1;
+    return ctx->batchCount;
 }
 #endif
 
 static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason reason) {
 #if PSP_ORIGINAL_FOG
-    int drawOriginalFog;
+    u32 originalFogVertexCount;
 #endif
 #if PROFILE_COMPONENTS
     u32 ownerComponent;
@@ -1738,7 +1717,7 @@ static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason 
     PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_SUBMIT);
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_BATCH_FLUSH);
 #if PSP_ORIGINAL_FOG
-    drawOriginalFog = psp_gfx_dl_build_original_fog_batch(ctx);
+    originalFogVertexCount = psp_gfx_dl_build_original_fog_batch(ctx);
 #endif
     if (ctx->batchSprites) {
         PspGfxPspgl_DrawColoredSprites(
@@ -1766,15 +1745,15 @@ static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason 
             ctx->batchPointFilter);
     }
 #if PSP_ORIGINAL_FOG
-    if (drawOriginalFog) {
-        PspGfxPspgl_DrawFogTriangles(sPspGfxDlFogBatch, ctx->batchCount,
+    if (originalFogVertexCount != 0) {
+        PspGfxPspgl_DrawFogTriangles(sPspGfxDlFogBatch, originalFogVertexCount,
                                      &ctx->batchProjection[0][0], ctx->batchProjectionSerial,
                                      ctx->batchPretransformed, ctx->batchDepthTest,
                                      ctx->batchDepthWrite, ctx->batchTextureId, PSP_GFX_DL_BATCH);
         ctx->stats.originalFogDrawCount++;
-        ctx->stats.originalFogTriangleCount += ctx->batchCount / 3;
-        ctx->stats.originalFogVertexBytes += ctx->batchCount * sizeof(PspGfxPspglFogVertex);
-        ctx->stats.originalFogVertexCopies += ctx->batchCount;
+        ctx->stats.originalFogTriangleCount += originalFogVertexCount / 3;
+        ctx->stats.originalFogVertexBytes += originalFogVertexCount * sizeof(PspGfxPspglFogVertex);
+        ctx->stats.originalFogVertexCopies += originalFogVertexCount;
     }
 #endif
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_BATCH_FLUSH);
@@ -2256,11 +2235,11 @@ static void psp_gfx_dl_set_batch_fog(PspGfxDlContext* ctx, int fog, const float 
     float color[4];
     float start;
     float end;
-    int originalFog = PSP_ORIGINAL_FOG && !PSP_FOG_DISABLED && fog;
+    int originalFog = PSP_ORIGINAL_FOG && fog;
 
     psp_gfx_dl_resolve_fog_values(ctx, fog, projection, color, &start, &end);
     fog = fog && (ctx->fogMul != 0) && (end > start) && (start >= 0.0f);
-    psp_gfx_dl_set_batch_fog_resolved(ctx, (originalFog || PSP_FOG_DISABLED) ? 0 : fog,
+    psp_gfx_dl_set_batch_fog_resolved(ctx, originalFog ? 0 : fog,
                                       originalFog, color, start, end);
 }
 
@@ -2498,11 +2477,11 @@ static u32 psp_gfx_dl_apply_effective_batch_state(PspGfxDlContext* ctx, const Ps
     psp_gfx_dl_set_batch_depth(ctx, ctx->effectiveDepth.depthTest, ctx->effectiveDepth.depthWrite,
                                ctx->effectiveDepth.depthBias);
     {
-        int originalFog = PSP_ORIGINAL_FOG && !PSP_FOG_DISABLED && !pretransformed &&
+        int originalFog = PSP_ORIGINAL_FOG && !pretransformed &&
                           ((ctx->otherModeL >> 30) == G_BL_CLR_FOG);
 
         psp_gfx_dl_set_batch_fog_resolved(ctx,
-                                          (originalFog || PSP_FOG_DISABLED) ? 0 : ctx->effectiveFog.fog,
+                                          originalFog ? 0 : ctx->effectiveFog.fog,
                                           originalFog, ctx->effectiveFog.color,
                                           ctx->effectiveFog.start, ctx->effectiveFog.end);
     }
