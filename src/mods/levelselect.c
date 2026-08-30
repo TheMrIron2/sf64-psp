@@ -21,6 +21,11 @@ static PlanetId sPlanetArray[][3] = {
 };
 
 void Map_LevelSelect(void) {
+    enum {
+        LEVELSELECT_START_NORMAL,
+        LEVELSELECT_START_TUNNEL,
+        LEVELSELECT_START_ANDROSS,
+    };
     static s32 mission = 0;
     static s32 difficulty = 0;
     static char* sLevelSelectPlanetNames[] = {
@@ -28,6 +33,7 @@ void Map_LevelSelect(void) {
         "ZONESS", "CORNERIA", "TITANIA", "AQUAS",    "FORTUNA",  "VENOM 1",  "SOLAR",  "VENOM 2",
     };
     static s32 startOption = 0;
+    static char* sVenom2StartNames[] = { "NORMAL", "TUNNEL", "ANDROSS" };
 
     // static f32 zStart = 0.0f;
     // f32 zInc;
@@ -70,8 +76,19 @@ void Map_LevelSelect(void) {
         Map_CurrentLevel_Setup();
         Map_PositionCursor();
     }
+    if ((sPlanetArray[mission][difficulty] != SAVE_SLOT_VENOM_2) &&
+        (startOption > LEVELSELECT_START_TUNNEL)) {
+        startOption = LEVELSELECT_START_NORMAL;
+    }
     if (contPress->button & (L_TRIG | Z_TRIG)) {
-        startOption ^= 1;
+        if (sPlanetArray[mission][difficulty] == SAVE_SLOT_VENOM_2) {
+            startOption++;
+            if (startOption > LEVELSELECT_START_ANDROSS) {
+                startOption = LEVELSELECT_START_NORMAL;
+            }
+        } else {
+            startOption ^= 1;
+        }
     }
 
     // if (contPress->button & U_CBUTTONS) {
@@ -101,7 +118,9 @@ void Map_LevelSelect(void) {
         Graphics_DisplaySmallText(20, 200, 1.0f, 1.0f, "PLANET:");
         Graphics_DisplaySmallText(80, 200, 1.0f, 1.0f, sLevelSelectPlanetNames[sPlanetArray[mission][difficulty]]);
 
-        if (startOption) {
+        if (sPlanetArray[mission][difficulty] == SAVE_SLOT_VENOM_2) {
+            Graphics_DisplaySmallText(80, 210, 1.0f, 1.0f, sVenom2StartNames[startOption]);
+        } else if (startOption) {
             if ((sCurrentPlanetId == PLANET_SECTOR_X) || (sCurrentPlanetId == PLANET_METEO)) {
                 Graphics_DisplaySmallText(80, 210, 1.0f, 1.0f, "WARP ZONE");
             } else if (sCurrentPlanetId == PLANET_VENOM) {
@@ -127,8 +146,9 @@ void Map_LevelSelect(void) {
         sLevelStartState = 0;
         D_menu_801CD968 = 0;
         Map_PlayLevel();
-        if (startOption && ((gCurrentLevel == LEVEL_METEO) || (gCurrentLevel == LEVEL_SECTOR_X) ||
-                            (sPlanetArray[mission][difficulty] == SAVE_SLOT_VENOM_2))) {
+        if ((startOption == LEVELSELECT_START_TUNNEL) &&
+            ((gCurrentLevel == LEVEL_METEO) || (gCurrentLevel == LEVEL_SECTOR_X) ||
+             (sPlanetArray[mission][difficulty] == SAVE_SLOT_VENOM_2))) {
             gLevelPhase = 1;
         }
         // gSavedPathProgress = gPathProgress = zStart;
