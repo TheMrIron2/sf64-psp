@@ -15,13 +15,8 @@
 #define PROFILE_HW_COUNTER_SCOPES 0
 #endif
 
-#ifndef PROFILE_HW_COUNTER_FRAMES
-#define PROFILE_HW_COUNTER_FRAMES 300
-#endif
-
-#ifndef PROFILE_HW_COUNTER_WARMUP_FRAMES
-#define PROFILE_HW_COUNTER_WARMUP_FRAMES 120
-#endif
+#define PSP_HW_COUNTER_CAPTURE_FRAMES 300
+#define PSP_HW_COUNTER_WARMUP_FRAMES 120
 
 typedef enum {
     /* Whole graphics task, same window the FPS overlay reports as GFX time */

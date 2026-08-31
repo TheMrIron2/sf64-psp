@@ -1536,7 +1536,7 @@ static s32 psp_audio_mixer_execute_command_list(const Acmd* commands,
             case A_SPNOOP:
                 break;
             case A_ADPCM:
-#if defined(TARGET_PSP) && PSP_AUDIO_VME_RESEARCH
+#if defined(TARGET_PSP) && PSP_VME
                 {
                     s16* output = BUF_S16(rspa.out);
                     u32 samples = ROUND_UP_32(rspa.nbytes) /

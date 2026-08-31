@@ -65,13 +65,7 @@ extern Gfx gMapVenomCloudRuntimeDL[];
 #define PROFILE_TRIVIAL_REJECTS 0
 #endif
 
-#ifndef BATCH_STATE_CACHE
-#define BATCH_STATE_CACHE 1
-#endif
 
-#ifndef VTX_FUSED_TNL
-#define VTX_FUSED_TNL 1
-#endif
 
 
 // Open batch pool, see docs/psp_counter_findings.md finding 9
@@ -1561,28 +1555,6 @@ static void psp_gfx_dl_prepare_effective_lights(PspGfxDlContext* ctx) {
     ctx->lightingStateDirty = 0;
 }
 
-#if !VTX_FUSED_TNL
-static void psp_gfx_dl_stage_lighting_batch(
-    PspGfxDlContext* ctx,
-    const Vtx* src,
-    u32 count
-) {
-    u32 i;
-
-    for (i = 0; i < count; i++) {
-        sPspGfxDlLightingNormals[i].x = (int8_t) src[i].v.cn[0];
-        sPspGfxDlLightingNormals[i].y = (int8_t) src[i].v.cn[1];
-        sPspGfxDlLightingNormals[i].z = (int8_t) src[i].v.cn[2];
-        sPspGfxDlLightingNormals[i].w = 0;
-    }
-
-    psp_gfx_dl_stage_ambient_light(ctx);
-
-    for (i = 0; i < ctx->lightCount; i++) {
-        psp_gfx_dl_stage_directional_light(ctx, i);
-    }
-}
-#endif
 
 static void psp_gfx_dl_load_ambient_light(PspGfxDlContext* ctx, const Light* src) {
     ctx->ambientR = src->l.col[0];
@@ -1670,14 +1642,10 @@ static void psp_gfx_dl_handle_movemem(PspGfxDlContext* ctx, const Gfx* gfx) {
             light
         );
         ctx->lightingStateDirty = 1;
-#if VTX_FUSED_TNL
         psp_gfx_dl_stage_directional_light(ctx, lightSlot);
-#endif
     } else if (lightSlot == ctx->lightCount) {
         psp_gfx_dl_load_ambient_light(ctx, light);
-#if VTX_FUSED_TNL
         psp_gfx_dl_stage_ambient_light(ctx);
-#endif
     }
 }
 
@@ -2378,7 +2346,6 @@ static void psp_gfx_dl_set_batch_transform(PspGfxDlContext* ctx, int pretransfor
 
 static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int premultiply);
 
-#if BATCH_STATE_CACHE
 static int psp_gfx_dl_resolve_effective_material_state(PspGfxDlContext* ctx) {
     PspGfxDlEffectiveMaterialState* material = &ctx->effectiveMaterial;
     int premultiplied;
@@ -2602,7 +2569,6 @@ static u32 psp_gfx_dl_apply_effective_batch_state(PspGfxDlContext* ctx, const Ps
     (void) resolved;
     return ctx->effectiveMaterial.textureId;
 }
-#endif
 
 static int psp_gfx_dl_vertex_is_valid(PspGfxDlContext* ctx, u8 index) {
     return (index < PSP_GFX_DL_MAX_VERTICES) && ctx->vertices[index].state.fields.valid;
@@ -3443,26 +3409,7 @@ static int psp_gfx_dl_try_emit_tri2_direct_pair(PspGfxDlContext* ctx, u8 a0, u8 
     psp_gfx_dl_count_tri2_pair_triangle_stats(ctx, va1, vb1, vc1);
 #endif
 
-#if BATCH_STATE_CACHE
     textureId = psp_gfx_dl_apply_effective_batch_state(ctx, va0, pretransformed0, wrapS, wrapT);
-#else
-    psp_gfx_dl_set_batch_transform(ctx, pretransformed0, va0->projectionSerial, va0->projection);
-    if (ctx->textureEnabled && (ctx->textureId == 0)) {
-        psp_gfx_dl_prepare_texture(ctx, 1, psp_gfx_dl_premultiplied_blend_enabled(ctx));
-    }
-    textureId = ctx->textureEnabled ? ctx->textureId : 0;
-    psp_gfx_dl_set_batch_depth(ctx, (ctx->geometryMode & G_ZBUFFER) != 0, (ctx->otherModeL & Z_UPD) != 0,
-                               psp_gfx_dl_depth_bias_enabled(ctx));
-    psp_gfx_dl_set_batch_fog(ctx, !pretransformed0 && ((ctx->otherModeL >> 30) == G_BL_CLR_FOG), va0->projection);
-    psp_gfx_dl_set_batch_texture(ctx, textureId, ctx->textureEnabled ? ctx->textureRef : psp_gfx_dl_null_texture_ref(),
-                                 psp_gfx_dl_texture_env_for_combine(ctx),
-                                 psp_gfx_dl_texture_env_color_for_combine(ctx), ctx->combineMode,
-                                 psp_gfx_dl_primitive_color(ctx), psp_gfx_dl_environment_color(ctx),
-                                 wrapS, wrapT,
-                                 psp_gfx_dl_alpha_test_enabled(ctx), psp_gfx_dl_blend_enabled(ctx),
-                                 psp_gfx_dl_premultiplied_blend_enabled(ctx),
-                                 psp_gfx_dl_effective_point_filter(ctx));
-#endif
 
 #if PSP_GFX_DL_HOT_STATS
     if (ctx->batchDepthTest) {
@@ -3888,9 +3835,6 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
     s16 tCoords[3];
     PspGfxPspglTextureWrap wrapS;
     PspGfxPspglTextureWrap wrapT;
-#if !BATCH_STATE_CACHE
-    PspGfxPspglTextureEnv textureEnv = PSP_GFX_PSPGL_TEX_REPLACE;
-#endif
     int pretransformed;
 
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_BATCH_CONSTRUCTION);
@@ -3902,8 +3846,6 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
         return;
     }
 
-#if !BATCH_STATE_CACHE
-#endif
 
     va = &ctx->vertices[a];
     vb = &ctx->vertices[b];
@@ -3932,8 +3874,6 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
     } else {
         ctx->stats.projectedTriangleCount++;
     }
-#if !BATCH_STATE_CACHE
-#endif
 
     sharedClipCode = va->clipCode & vb->clipCode & vc->clipCode;
     combinedClipCode = va->clipCode | vb->clipCode | vc->clipCode;
@@ -3991,25 +3931,7 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
         PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_BATCH_CONSTRUCTION);
         return;
     }
-#if BATCH_STATE_CACHE
     textureId = psp_gfx_dl_apply_effective_batch_state(ctx, va, pretransformed, wrapS, wrapT);
-#else
-    if (ctx->textureEnabled && (ctx->textureId == 0)) {
-        psp_gfx_dl_prepare_texture(ctx, 1, psp_gfx_dl_premultiplied_blend_enabled(ctx));
-    }
-    textureId = ctx->textureEnabled ? ctx->textureId : 0;
-    psp_gfx_dl_set_batch_transform(ctx, pretransformed, va->projectionSerial, va->projection);
-    psp_gfx_dl_set_batch_depth(ctx, depthTest, depthWrite, psp_gfx_dl_depth_bias_enabled(ctx));
-    psp_gfx_dl_set_batch_fog(ctx, !pretransformed && ((ctx->otherModeL >> 30) == G_BL_CLR_FOG), va->projection);
-    textureEnv = psp_gfx_dl_texture_env_for_combine(ctx);
-    psp_gfx_dl_set_batch_texture(ctx, textureId, ctx->textureEnabled ? ctx->textureRef : psp_gfx_dl_null_texture_ref(),
-                                 textureEnv, psp_gfx_dl_texture_env_color_for_combine(ctx), ctx->combineMode,
-                                 psp_gfx_dl_primitive_color(ctx), psp_gfx_dl_environment_color(ctx),
-                                 wrapS, wrapT,
-                                 psp_gfx_dl_alpha_test_enabled(ctx), psp_gfx_dl_blend_enabled(ctx),
-                                 psp_gfx_dl_premultiplied_blend_enabled(ctx),
-                                 psp_gfx_dl_effective_point_filter(ctx));
-#endif
 #if PROFILE_TRIVIAL_REJECTS
 #endif
     if (ctx->batchDepthTest) {
@@ -4190,9 +4112,7 @@ static void psp_gfx_dl_handle_texture_rectangle(PspGfxDlContext* ctx, const Gfx*
         psp_gfx_dl_set_batch_fog(ctx, 0, ctx->projection);
         psp_gfx_dl_set_batch_transform(ctx, 1, 0, NULL);
     }
-#if BATCH_STATE_CACHE
     psp_gfx_dl_mark_effective_state_dirty(ctx);
-#endif
 
     if (sprites) {
         psp_gfx_dl_emit_rect_vertex(ctx, x0, y0, s0, t0);
@@ -4547,9 +4467,7 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
     u64 phaseStartUs;
     const n64psp_directional_lightf* lightingLights;
     u32 lightingLightCount;
-#if VTX_FUSED_TNL
     n64psp_tnl_output_streams directOutput;
-#endif
 
     if (src == NULL) {
         ctx->stats.vertexPointerRejected++;
@@ -4591,22 +4509,6 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
 
     phaseStartUs = PspProfiler_RenderPhaseBegin();
     {
-#if !VTX_FUSED_TNL
-        for (i = 0; i < count; i++) {
-            const Vtx* in = &src[i];
-
-            sPspGfxDlTransformInput[i].x =
-                (float) in->v.ob[0];
-
-            sPspGfxDlTransformInput[i].y =
-                (float) in->v.ob[1];
-
-            sPspGfxDlTransformInput[i].z =
-                (float) in->v.ob[2];
-
-            sPspGfxDlTransformInput[i].w = 1.0f;
-        }
-#endif
 
         PspProfiler_RenderPhaseEnd(PSP_PROFILE_PHASE_G_VTX_UNPACK, phaseStartUs);
         phaseStartUs = PspProfiler_RenderPhaseBegin();
@@ -4629,7 +4531,6 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
 
     phaseStartUs = PspProfiler_RenderPhaseBegin();
     {
-#if VTX_FUSED_TNL
         PspGfxDlVertex* firstOutput = &ctx->vertices[v0];
 
         directOutput.view = &firstOutput->viewX;
@@ -4661,15 +4562,6 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
                 count
             );
         }
-#else
-        n64psp_mat4f_transform_vec4_chain2_batch(
-            sPspGfxDlTransformOutput,
-            &ctx->alignedMatrices.modelview,
-            &ctx->alignedMatrices.projection,
-            sPspGfxDlTransformInput,
-            count
-        );
-#endif
     }
     PspProfiler_RenderPhaseEnd(PSP_PROFILE_PHASE_G_VTX_TRANSFORM, phaseStartUs);
 
@@ -4677,38 +4569,9 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
     {
         for (i = 0; i < count; i++) {
             PspGfxDlVertex* out = &ctx->vertices[v0 + i];
-#if !VTX_FUSED_TNL
-            PspGfxDlVec4 view;
-            PspGfxDlVec4 clip;
-#endif
 
             psp_gfx_dl_set_vertex_projection(ctx, out, projectionSnapshot);
 
-#if !VTX_FUSED_TNL
-            view.x = sPspGfxDlTransformOutput[i].first.x;
-            view.y = sPspGfxDlTransformOutput[i].first.y;
-            view.z = sPspGfxDlTransformOutput[i].first.z;
-            view.w = sPspGfxDlTransformOutput[i].first.w;
-
-            clip.x = sPspGfxDlTransformOutput[i].second.x;
-            clip.y = sPspGfxDlTransformOutput[i].second.y;
-            clip.z = sPspGfxDlTransformOutput[i].second.z;
-            clip.w = sPspGfxDlTransformOutput[i].second.w;
-
-            out->state.raw =
-                psp_gfx_dl_store_transformed_vertex(
-                    ctx,
-                    out,
-                    &view,
-                    &clip
-                );
-#elif PSP_GFX_DL_HOT_STATS
-            if (!out->state.fields.valid) {
-                ctx->stats.nearZeroWCount++;
-            } else if (ctx->hasProjection && (out->clipW < 0.0f)) {
-                ctx->stats.behindEyeVertexCount++;
-            }
-#endif
 
 #if PSP_ORIGINAL_FOG
             out->state.fields.fogAlpha = psp_gfx_dl_calculate_fog_alpha(ctx, out);
@@ -4760,27 +4623,6 @@ static void psp_gfx_dl_handle_vtx(PspGfxDlContext* ctx, const Gfx* gfx) {
     }
     PspProfiler_RenderPhaseEnd(PSP_PROFILE_PHASE_G_VTX_POST_TRANSFORM, phaseStartUs);
 
-#if !VTX_FUSED_TNL
-    if ((ctx->geometryMode & G_LIGHTING) != 0) {
-        phaseStartUs = PspProfiler_RenderPhaseBegin();
-        psp_gfx_dl_stage_lighting_batch(ctx, src, count);
-        PspProfiler_RenderPhaseEnd(PSP_PROFILE_PHASE_G_VTX_LIGHTING_STAGE, phaseStartUs);
-        phaseStartUs = PspProfiler_RenderPhaseBegin();
-        psp_gfx_dl_prepare_batch_matrices(ctx);
-        PspProfiler_RenderPhaseEnd(PSP_PROFILE_PHASE_G_VTX_MATRIX_PREPARE, phaseStartUs);
-        phaseStartUs = PspProfiler_RenderPhaseBegin();
-        n64psp_directional_light_snorm8_batch(
-            sPspGfxDlLightingOutput,
-            &ctx->alignedMatrices.modelview,
-            sPspGfxDlLightingNormals,
-            lightingLightCount != 0 ? lightingLights : NULL,
-            &sPspGfxDlLightingAmbient,
-            lightingLightCount,
-            count
-        );
-        PspProfiler_RenderPhaseEnd(PSP_PROFILE_PHASE_G_VTX_LIGHTING_KERNEL, phaseStartUs);
-    }
-#endif
 
     phaseStartUs = PspProfiler_RenderPhaseBegin();
     {
@@ -5625,12 +5467,10 @@ static void psp_gfx_dl_reset_context(PspGfxDlContext* ctx) {
     ctx->cachedModelviewSerial = 0;
     ctx->cachedModelviewSerial = 0;
     ctx->cachedProjectionSerial = 0;
-#if VTX_FUSED_TNL
     psp_gfx_dl_stage_ambient_light(ctx);
     for (i = 0; i < ARRAY_COUNT(ctx->lights); i++) {
         psp_gfx_dl_stage_directional_light(ctx, i);
     }
-#endif
 }
 
 #if PSP_RENDERER_DIAGNOSTICS

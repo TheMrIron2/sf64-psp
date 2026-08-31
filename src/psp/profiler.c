@@ -46,15 +46,6 @@ extern int gDrawMode;
 #ifndef PROFILE_FRAME_TRACE_FRAMES
 #define PROFILE_FRAME_TRACE_FRAMES 240
 #endif
-#ifndef BATCH_STATE_CACHE
-#define BATCH_STATE_CACHE 1
-#endif
-#ifndef VTX_FUSED_TNL
-#define VTX_FUSED_TNL 1
-#endif
-#ifndef PSP_FLOAT_MTX
-#define PSP_FLOAT_MTX 1
-#endif
 #ifndef SF64_GIT_SHA
 #define SF64_GIT_SHA "unknown"
 #endif
@@ -69,9 +60,6 @@ extern int gDrawMode;
 #endif
 #ifndef PSPGL_SOURCE_MODE
 #define PSPGL_SOURCE_MODE "system"
-#endif
-#ifndef PERFECT_DARK_PSP_SHA
-#define PERFECT_DARK_PSP_SHA "unknown"
 #endif
 #ifndef BUILD_COMPILER
 #define BUILD_COMPILER "unknown"
@@ -1738,11 +1726,10 @@ static void psp_profiler_write_phase_files(u32 slot) {
     }
 
     snprintf(line, sizeof(line),
-             "SF64 git SHA: %s\nn64psp submodule SHA: %s\nPSPGL source mode: %s\nPSPGL git SHA: %s\nPSPGL worktree: %s\nPerfect Dark reference SHA: %s\ncompiler: %s\noptimisation flags: %s\nPROFILE_PSP: %d\nPROFILE_PHASES: %d\nPROFILE_TRIVIAL_REJECTS: %d\nBATCH_STATE_CACHE: %d\nVTX_FUSED_TNL: %d\nPSP_FLOAT_MTX: %d\nCPU clock: %lu\nbus clock: %lu\ncapture slot: %lu\nrequested frame count: %d\nactual frame count: %lu\ntimer overhead us: %llu\n\n",
+             "SF64 git SHA: %s\nn64psp submodule SHA: %s\nPSPGL source mode: %s\nPSPGL git SHA: %s\nPSPGL worktree: %s\ncompiler: %s\noptimisation flags: %s\nPROFILE_PSP: %d\nPROFILE_PHASES: %d\nPROFILE_TRIVIAL_REJECTS: %d\nCPU clock: %lu\nbus clock: %lu\ncapture slot: %lu\nrequested frame count: %d\nactual frame count: %lu\ntimer overhead us: %llu\n\n",
              SF64_GIT_SHA, N64PSP_GIT_SHA, PSPGL_SOURCE_MODE, PSPGL_GIT_SHA, PSPGL_GIT_DIRTY,
-             PERFECT_DARK_PSP_SHA, BUILD_COMPILER, BUILD_OPT_FLAGS,
+             BUILD_COMPILER, BUILD_OPT_FLAGS,
              PROFILE_GPROF, PROFILE_PHASES, PROFILE_TRIVIAL_REJECTS,
-             BATCH_STATE_CACHE, VTX_FUSED_TNL, PSP_FLOAT_MTX,
              (unsigned long) scePowerGetCpuClockFrequency(),
              (unsigned long) scePowerGetBusClockFrequency(), (unsigned long) slot, PROFILE_CAPTURE_FRAMES,
              (unsigned long) sCaptureFrames, sTimerReadPairOverheadUs);

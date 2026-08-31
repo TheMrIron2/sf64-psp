@@ -1738,15 +1738,6 @@ void Map_PathLines_Draw(s32);
 void Map_PathLinePos(s32 index, Vec3f* src, Vec3f* dest);
 void Map_CamMatrixRot(void);
 
-#ifndef PSP_MAP_SKIP_COMPLETED_PATHS
-#define PSP_MAP_SKIP_COMPLETED_PATHS 0
-#endif
-#ifndef PSP_MAP_SKIP_HISTORY_HUD
-#define PSP_MAP_SKIP_HISTORY_HUD 0
-#endif
-#ifndef PSP_MAP_SKIP_PLANETS
-#define PSP_MAP_SKIP_PLANETS 0
-#endif
 void Map_Main(void) {
     Map_AssetTrace_Check("map-main-entry");
     if (sMapTimer1 > 0) {
@@ -2432,10 +2423,6 @@ void Map_Draw(void) {
 
             Map_PathLines_Draw(i);
 
-            if (PSP_MAP_SKIP_COMPLETED_PATHS && (gPlanetPathStatus[i] == 3)) {
-                continue;
-            }
-
             if (sPaths[i].unk_14 != 0) {
                 Map_Path_Draw(i);
             }
@@ -2450,19 +2437,17 @@ void Map_Draw(void) {
 
     Map_Area6Ships_Draw();
 
-    if (!PSP_MAP_SKIP_PLANETS) {
-        if ((sMapState == MAP_IDLE) && Map_PlanetLayersCanBatch()) {
-            for (ptr = D_menu_801CD8A0, i = 0; i < PLANET_MAX; i++, ptr++) {
-                Map_PlanetBase_Draw(*ptr);
-            }
-            Map_PlanetSharedLayers_Draw();
-            for (ptr = D_menu_801CD8A0, i = 0; i < PLANET_MAX; i++, ptr++) {
-                Map_PlanetForeground_Draw(*ptr);
-            }
-        } else {
-            for (ptr = D_menu_801CD8A0, i = 0; i < PLANET_MAX; i++, ptr++) {
-                Map_Planet_Draw(*ptr);
-            }
+    if ((sMapState == MAP_IDLE) && Map_PlanetLayersCanBatch()) {
+        for (ptr = D_menu_801CD8A0, i = 0; i < PLANET_MAX; i++, ptr++) {
+            Map_PlanetBase_Draw(*ptr);
+        }
+        Map_PlanetSharedLayers_Draw();
+        for (ptr = D_menu_801CD8A0, i = 0; i < PLANET_MAX; i++, ptr++) {
+            Map_PlanetForeground_Draw(*ptr);
+        }
+    } else {
+        for (ptr = D_menu_801CD8A0, i = 0; i < PLANET_MAX; i++, ptr++) {
+            Map_Planet_Draw(*ptr);
         }
     }
 
@@ -6262,9 +6247,7 @@ void Map_801A9DE8(void) {
             D_menu_801CD83C = gTotalHits;
         }
         Map_TotalHits_Draw();
-    if (!PSP_MAP_SKIP_HISTORY_HUD) {
-        Map_801A9FD4(false);
-    }
+    Map_801A9FD4(false);
     }
 }
 

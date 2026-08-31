@@ -75,12 +75,7 @@ static void psp_renderer_draw_perf_overlay(void) {
         return;
     }
 
-    /*
-     * Use the uncached alias so the displayed framebuffer immediately
-     * sees the CPU writes.
-     */
-    uncachedAddress =
-        ((uintptr_t) framebuffer) | (uintptr_t) 0x40000000U;
+    uncachedAddress = ((uintptr_t) framebuffer) | (uintptr_t) 0x40000000U;
 
     pspDebugScreenSetBase((u32*) uncachedAddress);
     pspDebugScreenSetColorMode(pixelFormat);
@@ -88,13 +83,8 @@ static void psp_renderer_draw_perf_overlay(void) {
     pspDebugScreenSetBackColor(0x00000000);
     pspDebugScreenSetTextColor(0xFFFFFFFF);
     pspDebugScreenEnableBackColor(1);
-
     pspDebugScreenSetXY(0, 0);
 
-    /*
-     * No floating-point formatting: both values are stored in tenths.
-     * Trailing spaces erase remnants when the number loses a digit.
-     */
     pspDebugScreenPrintf(
         "FPS %lu.%lu  GFX %lu.%lums   ",
         (unsigned long) (sPerfFpsTenths / 10),

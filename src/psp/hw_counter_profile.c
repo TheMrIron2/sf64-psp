@@ -49,26 +49,8 @@
 #ifndef PROFILE_COMPONENTS
 #define PROFILE_COMPONENTS 0
 #endif
-#ifndef BATCH_STATE_CACHE
-#define BATCH_STATE_CACHE 1
-#endif
-#ifndef VTX_FUSED_TNL
-#define VTX_FUSED_TNL 1
-#endif
-#ifndef PSP_FLOAT_MTX
-#define PSP_FLOAT_MTX 1
-#endif
 #ifndef PSPGL_SWAP_INTERVAL
 #define PSPGL_SWAP_INTERVAL 0
-#endif
-#ifndef PSP_MAP_SKIP_COMPLETED_PATHS
-#define PSP_MAP_SKIP_COMPLETED_PATHS 0
-#endif
-#ifndef PSP_MAP_SKIP_HISTORY_HUD
-#define PSP_MAP_SKIP_HISTORY_HUD 0
-#endif
-#ifndef PSP_MAP_SKIP_PLANETS
-#define PSP_MAP_SKIP_PLANETS 0
 #endif
 #ifndef PSP_AUDIO
 #define PSP_AUDIO 0
@@ -244,7 +226,7 @@ static int sPspHwFrameBeginValid;
 static int sPspHwCurrentFrameIntervalValid;
 static int sPspHwCurrentTaskValid;
 static int sPspHwCurrentPresentValid;
-static u32 sPspHwPacingSamples[PSP_HW_PACING_COUNT][PROFILE_HW_COUNTER_FRAMES];
+static u32 sPspHwPacingSamples[PSP_HW_PACING_COUNT][PSP_HW_COUNTER_CAPTURE_FRAMES];
 
 static u64 psp_hw_ratio(u64 value, u64 denominator) {
     if (denominator == 0) {
@@ -264,7 +246,7 @@ static void psp_hw_record_pacing(PspHwPacingMetric metric, u32 elapsedUs) {
     PspHwPacingTotals* totals = &sPspHwTotals.pacing[metric];
     u32 vblanks;
 
-    if (totals->samples >= PROFILE_HW_COUNTER_FRAMES) {
+    if (totals->samples >= PSP_HW_COUNTER_CAPTURE_FRAMES) {
         return;
     }
     sPspHwPacingSamples[metric][totals->samples++] = elapsedUs;
@@ -404,7 +386,7 @@ static int psp_hw_dump_metadata(SceUID fd) {
              "frames,%lu\n"
              "warmup_frames,%u\n",
              sPspHwSceneNames[sPspHwScene], psp_hw_source_name(),
-             (unsigned long) sPspHwTotals.frames, PROFILE_HW_COUNTER_WARMUP_FRAMES);
+             (unsigned long) sPspHwTotals.frames, PSP_HW_COUNTER_WARMUP_FRAMES);
     if (!psp_hw_write_all(fd, line)) {
         return 0;
     }
@@ -439,14 +421,9 @@ static int psp_hw_dump_metadata(SceUID fd) {
     snprintf(line, sizeof(line),
              "build_flags,PROFILE_HW_COUNTERS=1 PROFILE_HW_COUNTER_SCOPES=%d PROFILE_PHASES=%d "
              "PROFILE_COMPONENTS=%d PROFILE_GPROF=%d PSP_FPS_OVERLAY=%d PSP_RENDERER_DIAGNOSTICS=%d "
-             "PSP_LOG=%d PSP_AUDIO=%d VTX_FUSED_TNL=%d PSP_FLOAT_MTX=%d PSPGL_SWAP_INTERVAL=%d "
-             "PSP_MAP_SKIP_COMPLETED_PATHS=%d PSP_MAP_SKIP_HISTORY_HUD=%d PSP_MAP_SKIP_PLANETS=%d "
-             "BATCH_STATE_CACHE=%d\n",
+             "PSP_LOG=%d PSP_AUDIO=%d PSPGL_SWAP_INTERVAL=%d\n",
              PROFILE_HW_COUNTER_SCOPES, PROFILE_PHASES, PROFILE_COMPONENTS, PROFILE_GPROF,
-             PSP_FPS_OVERLAY, PSP_RENDERER_DIAGNOSTICS, PSP_LOG_ENABLED, PSP_AUDIO, VTX_FUSED_TNL,
-             PSP_FLOAT_MTX, PSPGL_SWAP_INTERVAL, PSP_MAP_SKIP_COMPLETED_PATHS, PSP_MAP_SKIP_HISTORY_HUD,
-             PSP_MAP_SKIP_PLANETS,
-             BATCH_STATE_CACHE);
+             PSP_FPS_OVERLAY, PSP_RENDERER_DIAGNOSTICS, PSP_LOG_ENABLED, PSP_AUDIO, PSPGL_SWAP_INTERVAL);
     if (!psp_hw_write_all(fd, line)) {
         return 0;
     }
@@ -699,7 +676,7 @@ static void psp_hw_start(void) {
     }
     memset(&sPspHwTotals, 0, sizeof(sPspHwTotals));
     sPspHwFrameBeginValid = 0;
-    sPspHwWarmupFrames = PROFILE_HW_COUNTER_WARMUP_FRAMES;
+    sPspHwWarmupFrames = PSP_HW_COUNTER_WARMUP_FRAMES;
     sPspHwStopRequested = 0;
     sPspHwFrameArmed = 0;
     sPspHwErrorStep = PSP_HW_STEP_NONE;
@@ -852,7 +829,7 @@ void PspHwCounterProfile_FrameEnd(u32 commands, u32 loadedVertices, u32 submitte
     sPspHwTotals.submittedVertices += submittedVertices;
     sPspHwTotals.frames++;
 
-    if ((sPspHwTotals.frames >= PROFILE_HW_COUNTER_FRAMES) || sPspHwStopRequested) {
+    if ((sPspHwTotals.frames >= PSP_HW_COUNTER_CAPTURE_FRAMES) || sPspHwStopRequested) {
         psp_hw_request_dump();
     }
 }
@@ -956,7 +933,7 @@ void PspHwCounterProfile_DrawStatus(void) {
                              (unsigned long) sPspHwWarmupFrames);
     } else if (sPspHwStatus == PSP_HW_STATUS_RECORDING) {
         pspDebugScreenPrintf("HW %-8s %s REC %03lu/%03u", scene, source,
-                             (unsigned long) sPspHwTotals.frames, PROFILE_HW_COUNTER_FRAMES);
+                             (unsigned long) sPspHwTotals.frames, PSP_HW_COUNTER_CAPTURE_FRAMES);
     } else if (sPspHwStatus == PSP_HW_STATUS_SAVING) {
         pspDebugScreenPrintf("HW %-8s %s SAVING     ", scene, source);
     } else if (sPspHwStatus == PSP_HW_STATUS_SAVED) {

@@ -522,7 +522,7 @@ void Matrix_SetGfxMtx(Gfx** gfx) {
 }
 
 void Matrix_SetGfxMtxFlags(Gfx** gfx, u32 flags) {
-#if defined(TARGET_PSP) && PSP_FLOAT_MTX
+#ifdef TARGET_PSP
     Matrix_SetGfxMtxFromMatrix(gfx, gGfxMatrix, flags);
 #else
     Matrix_ToMtx(gGfxMtx);
@@ -533,31 +533,10 @@ void Matrix_SetGfxMtxFlags(Gfx** gfx, u32 flags) {
 #ifdef TARGET_PSP
 typedef char MatrixMtxSizeCheck[(sizeof(Matrix) == sizeof(Mtx)) ? 1 : -1];
 
-#if !PSP_FLOAT_MTX
-static void Matrix_PackMtx(Mtx* dest, const Matrix* src) {
-    s32 row;
-    s32 col;
-
-    for (row = 0; row < 4; row++) {
-        for (col = 0; col < 4; col++) {
-            s32 fixed = (s32) (src->m[row][col] * 65536.0f);
-
-            dest->u.i[row][col] = (u16) (fixed >> 16);
-            dest->u.f[row][col] = (u16) fixed;
-        }
-    }
-}
-#endif
-
 void Matrix_SetGfxMtxFromMatrix(Gfx** gfx, const Matrix* src, u32 flags) {
-#if PSP_FLOAT_MTX
     Mtx* dest = gGfxMtx++;
 
     *(Matrix*) dest = *src;
     PSP_RENDERER_DL_MTXF((*gfx)++, dest, flags);
-#else
-    Matrix_PackMtx(gGfxMtx, src);
-    gSPMatrix((*gfx)++, gGfxMtx++, flags);
-#endif
 }
 #endif
