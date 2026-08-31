@@ -1273,6 +1273,7 @@ void PspGfxPspgl_Init(void) {
     PspGfxPspgl_InitColorTransfer();
     psp_gfx_pspgl_invalidate_state_cache();
     glViewport(0, 0, PspGfx_GetWidth(), PspGfx_GetHeight());
+    glDepthRangeRaw(-163939.984375f, 163939.984375f, 0, 65535);
 
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_TEXTURE_2D);

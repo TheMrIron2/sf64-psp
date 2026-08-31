@@ -270,16 +270,6 @@ void Title_Setup(void) {
     Title_GetRankTotalHits();
     PSP_TRACE("title setup: rank hits done");
 
-#ifdef TARGET_PSP
-    /*
-     * Early PSP bring-up keeps the scheduler on the simpler interactive title
-     * path. The opening cinematic currently reaches hardware-only crashes in
-     * the Great Fox travel update before we have a renderer to validate it.
-     */
-    PSP_TRACE("title setup: psp force title screen");
-    gGoToTitle = true;
-#endif
-
     if ((gMainController == -1) || gGoToTitle) {
         PSP_TRACE("title setup: title screen branch");
         AUDIO_SET_SPEC(SFX_LAYOUT_DEFAULT, AUDIOSPEC_TITLE);
@@ -2441,20 +2431,10 @@ void Title_Arwing_Draw(TitleTeam teamIdx) {
         arwing.bottomRightFlapYrot = arwing.upperLeftFlapYrot = arwing.bottomLeftFlapYrot = arwing.unk_28 = 0.0f;
 
     arwing.laserGunsYpos = sTitleArwing[teamIdx].laserGunsYpos;
-#ifdef TARGET_PSP
-    arwing.drawFace = 0;
-#else
     arwing.drawFace = sTitleArwing[teamIdx].drawFace;
-#endif
     arwing.teamFaceXrot = sTitleArwing[teamIdx].teamFaceXrot;
     arwing.teamFaceYrot = sTitleArwing[teamIdx].teamFaceYrot;
     arwing.cockpitGlassXrot = sTitleArwing[teamIdx].cockpitGlassXrot;
-
-#ifdef TARGET_PSP
-    Display_Arwing_Skel(&arwing);
-    Matrix_Pop(&gGfxMatrix);
-    return;
-#endif
 
     Display_Arwing_Skel(&arwing);
 

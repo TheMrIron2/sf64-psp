@@ -1337,6 +1337,19 @@ static void psp_gfx_dl_note_matrix_changed(PspGfxDlContext* ctx, int projection)
     }
 }
 
+static void psp_gfx_dl_apply_depth_clamp_projection(float matrix[4][4]) {
+    const float nearPlane = 2.0f;
+    const float farPlane = 12800.0f;
+
+    if ((fabsf(matrix[2][3] + 1.0f) < 0.0001f) &&
+        (fabsf(matrix[3][3]) < 0.0001f) &&
+        (fabsf(matrix[2][2] + 1.0015637f) < 0.0001f) &&
+        (fabsf(matrix[3][2] + 20.015638f) < 0.001f)) {
+        matrix[2][2] = (nearPlane + farPlane) / (nearPlane - farPlane);
+        matrix[3][2] = (2.0f * nearPlane * farPlane) / (nearPlane - farPlane);
+    }
+}
+
 static void psp_gfx_dl_handle_mtx_generic(PspGfxDlContext* ctx, const void* src, u32 flags, int floating) {
     float loaded[4][4];
     float (*target)[4];
@@ -1364,6 +1377,9 @@ static void psp_gfx_dl_handle_mtx_generic(PspGfxDlContext* ctx, const void* src,
         psp_gfx_dl_mtx_copy(target, loaded);
     } else {
         psp_gfx_dl_mtx_mul(target, loaded, target);
+    }
+    if ((flags & G_MTX_PROJECTION) != 0) {
+        psp_gfx_dl_apply_depth_clamp_projection(target);
     }
     *hasTarget = 1;
     psp_gfx_dl_note_matrix_changed(ctx, (flags & G_MTX_PROJECTION) != 0);
@@ -1419,6 +1435,9 @@ static void psp_gfx_dl_handle_mtx(PspGfxDlContext* ctx, const Gfx* gfx, int floa
         psp_gfx_dl_mtx_copy(target, loaded);
     } else {
         psp_gfx_dl_mtx_mul(target, loaded, target);
+    }
+    if (projection) {
+        psp_gfx_dl_apply_depth_clamp_projection(target);
     }
     *hasTarget = 1;
     psp_gfx_dl_note_matrix_changed(ctx, projection);
@@ -3678,6 +3697,21 @@ static u32 psp_gfx_dl_clip_polygon_plane(const PspGfxDlClipVertex* input, u32 in
     return outputCount;
 }
 
+static int psp_gfx_dl_culls_area(u32 geometryMode, float area) {
+    u32 cullMode = geometryMode & G_CULL_BOTH;
+
+    if (cullMode == G_CULL_BOTH) {
+        return 1;
+    }
+    if (area > 0.000001f) {
+        return (cullMode & G_CULL_FRONT) != 0;
+    }
+    if (area < -0.000001f) {
+        return (cullMode & G_CULL_BACK) != 0;
+    }
+    return 0;
+}
+
 static u32 psp_gfx_dl_emit_clipped_triangle(PspGfxDlContext* ctx, const PspGfxDlVertex* a,
                                             const PspGfxDlVertex* b, const PspGfxDlVertex* c, int textured) {
     PspGfxDlClipVertex buffers[2][PSP_GFX_DL_MAX_CLIP_VERTICES];
@@ -3686,6 +3720,7 @@ static u32 psp_gfx_dl_emit_clipped_triangle(PspGfxDlContext* ctx, const PspGfxDl
     PspGfxDlClipVertex* swap;
     u32 vertexCount = 3;
     u32 generatedCount = 0;
+    u32 emittedCount = 0;
     u32 plane;
     u32 i;
 
@@ -3807,6 +3842,17 @@ static u32 psp_gfx_dl_emit_clipped_triangle(PspGfxDlContext* ctx, const PspGfxDl
         PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_BATCH);
     }
     for (i = 1; i + 1 < vertexCount; i++) {
+        float ax = input[0].x / input[0].w;
+        float ay = input[0].y / input[0].w;
+        float bx = input[i].x / input[i].w;
+        float by = input[i].y / input[i].w;
+        float cx = input[i + 1].x / input[i + 1].w;
+        float cy = input[i + 1].y / input[i + 1].w;
+        float area = ((bx - ax) * (cy - ay)) - ((by - ay) * (cx - ax));
+
+        if (psp_gfx_dl_culls_area(ctx->geometryMode, area)) {
+            continue;
+        }
         if (textured) {
             psp_gfx_dl_emit_textured_triangle(ctx, &input[0], &input[i], &input[i + 1]);
         } else {
@@ -3814,12 +3860,13 @@ static u32 psp_gfx_dl_emit_clipped_triangle(PspGfxDlContext* ctx, const PspGfxDl
             psp_gfx_dl_emit_clip_vertex(ctx, &input[i]);
             psp_gfx_dl_emit_clip_vertex(ctx, &input[i + 1]);
         }
+        emittedCount++;
     }
     if (!textured) {
         PspHwCounterProfile_InnerScopeEnd(PSP_HW_SCOPE_BATCH);
     }
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_CLIPPING);
-    return vertexCount - 2;
+    return emittedCount;
 }
 
 static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
@@ -3934,6 +3981,12 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
 #if PSP_RENDERER_DIAGNOSTICS
         psp_gfx_dl_material_corpus_add_rejected(1);
 #endif
+        PspProfiler_CountTriangleResult(0, 1, 0, 0, 0);
+        PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_BATCH_CONSTRUCTION);
+        return;
+    }
+    if ((combinedClipCode == 0) && psp_gfx_dl_culls_area(ctx->geometryMode, area)) {
+        ctx->stats.triangleCount++;
         PspProfiler_CountTriangleResult(0, 1, 0, 0, 0);
         PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_BATCH_CONSTRUCTION);
         return;
