@@ -150,7 +150,15 @@ typedef char PspGfxDlPackedVertexAttributeOffsetCheck[
 ];
 
 typedef struct {
+    float p22;
+    float p23;
+    float p32;
+    float p33;
+} PspGfxDlFogProjection;
+
+typedef struct {
     float matrix[4][4];
+    PspGfxDlFogProjection fogProjection;
     u32 serial;
     u32 refCount;
 } PspGfxDlProjectionSnapshot;
@@ -297,6 +305,8 @@ typedef struct {
     PspGfxDlVertex vertices[PSP_GFX_DL_MAX_VERTICES];
     float modelview[4][4];
     float projection[4][4];
+    /* The GE projection is depth adapted while N64 fog retains the original depth mapping */
+    float fogProjection[4][4];
     PspGfxDlProjectionSnapshot projectionSnapshots[PSP_GFX_DL_PROJECTION_SNAPSHOTS];
     float modelviewStack[PSP_GFX_DL_MTX_STACK_DEPTH][4][4];
     float batchProjection[4][4];
@@ -664,13 +674,21 @@ static u32 psp_gfx_dl_environment_color(const PspGfxDlContext* ctx) {
     return psp_gfx_dl_pack_rgba_u8(ctx->environmentR, ctx->environmentG, ctx->environmentB, ctx->environmentA, 0);
 }
 
-static float psp_gfx_dl_fog_distance(const float projection[4][4], float ndcZ) {
-    float denominator = projection[2][2] - (ndcZ * projection[2][3]);
+static void psp_gfx_dl_get_fog_projection(const float matrix[4][4],
+                                          PspGfxDlFogProjection* projection) {
+    projection->p22 = matrix[2][2];
+    projection->p23 = matrix[2][3];
+    projection->p32 = matrix[3][2];
+    projection->p33 = matrix[3][3];
+}
+
+static float psp_gfx_dl_fog_distance(const PspGfxDlFogProjection* projection, float ndcZ) {
+    float denominator = projection->p22 - (ndcZ * projection->p23);
 
     if ((denominator > -0.000001f) && (denominator < 0.000001f)) {
         return 0.0f;
     }
-    return (projection[3][2] - (ndcZ * projection[3][3])) / denominator;
+    return (projection->p32 - (ndcZ * projection->p33)) / denominator;
 }
 
 #if !PSP_ORIGINAL_FOG
@@ -688,58 +706,116 @@ typedef struct {
 
 static PspGfxDlApproxFogFit sPspGfxDlApproxFogFit;
 
-static int psp_gfx_dl_fit_black_fog_curve(const float projection[4][4], s16 fogMul,
-                                          s16 fogOffset, float* start, float* end) {
-    float sumX = 0.0f;
-    float sumY = 0.0f;
-    float sumXX = 0.0f;
-    float sumXY = 0.0f;
-    float denominator;
-    float slope;
-    float intercept;
-    u32 q;
+static int psp_gfx_dl_black_fog_minimax_feasible(const float distances[23], const float values[23],
+                                                 float error, float* slope, float* intercept) {
+    float slopeLow = 0.000001f;
+    float slopeHigh = 1000000.0f;
+    float interceptLow = -1000000.0f;
+    float interceptHigh = 0.0f;
+    u32 i;
+    u32 j;
 
-    for (q = 0; q < 32; q++) {
+    for (i = 0; i < 23; i++) {
+        float minimumSlope = (values[i] - error) / distances[i];
+
+        if (minimumSlope > slopeLow) {
+            slopeLow = minimumSlope;
+        }
+        for (j = i + 1; j < 23; j++) {
+            float distanceSpan = distances[j] - distances[i];
+            float valueSpan = values[j] - values[i];
+            float pairLow;
+            float pairHigh;
+
+            if (distanceSpan <= 0.0f) {
+                return 0;
+            }
+            pairLow = (valueSpan - (2.0f * error)) / distanceSpan;
+            pairHigh = (valueSpan + (2.0f * error)) / distanceSpan;
+            if (pairLow > slopeLow) {
+                slopeLow = pairLow;
+            }
+            if (pairHigh < slopeHigh) {
+                slopeHigh = pairHigh;
+            }
+        }
+    }
+    if (slopeHigh < slopeLow) {
+        return 0;
+    }
+    *slope = (slopeLow + slopeHigh) * 0.5f;
+    for (i = 0; i < 23; i++) {
+        float sampleLow = values[i] - error - (*slope * distances[i]);
+        float sampleHigh = values[i] + error - (*slope * distances[i]);
+
+        if (sampleLow > interceptLow) {
+            interceptLow = sampleLow;
+        }
+        if (sampleHigh < interceptHigh) {
+            interceptHigh = sampleHigh;
+        }
+    }
+    if (interceptHigh < interceptLow) {
+        return 0;
+    }
+    *intercept = (interceptLow + interceptHigh) * 0.5f;
+    return 1;
+}
+
+static int psp_gfx_dl_fit_black_fog_curve(const PspGfxDlFogProjection* projection, s16 fogMul,
+                                          s16 fogOffset, float* start, float* end) {
+    float distances[23];
+    float values[23];
+    float errorLow = 0.0f;
+    float errorHigh = 1.0f;
+    float slope = 0.0f;
+    float intercept = 0.0f;
+    u32 i;
+
+    for (i = 0; i < 23; i++) {
+        u32 q = i + 8U;
         float alpha = (float) ((q << 3) + 4U);
         float ndcZ = (alpha - (float) fogOffset) / (float) fogMul;
-        float distance = psp_gfx_dl_fog_distance(projection, ndcZ);
-        float weight = (float) sPspGfxDlPresentedFogAlpha[q] / 255.0f;
 
-        sumX += distance;
-        sumY += weight;
-        sumXX += distance * distance;
-        sumXY += distance * weight;
+        distances[i] = psp_gfx_dl_fog_distance(projection, ndcZ);
+        values[i] = (float) sPspGfxDlPresentedFogAlpha[q] / 255.0f;
     }
-    denominator = (32.0f * sumXX) - (sumX * sumX);
-    if ((denominator > -0.000001f) && (denominator < 0.000001f)) {
+    for (i = 0; i < 24; i++) {
+        float error = (errorLow + errorHigh) * 0.5f;
+
+        if (psp_gfx_dl_black_fog_minimax_feasible(distances, values, error,
+                                                   &slope, &intercept)) {
+            errorHigh = error;
+        } else {
+            errorLow = error;
+        }
+    }
+    if (!psp_gfx_dl_black_fog_minimax_feasible(distances, values, errorHigh,
+                                                &slope, &intercept) ||
+        (slope <= 0.000001f)) {
         return 0;
     }
-    slope = ((32.0f * sumXY) - (sumX * sumY)) / denominator;
-    if (slope <= 0.000001f) {
-        return 0;
-    }
-    intercept = (sumY - (slope * sumX)) / 32.0f;
     *start = -intercept / slope;
     *end = (1.0f - intercept) / slope;
     return (*start >= 0.0f) && (*end > *start);
 }
 
-static int psp_gfx_dl_get_black_fog_curve(const float projection[4][4], s16 fogMul,
+static int psp_gfx_dl_get_black_fog_curve(const PspGfxDlFogProjection* projection, s16 fogMul,
                                           s16 fogOffset, float* start, float* end) {
     PspGfxDlApproxFogFit* fit = &sPspGfxDlApproxFogFit;
 
     if (!fit->valid || (fit->fogMul != fogMul) || (fit->fogOffset != fogOffset) ||
-        (fit->projection22 != projection[2][2]) || (fit->projection23 != projection[2][3]) ||
-        (fit->projection32 != projection[3][2]) || (fit->projection33 != projection[3][3])) {
+        (fit->projection22 != projection->p22) || (fit->projection23 != projection->p23) ||
+        (fit->projection32 != projection->p32) || (fit->projection33 != projection->p33)) {
         if (!psp_gfx_dl_fit_black_fog_curve(projection, fogMul, fogOffset,
                                             &fit->start, &fit->end)) {
             fit->valid = 0;
             return 0;
         }
-        fit->projection22 = projection[2][2];
-        fit->projection23 = projection[2][3];
-        fit->projection32 = projection[3][2];
-        fit->projection33 = projection[3][3];
+        fit->projection22 = projection->p22;
+        fit->projection23 = projection->p23;
+        fit->projection32 = projection->p32;
+        fit->projection33 = projection->p33;
         fit->fogMul = fogMul;
         fit->fogOffset = fogOffset;
         fit->valid = 1;
@@ -1258,10 +1334,20 @@ static u32 psp_gfx_dl_prepare_vertex_projection(PspGfxDlContext* ctx, u32 count)
     }
 
     psp_gfx_dl_mtx_copy(ctx->projectionSnapshots[freeSnapshot].matrix, ctx->projection);
+    psp_gfx_dl_get_fog_projection(ctx->fogProjection,
+                                  &ctx->projectionSnapshots[freeSnapshot].fogProjection);
     ctx->projectionSnapshots[freeSnapshot].serial = ctx->projectionSerial;
     ctx->projectionSnapshots[freeSnapshot].refCount = count;
     ctx->currentProjectionSnapshot = freeSnapshot;
     return freeSnapshot;
+}
+
+static const PspGfxDlFogProjection* psp_gfx_dl_vertex_fog_projection(
+    const PspGfxDlContext* ctx, const PspGfxDlVertex* vertex) {
+    if (vertex->projectionSnapshot < PSP_GFX_DL_PROJECTION_SNAPSHOTS) {
+        return &ctx->projectionSnapshots[vertex->projectionSnapshot].fogProjection;
+    }
+    return NULL;
 }
 
 static void psp_gfx_dl_set_vertex_projection(PspGfxDlContext* ctx, PspGfxDlVertex* vertex,
@@ -1351,16 +1437,27 @@ static int __attribute__((used)) psp_gfx_dl_store_transformed_vertex(
 }
 
 #if PSP_ORIGINAL_FOG
+static void psp_gfx_dl_fog_clip_depth(const PspGfxDlFogProjection* projection,
+                                      float viewZ, float viewW, float* clipZ, float* clipW) {
+    *clipZ = (viewZ * projection->p22) + (viewW * projection->p32);
+    *clipW = (viewZ * projection->p23) + (viewW * projection->p33);
+}
+
 static u8 psp_gfx_dl_calculate_fog_alpha(const PspGfxDlContext* ctx, const PspGfxDlVertex* vertex) {
     n64psp_fog_coefficients coefficients;
+    const PspGfxDlFogProjection* projection = psp_gfx_dl_vertex_fog_projection(ctx, vertex);
+    float clipZ;
+    float clipW;
 
-    if (!vertex->state.fields.valid || ((ctx->geometryMode & G_FOG) == 0)) {
+    if (!vertex->state.fields.valid || ((ctx->geometryMode & G_FOG) == 0) ||
+        (projection == NULL)) {
         return 0;
     }
 
     coefficients.multiplier = ctx->fogMul;
     coefficients.offset = ctx->fogOffset;
-    return n64psp_fog_alpha(&coefficients, vertex->clipZ, vertex->clipW);
+    psp_gfx_dl_fog_clip_depth(projection, vertex->viewZ, vertex->viewW, &clipZ, &clipW);
+    return n64psp_fog_alpha(&coefficients, clipZ, clipW);
 }
 #endif
 
@@ -1427,6 +1524,14 @@ static void psp_gfx_dl_handle_mtx_generic(PspGfxDlContext* ctx, const void* src,
     } else {
         psp_gfx_dl_mtx_l2f(loaded, (const Mtx*) src);
     }
+    if ((flags & G_MTX_PROJECTION) != 0) {
+        if (((flags & G_MTX_LOAD) != 0) || !*hasTarget) {
+            psp_gfx_dl_mtx_copy(ctx->fogProjection, loaded);
+        } else {
+            psp_gfx_dl_mtx_mul(ctx->fogProjection, loaded, ctx->fogProjection);
+        }
+        psp_gfx_dl_mtx_copy(target, ctx->fogProjection);
+    } else
     if (((flags & G_MTX_LOAD) != 0) || !*hasTarget) {
         psp_gfx_dl_mtx_copy(target, loaded);
     } else {
@@ -1485,6 +1590,14 @@ static void psp_gfx_dl_handle_mtx(PspGfxDlContext* ctx, const Gfx* gfx, int floa
         psp_gfx_dl_mtx_l2f(decoded, (const Mtx*) src);
         loaded = decoded;
     }
+    if (projection) {
+        if (load || !*hasTarget) {
+            psp_gfx_dl_mtx_copy(ctx->fogProjection, loaded);
+        } else {
+            psp_gfx_dl_mtx_mul(ctx->fogProjection, loaded, ctx->fogProjection);
+        }
+        psp_gfx_dl_mtx_copy(target, ctx->fogProjection);
+    } else
     if (load || !*hasTarget) {
         psp_gfx_dl_mtx_copy(target, loaded);
     } else {
@@ -2351,7 +2464,8 @@ static void psp_gfx_dl_set_batch_fog_resolved(PspGfxDlContext* ctx, int fog, int
     ctx->batchFogEnd = end;
 }
 
-static void psp_gfx_dl_resolve_fog_values(PspGfxDlContext* ctx, int fog, const float projection[4][4],
+static void psp_gfx_dl_resolve_fog_values(PspGfxDlContext* ctx, int fog,
+                                          const PspGfxDlFogProjection* projection,
                                           float color[4], float* start, float* end) {
     *start = 0.0f;
     *end = 0.0f;
@@ -2393,12 +2507,15 @@ static int psp_gfx_dl_resolve_fog_state_values(PspGfxDlContext* ctx, const PspGf
                                                int pretransformed, float color[4], float* start, float* end) {
     int requestedFog = !pretransformed && ((ctx->otherModeL >> 30) == G_BL_CLR_FOG);
 
-    psp_gfx_dl_resolve_fog_values(ctx, requestedFog, vertex->projection, color, start, end);
+    psp_gfx_dl_resolve_fog_values(ctx, requestedFog,
+                                  psp_gfx_dl_vertex_fog_projection(ctx, vertex),
+                                  color, start, end);
     return requestedFog && (ctx->fogMul != 0) && (*end > *start) && (*start >= 0.0f);
 }
 
 #if PSP_RENDERER_DIAGNOSTICS
-static void psp_gfx_dl_trace_fog_curve(const PspGfxDlContext* ctx, const float projection[4][4],
+static void psp_gfx_dl_trace_fog_curve(const PspGfxDlContext* ctx,
+                                       const PspGfxDlFogProjection* projection,
                                        float start, float end) {
     static const u8 samples[4] = { 8, 16, 24, 31 };
     char line[512];
@@ -2410,7 +2527,7 @@ static void psp_gfx_dl_trace_fog_curve(const PspGfxDlContext* ctx, const float p
     }
     used = (u32) snprintf(line, sizeof(line),
                           "[rdp-trace-fog-curve] proj=%.7f,%.7f,%.7f,%.7f gl=%.2f..%.2f",
-                          projection[2][2], projection[2][3], projection[3][2], projection[3][3],
+                          projection->p22, projection->p23, projection->p32, projection->p33,
                           start, end);
     for (i = 0; i < 4; i++) {
         u32 q = samples[i];
@@ -2432,7 +2549,8 @@ static void psp_gfx_dl_trace_fog_curve(const PspGfxDlContext* ctx, const float p
 }
 #endif
 
-static void psp_gfx_dl_set_batch_fog(PspGfxDlContext* ctx, int fog, const float projection[4][4]) {
+static void psp_gfx_dl_set_batch_fog(PspGfxDlContext* ctx, int fog,
+                                     const PspGfxDlFogProjection* projection) {
     float color[4];
     float start;
     float end;
@@ -2980,7 +3098,9 @@ static void psp_gfx_dl_trace_triangle(PspGfxDlContext* ctx, const Gfx* cmd, u32 
         return;
     }
     if (fog) {
-        psp_gfx_dl_trace_fog_curve(ctx, vertices[0]->projection, fogStart, fogEnd);
+        psp_gfx_dl_trace_fog_curve(ctx,
+                                   psp_gfx_dl_vertex_fog_projection(ctx, vertices[0]),
+                                   fogStart, fogEnd);
     }
 
     snprintf(line, sizeof(line),
@@ -4294,7 +4414,7 @@ static void psp_gfx_dl_handle_texture_rectangle(PspGfxDlContext* ctx, const Gfx*
 
     if (sprites) {
         psp_gfx_dl_set_batch_depth(ctx, 0, 0, 0);
-        psp_gfx_dl_set_batch_fog(ctx, 0, ctx->projection);
+        psp_gfx_dl_set_batch_fog(ctx, 0, NULL);
         psp_gfx_dl_set_batch_transform(ctx, 1, 0, NULL);
     }
     psp_gfx_dl_set_batch_texture(
@@ -4314,7 +4434,7 @@ static void psp_gfx_dl_handle_texture_rectangle(PspGfxDlContext* ctx, const Gfx*
         psp_gfx_dl_premultiplied_blend_enabled(ctx), psp_gfx_dl_effective_point_filter(ctx));
     if (!sprites) {
         psp_gfx_dl_set_batch_depth(ctx, 0, 0, 0);
-        psp_gfx_dl_set_batch_fog(ctx, 0, ctx->projection);
+        psp_gfx_dl_set_batch_fog(ctx, 0, NULL);
         psp_gfx_dl_set_batch_transform(ctx, 1, 0, NULL);
     }
     psp_gfx_dl_mark_effective_state_dirty(ctx);
@@ -5680,6 +5800,7 @@ static void psp_gfx_dl_reset_context(PspGfxDlContext* ctx) {
     }
     psp_gfx_dl_identity(ctx->modelview);
     psp_gfx_dl_identity(ctx->projection);
+    psp_gfx_dl_identity(ctx->fogProjection);
     ctx->primitiveR = 255;
     ctx->primitiveG = 255;
     ctx->primitiveB = 255;
