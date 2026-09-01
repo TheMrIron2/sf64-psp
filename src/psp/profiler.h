@@ -189,6 +189,8 @@ void PspProfiler_CountTrianglePath(u32 directFastpathTriangles, u32 generalPathT
 void PspProfiler_CountTri2PairFastpath(u32 hit, u32 invalidVertex, u32 clippedOrRejected,
                                        u32 transformMismatch, u32 directIneligible, u32 bufferPreflush,
                                        u32 validationMismatch);
+void PspProfiler_CountTri2CullOutcome(u32 tested, u32 bothSurvive, u32 firstOnly, u32 secondOnly,
+                                      u32 bothRejected, u32 mixedFallback);
 void PspProfiler_RecordTri2PairValidationMismatch(u32 vertexIndex, u32 fieldMask, u32 batchDelta);
 void PspProfiler_CountEffectiveState(u32 resolves, u32 reuses, u32 materialResolves, u32 depthResolves,
                                      u32 fogResolves);
@@ -248,6 +250,9 @@ void PspProfiler_CountTrivialRejectRenderState(PspProfileTrivialRejectRenderStat
     ((void) 0)
 #define PspProfiler_CountTri2PairFastpath(hit, invalidVertex, clippedOrRejected, transformMismatch, \
                                           directIneligible, bufferPreflush, validationMismatch)      \
+    ((void) 0)
+#define PspProfiler_CountTri2CullOutcome(tested, bothSurvive, firstOnly, secondOnly, bothRejected, \
+                                         mixedFallback)                                                \
     ((void) 0)
 #define PspProfiler_RecordTri2PairValidationMismatch(vertexIndex, fieldMask, batchDelta) ((void) 0)
 #define PspProfiler_CountEffectiveState(resolves, reuses, materialResolves, depthResolves, fogResolves) ((void) 0)
