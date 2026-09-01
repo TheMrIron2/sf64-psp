@@ -337,6 +337,8 @@ typedef struct {
     u32 textureUploadHeight;
     u32 textureUploadX;
     u32 textureUploadY;
+    int textureMirrorFallback;
+    u32 textureMirrorFeasibilityKey;
     s32 textureTileUls;
     s32 textureTileUlt;
     u32 textureCms;
@@ -761,17 +763,8 @@ static PspGfxPspglTextureWrap psp_gfx_dl_texture_wrap(u32 mode, u32 mask) {
     return PSP_GFX_PSPGL_WRAP_REPEAT;
 }
 
-static int psp_gfx_dl_texture_axis_needs_wrap(const s16* coords, u32 count, u32 uploadSize) {
-    float limit = (float) uploadSize * 32.0f;
-    u32 i;
-
-    for (i = 0; i < count; i++) {
-        if (((float) coords[i] < 0.0f) || ((float) coords[i] > limit)) {
-            return 1;
-        }
-    }
-    return 0;
-}
+#define PSP_GFX_DL_ENCODED_MIRROR(ctx, mode, mask) \
+    (!(ctx)->textureMirrorFallback && (((mode) & G_TX_MIRROR) != 0) && ((mask) != G_TX_NOMASK))
 
 static PspGfxPspglTextureWrap psp_gfx_dl_texture_draw_wrap(u32 mode, u32 mask, int needsWrap) {
     if (((mode & G_TX_MIRROR) != 0) && !needsWrap) {
@@ -779,6 +772,73 @@ static PspGfxPspglTextureWrap psp_gfx_dl_texture_draw_wrap(u32 mode, u32 mask, i
     }
     return psp_gfx_dl_texture_wrap(mode, mask);
 }
+
+static PspGfxPspglTextureWrap psp_gfx_dl_texture_tri3_wrap(u32 mode, u32 mask, u32 uploadSize,
+                                                           s16 a, s16 b, s16 c, int encodedMirror) {
+    u32 limit;
+    int needsWrap;
+    PspGfxPspglTextureWrap wrap;
+
+    if (encodedMirror) {
+        return PSP_GFX_PSPGL_WRAP_REPEAT;
+    }
+
+    if ((mode & G_TX_MIRROR) == 0) {
+        PspProfiler_CountMirrorClassification(0, 1, 0, 0);
+        return psp_gfx_dl_texture_wrap(mode, mask);
+    }
+    limit = uploadSize << 5;
+    needsWrap = (a < 0) || (b < 0) || (c < 0) || ((u32) a > limit) ||
+                ((u32) b > limit) || ((u32) c > limit);
+    wrap = psp_gfx_dl_texture_draw_wrap(mode, mask, needsWrap);
+    PspProfiler_CountMirrorClassification(1, 0, wrap == PSP_GFX_PSPGL_WRAP_CLAMP,
+                                          wrap == PSP_GFX_PSPGL_WRAP_MIRROR);
+    return wrap;
+}
+
+static PspGfxPspglTextureWrap psp_gfx_dl_texture_tri6_wrap(u32 mode, u32 mask, u32 uploadSize,
+                                                           s16 a, s16 b, s16 c, s16 d, s16 e, s16 f,
+                                                           int encodedMirror) {
+    u32 limit;
+    int needsWrap;
+    PspGfxPspglTextureWrap wrap;
+
+    if (encodedMirror) {
+        return PSP_GFX_PSPGL_WRAP_REPEAT;
+    }
+
+    if ((mode & G_TX_MIRROR) == 0) {
+        PspProfiler_CountMirrorClassification(0, 1, 0, 0);
+        return psp_gfx_dl_texture_wrap(mode, mask);
+    }
+    limit = uploadSize << 5;
+    needsWrap = (a < 0) || (b < 0) || (c < 0) || (d < 0) || (e < 0) || (f < 0) ||
+                ((u32) a > limit) || ((u32) b > limit) || ((u32) c > limit) ||
+                ((u32) d > limit) || ((u32) e > limit) || ((u32) f > limit);
+    wrap = psp_gfx_dl_texture_draw_wrap(mode, mask, needsWrap);
+    PspProfiler_CountMirrorClassification(1, 0, wrap == PSP_GFX_PSPGL_WRAP_CLAMP,
+                                          wrap == PSP_GFX_PSPGL_WRAP_MIRROR);
+    return wrap;
+}
+
+#if PROFILE_PHASES
+static void psp_gfx_dl_profile_mirror_texture(PspGfxDlContext* ctx, int clampS, int clampT,
+                                               u32 triangles) {
+    u32 mirrorS = (ctx->textureCms & G_TX_MIRROR) != 0;
+    u32 mirrorT = (ctx->textureCmt & G_TX_MIRROR) != 0;
+    u32 palette = (u32) ctx->texturePalette;
+
+    if ((ctx->textureFormat == G_IM_FMT_CI) && (ctx->textureSize == G_IM_SIZ_4b)) {
+        palette += ctx->texturePaletteIndex * 16U * sizeof(u16);
+    }
+    PspProfiler_RecordMirrorTexture((u32) ctx->textureImage, palette, ctx->textureId,
+                                    ctx->textureRef.generation, ctx->textureFormat, ctx->textureSize,
+                                    ctx->textureWidth, ctx->textureHeight, ctx->textureUploadWidth,
+                                    ctx->textureUploadHeight, mirrorS, mirrorT, mirrorS && clampS,
+                                    mirrorS && !clampS, mirrorT && clampT, mirrorT && !clampT,
+                                    triangles);
+}
+#endif
 
 static float psp_gfx_dl_normalize_s10_5_scaled(s16 coord, u32 uploadSize, u32 uploadOffset, s32 tileOrigin,
                                                s32 scale) {
@@ -2016,6 +2076,19 @@ static int psp_gfx_dl_pool_material_matches(const PspGfxDlBatchSlot* slot, u32 t
            (slot->pointFilter == pointFilter);
 }
 
+#if PROFILE_PHASES
+static int psp_gfx_dl_pool_material_matches_without_wrap(const PspGfxDlBatchSlot* slot, u32 textureId,
+                                                         PspGfxPspglTextureRef textureRef,
+                                                         PspGfxPspglTextureEnv textureEnv, u32 textureEnvColor,
+                                                         int alphaTest, int blend, int premultiplied,
+                                                         int pointFilter) {
+    return (slot->textureId == textureId) && psp_gfx_dl_texture_ref_equal(slot->textureRef, textureRef) &&
+           (slot->textureEnv == textureEnv) && (slot->textureEnvColor == textureEnvColor) &&
+           (slot->alphaTest == alphaTest) && (slot->blend == blend) &&
+           (slot->premultiplied == premultiplied) && (slot->pointFilter == pointFilter);
+}
+#endif
+
 // takes a free slot, giving up the oldest open one when the pool is full
 static u32 psp_gfx_dl_pool_acquire(PspGfxDlContext* ctx) {
     u32 i;
@@ -2097,6 +2170,9 @@ static void psp_gfx_dl_set_batch_texture(PspGfxDlContext* ctx, u32 textureId, Ps
     if ((blend == 0) && (ctx->batchDepthTest != 0) && (ctx->batchDepthWrite != 0)) {
         u32 i;
         u32 index;
+#if PROFILE_PHASES
+        int mixedWrapVariant = 0;
+#endif
 
         if ((sPspGfxDlPoolCurrent < 0) && (ctx->batchCount != 0)) {
             psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
@@ -2104,6 +2180,16 @@ static void psp_gfx_dl_set_batch_texture(PspGfxDlContext* ctx, u32 textureId, Ps
 
         for (i = 0; i < sPspGfxDlPoolOpen; i++) {
             index = sPspGfxDlPoolOrder[i];
+#if PROFILE_PHASES
+            if (!mixedWrapVariant &&
+                psp_gfx_dl_pool_material_matches_without_wrap(&sPspGfxDlPool[index], textureId, textureRef,
+                                                              textureEnv, textureEnvColor, alphaTest, blend,
+                                                              premultiplied, pointFilter) &&
+                ((sPspGfxDlPool[index].wrapS != wrapS) || (sPspGfxDlPool[index].wrapT != wrapT))) {
+                mixedWrapVariant = 1;
+                PspProfiler_CountWrapBatching(1, 0, 0, 0);
+            }
+#endif
             if (psp_gfx_dl_pool_material_matches(&sPspGfxDlPool[index], textureId, textureRef, textureEnv,
                                                  textureEnvColor, wrapS, wrapT, alphaTest, blend,
                                                  premultiplied, pointFilter)) {
@@ -2160,6 +2246,11 @@ static void psp_gfx_dl_set_batch_texture(PspGfxDlContext* ctx, u32 textureId, Ps
     if ((ctx->batchCount != 0) &&
         (textureIdChanged || textureEnvChanged || textureEnvColorChanged || wrapSChanged || wrapTChanged ||
          alphaTestChanged || blendChanged || premultipliedChanged || pointFilterChanged)) {
+        if ((wrapSChanged || wrapTChanged) && !textureIdChanged && !textureEnvChanged &&
+            !textureEnvColorChanged && !alphaTestChanged && !blendChanged && !premultipliedChanged &&
+            !pointFilterChanged) {
+            PspProfiler_CountWrapBatching(0, 0, 1, ctx->batchCount);
+        }
         PspProfiler_CountBatchStateTransitions(textureIdChanged, textureEnvChanged || textureEnvColorChanged,
                                                wrapSChanged, wrapTChanged,
                                                alphaTestChanged, blendChanged, premultipliedChanged);
@@ -2509,6 +2600,9 @@ static u32 psp_gfx_dl_apply_effective_batch_state(PspGfxDlContext* ctx, const Ps
     int resolved;
 
     psp_gfx_dl_resolve_effective_state(ctx, vertex, pretransformed, &materialResolved, &depthResolved, &fogResolved);
+    if ((ctx->batchWrapS != wrapS) || (ctx->batchWrapT != wrapT)) {
+        PspProfiler_CountWrapBatching(0, 1, 0, 0);
+    }
     resolved = materialResolved || depthResolved || fogResolved || (ctx->batchWrapS != wrapS) || (ctx->batchWrapT != wrapT);
     PspProfiler_CountEffectiveState(resolved ? 1 : 0, resolved ? 0 : 1, materialResolved, depthResolved,
                                     fogResolved);
@@ -3328,8 +3422,6 @@ static int psp_gfx_dl_try_emit_tri2_direct_pair(PspGfxDlContext* ctx, u8 a0, u8 
     const PspGfxDlVertex* vb1;
     const PspGfxDlVertex* vc1;
     const PspGfxDlVertex* vertices[6];
-    s16 sCoords[6];
-    s16 tCoords[6];
     PspGfxPspglTextureWrap wrapS;
     PspGfxPspglTextureWrap wrapT;
     u8 combined0;
@@ -3340,7 +3432,6 @@ static int psp_gfx_dl_try_emit_tri2_direct_pair(PspGfxDlContext* ctx, u8 a0, u8 
     float uScale = 0.0f;
     float vScale = 0.0f;
     u32 bufferPreflush = 0;
-    u32 i;
 
     if (!psp_gfx_dl_vertex_is_valid(ctx, a0) || !psp_gfx_dl_vertex_is_valid(ctx, b0) ||
         !psp_gfx_dl_vertex_is_valid(ctx, c0) || !psp_gfx_dl_vertex_is_valid(ctx, a1) ||
@@ -3364,16 +3455,16 @@ static int psp_gfx_dl_try_emit_tri2_direct_pair(PspGfxDlContext* ctx, u8 a0, u8 
     vertices[3] = va1;
     vertices[4] = vb1;
     vertices[5] = vc1;
-    for (i = 0; i < 6; i++) {
-        sCoords[i] = vertices[i]->s;
-        tCoords[i] = vertices[i]->t;
-    }
-    wrapS = psp_gfx_dl_texture_draw_wrap(
-        ctx->textureCms, ctx->textureMaskS,
-        psp_gfx_dl_texture_axis_needs_wrap(sCoords, 6, ctx->textureUploadWidth));
-    wrapT = psp_gfx_dl_texture_draw_wrap(
-        ctx->textureCmt, ctx->textureMaskT,
-        psp_gfx_dl_texture_axis_needs_wrap(tCoords, 6, ctx->textureUploadHeight));
+    wrapS = psp_gfx_dl_texture_tri6_wrap(ctx->textureCms, ctx->textureMaskS, ctx->textureUploadWidth,
+                                        va0->s, vb0->s, vc0->s, va1->s, vb1->s, vc1->s,
+                                        PSP_GFX_DL_ENCODED_MIRROR(ctx, ctx->textureCms, ctx->textureMaskS));
+    wrapT = psp_gfx_dl_texture_tri6_wrap(ctx->textureCmt, ctx->textureMaskT, ctx->textureUploadHeight,
+                                        va0->t, vb0->t, vc0->t, va1->t, vb1->t, vc1->t,
+                                        PSP_GFX_DL_ENCODED_MIRROR(ctx, ctx->textureCmt, ctx->textureMaskT));
+#if PROFILE_PHASES
+    psp_gfx_dl_profile_mirror_texture(ctx, wrapS == PSP_GFX_PSPGL_WRAP_CLAMP,
+                                      wrapT == PSP_GFX_PSPGL_WRAP_CLAMP, 2);
+#endif
     combined0 = va0->clipCode | vb0->clipCode | vc0->clipCode;
     combined1 = va1->clipCode | vb1->clipCode | vc1->clipCode;
     if ((combined0 != 0) || (combined1 != 0)) {
@@ -3831,8 +3922,6 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
     float fogColor[4];
     float fogStart;
     float fogEnd;
-    s16 sCoords[3];
-    s16 tCoords[3];
     PspGfxPspglTextureWrap wrapS;
     PspGfxPspglTextureWrap wrapT;
     int pretransformed;
@@ -3853,18 +3942,16 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
     if (ctx->textureEnabled && (ctx->textureId == 0)) {
         psp_gfx_dl_prepare_texture(ctx, 1, psp_gfx_dl_premultiplied_blend_enabled(ctx));
     }
-    sCoords[0] = va->s;
-    sCoords[1] = vb->s;
-    sCoords[2] = vc->s;
-    tCoords[0] = va->t;
-    tCoords[1] = vb->t;
-    tCoords[2] = vc->t;
-    wrapS = psp_gfx_dl_texture_draw_wrap(
-        ctx->textureCms, ctx->textureMaskS,
-        psp_gfx_dl_texture_axis_needs_wrap(sCoords, 3, ctx->textureUploadWidth));
-    wrapT = psp_gfx_dl_texture_draw_wrap(
-        ctx->textureCmt, ctx->textureMaskT,
-        psp_gfx_dl_texture_axis_needs_wrap(tCoords, 3, ctx->textureUploadHeight));
+    wrapS = psp_gfx_dl_texture_tri3_wrap(ctx->textureCms, ctx->textureMaskS, ctx->textureUploadWidth,
+                                        va->s, vb->s, vc->s,
+                                        PSP_GFX_DL_ENCODED_MIRROR(ctx, ctx->textureCms, ctx->textureMaskS));
+    wrapT = psp_gfx_dl_texture_tri3_wrap(ctx->textureCmt, ctx->textureMaskT, ctx->textureUploadHeight,
+                                        va->t, vb->t, vc->t,
+                                        PSP_GFX_DL_ENCODED_MIRROR(ctx, ctx->textureCmt, ctx->textureMaskT));
+#if PROFILE_PHASES
+    psp_gfx_dl_profile_mirror_texture(ctx, wrapS == PSP_GFX_PSPGL_WRAP_CLAMP,
+                                      wrapT == PSP_GFX_PSPGL_WRAP_CLAMP, 1);
+#endif
     psp_gfx_dl_set_batch_sprites(ctx, 0);
     pretransformed = !ctx->hasProjection || (va->projectionSerial == 0) ||
                      (va->projectionSerial != vb->projectionSerial) ||
@@ -4097,10 +4184,12 @@ static void psp_gfx_dl_handle_texture_rectangle(PspGfxDlContext* ctx, const Gfx*
     psp_gfx_dl_set_batch_texture(
         ctx, ctx->textureId, ctx->textureRef, PSP_GFX_PSPGL_TEX_MODULATE,
         0, ctx->combineMode, psp_gfx_dl_primitive_color(ctx), psp_gfx_dl_environment_color(ctx),
+        PSP_GFX_DL_ENCODED_MIRROR(ctx, ctx->textureCms, ctx->textureMaskS) ? PSP_GFX_PSPGL_WRAP_REPEAT :
         psp_gfx_dl_texture_draw_wrap(
             ctx->textureCms, ctx->textureMaskS,
             (s0 < 0.0f) || (s1 < 0.0f) || (s0 > (float) ctx->textureUploadWidth) ||
                 (s1 > (float) ctx->textureUploadWidth)),
+        PSP_GFX_DL_ENCODED_MIRROR(ctx, ctx->textureCmt, ctx->textureMaskT) ? PSP_GFX_PSPGL_WRAP_REPEAT :
         psp_gfx_dl_texture_draw_wrap(
             ctx->textureCmt, ctx->textureMaskT,
             (t0 < 0.0f) || (t1 < 0.0f) || (t0 > (float) ctx->textureUploadHeight) ||
@@ -4835,6 +4924,8 @@ static void psp_gfx_dl_handle_load_tlut(PspGfxDlContext* ctx) {
 
 static void psp_gfx_dl_handle_set_tile(PspGfxDlContext* ctx, const Gfx* gfx) {
     u32 tile = (gfx->words.w1 >> 24) & 0x7;
+    int oldMirrorS = ((ctx->textureCms & G_TX_MIRROR) != 0) && (ctx->textureMaskS != G_TX_NOMASK);
+    int oldMirrorT = ((ctx->textureCmt & G_TX_MIRROR) != 0) && (ctx->textureMaskT != G_TX_NOMASK);
 
     if (tile != G_TX_RENDERTILE) {
         return;
@@ -4847,6 +4938,10 @@ static void psp_gfx_dl_handle_set_tile(PspGfxDlContext* ctx, const Gfx* gfx) {
     ctx->textureMaskT = (gfx->words.w1 >> 14) & 0xF;
     ctx->textureCms = (gfx->words.w1 >> 8) & 0x3;
     ctx->textureMaskS = (gfx->words.w1 >> 4) & 0xF;
+    if ((oldMirrorS != (((ctx->textureCms & G_TX_MIRROR) != 0) && (ctx->textureMaskS != G_TX_NOMASK))) ||
+        (oldMirrorT != (((ctx->textureCmt & G_TX_MIRROR) != 0) && (ctx->textureMaskT != G_TX_NOMASK)))) {
+        ctx->textureId = 0;
+    }
 #if PSP_RENDERER_DIAGNOSTICS
     ctx->textureShiftT = (gfx->words.w1 >> 10) & 0xF;
     ctx->textureShiftS = gfx->words.w1 & 0xF;
@@ -4861,6 +4956,9 @@ static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int pr
     int supported = 1;
     PspHwTextureCacheClass cache = PSP_HW_TEXTURE_CACHE_COUNT;
     const u16* palette;
+
+    int mirrorS;
+    int mirrorT;
 
 #if PROFILE_TRIVIAL_REJECTS
     if (ctx->trivialRejectDiagnosticActive) {
@@ -4883,6 +4981,27 @@ static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int pr
     if ((ctx->textureFormat == G_IM_FMT_CI) && (ctx->texturePalette == NULL)) {
         return 0;
     }
+
+    u32 feasibilityKey;
+
+    mirrorS = ((ctx->textureCms & G_TX_MIRROR) != 0) && (ctx->textureMaskS != G_TX_NOMASK);
+    mirrorT = ((ctx->textureCmt & G_TX_MIRROR) != 0) && (ctx->textureMaskT != G_TX_NOMASK);
+    feasibilityKey = 2166136261U;
+    feasibilityKey = (feasibilityKey ^ ctx->textureWidth) * 16777619U;
+    feasibilityKey = (feasibilityKey ^ ctx->textureHeight) * 16777619U;
+    feasibilityKey = (feasibilityKey ^ (u32) mirrorS) * 16777619U;
+    feasibilityKey = (feasibilityKey ^ (u32) mirrorT) * 16777619U;
+    if (feasibilityKey != ctx->textureMirrorFeasibilityKey) {
+        ctx->textureMirrorFeasibilityKey = feasibilityKey;
+        ctx->textureMirrorFallback = (mirrorS || mirrorT) &&
+                                     !PspGfxPspgl_CanMirrorEncode(ctx->textureWidth, ctx->textureHeight,
+                                                                 mirrorS, mirrorT);
+        if (ctx->textureMirrorFallback) {
+            PspProfiler_CountMirrorEncodedTexture(mirrorS, mirrorT, 0, 0, 0, 0, 1, 0, 0, 0);
+        }
+    }
+    PspGfxPspgl_SetMirrorEncoding(!ctx->textureMirrorFallback && mirrorS,
+                                  !ctx->textureMirrorFallback && mirrorT);
 
     ctx->textureUploadAttempted = 1;
     PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_TEXTURE);
@@ -5014,6 +5133,13 @@ static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int pr
         supported = 0;
     }
 
+    if (supported && (ctx->textureId == 0) && PspGfxPspgl_MirrorEncodingFailed()) {
+        ctx->textureMirrorFallback = 1;
+        ctx->textureUploadAttempted = 0;
+        PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TEXTURE_PREPARE);
+        PspHwCounterProfile_InnerScopeEnd(PSP_HW_SCOPE_TEXTURE);
+        return psp_gfx_dl_prepare_texture(ctx, deferred, premultiply);
+    }
     if (supported && (ctx->textureId != 0)) {
         ctx->stats.textureCount++;
         if (deferred) {

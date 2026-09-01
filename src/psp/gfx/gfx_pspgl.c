@@ -39,7 +39,8 @@ void PspPlatform_LogLine(const char* line);
 #define PSP_GFX_PSPGL_RGBA16_TEXTURE_CACHE_SIZE 128
 #define PSP_GFX_PSPGL_RGBA16_LOOKUP_SET_COUNT 128
 #define PSP_GFX_PSPGL_RGBA32_TEXTURE_CACHE_SIZE 48
-#define PSP_GFX_PSPGL_MAX_TEXTURE_PIXELS (256 * 32)
+#define PSP_GFX_PSPGL_MAX_TEXTURE_PIXELS (256 * 32 * 4)
+#define PSP_GFX_PSPGL_STAGING_EXCEEDED(pixels, mirror) ((pixels) > PSP_GFX_PSPGL_MAX_TEXTURE_PIXELS)
 #define PSP_GFX_PSPGL_MIN_TEXTURE_DIMENSION 8
 #define PSP_GFX_PSPGL_VERTEX_STREAM_SETS 2
 #define PSP_GFX_PSPGL_REPLAY_CACHE_DRAWS 128
@@ -128,6 +129,8 @@ typedef struct {
     u32 height;
     u32 uploadWidth;
     u32 uploadHeight;
+    u8 mirrorS;
+    u8 mirrorT;
     GLuint texture;
     PspGfxPspglTextureParameterState parameterState;
 } PspGfxTextureCacheEntry;
@@ -139,6 +142,8 @@ typedef struct {
     u32 uploadWidth;
     u32 uploadHeight;
     int premultiplied;
+    u8 mirrorS;
+    u8 mirrorT;
     GLuint texture;
     PspGfxPspglTextureParameterState parameterState;
 } PspGfxRgba16TextureCacheEntry;
@@ -153,6 +158,8 @@ typedef struct {
     int envBlend;
     u32 primitiveColor;
     u32 environmentColor;
+    u8 mirrorS;
+    u8 mirrorT;
     GLuint texture;
     PspGfxPspglTextureParameterState parameterState;
 } PspGfxRgba32TextureCacheEntry;
@@ -180,6 +187,8 @@ typedef struct {
     u32 primitiveColor;
     u32 environmentColor;
     u32 colorTransfer;
+    u8 mirrorS;
+    u8 mirrorT;
     GLuint texture;
     PspGfxPspglTextureParameterState parameterState;
     u8 hashNext;
@@ -269,6 +278,9 @@ static u32 sVertexStreamLargePageIndex;
 static int sVertexStreamInitialized;
 static int sVertexStreamAvailable;
 static u32 sTextureParameterGeneration;
+static u8 sMirrorEncodingS;
+static u8 sMirrorEncodingT;
+static int sMirrorEncodingFailed;
 #if PSP_RENDERER_DIAGNOSTICS
 static u32 sInvalidTextureRefDiagCount;
 #endif
@@ -601,13 +613,15 @@ static u64 psp_gfx_pspgl_hash_start(u32 cacheClass) {
     return psp_gfx_pspgl_hash_u64(0xCBF29CE484222325ULL, cacheClass);
 }
 
-static u64 psp_gfx_pspgl_ci8_key_hash(const u8* indices, const u16* palette, u32 width, u32 height) {
+static u64 psp_gfx_pspgl_ci8_key_hash(const u8* indices, const u16* palette, u32 width, u32 height,
+                                      u32 mirrorS, u32 mirrorT) {
     u64 hash = psp_gfx_pspgl_hash_start(PSP_PROFILE_TEXTURE_CACHE_CI8);
 
     hash = psp_gfx_pspgl_hash_ptr(hash, indices);
     hash = psp_gfx_pspgl_hash_ptr(hash, palette);
     hash = psp_gfx_pspgl_hash_u64(hash, width);
     hash = psp_gfx_pspgl_hash_u64(hash, height);
+    hash = psp_gfx_pspgl_hash_u64(hash, mirrorS | (mirrorT << 1));
     return hash;
 }
 
@@ -617,13 +631,15 @@ static u64 psp_gfx_pspgl_ci8_base_hash(const u8* indices) {
     return psp_gfx_pspgl_hash_ptr(hash, indices);
 }
 
-static u64 psp_gfx_pspgl_rgba16_key_hash(const u16* pixels, u32 width, u32 height, int premultiply) {
+static u64 psp_gfx_pspgl_rgba16_key_hash(const u16* pixels, u32 width, u32 height, int premultiply,
+                                         u32 mirrorS, u32 mirrorT) {
     u64 hash = psp_gfx_pspgl_hash_start(PSP_PROFILE_TEXTURE_CACHE_RGBA16);
 
     hash = psp_gfx_pspgl_hash_ptr(hash, pixels);
     hash = psp_gfx_pspgl_hash_u64(hash, width);
     hash = psp_gfx_pspgl_hash_u64(hash, height);
     hash = psp_gfx_pspgl_hash_u64(hash, premultiply ? 1 : 0);
+    hash = psp_gfx_pspgl_hash_u64(hash, mirrorS | (mirrorT << 1));
     return hash;
 }
 
@@ -634,7 +650,7 @@ static u64 psp_gfx_pspgl_rgba16_base_hash(const u16* pixels) {
 }
 
 static u64 psp_gfx_pspgl_rgba32_key_hash(const void* pixels, u32 width, u32 height, int premultiply, int envBlend,
-                                         u32 primitiveColor, u32 environmentColor) {
+                                         u32 primitiveColor, u32 environmentColor, u32 mirrorS, u32 mirrorT) {
     u64 hash = psp_gfx_pspgl_hash_start(PSP_PROFILE_TEXTURE_CACHE_RGBA32);
 
     hash = psp_gfx_pspgl_hash_ptr(hash, pixels);
@@ -644,6 +660,7 @@ static u64 psp_gfx_pspgl_rgba32_key_hash(const void* pixels, u32 width, u32 heig
     hash = psp_gfx_pspgl_hash_u64(hash, envBlend ? 1 : 0);
     hash = psp_gfx_pspgl_hash_u64(hash, primitiveColor);
     hash = psp_gfx_pspgl_hash_u64(hash, environmentColor);
+    hash = psp_gfx_pspgl_hash_u64(hash, mirrorS | (mirrorT << 1));
     return hash;
 }
 
@@ -655,7 +672,7 @@ static u64 psp_gfx_pspgl_rgba32_base_hash(const void* pixels) {
 
 static u64 psp_gfx_pspgl_converted_key_hash(const void* pixels, const u16* palette, u32 width, u32 height,
                                             PspGfxConvertedTextureFormat format, int envBlend, u32 primitiveColor,
-                                            u32 environmentColor) {
+                                            u32 environmentColor, u32 mirrorS, u32 mirrorT) {
     u64 hash = psp_gfx_pspgl_hash_start(PSP_PROFILE_TEXTURE_CACHE_CONVERTED);
 
     hash = psp_gfx_pspgl_hash_ptr(hash, pixels);
@@ -667,6 +684,7 @@ static u64 psp_gfx_pspgl_converted_key_hash(const void* pixels, const u16* palet
     hash = psp_gfx_pspgl_hash_u64(hash, primitiveColor);
     hash = psp_gfx_pspgl_hash_u64(hash, environmentColor);
     hash = psp_gfx_pspgl_hash_u64(hash, SF64_PSP_COLOR_TRANSFER);
+    hash = psp_gfx_pspgl_hash_u64(hash, mirrorS | (mirrorT << 1));
     return hash;
 }
 
@@ -885,6 +903,51 @@ static u32 psp_gfx_pspgl_next_power_of_two(u32 value) {
     return result;
 }
 
+void PspGfxPspgl_SetMirrorEncoding(int mirrorS, int mirrorT) {
+    sMirrorEncodingS = mirrorS != 0;
+    sMirrorEncodingT = mirrorT != 0;
+    sMirrorEncodingFailed = 0;
+}
+
+int PspGfxPspgl_CanMirrorEncode(u32 width, u32 height, int mirrorS, int mirrorT) {
+    u32 encodedWidth = psp_gfx_pspgl_next_power_of_two(width) << (mirrorS != 0);
+    u32 encodedHeight = psp_gfx_pspgl_next_power_of_two(height) << (mirrorT != 0);
+
+    return !PSP_GFX_PSPGL_STAGING_EXCEEDED(encodedWidth * encodedHeight, mirrorS || mirrorT);
+}
+
+int PspGfxPspgl_MirrorEncodingFailed(void) {
+    return sMirrorEncodingFailed;
+}
+
+static u32 psp_gfx_pspgl_encoded_dimension(u32 logicalSize, int mirror) {
+    return psp_gfx_pspgl_next_power_of_two(logicalSize) << (mirror != 0);
+}
+
+static u32 psp_gfx_pspgl_mirror_source_coord(u32 coord, u32 logicalSize, int mirror) {
+    u32 period = psp_gfx_pspgl_next_power_of_two(logicalSize);
+
+    if (mirror && (coord >= period)) {
+        coord = (period * 2U) - 1U - coord;
+    }
+    return (coord < logicalSize) ? coord : (logicalSize - 1U);
+}
+
+#if PROFILE_PHASES
+static void psp_gfx_pspgl_count_mirror_encoding(u32 width, u32 height, u32 encodedWidth, u32 encodedHeight,
+                                                 int upload, int failure) {
+    u32 sourceWidth = psp_gfx_pspgl_next_power_of_two(width);
+    u32 sourceHeight = psp_gfx_pspgl_next_power_of_two(height);
+
+    PspProfiler_CountMirrorEncodedTexture(sMirrorEncodingS, sMirrorEncodingT,
+                                          sourceWidth * sourceHeight * 4U,
+                                          encodedWidth * encodedHeight * 4U, 1, upload, 0, failure,
+                                          encodedWidth, encodedHeight);
+}
+#else
+#define psp_gfx_pspgl_count_mirror_encoding(width, height, encodedWidth, encodedHeight, upload, failure) ((void) 0)
+#endif
+
 static int psp_gfx_pspgl_converted_format_is_ia8(PspGfxConvertedTextureFormat format) {
     return (format == PSP_GFX_TEXTURE_IA8) || (format == PSP_GFX_TEXTURE_IA8_SOFT_COVERAGE);
 }
@@ -1017,7 +1080,7 @@ static int psp_gfx_pspgl_find_converted_texture(const void* pixels, const u16* p
     }
 #if PROFILE_PHASES
     keyHash = psp_gfx_pspgl_converted_key_hash(pixels, palette, width, height, format, envBlend, primitiveColor,
-                                               environmentColor);
+                                               environmentColor, sMirrorEncodingS, sMirrorEncodingT);
     baseHash = psp_gfx_pspgl_converted_base_hash(pixels, format);
 #endif
     psp_gfx_pspgl_ensure_converted_texture_index();
@@ -1027,7 +1090,8 @@ static int psp_gfx_pspgl_find_converted_texture(const void* pixels, const u16* p
         if ((entry->pixels == pixels) && (entry->palette == palette) && (entry->width == width) &&
             (entry->height == height) && (entry->format == format) && (entry->envBlend == envBlend) &&
             (entry->primitiveColor == primitiveColor) && (entry->environmentColor == environmentColor) &&
-            (entry->colorTransfer == SF64_PSP_COLOR_TRANSFER)) {
+            (entry->colorTransfer == SF64_PSP_COLOR_TRANSFER) && (entry->mirrorS == sMirrorEncodingS) &&
+            (entry->mirrorT == sMirrorEncodingT)) {
             goto found;
         }
     }
@@ -1039,7 +1103,8 @@ static int psp_gfx_pspgl_find_converted_texture(const void* pixels, const u16* p
         if ((entry->pixels == pixels) && (entry->palette == palette) && (entry->width == width) &&
             (entry->height == height) && (entry->format == format) && (entry->envBlend == envBlend) &&
             (entry->primitiveColor == primitiveColor) && (entry->environmentColor == environmentColor) &&
-            (entry->colorTransfer == SF64_PSP_COLOR_TRANSFER)) {
+            (entry->colorTransfer == SF64_PSP_COLOR_TRANSFER) && (entry->mirrorS == sMirrorEncodingS) &&
+            (entry->mirrorT == sMirrorEncodingT)) {
             sConvertedTextureLastHit[format] = index;
             goto found;
         }
@@ -1102,25 +1167,28 @@ static u32 psp_gfx_pspgl_create_converted_texture(const void* pixels, const u16*
         environmentColor &= 0x00FFFFFFU;
     }
     psp_gfx_pspgl_ensure_converted_texture_index();
-    finalWidth = psp_gfx_pspgl_next_power_of_two(width);
-    finalHeight = psp_gfx_pspgl_next_power_of_two(height);
+    finalWidth = psp_gfx_pspgl_encoded_dimension(width, sMirrorEncodingS);
+    finalHeight = psp_gfx_pspgl_encoded_dimension(height, sMirrorEncodingT);
     finalPixelCount = finalWidth * finalHeight;
-    atlased = psp_gfx_pspgl_converted_texture_uses_glyph_atlas(format, width, height, envBlend);
-    if (finalPixelCount > PSP_GFX_PSPGL_MAX_TEXTURE_PIXELS) {
+    atlased = !sMirrorEncodingS && !sMirrorEncodingT &&
+              psp_gfx_pspgl_converted_texture_uses_glyph_atlas(format, width, height, envBlend);
+    if (PSP_GFX_PSPGL_STAGING_EXCEEDED(finalPixelCount, sMirrorEncodingS || sMirrorEncodingT)) {
+        sMirrorEncodingFailed = sMirrorEncodingS || sMirrorEncodingT;
+        psp_gfx_pspgl_count_mirror_encoding(width, height, finalWidth, finalHeight, 0, 1);
         return 0;
     }
 #if PROFILE_PHASES
     keyHash = psp_gfx_pspgl_converted_key_hash(pixels, palette, width, height, format, envBlend, primitiveColor,
-                                               environmentColor);
+                                               environmentColor, sMirrorEncodingS, sMirrorEncodingT);
     baseHash = psp_gfx_pspgl_converted_base_hash(pixels, format);
 #endif
     PspProfiler_CountTextureEvent(0, 1, 0, 0, 0);
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TEXTURE_DECODE);
     for (y = 0; y < finalHeight; y++) {
-        u32 srcY = (y < height) ? y : (height - 1);
+        u32 srcY = psp_gfx_pspgl_mirror_source_coord(y, height, sMirrorEncodingT);
 
         for (x = 0; x < finalWidth; x++) {
-            u32 srcX = (x < width) ? x : (width - 1);
+            u32 srcX = psp_gfx_pspgl_mirror_source_coord(x, width, sMirrorEncodingS);
             u32 srcIndex = (srcY * width) + srcX;
             u32 dstIndex = (y * finalWidth) + x;
             u8* out = &sTextureUpload[dstIndex * 4];
@@ -1190,7 +1258,7 @@ static u32 psp_gfx_pspgl_create_converted_texture(const void* pixels, const u16*
             PSP_PROFILE_TEXTURE_CACHE_CONVERTED,
             psp_gfx_pspgl_converted_key_hash(entry->pixels, entry->palette, entry->width, entry->height,
                                              entry->format, entry->envBlend, entry->primitiveColor,
-                                             entry->environmentColor));
+                                             entry->environmentColor, entry->mirrorS, entry->mirrorT));
 #endif
         psp_gfx_pspgl_remove_converted_texture_index(entry);
         if (!entry->atlased) {
@@ -1205,6 +1273,8 @@ static u32 psp_gfx_pspgl_create_converted_texture(const void* pixels, const u16*
     entry->palette = palette;
     entry->width = width;
     entry->height = height;
+    entry->mirrorS = sMirrorEncodingS;
+    entry->mirrorT = sMirrorEncodingT;
     entry->uploadWidth = atlased ? PSP_GFX_PSPGL_GLYPH_ATLAS_WIDTH : finalWidth;
     entry->uploadHeight = atlased ? PSP_GFX_PSPGL_GLYPH_ATLAS_HEIGHT : finalHeight;
     entry->uploadX = atlased ? (u16) ((entryIndex & 15U) * PSP_GFX_PSPGL_GLYPH_ATLAS_SLOT_WIDTH) : 0;
@@ -1245,6 +1315,7 @@ static u32 psp_gfx_pspgl_create_converted_texture(const void* pixels, const u16*
     psp_gfx_pspgl_insert_converted_texture_index(entry);
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TEXTURE_UPLOAD);
     PspProfiler_CountTextureEvent(0, 0, 1, 1, finalPixelCount * 4);
+    psp_gfx_pspgl_count_mirror_encoding(width, height, finalWidth, finalHeight, 1, 0);
     *uploadWidth = entry->uploadWidth;
     *uploadHeight = entry->uploadHeight;
     if (uploadX != NULL) {
@@ -1377,13 +1448,14 @@ int PspGfxPspgl_FindCi8Texture(const u8* indices, const u16* palette, u32 width,
         return 0;
     }
 #if PROFILE_PHASES
-    keyHash = psp_gfx_pspgl_ci8_key_hash(indices, palette, width, height);
+    keyHash = psp_gfx_pspgl_ci8_key_hash(indices, palette, width, height, sMirrorEncodingS, sMirrorEncodingT);
     baseHash = psp_gfx_pspgl_ci8_base_hash(indices);
 #endif
     for (i = 0; i < sTextureCacheCount; i++) {
         entry = &sTextureCache[i];
         if ((entry->indices == indices) && (entry->palette == palette) && (entry->width == width) &&
-            (entry->height == height)) {
+            (entry->height == height) && (entry->mirrorS == sMirrorEncodingS) &&
+            (entry->mirrorT == sMirrorEncodingT)) {
             *textureId = entry->texture;
             *textureRef = psp_gfx_pspgl_texture_ref(&entry->parameterState);
             *uploadWidth = entry->uploadWidth;
@@ -1420,24 +1492,26 @@ u32 PspGfxPspgl_CreateCi8Texture(const u8* indices, const u16* palette, u32 widt
         (uploadHeight == NULL) || (textureRef == NULL)) {
         return 0;
     }
-    finalWidth = psp_gfx_pspgl_next_power_of_two(width);
-    finalHeight = psp_gfx_pspgl_next_power_of_two(height);
+    finalWidth = psp_gfx_pspgl_encoded_dimension(width, sMirrorEncodingS);
+    finalHeight = psp_gfx_pspgl_encoded_dimension(height, sMirrorEncodingT);
     finalPixelCount = finalWidth * finalHeight;
-    if (finalPixelCount > PSP_GFX_PSPGL_MAX_TEXTURE_PIXELS) {
+    if (PSP_GFX_PSPGL_STAGING_EXCEEDED(finalPixelCount, sMirrorEncodingS || sMirrorEncodingT)) {
+        sMirrorEncodingFailed = sMirrorEncodingS || sMirrorEncodingT;
+        psp_gfx_pspgl_count_mirror_encoding(width, height, finalWidth, finalHeight, 0, 1);
         return 0;
     }
 #if PROFILE_PHASES
-    keyHash = psp_gfx_pspgl_ci8_key_hash(indices, palette, width, height);
+    keyHash = psp_gfx_pspgl_ci8_key_hash(indices, palette, width, height, sMirrorEncodingS, sMirrorEncodingT);
     baseHash = psp_gfx_pspgl_ci8_base_hash(indices);
 #endif
 
     PspProfiler_CountTextureEvent(0, 1, 0, 0, 0);
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TEXTURE_DECODE);
     for (y = 0; y < finalHeight; y++) {
-        u32 srcY = (y < height) ? y : (height - 1);
+        u32 srcY = psp_gfx_pspgl_mirror_source_coord(y, height, sMirrorEncodingT);
 
         for (x = 0; x < finalWidth; x++) {
-            u32 srcX = (x < width) ? x : (width - 1);
+            u32 srcX = psp_gfx_pspgl_mirror_source_coord(x, width, sMirrorEncodingS);
             u32 srcIndex = (srcY * width) + srcX;
             u32 dstIndex = (y * finalWidth) + x;
 
@@ -1455,7 +1529,8 @@ u32 PspGfxPspgl_CreateCi8Texture(const u8* indices, const u16* palette, u32 widt
 #if PROFILE_PHASES
         PspProfiler_RecordTextureCacheEviction(
             PSP_PROFILE_TEXTURE_CACHE_CI8,
-            psp_gfx_pspgl_ci8_key_hash(entry->indices, entry->palette, entry->width, entry->height));
+            psp_gfx_pspgl_ci8_key_hash(entry->indices, entry->palette, entry->width, entry->height,
+                                       entry->mirrorS, entry->mirrorT));
 #endif
         psp_gfx_pspgl_invalidate_bound_texture();
         psp_gfx_pspgl_invalidate_fallback_texture_parameter_state(entry->texture);
@@ -1466,6 +1541,8 @@ u32 PspGfxPspgl_CreateCi8Texture(const u8* indices, const u16* palette, u32 widt
     entry->palette = palette;
     entry->width = width;
     entry->height = height;
+    entry->mirrorS = sMirrorEncodingS;
+    entry->mirrorT = sMirrorEncodingT;
     entry->uploadWidth = finalWidth;
     entry->uploadHeight = finalHeight;
 #if PROFILE_PHASES
@@ -1485,6 +1562,7 @@ u32 PspGfxPspgl_CreateCi8Texture(const u8* indices, const u16* palette, u32 widt
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, finalWidth, finalHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, sTextureUpload);
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TEXTURE_UPLOAD);
     PspProfiler_CountTextureEvent(0, 0, 1, 1, finalPixelCount * 4);
+    psp_gfx_pspgl_count_mirror_encoding(width, height, finalWidth, finalHeight, 1, 0);
     *uploadWidth = finalWidth;
     *uploadHeight = finalHeight;
     return entry->texture;
@@ -1541,7 +1619,8 @@ static u32 psp_gfx_pspgl_rgba16_lookup_set(const u16* pixels, u32 width, u32 hei
 static int psp_gfx_pspgl_rgba16_entry_matches(const PspGfxRgba16TextureCacheEntry* entry, const u16* pixels,
                                               u32 width, u32 height, int premultiply) {
     return (entry->pixels == pixels) && (entry->width == width) && (entry->height == height) &&
-           (entry->premultiplied == premultiply);
+           (entry->premultiplied == premultiply) && (entry->mirrorS == sMirrorEncodingS) &&
+           (entry->mirrorT == sMirrorEncodingT);
 }
 
 static void psp_gfx_pspgl_remember_rgba16_lookup(u32 set, u32 index) {
@@ -1569,7 +1648,8 @@ int PspGfxPspgl_FindRgba16Texture(const u16* pixels, u32 width, u32 height, int 
         return 0;
     }
 #if PROFILE_PHASES
-    keyHash = psp_gfx_pspgl_rgba16_key_hash(pixels, width, height, premultiply);
+    keyHash = psp_gfx_pspgl_rgba16_key_hash(pixels, width, height, premultiply,
+                                            sMirrorEncodingS, sMirrorEncodingT);
     baseHash = psp_gfx_pspgl_rgba16_base_hash(pixels);
 #endif
     lookupSet = psp_gfx_pspgl_rgba16_lookup_set(pixels, width, height, premultiply);
@@ -1666,14 +1746,17 @@ u32 PspGfxPspgl_CreateRgba16Texture(const u16* pixels, u32 width, u32 height, in
         (textureRef == NULL)) {
         return 0;
     }
-    finalWidth = psp_gfx_pspgl_next_power_of_two(width);
-    finalHeight = psp_gfx_pspgl_next_power_of_two(height);
+    finalWidth = psp_gfx_pspgl_encoded_dimension(width, sMirrorEncodingS);
+    finalHeight = psp_gfx_pspgl_encoded_dimension(height, sMirrorEncodingT);
     finalPixelCount = finalWidth * finalHeight;
-    if (finalPixelCount > PSP_GFX_PSPGL_MAX_TEXTURE_PIXELS) {
+    if (PSP_GFX_PSPGL_STAGING_EXCEEDED(finalPixelCount, sMirrorEncodingS || sMirrorEncodingT)) {
+        sMirrorEncodingFailed = sMirrorEncodingS || sMirrorEncodingT;
+        psp_gfx_pspgl_count_mirror_encoding(width, height, finalWidth, finalHeight, 0, 1);
         return 0;
     }
 #if PROFILE_PHASES
-    keyHash = psp_gfx_pspgl_rgba16_key_hash(pixels, width, height, premultiply);
+    keyHash = psp_gfx_pspgl_rgba16_key_hash(pixels, width, height, premultiply,
+                                            sMirrorEncodingS, sMirrorEncodingT);
     baseHash = psp_gfx_pspgl_rgba16_base_hash(pixels);
 #endif
     softenAlpha = premultiply && psp_gfx_pspgl_is_dark_rgba16_mask(pixels, width, height);
@@ -1681,10 +1764,10 @@ u32 PspGfxPspgl_CreateRgba16Texture(const u16* pixels, u32 width, u32 height, in
     PspProfiler_CountTextureEvent(0, 1, 0, 0, 0);
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TEXTURE_DECODE);
     for (y = 0; y < finalHeight; y++) {
-        u32 srcY = (y < height) ? y : (height - 1);
+        u32 srcY = psp_gfx_pspgl_mirror_source_coord(y, height, sMirrorEncodingT);
 
         for (x = 0; x < finalWidth; x++) {
-            u32 srcX = (x < width) ? x : (width - 1);
+            u32 srcX = psp_gfx_pspgl_mirror_source_coord(x, width, sMirrorEncodingS);
             u32 srcIndex = (srcY * width) + srcX;
             u32 dstIndex = (y * finalWidth) + x;
 
@@ -1715,7 +1798,8 @@ u32 PspGfxPspgl_CreateRgba16Texture(const u16* pixels, u32 width, u32 height, in
 #if PROFILE_PHASES
         PspProfiler_RecordTextureCacheEviction(
             PSP_PROFILE_TEXTURE_CACHE_RGBA16,
-            psp_gfx_pspgl_rgba16_key_hash(entry->pixels, entry->width, entry->height, entry->premultiplied));
+            psp_gfx_pspgl_rgba16_key_hash(entry->pixels, entry->width, entry->height, entry->premultiplied,
+                                          entry->mirrorS, entry->mirrorT));
 #endif
         psp_gfx_pspgl_invalidate_bound_texture();
         psp_gfx_pspgl_invalidate_fallback_texture_parameter_state(entry->texture);
@@ -1725,6 +1809,8 @@ u32 PspGfxPspgl_CreateRgba16Texture(const u16* pixels, u32 width, u32 height, in
     entry->pixels = pixels;
     entry->width = width;
     entry->height = height;
+    entry->mirrorS = sMirrorEncodingS;
+    entry->mirrorT = sMirrorEncodingT;
     entry->uploadWidth = finalWidth;
     entry->uploadHeight = finalHeight;
     entry->premultiplied = premultiply;
@@ -1749,6 +1835,7 @@ u32 PspGfxPspgl_CreateRgba16Texture(const u16* pixels, u32 width, u32 height, in
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, finalWidth, finalHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, sTextureUpload);
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TEXTURE_UPLOAD);
     PspProfiler_CountTextureEvent(0, 0, 1, 1, finalPixelCount * 4);
+    psp_gfx_pspgl_count_mirror_encoding(width, height, finalWidth, finalHeight, 1, 0);
     *uploadWidth = finalWidth;
     *uploadHeight = finalHeight;
     return entry->texture;
@@ -1786,14 +1873,15 @@ static int psp_gfx_pspgl_find_rgba32_texture(const void* pixels, u32 width, u32 
     }
 #if PROFILE_PHASES
     keyHash = psp_gfx_pspgl_rgba32_key_hash(pixels, width, height, premultiply, envBlend, primitiveColor,
-                                            environmentColor);
+                                            environmentColor, sMirrorEncodingS, sMirrorEncodingT);
     baseHash = psp_gfx_pspgl_rgba32_base_hash(pixels);
 #endif
     for (i = 0; i < sRgba32TextureCacheCount; i++) {
         entry = &sRgba32TextureCache[i];
         if ((entry->pixels == pixels) && (entry->width == width) && (entry->height == height) &&
             (entry->premultiplied == premultiply) && (entry->envBlend == envBlend) &&
-            (entry->primitiveColor == primitiveColor) && (entry->environmentColor == environmentColor)) {
+            (entry->primitiveColor == primitiveColor) && (entry->environmentColor == environmentColor) &&
+            (entry->mirrorS == sMirrorEncodingS) && (entry->mirrorT == sMirrorEncodingT)) {
             *textureId = entry->texture;
             *textureRef = psp_gfx_pspgl_texture_ref(&entry->parameterState);
             *uploadWidth = entry->uploadWidth;
@@ -1850,24 +1938,26 @@ static u32 psp_gfx_pspgl_create_rgba32_texture(const void* pixels, u32 width, u3
         primitiveColor &= 0x00FFFFFFU;
         environmentColor &= 0x00FFFFFFU;
     }
-    finalWidth = psp_gfx_pspgl_next_power_of_two(width);
-    finalHeight = psp_gfx_pspgl_next_power_of_two(height);
+    finalWidth = psp_gfx_pspgl_encoded_dimension(width, sMirrorEncodingS);
+    finalHeight = psp_gfx_pspgl_encoded_dimension(height, sMirrorEncodingT);
     finalPixelCount = finalWidth * finalHeight;
-    if (finalPixelCount > PSP_GFX_PSPGL_MAX_TEXTURE_PIXELS) {
+    if (PSP_GFX_PSPGL_STAGING_EXCEEDED(finalPixelCount, sMirrorEncodingS || sMirrorEncodingT)) {
+        sMirrorEncodingFailed = sMirrorEncodingS || sMirrorEncodingT;
+        psp_gfx_pspgl_count_mirror_encoding(width, height, finalWidth, finalHeight, 0, 1);
         return 0;
     }
 #if PROFILE_PHASES
     keyHash = psp_gfx_pspgl_rgba32_key_hash(pixels, width, height, premultiply, envBlend, primitiveColor,
-                                            environmentColor);
+                                            environmentColor, sMirrorEncodingS, sMirrorEncodingT);
     baseHash = psp_gfx_pspgl_rgba32_base_hash(pixels);
 #endif
     PspProfiler_CountTextureEvent(0, 1, 0, 0, 0);
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TEXTURE_DECODE);
     for (y = 0; y < finalHeight; y++) {
-        u32 srcY = (y < height) ? y : (height - 1);
+        u32 srcY = psp_gfx_pspgl_mirror_source_coord(y, height, sMirrorEncodingT);
 
         for (x = 0; x < finalWidth; x++) {
-            u32 srcX = (x < width) ? x : (width - 1);
+            u32 srcX = psp_gfx_pspgl_mirror_source_coord(x, width, sMirrorEncodingS);
             u32 srcIndex = (srcY * width) + srcX;
             u32 dstIndex = (y * finalWidth) + x;
             u32 texel = psp_gfx_pspgl_read_n64_rgba32(pixels, srcIndex);
@@ -1914,7 +2004,8 @@ static u32 psp_gfx_pspgl_create_rgba32_texture(const void* pixels, u32 width, u3
         PspProfiler_RecordTextureCacheEviction(
             PSP_PROFILE_TEXTURE_CACHE_RGBA32,
             psp_gfx_pspgl_rgba32_key_hash(entry->pixels, entry->width, entry->height, entry->premultiplied,
-                                          entry->envBlend, entry->primitiveColor, entry->environmentColor));
+                                          entry->envBlend, entry->primitiveColor, entry->environmentColor,
+                                          entry->mirrorS, entry->mirrorT));
 #endif
         psp_gfx_pspgl_invalidate_bound_texture();
         psp_gfx_pspgl_invalidate_fallback_texture_parameter_state(entry->texture);
@@ -1924,6 +2015,8 @@ static u32 psp_gfx_pspgl_create_rgba32_texture(const void* pixels, u32 width, u3
     entry->pixels = pixels;
     entry->width = width;
     entry->height = height;
+    entry->mirrorS = sMirrorEncodingS;
+    entry->mirrorT = sMirrorEncodingT;
     entry->uploadWidth = finalWidth;
     entry->uploadHeight = finalHeight;
     entry->premultiplied = premultiply;
@@ -1948,6 +2041,7 @@ static u32 psp_gfx_pspgl_create_rgba32_texture(const void* pixels, u32 width, u3
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, finalWidth, finalHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, sTextureUpload);
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TEXTURE_UPLOAD);
     PspProfiler_CountTextureEvent(0, 0, 1, 1, finalPixelCount * 4);
+    psp_gfx_pspgl_count_mirror_encoding(width, height, finalWidth, finalHeight, 1, 0);
     *uploadWidth = finalWidth;
     *uploadHeight = finalHeight;
     return entry->texture;

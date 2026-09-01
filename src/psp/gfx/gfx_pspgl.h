@@ -111,6 +111,9 @@ typedef struct {
 void PspGfxPspgl_Init(void);
 void PspGfxPspgl_BeginFrame(void);
 void PspGfxPspgl_Flush(void);
+void PspGfxPspgl_SetMirrorEncoding(int mirrorS, int mirrorT);
+int PspGfxPspgl_CanMirrorEncode(u32 width, u32 height, int mirrorS, int mirrorT);
+int PspGfxPspgl_MirrorEncodingFailed(void);
 void PspGfxPspgl_InvalidateRgba16Texture(const u16* pixels);
 void PspGfxPspgl_SetScissor(float ulx, float uly, float lrx, float lry);
 void PspGfxPspgl_ClearScissor(void);

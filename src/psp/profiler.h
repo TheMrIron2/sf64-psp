@@ -201,6 +201,15 @@ void PspProfiler_CountVertexStream(u32 vboDraw, u32 vertices, u32 upload, u32 up
 void PspProfiler_CountTextureWrapRequest(u32 requestS, u32 requestT);
 void PspProfiler_CountTextureWrapCall(u32 emittedS, u32 emittedT);
 void PspProfiler_CountTextureWrapSkip(u32 skippedS, u32 skippedT);
+void PspProfiler_CountMirrorClassification(u32 requested, u32 avoided, u32 clamp, u32 mirror);
+void PspProfiler_CountWrapBatching(u32 mixedVariant, u32 stateChange, u32 flush, u32 flushedVertices);
+void PspProfiler_RecordMirrorTexture(u32 source, u32 palette, u32 texture, u32 generation, u32 format, u32 size,
+                                     u32 width, u32 height, u32 uploadWidth, u32 uploadHeight, u32 mirrorS,
+                                     u32 mirrorT, u32 clampS, u32 mirrorWrapS, u32 clampT, u32 mirrorWrapT,
+                                     u32 triangles);
+void PspProfiler_CountMirrorEncodedTexture(u32 mirrorS, u32 mirrorT, u32 sourceBytes, u32 encodedBytes,
+                                           u32 attempt, u32 success, u32 fallback, u32 failure,
+                                           u32 width, u32 height);
 void PspProfiler_CountTextureParameterCacheMiss(void);
 void PspProfiler_CountTextureParameterCacheReplacement(void);
 void PspProfiler_CountGlFlush(void);
@@ -252,6 +261,13 @@ void PspProfiler_CountTrivialRejectRenderState(PspProfileTrivialRejectRenderStat
 #define PspProfiler_CountTextureWrapRequest(requestS, requestT) ((void) 0)
 #define PspProfiler_CountTextureWrapCall(emittedS, emittedT) ((void) 0)
 #define PspProfiler_CountTextureWrapSkip(skippedS, skippedT) ((void) 0)
+#define PspProfiler_CountMirrorClassification(requested, avoided, clamp, mirror) ((void) 0)
+#define PspProfiler_CountWrapBatching(mixedVariant, stateChange, flush, flushedVertices) ((void) 0)
+#define PspProfiler_RecordMirrorTexture(source, palette, texture, generation, format, size, width, height, \
+                                        uploadWidth, uploadHeight, mirrorS, mirrorT, clampS, mirrorWrapS, clampT, \
+                                        mirrorWrapT, triangles) ((void) 0)
+#define PspProfiler_CountMirrorEncodedTexture(mirrorS, mirrorT, sourceBytes, encodedBytes, attempt, success, \
+                                              fallback, failure, width, height) ((void) 0)
 #define PspProfiler_CountTextureParameterCacheMiss() ((void) 0)
 #define PspProfiler_CountTextureParameterCacheReplacement() ((void) 0)
 #define PspProfiler_CountGlFlush() ((void) 0)

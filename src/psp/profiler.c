@@ -79,6 +79,7 @@ extern int gDrawMode;
 #define PSP_PROFILE_TIMER_SAMPLES 128
 #define PSP_PROFILE_TEXTURE_CACHE_TRACKED_KEYS 512
 #define PSP_PROFILE_TEXTURE_CACHE_REUSE_BINS 8
+#define PSP_PROFILE_MIRROR_TEXTURES 128
 
 #define PSP_PROFILE_ATTR __attribute__((no_instrument_function, no_profile_instrument_function))
 
@@ -157,6 +158,28 @@ typedef struct {
 } PspProfileTextureCacheState;
 
 typedef struct {
+    u32 source;
+    u32 palette;
+    u32 texture;
+    u32 generation;
+    u32 format;
+    u32 size;
+    u32 width;
+    u32 height;
+    u32 uploadWidth;
+    u32 uploadHeight;
+    u64 clampTriangles;
+    u64 mirrorTriangles;
+    u64 clampSTriangles;
+    u64 mirrorSTriangles;
+    u64 clampTTriangles;
+    u64 mirrorTTriangles;
+    u8 mirrorS;
+    u8 mirrorT;
+    u8 used;
+} PspProfileMirrorTexture;
+
+typedef struct {
     u64 displayListTasks;
     u64 opcodeCounts[256];
     u64 gvtxCommands;
@@ -233,6 +256,28 @@ typedef struct {
     u64 textureWrapCallsEmittedT;
     u64 textureWrapCallsSkippedS;
     u64 textureWrapCallsSkippedT;
+    u64 mirrorClassificationsRequested;
+    u64 mirrorClassificationsAvoided;
+    u64 mirrorClassificationsClamp;
+    u64 mirrorClassificationsMirror;
+    u64 wrapMixedMaterialVariants;
+    u64 effectiveWrapStateChanges;
+    u64 wrapAttributedFlushes;
+    u64 wrapAttributedFlushVertices;
+    PspProfileMirrorTexture mirrorTextures[PSP_PROFILE_MIRROR_TEXTURES];
+    u64 mirrorTextureOverflow;
+    u64 mirrorEncodingAttempts;
+    u64 mirrorEncodingFallbackUses;
+    u64 mirrorEncodedS;
+    u64 mirrorEncodedT;
+    u64 mirrorEncodedBoth;
+    u64 mirrorEncodedSourceBytes;
+    u64 mirrorEncodedBytes;
+    u64 mirrorEncodedUploads;
+    u64 mirrorEncodedUploadBytes;
+    u64 mirrorEncodedFailures;
+    u32 mirrorEncodedMaxWidth;
+    u32 mirrorEncodedMaxHeight;
     u64 textureParameterCacheMisses;
     u64 textureParameterCacheReplacements;
     PspProfileTextureCacheState textureCache[PSP_PROFILE_TEXTURE_CACHE_COUNT];
@@ -444,6 +489,20 @@ static u32 sStatusSlot;
 static u32 sNextSlot;
 static u32 sPreviousButtons;
 static int sCaptureActive;
+#if PROFILE_PHASES
+static u64 sMirrorEncodedLifetimeS;
+static u64 sMirrorEncodedLifetimeT;
+static u64 sMirrorEncodedLifetimeBoth;
+static u64 sMirrorEncodingLifetimeAttempts;
+static u64 sMirrorEncodingLifetimeFallbackUses;
+static u64 sMirrorEncodedLifetimeSourceBytes;
+static u64 sMirrorEncodedLifetimeBytes;
+static u64 sMirrorEncodedLifetimeUploads;
+static u64 sMirrorEncodedLifetimeUploadBytes;
+static u64 sMirrorEncodedLifetimeFailures;
+static u32 sMirrorEncodedLifetimeMaxWidth;
+static u32 sMirrorEncodedLifetimeMaxHeight;
+#endif
 static int sCaptureStarted;
 static int sCaptureDumped;
 static int sInitialized;
@@ -1735,6 +1794,16 @@ static void psp_profiler_write_phase_files(u32 slot) {
              (unsigned long) sCaptureFrames, sTimerReadPairOverheadUs);
     psp_profiler_write_all(fd, line);
     snprintf(line, sizeof(line),
+             "\n[mirror encoded texture lifetime]\nencoding_attempts,%llu\nsuccessful_encodings,%llu\nfallback_uses,%llu\nencoded_s,%llu\nencoded_t,%llu\nencoded_both,%llu\nsuccessful_source_bytes,%llu\nsuccessful_encoded_bytes,%llu\nsuccessful_additional_bytes,%llu\nencoded_uploads,%llu\nencoded_upload_bytes,%llu\nstaging_failures,%llu\nmaximum_successful_encoded_width,%lu\nmaximum_successful_encoded_height,%lu\n",
+             sMirrorEncodingLifetimeAttempts, sMirrorEncodedLifetimeUploads, sMirrorEncodingLifetimeFallbackUses,
+             sMirrorEncodedLifetimeS, sMirrorEncodedLifetimeT, sMirrorEncodedLifetimeBoth,
+             sMirrorEncodedLifetimeSourceBytes, sMirrorEncodedLifetimeBytes,
+             sMirrorEncodedLifetimeBytes - sMirrorEncodedLifetimeSourceBytes,
+             sMirrorEncodedLifetimeUploads, sMirrorEncodedLifetimeUploadBytes,
+             sMirrorEncodedLifetimeFailures, (unsigned long) sMirrorEncodedLifetimeMaxWidth,
+             (unsigned long) sMirrorEncodedLifetimeMaxHeight);
+    psp_profiler_write_all(fd, line);
+    snprintf(line, sizeof(line),
              "PROFILE_FRAME_TRACE: %d\nPROFILE_FRAME_TRACE_FRAMES: %d\nframe trace recorded frames: %lu\nframe trace complete: %lu\nframe trace dropped frames: %lu\nframe trace static bytes: %lu\n\n",
              PROFILE_FRAME_TRACE, PROFILE_FRAME_TRACE_FRAMES,
 #if PROFILE_FRAME_TRACE
@@ -1819,6 +1888,73 @@ static void psp_profiler_write_phase_files(u32 slot) {
              sCounters.textureWrapCallsEmittedT, sCounters.textureWrapCallsSkippedS,
              sCounters.textureWrapCallsSkippedT, sCounters.textureParameterCacheMisses,
              sCounters.textureParameterCacheReplacements);
+    psp_profiler_write_all(fd, line);
+    snprintf(line, sizeof(line),
+             "\n[mirror wrap classification]\nrequested,%llu\navoided_non_mirror,%llu\nresult_clamp,%llu\nresult_mirror,%llu\nmixed_material_variants,%llu\neffective_wrap_state_changes,%llu\nwrap_attributed_flushes,%llu\nwrap_attributed_flush_vertices,%llu\n",
+             sCounters.mirrorClassificationsRequested, sCounters.mirrorClassificationsAvoided,
+             sCounters.mirrorClassificationsClamp, sCounters.mirrorClassificationsMirror,
+             sCounters.wrapMixedMaterialVariants, sCounters.effectiveWrapStateChanges,
+             sCounters.wrapAttributedFlushes, sCounters.wrapAttributedFlushVertices);
+    psp_profiler_write_all(fd, line);
+    {
+        u64 used = 0, onlyMirror = 0, onlyClamp = 0, mixed = 0, splitAxis = 0;
+        u64 mixedBytes = 0, extraS = 0, extraT = 0, extraBoth = 0;
+
+        psp_profiler_write_all(fd,
+                               "\n[mirror texture identities]\nsource,palette,texture,generation,format,size,logical_width,logical_height,upload_width,upload_height,mirror_s_requested,mirror_t_requested,clamp_seen,mirror_seen,clamp_triangles,mirror_triangles,clamp_s_triangles,mirror_s_triangles,clamp_t_triangles,mirror_t_triangles,mixed_s,mixed_t,resident_bytes\n");
+        for (i = 0; i < PSP_PROFILE_MIRROR_TEXTURES; i++) {
+            PspProfileMirrorTexture* texture = &sCounters.mirrorTextures[i];
+            u64 bytes;
+            int clampSeen, mirrorSeen, mixedS, mixedT;
+
+            if (!texture->used) continue;
+            bytes = (u64) texture->uploadWidth * texture->uploadHeight * 4U;
+            clampSeen = texture->clampTriangles != 0;
+            mirrorSeen = texture->mirrorTriangles != 0;
+            mixedS = (texture->clampSTriangles != 0) && (texture->mirrorSTriangles != 0);
+            mixedT = (texture->clampTTriangles != 0) && (texture->mirrorTTriangles != 0);
+            used++;
+            if (mixedS || mixedT) {
+                mixed++;
+                mixedBytes += bytes;
+            } else if (mirrorSeen && !clampSeen) {
+                onlyMirror++;
+            } else if (clampSeen && !mirrorSeen) {
+                onlyClamp++;
+            } else {
+                splitAxis++;
+            }
+            if (mixedS) extraS += bytes;
+            if (mixedT) extraT += bytes;
+            if (mixedS && mixedT) extraBoth += bytes * 3U;
+            snprintf(line, sizeof(line),
+                     "0x%08lx,0x%08lx,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%u,%u,%d,%d,%llu,%llu,%llu,%llu,%llu,%llu,%d,%d,%llu\n",
+                     (unsigned long) texture->source, (unsigned long) texture->palette,
+                     (unsigned long) texture->texture, (unsigned long) texture->generation,
+                     (unsigned long) texture->format, (unsigned long) texture->size,
+                     (unsigned long) texture->width, (unsigned long) texture->height,
+                     (unsigned long) texture->uploadWidth, (unsigned long) texture->uploadHeight,
+                     texture->mirrorS, texture->mirrorT, clampSeen, mirrorSeen,
+                     texture->clampTriangles, texture->mirrorTriangles, texture->clampSTriangles,
+                     texture->mirrorSTriangles, texture->clampTTriangles, texture->mirrorTTriangles,
+                     mixedS, mixedT, bytes);
+            psp_profiler_write_all(fd, line);
+        }
+        snprintf(line, sizeof(line),
+                 "\n[mirror texture summary]\ntextures_with_mirror,%llu\nonly_mirror,%llu\nonly_clamp_despite_mirror,%llu\nmixed_variants_same_axis,%llu\nsplit_axis_clamp_mirror_without_axis_mixing,%llu\nmixed_resident_bytes,%llu\nextra_bytes_expand_mixed_s,%llu\nextra_bytes_expand_mixed_t,%llu\nextra_bytes_expand_mixed_both_2x2,%llu\nidentity_overflow,%llu\n",
+                 used, onlyMirror, onlyClamp, mixed, splitAxis, mixedBytes, extraS, extraT, extraBoth,
+                 sCounters.mirrorTextureOverflow);
+        psp_profiler_write_all(fd, line);
+    }
+    snprintf(line, sizeof(line),
+             "\n[mirror encoded textures]\nencoding_attempts,%llu\nsuccessful_encodings,%llu\nfallback_uses,%llu\nencoded_s,%llu\nencoded_t,%llu\nencoded_both,%llu\nsuccessful_source_bytes,%llu\nsuccessful_encoded_bytes,%llu\nsuccessful_additional_bytes,%llu\nencoded_uploads,%llu\nencoded_upload_bytes,%llu\nstaging_failures,%llu\nmaximum_successful_encoded_width,%lu\nmaximum_successful_encoded_height,%lu\n",
+             sCounters.mirrorEncodingAttempts, sCounters.mirrorEncodedUploads, sCounters.mirrorEncodingFallbackUses,
+             sCounters.mirrorEncodedS, sCounters.mirrorEncodedT, sCounters.mirrorEncodedBoth,
+             sCounters.mirrorEncodedSourceBytes, sCounters.mirrorEncodedBytes,
+             sCounters.mirrorEncodedBytes - sCounters.mirrorEncodedSourceBytes,
+             sCounters.mirrorEncodedUploads, sCounters.mirrorEncodedUploadBytes,
+             sCounters.mirrorEncodedFailures, (unsigned long) sCounters.mirrorEncodedMaxWidth,
+             (unsigned long) sCounters.mirrorEncodedMaxHeight);
     psp_profiler_write_all(fd, line);
     psp_profiler_write_all(fd,
                            "\n[texture cache behaviour]\ncache,capacity,current_entries,peak_entries,unique_keys,unique_base_keys,max_variants_per_base,lookups,hits,misses,insertions,evictions,reuse_after_eviction,max_reuse_distance,unique_key_overflow,unique_base_overflow\n");
@@ -3072,6 +3208,105 @@ void PspProfiler_CountBatchStateTransitions(int textureIdChanged, int textureEnv
         sFrameCounters.batchStateTransitions[PSP_PROFILE_BATCH_STATE_PREMULTIPLIED]++;
 #endif
     }
+}
+
+void PspProfiler_CountMirrorClassification(u32 requested, u32 avoided, u32 clamp, u32 mirror) {
+    if (!sCaptureActive) {
+        return;
+    }
+    sCounters.mirrorClassificationsRequested += requested;
+    sCounters.mirrorClassificationsAvoided += avoided;
+    sCounters.mirrorClassificationsClamp += clamp;
+    sCounters.mirrorClassificationsMirror += mirror;
+}
+
+void PspProfiler_CountWrapBatching(u32 mixedVariant, u32 stateChange, u32 flush, u32 flushedVertices) {
+    if (!sCaptureActive) {
+        return;
+    }
+    sCounters.wrapMixedMaterialVariants += mixedVariant;
+    sCounters.effectiveWrapStateChanges += stateChange;
+    sCounters.wrapAttributedFlushes += flush;
+    sCounters.wrapAttributedFlushVertices += flushedVertices;
+}
+
+void PspProfiler_RecordMirrorTexture(u32 source, u32 palette, u32 textureId, u32 generation, u32 format, u32 size,
+                                     u32 width, u32 height, u32 uploadWidth, u32 uploadHeight, u32 mirrorS,
+                                     u32 mirrorT, u32 clampS, u32 mirrorWrapS, u32 clampT, u32 mirrorWrapT,
+                                     u32 triangles) {
+    PspProfileMirrorTexture* texture = NULL;
+    u32 i;
+
+    if (!sCaptureActive || (!mirrorS && !mirrorT)) return;
+    for (i = 0; i < PSP_PROFILE_MIRROR_TEXTURES; i++) {
+        PspProfileMirrorTexture* candidate = &sCounters.mirrorTextures[i];
+
+        if (candidate->used && (candidate->source == source) && (candidate->palette == palette) &&
+            (candidate->format == format) && (candidate->size == size) && (candidate->width == width) &&
+            (candidate->height == height)) {
+            texture = candidate;
+            break;
+        }
+        if (!candidate->used && (texture == NULL)) texture = candidate;
+    }
+    if ((texture == NULL) || (texture->used && ((texture->source != source) || (texture->palette != palette) ||
+                                                (texture->format != format) || (texture->size != size) ||
+                                                (texture->width != width) || (texture->height != height)))) {
+        sCounters.mirrorTextureOverflow++;
+        return;
+    }
+    if (!texture->used) {
+        texture->used = 1;
+        texture->source = source;
+        texture->palette = palette;
+        texture->format = format;
+        texture->size = size;
+        texture->width = width;
+        texture->height = height;
+    }
+    texture->texture = textureId;
+    texture->generation = generation;
+    texture->uploadWidth = uploadWidth;
+    texture->uploadHeight = uploadHeight;
+    texture->mirrorS |= mirrorS != 0;
+    texture->mirrorT |= mirrorT != 0;
+    texture->clampSTriangles += clampS ? triangles : 0;
+    texture->mirrorSTriangles += mirrorWrapS ? triangles : 0;
+    texture->clampTTriangles += clampT ? triangles : 0;
+    texture->mirrorTTriangles += mirrorWrapT ? triangles : 0;
+    texture->clampTriangles += (clampS || clampT) ? triangles : 0;
+    texture->mirrorTriangles += (mirrorWrapS || mirrorWrapT) ? triangles : 0;
+}
+
+void PspProfiler_CountMirrorEncodedTexture(u32 mirrorS, u32 mirrorT, u32 sourceBytes, u32 encodedBytes,
+                                           u32 attempt, u32 success, u32 fallback, u32 failure,
+                                           u32 width, u32 height) {
+    if (!mirrorS && !mirrorT) return;
+    sMirrorEncodingLifetimeAttempts += attempt;
+    sMirrorEncodingLifetimeFallbackUses += fallback;
+    sMirrorEncodedLifetimeS += success && mirrorS && !mirrorT;
+    sMirrorEncodedLifetimeT += success && mirrorT && !mirrorS;
+    sMirrorEncodedLifetimeBoth += success && mirrorS && mirrorT;
+    sMirrorEncodedLifetimeSourceBytes += success ? sourceBytes : 0;
+    sMirrorEncodedLifetimeBytes += success ? encodedBytes : 0;
+    sMirrorEncodedLifetimeUploads += success;
+    sMirrorEncodedLifetimeUploadBytes += success ? encodedBytes : 0;
+    sMirrorEncodedLifetimeFailures += failure;
+    if (success && (width > sMirrorEncodedLifetimeMaxWidth)) sMirrorEncodedLifetimeMaxWidth = width;
+    if (success && (height > sMirrorEncodedLifetimeMaxHeight)) sMirrorEncodedLifetimeMaxHeight = height;
+    if (!sCaptureActive) return;
+    sCounters.mirrorEncodingAttempts += attempt;
+    sCounters.mirrorEncodingFallbackUses += fallback;
+    sCounters.mirrorEncodedS += success && mirrorS && !mirrorT;
+    sCounters.mirrorEncodedT += success && mirrorT && !mirrorS;
+    sCounters.mirrorEncodedBoth += success && mirrorS && mirrorT;
+    sCounters.mirrorEncodedSourceBytes += success ? sourceBytes : 0;
+    sCounters.mirrorEncodedBytes += success ? encodedBytes : 0;
+    sCounters.mirrorEncodedUploads += success;
+    sCounters.mirrorEncodedUploadBytes += success ? encodedBytes : 0;
+    sCounters.mirrorEncodedFailures += failure;
+    if (success && (width > sCounters.mirrorEncodedMaxWidth)) sCounters.mirrorEncodedMaxWidth = width;
+    if (success && (height > sCounters.mirrorEncodedMaxHeight)) sCounters.mirrorEncodedMaxHeight = height;
 }
 
 void PspProfiler_CountTextureFlushSource(PspProfileTextureFlushSource source) {
