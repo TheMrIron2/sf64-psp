@@ -225,6 +225,9 @@ typedef struct {
     u64 tri2CullSecondOnly;
     u64 tri2CullBothRejected;
     u64 tri2CullMixedFallback;
+    u64 tri2CullMixedDirect;
+    u64 tri2CullMixedVerticesEmitted;
+    u64 tri2DoubleTrivialFastReject;
     u64 effectiveStateResolves;
     u64 effectiveStateReuses;
     u64 materialStateResolves;
@@ -910,6 +913,7 @@ static const char* psp_profiler_tri2_matrix_name(PspProfileTriOutcome first, Psp
 static const char* psp_profiler_trivial_reject_cost_name(PspProfileTrivialRejectCost cost) {
     static const char* names[PSP_PROFILE_TRIVIAL_REJECT_COST_COUNT] = {
         "trivial_reject_triangles",
+        "generic_tri_invocations",
         "effective_state_calls",
         "effective_state_resolves",
         "effective_state_reuses",
@@ -922,6 +926,9 @@ static const char* psp_profiler_trivial_reject_cost_name(PspProfileTrivialReject
         "texture_decodes",
         "texture_uploads",
         "texture_bytes_uploaded",
+        "wrap_resolves_s",
+        "wrap_resolves_t",
+        "fog_resolves",
         "flushes",
         "flushed_vertices",
         "early_reject_taken",
@@ -997,9 +1004,7 @@ static const char* psp_profiler_component_name(u32 component) {
 }
 #elif PROFILE_TRIVIAL_REJECTS
 static const char* psp_profiler_component_name(u32 component) {
-    if (component == PSP_PROFILE_COMPONENT_MIXED_BATCH) {
-        return "mixed_batch";
-    }
+    (void) component;
     return "unattributed";
 }
 #endif
@@ -2008,7 +2013,7 @@ static void psp_profiler_write_phase_files(u32 slot) {
              sCounters.perspectivePathTriangles, sCounters.clippedPathTriangles, sCounters.directVerticesWritten);
     psp_profiler_write_all(fd, line);
     snprintf(line, sizeof(line),
-             "\n[TRI2 pair fast path]\nattempts,%llu\nfastpath_hits,%llu\nfastpath_triangles,%llu\nfallback_invalid_vertex,%llu\nfallback_clipped_or_rejected,%llu\nfallback_transform_mismatch,%llu\nfallback_direct_ineligible,%llu\nbuffer_preflushes,%llu\nstate_applications_saved,%llu\nvertices_emitted,%llu\nvalidation_mismatches,%llu\ntri2_cull_tested_pairs,%llu\ntri2_cull_both_survive,%llu\ntri2_cull_first_only,%llu\ntri2_cull_second_only,%llu\ntri2_cull_both_rejected,%llu\ntri2_cull_mixed_fallback,%llu\nfirst_mismatch_seen,%lu\nfirst_mismatch_vertex,%lu\nfirst_mismatch_field_mask,0x%08lx\nfirst_mismatch_batch_delta,%lu\n",
+             "\n[TRI2 pair fast path]\nattempts,%llu\nfastpath_hits,%llu\nfastpath_triangles,%llu\nfallback_invalid_vertex,%llu\nfallback_clipped_or_rejected,%llu\nfallback_transform_mismatch,%llu\nfallback_direct_ineligible,%llu\nbuffer_preflushes,%llu\nstate_applications_saved,%llu\nvertices_emitted,%llu\nvalidation_mismatches,%llu\ntri2_cull_tested_pairs,%llu\ntri2_cull_both_survive,%llu\ntri2_cull_first_only,%llu\ntri2_cull_second_only,%llu\ntri2_cull_both_rejected,%llu\ntri2_cull_mixed_fallback,%llu\ntri2_cull_mixed_direct,%llu\ntri2_cull_mixed_vertices_emitted,%llu\ntri2_double_trivial_fast_reject,%llu\nfirst_mismatch_seen,%lu\nfirst_mismatch_vertex,%lu\nfirst_mismatch_field_mask,0x%08lx\nfirst_mismatch_batch_delta,%lu\n",
              sCounters.tri2PairAttempts, sCounters.tri2PairFastpathHits,
              sCounters.tri2PairFastpathTriangles, sCounters.tri2PairFallbackInvalidVertex,
              sCounters.tri2PairFallbackClippedOrRejected, sCounters.tri2PairFallbackTransformMismatch,
@@ -2017,6 +2022,8 @@ static void psp_profiler_write_phase_files(u32 slot) {
              sCounters.tri2PairValidationMismatches, sCounters.tri2CullTestedPairs,
              sCounters.tri2CullBothSurvive, sCounters.tri2CullFirstOnly, sCounters.tri2CullSecondOnly,
              sCounters.tri2CullBothRejected, sCounters.tri2CullMixedFallback,
+             sCounters.tri2CullMixedDirect, sCounters.tri2CullMixedVerticesEmitted,
+             sCounters.tri2DoubleTrivialFastReject,
              (unsigned long) sTri2PairFirstMismatchSeen,
              (unsigned long) sTri2PairFirstMismatchVertex,
              (unsigned long) sTri2PairFirstMismatchFieldMask,
@@ -3421,6 +3428,29 @@ void PspProfiler_CountTri2CullOutcome(u32 tested, u32 bothSurvive, u32 firstOnly
     sCounters.tri2CullBothRejected += bothRejected;
     sCounters.tri2CullMixedFallback += mixedFallback;
     sCounters.tri2PairAttempts += bothRejected;
+}
+
+void PspProfiler_CountTri2CullMixedResult(u32 direct, u32 fallback, u32 verticesEmitted, u32 bufferPreflush) {
+    if (!sCaptureActive) {
+        return;
+    }
+    sCounters.tri2CullMixedDirect += direct;
+    sCounters.tri2CullMixedFallback += fallback;
+    sCounters.tri2CullMixedVerticesEmitted += verticesEmitted;
+    sCounters.tri2PairAttempts += direct;
+    sCounters.tri2PairFastpathHits += direct;
+    sCounters.tri2PairFastpathTriangles += direct;
+    sCounters.tri2PairStateApplicationsSaved += direct;
+    sCounters.tri2PairVerticesEmitted += verticesEmitted;
+    sCounters.tri2PairBufferPreflushes += bufferPreflush;
+}
+
+void PspProfiler_CountTri2DoubleTrivialFastReject(void) {
+    if (!sCaptureActive) {
+        return;
+    }
+    sCounters.tri2DoubleTrivialFastReject++;
+    sCounters.tri2PairAttempts++;
 }
 
 void PspProfiler_RecordTri2PairValidationMismatch(u32 vertexIndex, u32 fieldMask, u32 batchDelta) {

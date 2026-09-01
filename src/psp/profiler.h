@@ -97,6 +97,7 @@ typedef enum {
 
 typedef enum {
     PSP_PROFILE_TRIVIAL_REJECT_COST_TRIANGLES,
+    PSP_PROFILE_TRIVIAL_REJECT_COST_GENERIC_TRI_INVOCATIONS,
     PSP_PROFILE_TRIVIAL_REJECT_COST_EFFECTIVE_STATE_CALLS,
     PSP_PROFILE_TRIVIAL_REJECT_COST_EFFECTIVE_STATE_RESOLVES,
     PSP_PROFILE_TRIVIAL_REJECT_COST_EFFECTIVE_STATE_REUSES,
@@ -109,6 +110,9 @@ typedef enum {
     PSP_PROFILE_TRIVIAL_REJECT_COST_TEXTURE_DECODES,
     PSP_PROFILE_TRIVIAL_REJECT_COST_TEXTURE_UPLOADS,
     PSP_PROFILE_TRIVIAL_REJECT_COST_TEXTURE_BYTES_UPLOADED,
+    PSP_PROFILE_TRIVIAL_REJECT_COST_WRAP_RESOLVES_S,
+    PSP_PROFILE_TRIVIAL_REJECT_COST_WRAP_RESOLVES_T,
+    PSP_PROFILE_TRIVIAL_REJECT_COST_FOG_RESOLVES,
     PSP_PROFILE_TRIVIAL_REJECT_COST_FLUSHES,
     PSP_PROFILE_TRIVIAL_REJECT_COST_FLUSHED_VERTICES,
     PSP_PROFILE_TRIVIAL_REJECT_COST_EARLY_REJECT_TAKEN,
@@ -191,6 +195,8 @@ void PspProfiler_CountTri2PairFastpath(u32 hit, u32 invalidVertex, u32 clippedOr
                                        u32 validationMismatch);
 void PspProfiler_CountTri2CullOutcome(u32 tested, u32 bothSurvive, u32 firstOnly, u32 secondOnly,
                                       u32 bothRejected, u32 mixedFallback);
+void PspProfiler_CountTri2CullMixedResult(u32 direct, u32 fallback, u32 verticesEmitted, u32 bufferPreflush);
+void PspProfiler_CountTri2DoubleTrivialFastReject(void);
 void PspProfiler_RecordTri2PairValidationMismatch(u32 vertexIndex, u32 fieldMask, u32 batchDelta);
 void PspProfiler_CountEffectiveState(u32 resolves, u32 reuses, u32 materialResolves, u32 depthResolves,
                                      u32 fogResolves);
@@ -254,6 +260,8 @@ void PspProfiler_CountTrivialRejectRenderState(PspProfileTrivialRejectRenderStat
 #define PspProfiler_CountTri2CullOutcome(tested, bothSurvive, firstOnly, secondOnly, bothRejected, \
                                          mixedFallback)                                                \
     ((void) 0)
+#define PspProfiler_CountTri2CullMixedResult(direct, fallback, verticesEmitted, bufferPreflush) ((void) 0)
+#define PspProfiler_CountTri2DoubleTrivialFastReject() ((void) 0)
 #define PspProfiler_RecordTri2PairValidationMismatch(vertexIndex, fieldMask, batchDelta) ((void) 0)
 #define PspProfiler_CountEffectiveState(resolves, reuses, materialResolves, depthResolves, fogResolves) ((void) 0)
 #define PspProfiler_CountDrawCall(vertices) ((void) 0)
