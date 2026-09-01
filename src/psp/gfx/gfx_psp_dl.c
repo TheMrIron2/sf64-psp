@@ -2397,6 +2397,41 @@ static int psp_gfx_dl_resolve_fog_state_values(PspGfxDlContext* ctx, const PspGf
     return requestedFog && (ctx->fogMul != 0) && (*end > *start) && (*start >= 0.0f);
 }
 
+#if PSP_RENDERER_DIAGNOSTICS
+static void psp_gfx_dl_trace_fog_curve(const PspGfxDlContext* ctx, const float projection[4][4],
+                                       float start, float end) {
+    static const u8 samples[4] = { 8, 16, 24, 31 };
+    char line[512];
+    u32 used;
+    u32 i;
+
+    if ((ctx->fogMul == 0) || (end <= start)) {
+        return;
+    }
+    used = (u32) snprintf(line, sizeof(line),
+                          "[rdp-trace-fog-curve] proj=%.7f,%.7f,%.7f,%.7f gl=%.2f..%.2f",
+                          projection[2][2], projection[2][3], projection[3][2], projection[3][3],
+                          start, end);
+    for (i = 0; i < 4; i++) {
+        u32 q = samples[i];
+        float alpha = (float) ((q << 3) + 4U);
+        float ndcZ = (alpha - (float) ctx->fogOffset) / (float) ctx->fogMul;
+        float distance = psp_gfx_dl_fog_distance(projection, ndcZ);
+        float hardware = (distance - start) / (end - start);
+
+        if (hardware < 0.0f) {
+            hardware = 0.0f;
+        } else if (hardware > 1.0f) {
+            hardware = 1.0f;
+        }
+        used += (u32) snprintf(line + used, sizeof(line) - used,
+                               " q%lu=%.1f:%u/%.3f", (unsigned long) q, distance,
+                               (unsigned int) sPspGfxDlPresentedFogAlpha[q], hardware);
+    }
+    PspPlatform_LogLine(line);
+}
+#endif
+
 static void psp_gfx_dl_set_batch_fog(PspGfxDlContext* ctx, int fog, const float projection[4][4]) {
     float color[4];
     float start;
@@ -2943,6 +2978,9 @@ static void psp_gfx_dl_trace_triangle(PspGfxDlContext* ctx, const Gfx* cmd, u32 
 #endif
     if (!psp_gfx_dl_trace_state(ctx, "tri", cmd, depth, force, fog, fogStart, fogEnd)) {
         return;
+    }
+    if (fog) {
+        psp_gfx_dl_trace_fog_curve(ctx, vertices[0]->projection, fogStart, fogEnd);
     }
 
     snprintf(line, sizeof(line),
