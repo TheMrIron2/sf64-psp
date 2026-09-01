@@ -4000,12 +4000,6 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
     u8 sharedClipCode;
     u32 emittedTriangles;
     u32 textureId = 0;
-    int depthTest;
-    int depthWrite;
-    int fogEnabled;
-    float fogColor[4];
-    float fogStart;
-    float fogEnd;
     PspGfxPspglTextureWrap wrapS;
     PspGfxPspglTextureWrap wrapT;
     int pretransformed;
@@ -4026,16 +4020,39 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
     va = &ctx->vertices[a];
     vb = &ctx->vertices[b];
     vc = &ctx->vertices[c];
-#if PROFILE_TRIVIAL_REJECTS
     sharedClipCode = va->clipCode & vb->clipCode & vc->clipCode;
+    combinedClipCode = va->clipCode | vb->clipCode | vc->clipCode;
     if (sharedClipCode != 0) {
+#if PROFILE_TRIVIAL_REJECTS
         if (ctx->trivialRejectDiagnosticActive) {
             PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_SCOPE_INVALID_NESTING, 1);
         }
         ctx->trivialRejectDiagnosticActive = 1;
         PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_SCOPE_BEGINS, 1);
-    }
+        PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_TRIANGLES, 1);
+        if (ctx->batchCount == 0) {
+            PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_BATCH_EMPTY_BEFORE_STATE, 1);
+        } else {
+            PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_BATCH_NONEMPTY_BEFORE_STATE, 1);
+        }
+        PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_BATCH_VERTICES_BEFORE_STATE,
+                                           ctx->batchCount);
+        PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_EARLY_REJECT_TAKEN, 1);
 #endif
+        ctx->stats.sharedClipTriangleCount++;
+        ctx->stats.clipRejectedTriangleCount++;
+        ctx->stats.triangleCount++;
+#if PSP_RENDERER_DIAGNOSTICS
+        psp_gfx_dl_material_corpus_add_rejected(1);
+#endif
+        PspProfiler_CountTriangleResult(0, 1, 0, 0, 0);
+#if PROFILE_TRIVIAL_REJECTS
+        ctx->trivialRejectDiagnosticActive = 0;
+        PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_SCOPE_ENDS, 1);
+#endif
+        PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_BATCH_CONSTRUCTION);
+        return;
+    }
     if (ctx->textureEnabled && (ctx->textureId == 0)) {
         psp_gfx_dl_prepare_texture(ctx, 1, psp_gfx_dl_premultiplied_blend_enabled(ctx));
     }
@@ -4065,19 +4082,6 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
         ctx->stats.projectedTriangleCount++;
     }
 
-    sharedClipCode = va->clipCode & vb->clipCode & vc->clipCode;
-    combinedClipCode = va->clipCode | vb->clipCode | vc->clipCode;
-    depthTest = (ctx->geometryMode & G_ZBUFFER) != 0;
-    depthWrite = (ctx->otherModeL & Z_UPD) != 0;
-    fogEnabled = psp_gfx_dl_resolve_fog_state_values(ctx, va, pretransformed, fogColor, &fogStart, &fogEnd);
-#if PROFILE_TRIVIAL_REJECTS
-    if (ctx->trivialRejectDiagnosticActive) {
-        PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_FOG_RESOLVES, 1);
-    }
-#endif
-    if (sharedClipCode != 0) {
-        ctx->stats.sharedClipTriangleCount++;
-    }
     if ((va->clipW < 0.0f) && (vb->clipW < 0.0f) && (vc->clipW < 0.0f)) {
         ctx->stats.behindEyeTriangleCount++;
     } else if ((va->clipW < 0.0f) || (vb->clipW < 0.0f) || (vc->clipW < 0.0f)) {
@@ -4088,42 +4092,6 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
         ctx->stats.degenerateTriangleCount++;
     }
 
-#if PROFILE_TRIVIAL_REJECTS
-    if (sharedClipCode != 0) {
-        PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_TRIANGLES, 1);
-        if (ctx->batchCount == 0) {
-            PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_BATCH_EMPTY_BEFORE_STATE, 1);
-        } else {
-            PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_BATCH_NONEMPTY_BEFORE_STATE, 1);
-        }
-        PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_BATCH_VERTICES_BEFORE_STATE,
-                                           ctx->batchCount);
-        PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_EARLY_REJECT_TAKEN, 1);
-    }
-#endif
-    if (sharedClipCode != 0) {
-        if (depthTest) {
-            ctx->stats.depthTestTriangleCount++;
-        }
-        if (depthWrite) {
-            ctx->stats.depthWriteTriangleCount++;
-        }
-        if (fogEnabled) {
-            psp_gfx_dl_count_fog_triangle_stats(ctx, va, vb, vc, fogStart, fogEnd);
-        }
-        ctx->stats.clipRejectedTriangleCount++;
-        ctx->stats.triangleCount++;
-#if PSP_RENDERER_DIAGNOSTICS
-        psp_gfx_dl_material_corpus_add_rejected(1);
-#endif
-        PspProfiler_CountTriangleResult(0, 1, 0, 0, 0);
-#if PROFILE_TRIVIAL_REJECTS
-        ctx->trivialRejectDiagnosticActive = 0;
-        PspProfiler_CountTrivialRejectCost(PSP_PROFILE_TRIVIAL_REJECT_COST_SCOPE_ENDS, 1);
-#endif
-        PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_BATCH_CONSTRUCTION);
-        return;
-    }
     if ((combinedClipCode == 0) && psp_gfx_dl_culls_area(ctx->geometryMode, area)) {
         ctx->stats.triangleCount++;
         PspProfiler_CountTriangleResult(0, 1, 0, 0, 0);
@@ -4131,8 +4099,6 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
         return;
     }
     textureId = psp_gfx_dl_apply_effective_batch_state(ctx, va, pretransformed, wrapS, wrapT);
-#if PROFILE_TRIVIAL_REJECTS
-#endif
     if (ctx->batchDepthTest) {
         ctx->stats.depthTestTriangleCount++;
     }
