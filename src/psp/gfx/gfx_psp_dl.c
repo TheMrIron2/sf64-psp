@@ -4570,8 +4570,13 @@ static void psp_gfx_dl_handle_fill_rectangle(PspGfxDlContext* ctx, const Gfx* gf
     }
 
     if (primitiveFill) {
+        u8 alpha = ctx->primitiveA;
+
+        if (((ctx->otherModeL & FORCE_BL) != 0) && (alpha != 255)) {
+            alpha = psp_gfx_color_transfer_u8(alpha);
+        }
         color = psp_gfx_dl_pack_rgba_u8(ctx->primitiveR, ctx->primitiveG, ctx->primitiveB,
-                                        ctx->primitiveA, 0);
+                                        alpha, 0);
         blend = ((ctx->otherModeL & FORCE_BL) != 0) && (ctx->primitiveA != 255);
         ctx->stats.fillRectanglePrimitiveColorCount++;
     } else if (!psp_gfx_dl_is_fill_cycle(ctx)) {
