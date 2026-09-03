@@ -950,7 +950,6 @@ void Background_dummy_80040CDC(void) {
 
 void Background_DrawGround(void) {
     f32 zPos;
-    f32 groundScaleX = 1.0f;
     s32 i;
     u32 xScroll;
     u32 yScroll;
@@ -1061,23 +1060,67 @@ void Background_DrawGround(void) {
                         gDPSetPrimColor(gMasterDisp++, 0x00, 0x00, 255, 255, 255, 128);
                         gDPLoadTileTexture(gMasterDisp++, aCoWaterTex1, G_IM_FMT_RGBA, G_IM_SIZ_16b, 32, 32);
                         gBgColor = 0x190F; // 24, 32, 56
-#ifdef TARGET_PSP
-                        if (PspDisplay_IsWidescreen()) {
-                            groundScaleX = PspDisplay_GetProjectionAspect() * SCREEN_HEIGHT / SCREEN_WIDTH;
-                        }
-#endif
                         break;
                 }
+#ifdef TARGET_PSP
+                if (gGroundSurface == SURFACE_WATER) {
+                    PSP_RENDERER_DL_VIEWPORT_FULL_MARKER(gMasterDisp++);
+                }
+#endif
                 Matrix_Push(&gGfxMatrix);
                 Matrix_Translate(gGfxMatrix, 0.0f, 0.0f, -3000.0f, MTXF_APPLY);
-                Matrix_Scale(gGfxMatrix, groundScaleX, 1.0f, 0.5f, MTXF_APPLY);
+                Matrix_Scale(gGfxMatrix, 1.0f, 1.0f, 0.5f, MTXF_APPLY);
                 Matrix_SetGfxMtx(&gMasterDisp);
                 gSPDisplayList(gMasterDisp++, aCoGroundOnRailsDL);
                 Matrix_Pop(&gGfxMatrix);
+
+#ifdef TARGET_PSP
+                if (PspDisplay_IsWidescreen() && (gGroundSurface == SURFACE_WATER)) {
+                    Matrix_Push(&gGfxMatrix);
+                    Matrix_Translate(gGfxMatrix, -8000.0f, 0.0f, -3000.0f, MTXF_APPLY);
+                    Matrix_Scale(gGfxMatrix, 1.0f, 1.0f, 0.5f, MTXF_APPLY);
+                    Matrix_SetGfxMtx(&gMasterDisp);
+                    gSPDisplayList(gMasterDisp++, aCoGroundOnRailsDL);
+                    Matrix_Pop(&gGfxMatrix);
+
+                    Matrix_Push(&gGfxMatrix);
+                    Matrix_Translate(gGfxMatrix, 8000.0f, 0.0f, -3000.0f, MTXF_APPLY);
+                    Matrix_Scale(gGfxMatrix, 1.0f, 1.0f, 0.5f, MTXF_APPLY);
+                    Matrix_SetGfxMtx(&gMasterDisp);
+                    gSPDisplayList(gMasterDisp++, aCoGroundOnRailsDL);
+                    Matrix_Pop(&gGfxMatrix);
+                }
+#endif
+
+                Matrix_Push(&gGfxMatrix);
                 Matrix_Translate(gGfxMatrix, 0.0f, 0.0f, 3000.0f, MTXF_APPLY);
-                Matrix_Scale(gGfxMatrix, groundScaleX, 1.0f, 0.5f, MTXF_APPLY);
+                Matrix_Scale(gGfxMatrix, 1.0f, 1.0f, 0.5f, MTXF_APPLY);
                 Matrix_SetGfxMtx(&gMasterDisp);
                 gSPDisplayList(gMasterDisp++, aCoGroundOnRailsDL);
+                Matrix_Pop(&gGfxMatrix);
+
+#ifdef TARGET_PSP
+                if (PspDisplay_IsWidescreen() && (gGroundSurface == SURFACE_WATER)) {
+                    Matrix_Push(&gGfxMatrix);
+                    Matrix_Translate(gGfxMatrix, -8000.0f, 0.0f, 3000.0f, MTXF_APPLY);
+                    Matrix_Scale(gGfxMatrix, 1.0f, 1.0f, 0.5f, MTXF_APPLY);
+                    Matrix_SetGfxMtx(&gMasterDisp);
+                    gSPDisplayList(gMasterDisp++, aCoGroundOnRailsDL);
+                    Matrix_Pop(&gGfxMatrix);
+
+                    Matrix_Push(&gGfxMatrix);
+                    Matrix_Translate(gGfxMatrix, 8000.0f, 0.0f, 3000.0f, MTXF_APPLY);
+                    Matrix_Scale(gGfxMatrix, 1.0f, 1.0f, 0.5f, MTXF_APPLY);
+                    Matrix_SetGfxMtx(&gMasterDisp);
+                    gSPDisplayList(gMasterDisp++, aCoGroundOnRailsDL);
+                    Matrix_Pop(&gGfxMatrix);
+                }
+#endif
+#ifdef TARGET_PSP
+                if (gGroundSurface == SURFACE_WATER) {
+                    PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER(gMasterDisp++);
+                }
+#endif
             } else {
                 gGroundSurface = SURFACE_GRASS;
                 gBgColor = 0x845; // 8, 8, 32

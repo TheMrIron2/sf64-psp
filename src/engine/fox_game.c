@@ -3,6 +3,9 @@
 #include "sf64dma.h"
 #include "assets/ast_logo.h"
 #include "mods.h"
+#ifdef TARGET_PSP
+#include "src/psp/renderer.h"
+#endif
 
 #if defined(TARGET_PSP) && defined(PSP_TRACE_ENABLED) && PSP_TRACE_ENABLED
 void PspPlatform_LogLine(const char* line);
@@ -173,6 +176,9 @@ bool Game_ChangeScene(void) {
 
 void Game_InitMasterDL(Gfx** dList) {
     gSPDisplayList((*dList)++, gRcpInitDL);
+#ifdef TARGET_PSP
+    PSP_RENDERER_DL_VIEWPORT_FULL_MARKER((*dList)++);
+#endif
     gDPSetScissor((*dList)++, G_SC_NON_INTERLACE, SCREEN_MARGIN, SCREEN_MARGIN, SCREEN_WIDTH - SCREEN_MARGIN,
                   SCREEN_HEIGHT - SCREEN_MARGIN);
     gDPSetDepthImage((*dList)++, &gZBuffer);
@@ -195,6 +201,9 @@ void Game_InitMasterDL(Gfx** dList) {
 
     gDPFillRectangle((*dList)++, SCREEN_MARGIN, SCREEN_MARGIN, SCREEN_WIDTH - SCREEN_MARGIN - 1,
                      SCREEN_HEIGHT - SCREEN_MARGIN);
+#ifdef TARGET_PSP
+    PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER((*dList)++);
+#endif
     gDPPipeSync((*dList)++);
     gDPSetColorDither((*dList)++, G_CD_MAGICSQ);
 }

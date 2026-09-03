@@ -78,6 +78,7 @@ static u32 sReplayCacheVertexCount;
 static int sReplayCacheCapturing;
 static int sReplayCacheReady;
 static int sUiViewportActive = -1;
+static int sViewportPolicy = -1;
 #if PSP_ORIGINAL_FOG
 static int sReplayCacheLastDrawCaptured;
 #endif
@@ -504,6 +505,10 @@ static void psp_gfx_pspgl_select_viewport(int ui) {
         glViewport(display->viewport_x, display->viewport_y, display->viewport_width, display->viewport_height);
     }
     sUiViewportActive = ui;
+}
+
+void PspGfxPspgl_SetViewportPolicy(int uiViewport) {
+    sViewportPolicy = uiViewport;
 }
 
 static int psp_gfx_pspgl_is_ui_draw(const PspGfxPspglColorVertex* vertices, u32 count,
@@ -1469,6 +1474,7 @@ void PspGfxPspgl_BeginFrame(void) {
     psp_gfx_pspgl_clear_display_borders(display);
     glViewport(display->viewport_x, display->viewport_y, display->viewport_width, display->viewport_height);
     sUiViewportActive = 0;
+    sViewportPolicy = -1;
     PspGfxPspgl_ClearScissor();
 
     glDisable(GL_DEPTH_TEST);
@@ -2483,6 +2489,9 @@ static void psp_gfx_pspgl_draw_colored(const PspGfxPspglColorVertex* vertices, u
 
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
 
+    if (uiViewport < 0) {
+        uiViewport = sViewportPolicy;
+    }
     psp_gfx_pspgl_select_viewport(uiViewport >= 0
                                       ? uiViewport
                                       : psp_gfx_pspgl_is_ui_draw(vertices, vertexCount, projectionMatrix));
@@ -2644,6 +2653,9 @@ void PspGfxPspgl_DrawFogTriangles(const PspGfxPspglFogVertex* vertices, u32 vert
     largeDraw = psp_gfx_pspgl_is_large_draw(vertexCount);
     psp_gfx_pspgl_unmap_small_arena();
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
+    psp_gfx_pspgl_select_viewport(sViewportPolicy >= 0
+                                      ? sViewportPolicy
+                                      : psp_gfx_pspgl_is_ui_draw(NULL, 0, projectionMatrix));
     if (pretransformed || (projectionMatrix == NULL)) {
         psp_gfx_pspgl_load_projection_identity();
     } else {
@@ -2834,7 +2846,7 @@ void PspGfxPspgl_DrawSolidRect(float ulx, float uly, float lrx, float lry, u32 c
     vertices[5].z = 0.0f;
 
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
-    psp_gfx_pspgl_select_viewport(fullViewport
+    psp_gfx_pspgl_select_viewport(fullViewport || (sViewportPolicy == 0)
                                       ? 0
                                       : !(ulx <= 0.0f && uly <= 0.0f && lrx >= 320.0f && lry >= 240.0f));
     psp_gfx_pspgl_load_projection_identity();

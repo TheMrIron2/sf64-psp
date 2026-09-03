@@ -209,6 +209,7 @@ void PspGfxPspgl_DrawColoredSprites(const PspGfxPspglColorVertex* vertices, u32 
                                     int pointFilter, int uiViewport);
 void PspGfxPspgl_DrawSolidRect(float ulx, float uly, float lrx, float lry, u32 color, int blend,
                                int fullViewport);
+void PspGfxPspgl_SetViewportPolicy(int uiViewport);
 void PspGfxPspgl_BeginReplayCache(void);
 void PspGfxPspgl_EndReplayCache(void);
 void PspGfxPspgl_ReplayCache(void);
