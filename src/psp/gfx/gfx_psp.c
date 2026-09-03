@@ -1,5 +1,6 @@
 #include "src/psp/gfx/gfx_psp.h"
 
+#include "src/psp/display.h"
 #include "src/psp/platform.h"
 #include "src/psp/profiler.h"
 
@@ -16,6 +17,7 @@ static EGLDisplay sDisplay = EGL_NO_DISPLAY;
 static EGLSurface sSurface = EGL_NO_SURFACE;
 static EGLContext sContext = EGL_NO_CONTEXT;
 static int sReady;
+static n64psp_display_config sDisplayConfig;
 
 static void psp_gfx_log_failure(const char* phase) {
     PspPlatform_LogLine(phase);
@@ -37,6 +39,10 @@ int PspGfx_Init(void) {
 
     if (sReady) {
         return 1;
+    }
+    if (!n64psp_display_configure(&sDisplayConfig, N64PSP_DISPLAY_WIDESCREEN, 320, 240,
+                                  PSP_GFX_WIDTH, PSP_GFX_HEIGHT)) {
+        return 0;
     }
 
     sDisplay = eglGetDisplay(EGL_DEFAULT_DISPLAY);
@@ -107,4 +113,34 @@ int PspGfx_GetWidth(void) {
 
 int PspGfx_GetHeight(void) {
     return PSP_GFX_HEIGHT;
+}
+
+const n64psp_display_config* PspGfx_GetDisplayConfig(void) {
+    return &sDisplayConfig;
+}
+
+float PspDisplay_GetProjectionAspect(void) {
+    return sDisplayConfig.projection_aspect;
+}
+
+int PspDisplay_IsWidescreen(void) {
+    return sDisplayConfig.mode == N64PSP_DISPLAY_WIDESCREEN;
+}
+
+float PspDisplay_GetUiScaleY(void) {
+    return (float) sDisplayConfig.ui_viewport_height / (float) sDisplayConfig.logical_height;
+}
+
+void PspGfx_CycleDisplayMode(void) {
+    n64psp_display_mode mode = (n64psp_display_mode)((sDisplayConfig.mode + 1) % N64PSP_DISPLAY_MODE_COUNT);
+
+    if (n64psp_display_configure(&sDisplayConfig, mode, 320, 240, PSP_GFX_WIDTH, PSP_GFX_HEIGHT)) {
+        if (mode == N64PSP_DISPLAY_ORIGINAL) {
+            PspPlatform_LogLine("[psp-display] original 320x240");
+        } else if (mode == N64PSP_DISPLAY_4_3) {
+            PspPlatform_LogLine("[psp-display] 4:3 360x270");
+        } else {
+            PspPlatform_LogLine("[psp-display] widescreen 480x272");
+        }
+    }
 }

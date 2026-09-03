@@ -25,6 +25,7 @@ s32 Lib_vsPrintf(char* dst, const char* fmt, va_list args);
 void Lib_vTable(s32 index, void (**table)(s32, s32), s32 arg0, s32 arg1);
 void Lib_QuickSort(u8* first, u32 length, u32 size, CompareFunc cFunc);
 void Lib_InitPerspective(Gfx** dList);
+void Lib_InitPerspectiveAspect(Gfx** dList, f32 aspect);
 void Lib_InitOrtho(Gfx** dList);
 void Lib_DmaRead(void* src, void* dst, s32 size);
 void Lib_FillScreen(u8 setFill);

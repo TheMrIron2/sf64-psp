@@ -1,4 +1,8 @@
 #include "global.h"
+
+#ifdef TARGET_PSP
+#include "src/psp/display.h"
+#endif
 #include "assets/ast_katina.h"
 #include "assets/ast_venom_1.h"
 #include "assets/ast_venom_2.h"
@@ -317,6 +321,14 @@ void Background_DrawBackdrop(void) {
                     } else if (gCurrentLevel == LEVEL_KATINA) {
                         Matrix_Translate(gGfxMatrix, 0.0f, -2500.0f, 0, MTXF_APPLY);
                     }
+#ifdef TARGET_PSP
+                    if (PspDisplay_IsWidescreen() && gCurrentLevel == LEVEL_FORTUNA) {
+                        Matrix_Translate(gGfxMatrix, -7280.0f, 0.0f, 0.0f, MTXF_APPLY);
+                        Matrix_SetGfxMtx(&gMasterDisp);
+                        gSPDisplayList(gMasterDisp++, aFoBackdropDL);
+                        Matrix_Translate(gGfxMatrix, 7280.0f, 0.0f, 0.0f, MTXF_APPLY);
+                    }
+#endif
                     Matrix_SetGfxMtx(&gMasterDisp);
 
                     switch (gCurrentLevel) {
@@ -362,6 +374,13 @@ void Background_DrawBackdrop(void) {
                             gSPDisplayList(gMasterDisp++, aVe2BackdropDL);
                             break;
                     }
+#ifdef TARGET_PSP
+                    if (PspDisplay_IsWidescreen() && gCurrentLevel == LEVEL_FORTUNA) {
+                        Matrix_Translate(gGfxMatrix, 7280.0f, 0.0f, 0.0f, MTXF_APPLY);
+                        Matrix_SetGfxMtx(&gMasterDisp);
+                        gSPDisplayList(gMasterDisp++, aFoBackdropDL);
+                    }
+#endif
                     break;
 
                 case LEVEL_CORNERIA:
@@ -371,6 +390,18 @@ void Background_DrawBackdrop(void) {
                         Math_ModF(Math_RadToDeg(gPlayer[gPlayerNum].camYaw) * (-7280.0f / 360.0f) * 5.0f, 7280.0f);
                     Matrix_RotateZ(gGfxMatrix, gPlayer[gPlayerNum].camRoll * M_DTOR, MTXF_APPLY);
                     Matrix_Translate(gGfxMatrix, bgXpos2, -2000.0f + bgYpos, -6000.0f, MTXF_APPLY);
+#ifdef TARGET_PSP
+                    if (PspDisplay_IsWidescreen()) {
+                        Matrix_Translate(gGfxMatrix, -7280.0f, 0.0f, 0.0f, MTXF_APPLY);
+                        Matrix_SetGfxMtx(&gMasterDisp);
+                        if (gCurrentLevel == LEVEL_CORNERIA) {
+                            gSPDisplayList(gMasterDisp++, aCoBackdropDL);
+                        } else {
+                            gSPDisplayList(gMasterDisp++, aVe1BackdropDL);
+                        }
+                        Matrix_Translate(gGfxMatrix, 7280.0f, 0.0f, 0.0f, MTXF_APPLY);
+                    }
+#endif
                     Matrix_SetGfxMtx(&gMasterDisp);
 
                     switch (gCurrentLevel) {
@@ -393,6 +424,17 @@ void Background_DrawBackdrop(void) {
                             gSPDisplayList(gMasterDisp++, aVe1BackdropDL);
                             break;
                     }
+#ifdef TARGET_PSP
+                    if (PspDisplay_IsWidescreen()) {
+                        Matrix_Translate(gGfxMatrix, 7280.0f, 0.0f, 0.0f, MTXF_APPLY);
+                        Matrix_SetGfxMtx(&gMasterDisp);
+                        if (gCurrentLevel == LEVEL_CORNERIA) {
+                            gSPDisplayList(gMasterDisp++, aCoBackdropDL);
+                        } else {
+                            gSPDisplayList(gMasterDisp++, aVe1BackdropDL);
+                        }
+                    }
+#endif
                     break;
 
                 case LEVEL_VENOM_ANDROSS:
@@ -908,6 +950,7 @@ void Background_dummy_80040CDC(void) {
 
 void Background_DrawGround(void) {
     f32 zPos;
+    f32 groundScaleX = 1.0f;
     s32 i;
     u32 xScroll;
     u32 yScroll;
@@ -1018,16 +1061,21 @@ void Background_DrawGround(void) {
                         gDPSetPrimColor(gMasterDisp++, 0x00, 0x00, 255, 255, 255, 128);
                         gDPLoadTileTexture(gMasterDisp++, aCoWaterTex1, G_IM_FMT_RGBA, G_IM_SIZ_16b, 32, 32);
                         gBgColor = 0x190F; // 24, 32, 56
+#ifdef TARGET_PSP
+                        if (PspDisplay_IsWidescreen()) {
+                            groundScaleX = PspDisplay_GetProjectionAspect() * SCREEN_HEIGHT / SCREEN_WIDTH;
+                        }
+#endif
                         break;
                 }
                 Matrix_Push(&gGfxMatrix);
                 Matrix_Translate(gGfxMatrix, 0.0f, 0.0f, -3000.0f, MTXF_APPLY);
-                Matrix_Scale(gGfxMatrix, 1.0f, 1.0f, 0.5f, MTXF_APPLY);
+                Matrix_Scale(gGfxMatrix, groundScaleX, 1.0f, 0.5f, MTXF_APPLY);
                 Matrix_SetGfxMtx(&gMasterDisp);
                 gSPDisplayList(gMasterDisp++, aCoGroundOnRailsDL);
                 Matrix_Pop(&gGfxMatrix);
                 Matrix_Translate(gGfxMatrix, 0.0f, 0.0f, 3000.0f, MTXF_APPLY);
-                Matrix_Scale(gGfxMatrix, 1.0f, 1.0f, 0.5f, MTXF_APPLY);
+                Matrix_Scale(gGfxMatrix, groundScaleX, 1.0f, 0.5f, MTXF_APPLY);
                 Matrix_SetGfxMtx(&gMasterDisp);
                 gSPDisplayList(gMasterDisp++, aCoGroundOnRailsDL);
             } else {

@@ -206,8 +206,9 @@ void PspGfxPspgl_DrawColoredSprites(const PspGfxPspglColorVertex* vertices, u32 
                                     int alphaTest, int blend, int premultiplied, int depthTest, int depthWrite, int fog,
                                     const float* fogColor, float fogStart, float fogEnd,
                                     const float* projectionMatrix, u32 projectionSerial, int pretransformed,
-                                    int pointFilter);
-void PspGfxPspgl_DrawSolidRect(float ulx, float uly, float lrx, float lry, u32 color, int blend);
+                                    int pointFilter, int uiViewport);
+void PspGfxPspgl_DrawSolidRect(float ulx, float uly, float lrx, float lry, u32 color, int blend,
+                               int fullViewport);
 void PspGfxPspgl_BeginReplayCache(void);
 void PspGfxPspgl_EndReplayCache(void);
 void PspGfxPspgl_ReplayCache(void);

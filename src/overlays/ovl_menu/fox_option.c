@@ -7,6 +7,10 @@
 #include "mods.h"
 #include "prevent_bss_reordering.h"
 #include "global.h"
+
+#ifdef TARGET_PSP
+#include "src/psp/display.h"
+#endif
 #include "fox_option.h"
 #include "assets/ast_text.h"
 #include "assets/ast_font_3d.h"
@@ -3510,9 +3514,15 @@ void Option_DrawMenuCard(OptionCardFrame arg0) {
 
 void Option_DrawMenuArwing(ArwingCursorPos arwing) {
     if (sDrawCursor) {
+#ifdef TARGET_PSP
+        Lib_InitPerspectiveAspect(&gMasterDisp, (f32) SCREEN_WIDTH / SCREEN_HEIGHT);
+#endif
         Option_DrawArwing(arwing.x, arwing.y, D_menu_801B91F4, sLeftArwingCursorYrot, 90.0f, D_menu_801B91F8);
         Option_DrawArwing(arwing.x + arwing.range, arwing.y, D_menu_801B91F4, sRightArwingCursorYrot, -90.0f,
                           D_menu_801B91F8);
+#ifdef TARGET_PSP
+        Lib_InitPerspective(&gMasterDisp);
+#endif
     }
 }
 

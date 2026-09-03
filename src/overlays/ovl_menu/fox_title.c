@@ -366,6 +366,9 @@ void Title_Draw(void) {
     case TITLE_SCREEN:
         PSP_TRACE("title draw: screen begin");
 
+#ifdef TARGET_PSP
+        Lib_InitPerspectiveAspect(&gMasterDisp, (f32) SCREEN_WIDTH / SCREEN_HEIGHT);
+#endif
         PSP_TRACE("title draw: matrix push 1");
         PSP_PROFILE_DL_COMPONENT(gMasterDisp++, PSP_PROFILE_COMPONENT_TITLE_COMMON);
         Title_Matrix_Push();
@@ -403,6 +406,9 @@ void Title_Draw(void) {
         Matrix_Pop(&gGfxMatrix);
 
         PSP_PROFILE_DL_COMPONENT(gMasterDisp++, PSP_PROFILE_COMPONENT_UNATTRIBUTED);
+#ifdef TARGET_PSP
+        Lib_InitPerspective(&gMasterDisp);
+#endif
         PSP_TRACE("title draw: screen done");
         break;
 

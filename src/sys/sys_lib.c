@@ -1,5 +1,9 @@
 #include "sys.h"
 
+#ifdef TARGET_PSP
+#include "src/psp/display.h"
+#endif
+
 #if defined(TARGET_PSP) && !defined(PSP_TRACE_ENABLED)
 #define PSP_TRACE_ENABLED 0
 #endif
@@ -158,7 +162,7 @@ void Lib_QuickSort(u8* first, u32 length, u32 size, CompareFunc cFunc) {
     }
 }
 
-void Lib_InitPerspective(Gfx** dList) {
+void Lib_InitPerspectiveAspect(Gfx** dList, f32 aspect) {
     u16 norm;
 #ifdef TARGET_PSP
     Matrix projection;
@@ -166,10 +170,9 @@ void Lib_InitPerspective(Gfx** dList) {
 
     PSP_TRACE("perspective: guPerspective");
 #ifdef TARGET_PSP
-    Psp_GuPerspective(&projection, &norm, gFovY, (f32) SCREEN_WIDTH / SCREEN_HEIGHT, gProjectNear, gProjectFar,
-                      1.0f);
+    Psp_GuPerspective(&projection, &norm, gFovY, aspect, gProjectNear, gProjectFar, 1.0f);
 #else
-    guPerspective(gGfxMtx, &norm, gFovY, (f32) SCREEN_WIDTH / SCREEN_HEIGHT, gProjectNear, gProjectFar, 1.0f);
+    guPerspective(gGfxMtx, &norm, gFovY, aspect, gProjectNear, gProjectFar, 1.0f);
 #endif
     PSP_TRACE("perspective: persp normalize");
     gSPPerspNormalize((*dList)++, norm);
@@ -194,6 +197,14 @@ void Lib_InitPerspective(Gfx** dList) {
     PSP_TRACE("perspective: matrix copy");
     Matrix_Copy(gGfxMatrix, &gIdentityMatrix);
     PSP_TRACE("perspective: done");
+}
+
+void Lib_InitPerspective(Gfx** dList) {
+#ifdef TARGET_PSP
+    Lib_InitPerspectiveAspect(dList, PspDisplay_GetProjectionAspect());
+#else
+    Lib_InitPerspectiveAspect(dList, (f32) SCREEN_WIDTH / SCREEN_HEIGHT);
+#endif
 }
 
 void Lib_InitOrtho(Gfx** dList) {

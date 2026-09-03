@@ -77,6 +77,7 @@ static u32 sReplayCacheDrawCount;
 static u32 sReplayCacheVertexCount;
 static int sReplayCacheCapturing;
 static int sReplayCacheReady;
+static int sUiViewportActive = -1;
 #if PSP_ORIGINAL_FOG
 static int sReplayCacheLastDrawCaptured;
 #endif
@@ -473,6 +474,43 @@ static void psp_gfx_pspgl_load_projection_matrix(const GLfloat* matrix, u32 seri
         sStateCache.projectionIdentity = 0;
         sStateCache.projectionSerial = serial;
     }
+}
+
+static int psp_gfx_pspgl_covers_screen(const PspGfxPspglColorVertex* vertices, u32 count) {
+    float minX = 2.0f;
+    float maxX = -2.0f;
+    float minY = 2.0f;
+    float maxY = -2.0f;
+    u32 i;
+
+    for (i = 0; i < count; i++) {
+        if (vertices[i].x < minX) minX = vertices[i].x;
+        if (vertices[i].x > maxX) maxX = vertices[i].x;
+        if (vertices[i].y < minY) minY = vertices[i].y;
+        if (vertices[i].y > maxY) maxY = vertices[i].y;
+    }
+    return minX <= -0.99f && maxX >= 0.99f && minY <= -0.99f && maxY >= 0.99f;
+}
+
+static void psp_gfx_pspgl_select_viewport(int ui) {
+    const n64psp_display_config* display = PspGfx_GetDisplayConfig();
+
+    ui = ui && display->mode == N64PSP_DISPLAY_WIDESCREEN;
+    if (sUiViewportActive == ui) return;
+    if (ui) {
+        glViewport(display->ui_viewport_x, display->ui_viewport_y,
+                   display->ui_viewport_width, display->ui_viewport_height);
+    } else {
+        glViewport(display->viewport_x, display->viewport_y, display->viewport_width, display->viewport_height);
+    }
+    sUiViewportActive = ui;
+}
+
+static int psp_gfx_pspgl_is_ui_draw(const PspGfxPspglColorVertex* vertices, u32 count,
+                                    const float* projection) {
+    if (projection == NULL) return !psp_gfx_pspgl_covers_screen(vertices, count);
+    if (fabsf(projection[15]) > 0.5f) return 1;
+    return projection[0] != 0.0f && fabsf(projection[5] / projection[0]) < 1.5f;
 }
 
 static void psp_gfx_pspgl_capability(GLenum capability, int enabled, int* valid, int* cached) {
@@ -1341,9 +1379,11 @@ static u32 psp_gfx_pspgl_get_converted_texture(const void* pixels, const u16* pa
 }
 
 void PspGfxPspgl_Init(void) {
+    const n64psp_display_config* display = PspGfx_GetDisplayConfig();
+
     PspGfxPspgl_InitColorTransfer();
     psp_gfx_pspgl_invalidate_state_cache();
-    glViewport(0, 0, PspGfx_GetWidth(), PspGfx_GetHeight());
+    glViewport(display->viewport_x, display->viewport_y, display->viewport_width, display->viewport_height);
     glDepthRangeRaw(-163939.984375f, 163939.984375f, 0, 65535);
 
     glDisable(GL_DEPTH_TEST);
@@ -1365,8 +1405,9 @@ void PspGfxPspgl_Init(void) {
 }
 
 void PspGfxPspgl_SetScissor(float ulx, float uly, float lrx, float lry) {
-    float scaleX = (float) PspGfx_GetWidth() / PSP_GFX_PSPGL_N64_WIDTH;
-    float scaleY = (float) PspGfx_GetHeight() / PSP_GFX_PSPGL_N64_HEIGHT;
+    const n64psp_display_config* display = PspGfx_GetDisplayConfig();
+    float scaleX = (float) display->viewport_width / PSP_GFX_PSPGL_N64_WIDTH;
+    float scaleY = (float) display->viewport_height / PSP_GFX_PSPGL_N64_HEIGHT;
     GLint x0;
     GLint y0Top;
     GLint x1;
@@ -1377,11 +1418,12 @@ void PspGfxPspgl_SetScissor(float ulx, float uly, float lrx, float lry) {
     if (lrx > PSP_GFX_PSPGL_N64_WIDTH) lrx = PSP_GFX_PSPGL_N64_WIDTH;
     if (lry > PSP_GFX_PSPGL_N64_HEIGHT) lry = PSP_GFX_PSPGL_N64_HEIGHT;
     if ((lrx <= ulx) || (lry <= uly)) return;
-    x0 = (GLint) (ulx * scaleX);
+    x0 = display->viewport_x + (GLint) (ulx * scaleX);
     y0Top = (GLint) (uly * scaleY);
-    x1 = (GLint) ((lrx * scaleX) + 0.5f);
+    x1 = display->viewport_x + (GLint) ((lrx * scaleX) + 0.5f);
     y1Bottom = (GLint) ((lry * scaleY) + 0.5f);
-    glScissor(x0, PspGfx_GetHeight() - y1Bottom, x1 - x0, y1Bottom - y0Top);
+    glScissor(x0, display->viewport_y + display->viewport_height - y1Bottom,
+              x1 - x0, y1Bottom - y0Top);
     glEnable(GL_SCISSOR_TEST);
 }
 
@@ -1389,8 +1431,44 @@ void PspGfxPspgl_ClearScissor(void) {
     glDisable(GL_SCISSOR_TEST);
 }
 
+static void psp_gfx_pspgl_clear_display_borders(const n64psp_display_config* display) {
+    const GLint x = display->viewport_x;
+    const GLint y = display->viewport_y;
+    const GLint width = display->viewport_width;
+    const GLint height = display->viewport_height;
+    const GLint right = x + width;
+    const GLint top = y + height;
+
+    if (width == display->surface_width && height == display->surface_height) {
+        return;
+    }
+
+    glEnable(GL_SCISSOR_TEST);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    if (x > 0) {
+        glScissor(0, 0, x, display->surface_height);
+        glClear(GL_COLOR_BUFFER_BIT);
+    }
+    if (right < display->surface_width) {
+        glScissor(right, 0, display->surface_width - right, display->surface_height);
+        glClear(GL_COLOR_BUFFER_BIT);
+    }
+    if (y > 0) {
+        glScissor(x, 0, width, y);
+        glClear(GL_COLOR_BUFFER_BIT);
+    }
+    if (top < display->surface_height) {
+        glScissor(x, top, width, display->surface_height - top);
+        glClear(GL_COLOR_BUFFER_BIT);
+    }
+}
+
 void PspGfxPspgl_BeginFrame(void) {
-    glViewport(0, 0, PspGfx_GetWidth(), PspGfx_GetHeight());
+    const n64psp_display_config* display = PspGfx_GetDisplayConfig();
+
+    psp_gfx_pspgl_clear_display_borders(display);
+    glViewport(display->viewport_x, display->viewport_y, display->viewport_width, display->viewport_height);
+    sUiViewportActive = 0;
     PspGfxPspgl_ClearScissor();
 
     glDisable(GL_DEPTH_TEST);
@@ -1408,16 +1486,16 @@ void PspGfxPspgl_BeginFrame(void) {
     glDepthMask(GL_FALSE);
     psp_gfx_pspgl_invalidate_state_cache();
     PspGfxPspgl_DrawSolidRect(0.0f, 0.0f, PSP_GFX_PSPGL_N64_WIDTH, PSP_GFX_PSPGL_SCREEN_MARGIN,
-                              PSP_GFX_PSPGL_BLACK, 0);
+                              PSP_GFX_PSPGL_BLACK, 0, 1);
     PspGfxPspgl_DrawSolidRect(0.0f, PSP_GFX_PSPGL_N64_HEIGHT - PSP_GFX_PSPGL_SCREEN_MARGIN,
-                              PSP_GFX_PSPGL_N64_WIDTH, PSP_GFX_PSPGL_N64_HEIGHT, PSP_GFX_PSPGL_BLACK, 0);
+                              PSP_GFX_PSPGL_N64_WIDTH, PSP_GFX_PSPGL_N64_HEIGHT, PSP_GFX_PSPGL_BLACK, 0, 1);
     PspGfxPspgl_DrawSolidRect(0.0f, PSP_GFX_PSPGL_SCREEN_MARGIN, PSP_GFX_PSPGL_SCREEN_MARGIN,
                               PSP_GFX_PSPGL_N64_HEIGHT - PSP_GFX_PSPGL_SCREEN_MARGIN,
-                              PSP_GFX_PSPGL_BLACK, 0);
+                              PSP_GFX_PSPGL_BLACK, 0, 1);
     PspGfxPspgl_DrawSolidRect(PSP_GFX_PSPGL_N64_WIDTH - PSP_GFX_PSPGL_SCREEN_MARGIN,
                               PSP_GFX_PSPGL_SCREEN_MARGIN, PSP_GFX_PSPGL_N64_WIDTH,
                               PSP_GFX_PSPGL_N64_HEIGHT - PSP_GFX_PSPGL_SCREEN_MARGIN,
-                              PSP_GFX_PSPGL_BLACK, 0);
+                              PSP_GFX_PSPGL_BLACK, 0, 1);
     psp_gfx_pspgl_invalidate_state_cache();
 }
 
@@ -2255,6 +2333,7 @@ static void psp_gfx_pspgl_draw_client_arrays(const PspGfxPspglColorVertex* verti
 
     psp_gfx_pspgl_unmap_small_arena();
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
+
     psp_gfx_pspgl_bind_client_arrays(vertices);
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
     psp_gfx_pspgl_begin_submit_phase(smallDraw, largeDraw);
@@ -2391,7 +2470,7 @@ static void psp_gfx_pspgl_draw_colored(const PspGfxPspglColorVertex* vertices, u
     u32 textureEnvColor, PspGfxPspglTextureWrap wrapS, PspGfxPspglTextureWrap wrapT, int alphaTest,
     int blend, int premultiplied, int depthTest, int depthWrite, int fog, const float* fogColor, float fogStart, float fogEnd,
     const float* projectionMatrix, u32 projectionSerial, int pretransformed, int pointFilter,
-    const PspGfxPspglVertexReservation* reservation
+    const PspGfxPspglVertexReservation* reservation, int uiViewport
 ) {
     GLint glTextureEnv;
     GLint glWrapS;
@@ -2403,6 +2482,10 @@ static void psp_gfx_pspgl_draw_colored(const PspGfxPspglColorVertex* vertices, u
     }
 
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
+
+    psp_gfx_pspgl_select_viewport(uiViewport >= 0
+                                      ? uiViewport
+                                      : psp_gfx_pspgl_is_ui_draw(vertices, vertexCount, projectionMatrix));
 
     if (pretransformed || (projectionMatrix == NULL)) {
         psp_gfx_pspgl_load_projection_identity();
@@ -2527,7 +2610,7 @@ void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u3
     psp_gfx_pspgl_draw_colored(vertices, vertexCount, GL_TRIANGLES, textureId, textureRef, textureEnv,
                                textureEnvColor, wrapS, wrapT, alphaTest, blend, premultiplied, depthTest,
                                depthWrite, fog, fogColor, fogStart, fogEnd, projectionMatrix, projectionSerial,
-                               pretransformed, pointFilter, NULL);
+                               pretransformed, pointFilter, NULL, -1);
 }
 
 void PspGfxPspgl_DrawFogTriangles(const PspGfxPspglFogVertex* vertices, u32 vertexCount,
@@ -2699,22 +2782,24 @@ void PspGfxPspgl_DrawReservedColoredTriangles(const PspGfxPspglVertexReservation
     psp_gfx_pspgl_draw_colored(reservation->vertices, vertexCount, GL_TRIANGLES, textureId, textureRef,
                                textureEnv, textureEnvColor, wrapS, wrapT, alphaTest, blend, premultiplied,
                                depthTest, depthWrite, fog, fogColor, fogStart, fogEnd, projectionMatrix,
-                               projectionSerial, pretransformed, pointFilter, reservation);
+                               projectionSerial, pretransformed, pointFilter, reservation, -1);
 }
 
 void PspGfxPspgl_DrawColoredSprites(const PspGfxPspglColorVertex* vertices, u32 vertexCount,
     u32 textureId, PspGfxPspglTextureRef textureRef, PspGfxPspglTextureEnv textureEnv,
     u32 textureEnvColor, PspGfxPspglTextureWrap wrapS, PspGfxPspglTextureWrap wrapT, int alphaTest,
     int blend, int premultiplied, int depthTest, int depthWrite, int fog, const float* fogColor, float fogStart,
-    float fogEnd, const float* projectionMatrix, u32 projectionSerial, int pretransformed, int pointFilter
+    float fogEnd, const float* projectionMatrix, u32 projectionSerial, int pretransformed, int pointFilter,
+    int uiViewport
 ) {
     psp_gfx_pspgl_draw_colored(vertices, vertexCount, PSP_GFX_PSPGL_GL_SPRITES, textureId, textureRef,
                                textureEnv, textureEnvColor, wrapS, wrapT, alphaTest, blend, premultiplied,
                                depthTest, depthWrite, fog, fogColor, fogStart, fogEnd, projectionMatrix,
-                               projectionSerial, pretransformed, pointFilter, NULL);
+                               projectionSerial, pretransformed, pointFilter, NULL, uiViewport);
 }
 
-void PspGfxPspgl_DrawSolidRect(float ulx, float uly, float lrx, float lry, u32 color, int blend) {
+void PspGfxPspgl_DrawSolidRect(float ulx, float uly, float lrx, float lry, u32 color, int blend,
+                               int fullViewport) {
     PspGfxPspglColorVertex vertices[6];
 
     vertices[0].u = 0.0f;
@@ -2749,6 +2834,9 @@ void PspGfxPspgl_DrawSolidRect(float ulx, float uly, float lrx, float lry, u32 c
     vertices[5].z = 0.0f;
 
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
+    psp_gfx_pspgl_select_viewport(fullViewport
+                                      ? 0
+                                      : !(ulx <= 0.0f && uly <= 0.0f && lrx >= 320.0f && lry >= 240.0f));
     psp_gfx_pspgl_load_projection_identity();
     psp_gfx_pspgl_texture_2d(0);
     psp_gfx_pspgl_alpha_test(0);

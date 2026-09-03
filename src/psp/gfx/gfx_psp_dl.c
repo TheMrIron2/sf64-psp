@@ -1958,7 +1958,7 @@ static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason 
             ctx->batchAlphaTest, ctx->batchBlend, ctx->batchPremultiplied, ctx->batchDepthTest,
             ctx->batchDepthWrite, ctx->batchFog, ctx->batchFogColor, ctx->batchFogStart, ctx->batchFogEnd,
             &ctx->batchProjection[0][0], ctx->batchProjectionSerial, ctx->batchPretransformed,
-            ctx->batchPointFilter);
+            ctx->batchPointFilter, -1);
     } else if (ctx->batchReserved) {
         PspGfxPspgl_DrawReservedColoredTriangles(
             &ctx->batchReservation, ctx->batchCount, ctx->batchTextureId, ctx->batchTextureRef,
@@ -4600,10 +4600,10 @@ static void psp_gfx_dl_handle_fill_rectangle(PspGfxDlContext* ctx, const Gfx* gf
     }
 #endif
     if (primitiveFill && blend && activeBackgroundRect && !sPspGfxDlBackgroundFeedbackPrimed) {
-        PspGfxPspgl_DrawSolidRect(ulx, uly, lrx, lry, sPspGfxDlBackgroundFeedbackSeedColor, 0);
+        PspGfxPspgl_DrawSolidRect(ulx, uly, lrx, lry, sPspGfxDlBackgroundFeedbackSeedColor, 0, 0);
         sPspGfxDlBackgroundFeedbackPrimed = 1;
     }
-    PspGfxPspgl_DrawSolidRect(ulx, uly, lrx, lry, color, blend);
+    PspGfxPspgl_DrawSolidRect(ulx, uly, lrx, lry, color, blend, 0);
     if (psp_gfx_dl_is_fill_cycle(ctx) && activeBackgroundRect) {
         sPspGfxDlBackgroundFeedbackSeedColor = ctx->fillColor | 0xFF000000u;
         sPspGfxDlBackgroundFeedbackPrimed = 0;

@@ -1,6 +1,9 @@
 #include "sf64math.h"
 #include "fox_hud.h"
 #include "prevent_bss_reordering.h"
+#ifdef TARGET_PSP
+#include "src/psp/display.h"
+#endif
 
 Vec3f D_801616A0;
 Vec3f D_801616B0;
@@ -2586,6 +2589,7 @@ void HUD_RadioDamage_Draw(void) {
     s32 g;
     s32 b;
     s32 alpha;
+    f32 yScale = 1.0f;
 
     if (D_8016178C != 0) {
         alpha = 192 / D_8016178C;
@@ -2598,14 +2602,23 @@ void HUD_RadioDamage_Draw(void) {
     }
 
     if ((D_80161788 != 0) || (D_8016178C != 0)) {
+#ifdef TARGET_PSP
+        Lib_InitPerspectiveAspect(&gMasterDisp, (f32) SCREEN_WIDTH / SCREEN_HEIGHT);
+        if (PspDisplay_GetUiScaleY() > 1.0f) {
+            yScale = 1.025f;
+        }
+#endif
         RCP_SetupDL(&gMasterDisp, SETUPDL_12);
         gDPSetPrimColor(gMasterDisp++, 0, 0, r, g, b, alpha);
         Matrix_Push(&gGfxMatrix);
         Matrix_Translate(gGfxMatrix, -53.9f, -38.5f, -139.4f, MTXF_APPLY);
-        Matrix_Scale(gGfxMatrix, 1.0f, 1.0f, 1.0f, MTXF_APPLY);
+        Matrix_Scale(gGfxMatrix, 1.0f, yScale, 1.0f, MTXF_APPLY);
         Matrix_SetGfxMtx(&gMasterDisp);
         gSPDisplayList(gMasterDisp++, sRadioDamageDL);
         Matrix_Pop(&gGfxMatrix);
+#ifdef TARGET_PSP
+        Lib_InitPerspective(&gMasterDisp);
+#endif
     }
 }
 

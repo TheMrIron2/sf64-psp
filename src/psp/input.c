@@ -1,6 +1,7 @@
 #include <pspctrl.h>
 
 #include "src/psp/gfx/gfx_psp_dl.h"
+#include "src/psp/gfx/gfx_psp.h"
 #include "src/psp/input.h"
 #include "src/psp/hw_counter_profile.h"
 #include "src/psp/profiler.h"
@@ -94,6 +95,7 @@ void PspInput_Init(void) {
 
 int PspInput_Poll(OSContPad* pads) {
     SceCtrlData pad;
+    static u32 previousButtons;
     s32 i;
 
     for (i = 0; i < MAXCONTROLLERS; i++) {
@@ -104,7 +106,17 @@ int PspInput_Poll(OSContPad* pads) {
     }
 
     if (sceCtrlPeekBufferPositive(&pad, 1) > 0) {
-        if (PspGfxDl_TracePollControls(pad.Buttons)) {
+        const u32 displayCombo = PSP_CTRL_SELECT | PSP_CTRL_SQUARE;
+        int displayPressed = ((pad.Buttons & displayCombo) == displayCombo) &&
+                             ((previousButtons & displayCombo) != displayCombo);
+
+        previousButtons = pad.Buttons;
+        if ((pad.Buttons & displayCombo) == displayCombo) {
+            if (displayPressed) {
+                PspGfx_CycleDisplayMode();
+            }
+            pad.Buttons &= ~displayCombo;
+        } else if (PspGfxDl_TracePollControls(pad.Buttons)) {
             pad.Buttons &= ~(PSP_CTRL_SELECT | PSP_CTRL_TRIANGLE);
         } else if (PspHwCounterProfile_PollControls(pad.Buttons)) {
             pad.Buttons &= ~(PSP_CTRL_SELECT | PSP_CTRL_LTRIGGER | PSP_CTRL_RTRIGGER | PSP_CTRL_LEFT |
