@@ -1265,4 +1265,20 @@ Gfx gRcpSetupDLs[][9] = {
                            G_TD_CLAMP | G_TP_PERSP | G_CYC_2CYCLE | G_PM_NPRIMITIVE),
         gsSPEndDisplayList(),
     },
+#ifdef TARGET_PSP
+    {
+        /* SETUPDL_85_POINT */
+        gsDPPipeSync(),
+        gsSPClearGeometryMode(G_ZBUFFER | G_SHADE | G_CULL_BOTH | G_FOG | G_LIGHTING | G_TEXTURE_GEN |
+                              G_TEXTURE_GEN_LINEAR | G_LOD | G_SHADING_SMOOTH),
+        gsSPTexture(0xFFFF, 0xFFFF, 0, G_TX_RENDERTILE, G_ON),
+        gsDPSetCombineMode(G_CC_MODULATEIA_PRIM, G_CC_MODULATEIA_PRIM),
+        gsSPSetGeometryMode(0),
+        gsSPSetOtherMode(G_SETOTHERMODE_L, G_MDSFT_ALPHACOMPARE, 3, G_AC_NONE | G_ZS_PIXEL),
+        gsDPSetRenderMode(G_RM_XLU_SURF, G_RM_XLU_SURF2),
+        gsSPSetOtherModeHi(G_AD_PATTERN | G_CD_MAGICSQ | G_CK_NONE | G_TC_FILT | G_TF_POINT | G_TT_RGBA16 | G_TL_TILE |
+                           G_TD_CLAMP | G_TP_NONE | G_CYC_1CYCLE | G_PM_NPRIMITIVE),
+        gsSPEndDisplayList(),
+    },
+#endif
 };

@@ -17,6 +17,7 @@ static EGLDisplay sDisplay = EGL_NO_DISPLAY;
 static EGLSurface sSurface = EGL_NO_SURFACE;
 static EGLContext sContext = EGL_NO_CONTEXT;
 static int sReady;
+static int sHudScalingEnabled;
 static n64psp_display_config sDisplayConfig;
 
 static void psp_gfx_log_failure(const char* phase) {
@@ -132,6 +133,15 @@ float PspDisplay_GetUiScaleY(void) {
 
 float PspDisplay_UiFromLeft(float x) {
     return n64psp_ui_from_left(&sDisplayConfig, x);
+}
+
+int PspDisplay_IsHudScalingEnabled(void) {
+    return sHudScalingEnabled;
+}
+
+void PspDisplay_ToggleHudScaling(void) {
+    sHudScalingEnabled = !sHudScalingEnabled;
+    PspPlatform_LogLine(sHudScalingEnabled ? "[psp-display] HUD scaling on" : "[psp-display] HUD scaling off");
 }
 
 void PspGfx_CycleDisplayMode(void) {

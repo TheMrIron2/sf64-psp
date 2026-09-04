@@ -1,4 +1,5 @@
 #include "src/psp/gfx/gfx_psp.h"
+#include "src/psp/display.h"
 #include "src/psp/gfx/gfx_pspgl.h"
 #include "src/psp/hw_counter_profile.h"
 #include "src/psp/profiler.h"
@@ -495,19 +496,43 @@ static int psp_gfx_pspgl_covers_screen(const PspGfxPspglColorVertex* vertices, u
 
 static void psp_gfx_pspgl_select_viewport(int ui) {
     const n64psp_display_config* display = PspGfx_GetDisplayConfig();
+    int viewportKey = ui;
 
     if (ui == PSP_GFX_PSPGL_VIEWPORT_WIDE_UI) {
         ui = PSP_GFX_PSPGL_VIEWPORT_FULL;
     }
-    ui = ui && display->mode == N64PSP_DISPLAY_PSP_480X272;
-    if (sUiViewportActive == ui) return;
-    if (ui) {
+    if ((ui == PSP_GFX_PSPGL_VIEWPORT_CENTERED_UI) &&
+        (display->mode != N64PSP_DISPLAY_PSP_480X272)) {
+        ui = PSP_GFX_PSPGL_VIEWPORT_FULL;
+    }
+    if (((ui == PSP_GFX_PSPGL_VIEWPORT_HUD_LEFT) ||
+         (ui == PSP_GFX_PSPGL_VIEWPORT_HUD_RIGHT)) && !PspDisplay_IsHudScalingEnabled()) {
+        viewportKey += 16;
+    }
+    if (sUiViewportActive == viewportKey) return;
+    if (ui == PSP_GFX_PSPGL_VIEWPORT_NATIVE_HUD) {
+        glViewport(((int) display->framebuffer_width - 320) / 2,
+                   ((int) display->framebuffer_height - 240) / 2, 320, 240);
+    } else if ((ui == PSP_GFX_PSPGL_VIEWPORT_HUD_LEFT) ||
+               (ui == PSP_GFX_PSPGL_VIEWPORT_HUD_RIGHT)) {
+        int width = PspDisplay_IsHudScalingEnabled() ? display->ui_viewport_width : 320;
+        int height = PspDisplay_IsHudScalingEnabled() ? display->ui_viewport_height : 240;
+        int x;
+        int y = ((int) display->framebuffer_height - height) / 2;
+
+        if (display->mode == N64PSP_DISPLAY_PSP_480X272) {
+            x = (ui == PSP_GFX_PSPGL_VIEWPORT_HUD_RIGHT) ? display->framebuffer_width - width : 0;
+        } else {
+            x = ((int) display->framebuffer_width - width) / 2;
+        }
+        glViewport(x, y, width, height);
+    } else if (ui == PSP_GFX_PSPGL_VIEWPORT_CENTERED_UI) {
         glViewport(display->ui_viewport_x, display->ui_viewport_y,
                    display->ui_viewport_width, display->ui_viewport_height);
     } else {
         glViewport(display->viewport_x, display->viewport_y, display->viewport_width, display->viewport_height);
     }
-    sUiViewportActive = ui;
+    sUiViewportActive = viewportKey;
 }
 
 void PspGfxPspgl_SetViewportPolicy(int uiViewport) {
@@ -2849,9 +2874,10 @@ void PspGfxPspgl_DrawSolidRect(float ulx, float uly, float lrx, float lry, u32 c
     vertices[5].z = 0.0f;
 
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
-    psp_gfx_pspgl_select_viewport(fullViewport || (sViewportPolicy == 0)
-                                      ? 0
-                                      : !(ulx <= 0.0f && uly <= 0.0f && lrx >= 320.0f && lry >= 240.0f));
+    psp_gfx_pspgl_select_viewport(
+        fullViewport ? PSP_GFX_PSPGL_VIEWPORT_FULL :
+        sViewportPolicy >= 0 ? sViewportPolicy :
+        !(ulx <= 0.0f && uly <= 0.0f && lrx >= 320.0f && lry >= 240.0f));
     psp_gfx_pspgl_load_projection_identity();
     psp_gfx_pspgl_texture_2d(0);
     psp_gfx_pspgl_alpha_test(0);

@@ -2,6 +2,7 @@
 
 #include "src/psp/gfx/gfx_psp_dl.h"
 #include "src/psp/gfx/gfx_psp.h"
+#include "src/psp/display.h"
 #include "src/psp/input.h"
 #include "src/psp/hw_counter_profile.h"
 #include "src/psp/profiler.h"
@@ -107,8 +108,11 @@ int PspInput_Poll(OSContPad* pads) {
 
     if (sceCtrlPeekBufferPositive(&pad, 1) > 0) {
         const u32 displayCombo = PSP_CTRL_SELECT | PSP_CTRL_SQUARE;
+        const u32 hudScaleCombo = PSP_CTRL_SELECT | PSP_CTRL_CROSS;
         int displayPressed = ((pad.Buttons & displayCombo) == displayCombo) &&
                              ((previousButtons & displayCombo) != displayCombo);
+        int hudScalePressed = ((pad.Buttons & hudScaleCombo) == hudScaleCombo) &&
+                              ((previousButtons & hudScaleCombo) != hudScaleCombo);
 
         previousButtons = pad.Buttons;
         if ((pad.Buttons & displayCombo) == displayCombo) {
@@ -116,6 +120,11 @@ int PspInput_Poll(OSContPad* pads) {
                 PspGfx_CycleDisplayMode();
             }
             pad.Buttons &= ~displayCombo;
+        } else if ((pad.Buttons & hudScaleCombo) == hudScaleCombo) {
+            if (hudScalePressed) {
+                PspDisplay_ToggleHudScaling();
+            }
+            pad.Buttons &= ~hudScaleCombo;
         } else if (PspGfxDl_TracePollControls(pad.Buttons)) {
             pad.Buttons &= ~(PSP_CTRL_SELECT | PSP_CTRL_TRIANGLE);
         } else if (PspHwCounterProfile_PollControls(pad.Buttons)) {

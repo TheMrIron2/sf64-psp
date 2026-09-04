@@ -3,6 +3,7 @@
 #include "prevent_bss_reordering.h"
 #ifdef TARGET_PSP
 #include "src/psp/display.h"
+#include "src/psp/renderer.h"
 #endif
 
 Vec3f D_801616A0;
@@ -85,6 +86,30 @@ s32 D_80161900[20];
 #include "assets/ast_star_wolf.h"
 
 void HUD_TeammateStatus_Draw(void);
+
+#ifdef TARGET_PSP
+typedef enum HUDPspAnchor {
+    HUD_PSP_ANCHOR_CENTER,
+    HUD_PSP_ANCHOR_LEFT,
+    HUD_PSP_ANCHOR_RIGHT,
+} HUDPspAnchor;
+
+static void HUD_PspLayoutBegin(HUDPspAnchor anchor) {
+    if (anchor == HUD_PSP_ANCHOR_LEFT) {
+        PSP_RENDERER_DL_VIEWPORT_HUD_LEFT_MARKER(gMasterDisp++);
+    } else if (anchor == HUD_PSP_ANCHOR_RIGHT) {
+        PSP_RENDERER_DL_VIEWPORT_HUD_RIGHT_MARKER(gMasterDisp++);
+    } else if (PspDisplay_IsHudScalingEnabled()) {
+        PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER(gMasterDisp++);
+    } else {
+        PSP_RENDERER_DL_VIEWPORT_NATIVE_HUD_MARKER(gMasterDisp++);
+    }
+}
+
+static void HUD_PspLayoutEnd(void) {
+    PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER(gMasterDisp++);
+}
+#endif
 
 s16 D_hud_800D1970 = 0;
 
@@ -1329,6 +1354,9 @@ void HUD_Bolse_Area6_SaveData(void) {
 void HUD_DrawStatusScreens(void) {
     s32 i;
 
+#ifdef TARGET_PSP
+    HUD_PspLayoutBegin(HUD_PSP_ANCHOR_CENTER);
+#endif
     for (i = 0; i < 5; i++) {
         if (sLevelClearStatusScreenTimers[i] != 0) {
             sLevelClearStatusScreenTimers[i]--;
@@ -1337,6 +1365,9 @@ void HUD_DrawStatusScreens(void) {
     HUD_DrawLevelStartStatusScreen();
     HUD_DrawLevelClearScreen();
     HUD_LevelClearStatusScreen_Draw();
+#ifdef TARGET_PSP
+    HUD_PspLayoutEnd();
+#endif
 }
 
 s32 HUD_PauseScreenInput(void) {
@@ -2227,54 +2258,62 @@ s32 ActorMissileSeek_ModeCheck(ActorMissileSeekMode mode) {
 
 void HUD_RadioCharacterName_Draw(void) {
     if (gGameState == GSTATE_PLAY) {
+        s32 namePosX = 73;
+
+#ifdef TARGET_PSP
+        PSP_RENDERER_DL_VIEWPORT_HUD_LEFT_MARKER(gMasterDisp++);
+#endif
         RCP_SetupDL(&gMasterDisp, SETUPDL_76);
         gDPSetPrimColor(gMasterDisp++, 0, 0, 255, 255, 0, 255);
 
         switch ((s32) gRadioMsgRadioId) {
             case RCID_FOX:
-                Graphics_DisplaySmallText(73, 173, 1.0f, 1.0f, "FOX");
+                Graphics_DisplaySmallText(namePosX, 173, 1.0f, 1.0f, "FOX");
                 break;
 
             case RCID_FALCO:
-                Graphics_DisplaySmallText(73, 173, 1.0f, 1.0f, "FALCO");
+                Graphics_DisplaySmallText(namePosX, 173, 1.0f, 1.0f, "FALCO");
                 break;
 
             case RCID_SLIPPY:
-                Graphics_DisplaySmallText(73, 173, 1.0f, 1.0f, "SLIPPY");
+                Graphics_DisplaySmallText(namePosX, 173, 1.0f, 1.0f, "SLIPPY");
                 break;
 
             case RCID_PEPPY:
-                Graphics_DisplaySmallText(73, 173, 1.0f, 1.0f, "PEPPY");
+                Graphics_DisplaySmallText(namePosX, 173, 1.0f, 1.0f, "PEPPY");
                 break;
 
             case RCID_WOLF:
             case RCID_WOLF_2:
-                Graphics_DisplaySmallText(73, 173, 1.0f, 1.0f, "WOLF");
+                Graphics_DisplaySmallText(namePosX, 173, 1.0f, 1.0f, "WOLF");
                 break;
 
             case RCID_LEON:
             case RCID_LEON_2:
-                Graphics_DisplaySmallText(73, 173, 1.0f, 1.0f, "LEON");
+                Graphics_DisplaySmallText(namePosX, 173, 1.0f, 1.0f, "LEON");
                 break;
 
             case RCID_PIGMA:
             case RCID_PIGMA_2:
-                Graphics_DisplaySmallText(73, 173, 1.0f, 1.0f, "PIGMA");
+                Graphics_DisplaySmallText(namePosX, 173, 1.0f, 1.0f, "PIGMA");
                 break;
 
             case RCID_ANDREW:
             case RCID_ANDREW_2:
-                Graphics_DisplaySmallText(73, 173, 1.0f, 1.0f, "ANDREW");
+                Graphics_DisplaySmallText(namePosX, 173, 1.0f, 1.0f, "ANDREW");
                 break;
 
             case RCID_BILL:
-                Graphics_DisplaySmallText(73, 173, 1.0f, 1.0f, "BILL");
+                Graphics_DisplaySmallText(namePosX, 173, 1.0f, 1.0f, "BILL");
                 break;
 
             case RCID_KATT:
-                Graphics_DisplaySmallText(73, 173, 1.0f, 1.0f, "KATT");
+                Graphics_DisplaySmallText(namePosX, 173, 1.0f, 1.0f, "KATT");
                 break;
         }
+#ifdef TARGET_PSP
+        PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER(gMasterDisp++);
+#endif
     }
 }
 
@@ -2603,8 +2642,9 @@ void HUD_RadioDamage_Draw(void) {
 
     if ((D_80161788 != 0) || (D_8016178C != 0)) {
 #ifdef TARGET_PSP
+        HUD_PspLayoutBegin(HUD_PSP_ANCHOR_LEFT);
         Lib_InitPerspectiveAspect(&gMasterDisp, (f32) SCREEN_WIDTH / SCREEN_HEIGHT);
-        if (PspDisplay_GetUiScaleY() > 1.0f) {
+        if (PspDisplay_IsHudScalingEnabled() && (PspDisplay_GetUiScaleY() > 1.0f)) {
             yScale = 1.025f;
         }
 #endif
@@ -2618,6 +2658,7 @@ void HUD_RadioDamage_Draw(void) {
         Matrix_Pop(&gGfxMatrix);
 #ifdef TARGET_PSP
         Lib_InitPerspective(&gMasterDisp);
+        HUD_PspLayoutEnd();
 #endif
     }
 }
@@ -3131,6 +3172,9 @@ void HUD_DrawBossHealth(void) {
     f32 var_fv0;
 
     if ((gShowBossHealth == 1) && (gTeamShields[TEAM_ID_SLIPPY] > 0)) {
+#ifdef TARGET_PSP
+        HUD_PspLayoutBegin(HUD_PSP_ANCHOR_LEFT);
+#endif
         if ((gBossHealthBar >= 0) && (D_801616BC == -1.0f)) {
             AUDIO_PLAY_SFX(NA_SE_BOSS_GAUGE_OPEN, gDefaultSfxSource, 4);
             D_801616BC = 255.0f;
@@ -3186,6 +3230,9 @@ void HUD_DrawBossHealth(void) {
                 Lib_TextureRect_RGBA16(&gMasterDisp, D_Tex_800D99F8, 32, 32, temp6, temp7, 0.2f, D_801616C8);
             }
         }
+#ifdef TARGET_PSP
+        HUD_PspLayoutEnd();
+#endif
     } else {
         D_801616C0 = 0.0f;
         D_801616C4 = 0.0f;
@@ -3251,7 +3298,13 @@ void HUD_DrawCountdown(s32* countdown, f32 scale) {
     }
 
     if (gPlayState != PLAY_PAUSE) {
+#ifdef TARGET_PSP
+        HUD_PspLayoutBegin(HUD_PSP_ANCHOR_CENTER);
+#endif
         HUD_DisplayCountdown(176.0f, 22.0f, countdown, scale);
+#ifdef TARGET_PSP
+        HUD_PspLayoutEnd();
+#endif
     }
 }
 
@@ -3577,6 +3630,9 @@ void HUD_VS_Radar(void) {
 }
 
 void HUD_SinglePlayer(void) {
+#ifdef TARGET_PSP
+    HUD_PspLayoutBegin(HUD_PSP_ANCHOR_RIGHT);
+#endif
     if (gPlayState != PLAY_PAUSE) {
         HUD_Radar();
     }
@@ -3587,17 +3643,40 @@ void HUD_SinglePlayer(void) {
         HUD_BombCounter_Draw(250.0f, 38.0f);
     }
 
+#ifdef TARGET_PSP
+    HUD_PspLayoutEnd();
+    HUD_PspLayoutBegin(HUD_PSP_ANCHOR_CENTER);
+#endif
     HUD_IncomingMsg();
+#ifdef TARGET_PSP
+    HUD_PspLayoutEnd();
+#endif
 
     if (D_hud_80161708 != 0) {
+#ifdef TARGET_PSP
+        HUD_PspLayoutBegin(HUD_PSP_ANCHOR_LEFT);
+#endif
         HUD_Shield_GoldRings_Score(24.0f, 30.0f);
+#ifdef TARGET_PSP
+        HUD_PspLayoutEnd();
+        HUD_PspLayoutBegin(HUD_PSP_ANCHOR_RIGHT);
+#endif
         if (gCurrentLevel != LEVEL_TRAINING) {
             HUD_LivesCount2_Draw(248.0f, 11.0f, gLifeCount[gPlayerNum]);
         }
+#ifdef TARGET_PSP
+        HUD_PspLayoutEnd();
+#endif
     }
 
     if (gCurrentLevel == LEVEL_TRAINING) {
+#ifdef TARGET_PSP
+        HUD_PspLayoutBegin(HUD_PSP_ANCHOR_RIGHT);
+#endif
         Training_RingPassCount_Draw();
+#ifdef TARGET_PSP
+        HUD_PspLayoutEnd();
+#endif
     }
 }
 
@@ -3707,12 +3786,24 @@ void HUD_Draw(void) {
     }
 
     if (gCamCount != 1) {
+#ifdef TARGET_PSP
+        HUD_PspLayoutBegin(HUD_PSP_ANCHOR_CENTER);
+#endif
         HUD_VS_Radar();
+#ifdef TARGET_PSP
+        HUD_PspLayoutEnd();
+#endif
     } else {
         HUD_SinglePlayer();
     }
     HUD_RadioDamage();
+#ifdef TARGET_PSP
+    HUD_PspLayoutBegin(HUD_PSP_ANCHOR_CENTER);
+#endif
     HUD_PauseScreen_Update();
+#ifdef TARGET_PSP
+    HUD_PspLayoutEnd();
+#endif
 }
 
 void FoBase_Draw(Boss* this) {

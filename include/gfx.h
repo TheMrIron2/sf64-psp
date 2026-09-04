@@ -301,7 +301,12 @@ typedef enum SetupDL {
     /* 0x55 */ SETUPDL_85,
     /* 0x56 */ SETUPDL_86,
     /* 0x57 */ SETUPDL_87,
+#ifdef TARGET_PSP
+    /* 0x58 */ SETUPDL_85_POINT,
+    /* 0x59 */ SETUPDL_MAX
+#else
     /* 0x58 */ SETUPDL_MAX
+#endif
 } SetupDL;
 
 extern Gfx gRcpSetupDLs[SETUPDL_MAX][9]; // 0x800D31B0
