@@ -130,6 +130,10 @@ float PspDisplay_GetUiScaleY(void) {
     return (float) sDisplayConfig.ui_viewport_height / (float) sDisplayConfig.logical_height;
 }
 
+float PspDisplay_UiFromLeft(float x) {
+    return n64psp_ui_from_left(&sDisplayConfig, x);
+}
+
 void PspGfx_CycleDisplayMode(void) {
     n64psp_display_mode mode =
         (n64psp_display_mode)((sDisplayConfig.mode + 1) % N64PSP_DISPLAY_PSP_MODE_COUNT);

@@ -3,6 +3,7 @@
 #include "buffers.h"
 #include "macros.h"
 #include "sf64thread.h"
+#include "src/psp/gfx/gfx_psp.h"
 #include "src/psp/gfx/gfx_pspgl.h"
 #include "src/psp/hw_counter_profile.h"
 #include "src/psp/platform.h"
@@ -433,6 +434,7 @@ typedef struct {
     float fogDepthMax;
     int batchPretransformed;
     int batchTransformSet;
+    int wideUiViewport;
     u32 otherModeL;
     u32 otherModeH;
     u8 fogR;
@@ -4371,17 +4373,27 @@ static void psp_gfx_dl_emit_rect_vertex(PspGfxDlContext* ctx,
 
     dst->color = psp_gfx_dl_pack_rgba_u8(r, g, b, a, ctx->batchPremultiplied);
 
-    dst->x = (x / 160.0f) - 1.0f;
+    if (ctx->wideUiViewport) {
+        const n64psp_display_config* display = PspGfx_GetDisplayConfig();
+
+        dst->x = ((x + display->side_extension) * 2.0f / display->logical_width) - 1.0f;
+    } else {
+        dst->x = (x / 160.0f) - 1.0f;
+    }
     dst->y = 1.0f - (y / 120.0f);
     dst->z = 0.0f;
 }
 
 static void psp_gfx_dl_handle_texture_rectangle(PspGfxDlContext* ctx, const Gfx* cmd, const Gfx* half1,
                                                 const Gfx* half2, int flip) {
-    float x0 = (float) ((cmd->words.w1 >> 12) & 0xFFF) * 0.25f;
-    float y0 = (float) (cmd->words.w1 & 0xFFF) * 0.25f;
-    float x1 = (float) ((cmd->words.w0 >> 12) & 0xFFF) * 0.25f;
-    float y1 = (float) (cmd->words.w0 & 0xFFF) * 0.25f;
+    s32 x0Raw = (s32) ((cmd->words.w1 >> 12) & 0xFFF);
+    s32 y0Raw = (s32) (cmd->words.w1 & 0xFFF);
+    s32 x1Raw = (s32) ((cmd->words.w0 >> 12) & 0xFFF);
+    s32 y1Raw = (s32) (cmd->words.w0 & 0xFFF);
+    float x0;
+    float y0;
+    float x1;
+    float y1;
     float s0 = (float) (s16) (half1->words.w1 >> 16) / 32.0f;
     float t0 = (float) (s16) (half1->words.w1 & 0xFFFF) / 32.0f;
     float dsdx = (float) (s16) (half2->words.w1 >> 16) / 1024.0f;
@@ -4389,6 +4401,15 @@ static void psp_gfx_dl_handle_texture_rectangle(PspGfxDlContext* ctx, const Gfx*
     float s1;
     float t1;
     int sprites;
+
+    if (ctx->wideUiViewport) {
+        if ((x0Raw & 0x800) != 0) x0Raw -= 0x1000;
+        if ((x1Raw & 0x800) != 0) x1Raw -= 0x1000;
+    }
+    x0 = (float) x0Raw * 0.25f;
+    y0 = (float) y0Raw * 0.25f;
+    x1 = (float) x1Raw * 0.25f;
+    y1 = (float) y1Raw * 0.25f;
 
     if (ctx->textureId == 0) {
         psp_gfx_dl_prepare_texture(ctx, 1, psp_gfx_dl_premultiplied_blend_enabled(ctx));
@@ -5508,12 +5529,20 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
             }
             if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_VIEWPORT_FULL) {
                 psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
-                PspGfxPspgl_SetViewportPolicy(0);
+                ctx->wideUiViewport = 0;
+                PspGfxPspgl_SetViewportPolicy(PSP_GFX_PSPGL_VIEWPORT_FULL);
                 continue;
             }
             if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_VIEWPORT_AUTO) {
                 psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
-                PspGfxPspgl_SetViewportPolicy(-1);
+                ctx->wideUiViewport = 0;
+                PspGfxPspgl_SetViewportPolicy(PSP_GFX_PSPGL_VIEWPORT_AUTO);
+                continue;
+            }
+            if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_VIEWPORT_WIDE_UI) {
+                psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+                ctx->wideUiViewport = 1;
+                PspGfxPspgl_SetViewportPolicy(PSP_GFX_PSPGL_VIEWPORT_WIDE_UI);
                 continue;
             }
         }

@@ -496,6 +496,9 @@ static int psp_gfx_pspgl_covers_screen(const PspGfxPspglColorVertex* vertices, u
 static void psp_gfx_pspgl_select_viewport(int ui) {
     const n64psp_display_config* display = PspGfx_GetDisplayConfig();
 
+    if (ui == PSP_GFX_PSPGL_VIEWPORT_WIDE_UI) {
+        ui = PSP_GFX_PSPGL_VIEWPORT_FULL;
+    }
     ui = ui && display->mode == N64PSP_DISPLAY_PSP_480X272;
     if (sUiViewportActive == ui) return;
     if (ui) {

@@ -1,6 +1,11 @@
 #ifndef PSP_GFX_PSPGL_H
 #define PSP_GFX_PSPGL_H
 
+#define PSP_GFX_PSPGL_VIEWPORT_AUTO (-1)
+#define PSP_GFX_PSPGL_VIEWPORT_FULL 0
+#define PSP_GFX_PSPGL_VIEWPORT_CENTERED_UI 1
+#define PSP_GFX_PSPGL_VIEWPORT_WIDE_UI 2
+
 #include "PR/ultratypes.h"
 
 #include <stddef.h>

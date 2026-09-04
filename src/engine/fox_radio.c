@@ -18,6 +18,10 @@
 #include "assets/ast_area_6.h"
 #include "assets/ast_title.h"
 #include "assets/ast_zoness.h"
+#ifdef TARGET_PSP
+#include "src/psp/display.h"
+#include "src/psp/renderer.h"
+#endif
 
 u16** gRadioMsgList;
 s32 gRadioMsgListIndex;
@@ -164,6 +168,7 @@ void Radio_Portrait_Draw(void) {
     f32 sp38;
     f32 temp_fa0;
     s32 j;
+    f32 portraitPosX;
 
     sRadioUseRedBox = false;
 
@@ -421,6 +426,11 @@ void Radio_Portrait_Draw(void) {
     }
 
     if ((radioPortraitTex != NULL) && (gRadioPortraitScaleY != 0.0f)) {
+        portraitPosX = gRadioPortraitPosX;
+#ifdef TARGET_PSP
+        portraitPosX = PspDisplay_UiFromLeft(portraitPosX);
+        PSP_RENDERER_DL_VIEWPORT_WIDE_UI_MARKER(gMasterDisp++);
+#endif
         temp_fa0 = (2.0f * gRadioPortraitScaleY) + gRadioPortraitPosY;
         if ((gRadioPortraitPosY + 20.0f) <= temp_fa0) {
             sRadioPortraitScaleNeg = 1.0f;
@@ -434,23 +444,26 @@ void Radio_Portrait_Draw(void) {
 
         if (mirror) {
             for (i = 0, j = 0; i < 2; i++, j += 44 * 20) {
-                Lib_TextureRect_RGBA16_MirX(&gMasterDisp, &radioPortraitTex[j], 44, 20, gRadioPortraitPosX,
+                Lib_TextureRect_RGBA16_MirX(&gMasterDisp, &radioPortraitTex[j], 44, 20, portraitPosX,
                                             gRadioPortraitPosY + 20.0f + sp38 + (i * 20.0f * gRadioPortraitScaleY),
                                             1.0f, gRadioPortraitScaleY);
             }
-            Lib_TextureRect_RGBA16_MirX(&gMasterDisp, &radioPortraitTex[44 * 20 * 2], 44, 4, gRadioPortraitPosX,
+            Lib_TextureRect_RGBA16_MirX(&gMasterDisp, &radioPortraitTex[44 * 20 * 2], 44, 4, portraitPosX,
                                         gRadioPortraitPosY + 20.0f + sp38 + (40.0f * gRadioPortraitScaleY), 1.0f,
                                         gRadioPortraitScaleY);
         } else {
             for (i = 0, j = 0; i < 2; i++, j += 44 * 20) {
-                Lib_TextureRect_RGBA16(&gMasterDisp, &radioPortraitTex[j], 44, 20, gRadioPortraitPosX,
+                Lib_TextureRect_RGBA16(&gMasterDisp, &radioPortraitTex[j], 44, 20, portraitPosX,
                                        gRadioPortraitPosY + 20.0f + sp38 + (i * 20.0f * gRadioPortraitScaleY), 1.0f,
                                        gRadioPortraitScaleY);
             }
-            Lib_TextureRect_RGBA16(&gMasterDisp, &radioPortraitTex[44 * 20 * 2], 44, 4, gRadioPortraitPosX,
+            Lib_TextureRect_RGBA16(&gMasterDisp, &radioPortraitTex[44 * 20 * 2], 44, 4, portraitPosX,
                                    gRadioPortraitPosY + 20.0f + sp38 + (40.0f * gRadioPortraitScaleY), 1.0f,
                                    gRadioPortraitScaleY);
         }
+#ifdef TARGET_PSP
+        PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER(gMasterDisp++);
+#endif
     }
 }
 
@@ -460,6 +473,19 @@ void Radio_TextBox_Draw(void) {
     u8* texture;
     u16* palette;
     f32 sp30;
+    f32 textBoxPosX = gRadioTextBoxPosX;
+    s32 printPosX = gRadioPrintPosX;
+
+#ifdef TARGET_PSP
+    s32 useWideUi = (((gGameState != GSTATE_MAP) && (gRadioTextBoxScaleY != 0.0f)) ||
+                      (gRadioTextBoxScaleY == 1.3f));
+
+    textBoxPosX = PspDisplay_UiFromLeft(textBoxPosX);
+    printPosX = (s32) PspDisplay_UiFromLeft((f32) printPosX);
+    if (useWideUi) {
+        PSP_RENDERER_DL_VIEWPORT_WIDE_UI_MARKER(gMasterDisp++);
+    }
+#endif
 
     if ((gGameState != GSTATE_MAP) && (gRadioTextBoxScaleY != 0.0f)) {
         temp_fa0 = (gRadioTextBoxScaleY / 0.26f) * 3.0f;
@@ -493,15 +519,20 @@ void Radio_TextBox_Draw(void) {
             gDPSetPrimColor(gMasterDisp++, 0x00, 0x00, 60, 60, 255, 170);
         }
 
-        Lib_TextureRect_CI8(&gMasterDisp, texture, palette, 32, 32, gRadioTextBoxPosX, gRadioTextBoxPosY + 16.0f + sp30,
+        Lib_TextureRect_CI8(&gMasterDisp, texture, palette, 32, 32, textBoxPosX, gRadioTextBoxPosY + 16.0f + sp30,
                             gRadioTextBoxScaleX, gRadioTextBoxScaleY);
     }
 
     if (gRadioTextBoxScaleY == 1.3f) {
         RCP_SetupDL(&gMasterDisp, SETUPDL_85);
         gMsgCharIsPrinting =
-            Message_DisplayText(&gMasterDisp, gRadioMsg, gRadioPrintPosX, gRadioPrintPosY, gRadioMsgCharIndex);
+            Message_DisplayText(&gMasterDisp, gRadioMsg, printPosX, gRadioPrintPosY, gRadioMsgCharIndex);
     }
+#ifdef TARGET_PSP
+    if (useWideUi) {
+        PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER(gMasterDisp++);
+    }
+#endif
 }
 
 s32 D_radio_80178748; // set to 1, never used
