@@ -496,7 +496,7 @@ static int psp_gfx_pspgl_covers_screen(const PspGfxPspglColorVertex* vertices, u
 static void psp_gfx_pspgl_select_viewport(int ui) {
     const n64psp_display_config* display = PspGfx_GetDisplayConfig();
 
-    ui = ui && display->mode == N64PSP_DISPLAY_WIDESCREEN;
+    ui = ui && display->mode == N64PSP_DISPLAY_PSP_480X272;
     if (sUiViewportActive == ui) return;
     if (ui) {
         glViewport(display->ui_viewport_x, display->ui_viewport_y,
@@ -1444,26 +1444,26 @@ static void psp_gfx_pspgl_clear_display_borders(const n64psp_display_config* dis
     const GLint right = x + width;
     const GLint top = y + height;
 
-    if (width == display->surface_width && height == display->surface_height) {
+    if (width == display->framebuffer_width && height == display->framebuffer_height) {
         return;
     }
 
     glEnable(GL_SCISSOR_TEST);
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     if (x > 0) {
-        glScissor(0, 0, x, display->surface_height);
+        glScissor(0, 0, x, display->framebuffer_height);
         glClear(GL_COLOR_BUFFER_BIT);
     }
-    if (right < display->surface_width) {
-        glScissor(right, 0, display->surface_width - right, display->surface_height);
+    if (right < display->framebuffer_width) {
+        glScissor(right, 0, display->framebuffer_width - right, display->framebuffer_height);
         glClear(GL_COLOR_BUFFER_BIT);
     }
     if (y > 0) {
         glScissor(x, 0, width, y);
         glClear(GL_COLOR_BUFFER_BIT);
     }
-    if (top < display->surface_height) {
-        glScissor(x, top, width, display->surface_height - top);
+    if (top < display->framebuffer_height) {
+        glScissor(x, top, width, display->framebuffer_height - top);
         glClear(GL_COLOR_BUFFER_BIT);
     }
 }

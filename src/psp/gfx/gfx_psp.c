@@ -40,8 +40,7 @@ int PspGfx_Init(void) {
     if (sReady) {
         return 1;
     }
-    if (!n64psp_display_configure(&sDisplayConfig, N64PSP_DISPLAY_WIDESCREEN, 320, 240,
-                                  PSP_GFX_WIDTH, PSP_GFX_HEIGHT)) {
+    if (!n64psp_display_configure(&sDisplayConfig, N64PSP_DISPLAY_PSP_480X272)) {
         return 0;
     }
 
@@ -120,11 +119,11 @@ const n64psp_display_config* PspGfx_GetDisplayConfig(void) {
 }
 
 float PspDisplay_GetProjectionAspect(void) {
-    return sDisplayConfig.projection_aspect;
+    return sDisplayConfig.display_aspect;
 }
 
 int PspDisplay_IsWidescreen(void) {
-    return sDisplayConfig.mode == N64PSP_DISPLAY_WIDESCREEN;
+    return sDisplayConfig.mode == N64PSP_DISPLAY_PSP_480X272;
 }
 
 float PspDisplay_GetUiScaleY(void) {
@@ -132,13 +131,14 @@ float PspDisplay_GetUiScaleY(void) {
 }
 
 void PspGfx_CycleDisplayMode(void) {
-    n64psp_display_mode mode = (n64psp_display_mode)((sDisplayConfig.mode + 1) % N64PSP_DISPLAY_MODE_COUNT);
+    n64psp_display_mode mode =
+        (n64psp_display_mode)((sDisplayConfig.mode + 1) % N64PSP_DISPLAY_PSP_MODE_COUNT);
 
-    if (n64psp_display_configure(&sDisplayConfig, mode, 320, 240, PSP_GFX_WIDTH, PSP_GFX_HEIGHT)) {
-        if (mode == N64PSP_DISPLAY_ORIGINAL) {
+    if (n64psp_display_configure(&sDisplayConfig, mode)) {
+        if (mode == N64PSP_DISPLAY_PSP_320X240) {
             PspPlatform_LogLine("[psp-display] original 320x240");
-        } else if (mode == N64PSP_DISPLAY_4_3) {
-            PspPlatform_LogLine("[psp-display] 4:3 360x270");
+        } else if (mode == N64PSP_DISPLAY_PSP_362X272) {
+            PspPlatform_LogLine("[psp-display] 4:3 362x272");
         } else {
             PspPlatform_LogLine("[psp-display] widescreen 480x272");
         }
