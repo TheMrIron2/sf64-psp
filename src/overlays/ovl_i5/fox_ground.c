@@ -1,6 +1,10 @@
 #include "global.h"
 #include "assets/ast_titania.h"
 #include "prevent_bss_reordering.h"
+#ifdef TARGET_PSP
+#include "src/psp/display.h"
+#include "src/psp/renderer.h"
+#endif
 
 void Ground_801B5244(s32 arg0, s32 arg1);
 void Ground_801B5FE0(s32 arg0, s32 arg1, s32 arg2);
@@ -301,22 +305,33 @@ void Ground_801B5244(s32 arg0, s32 arg1) {
     s32 sp5C = arg1;
     Vtx* v0;
     Vtx* v1;
+#ifdef TARGET_PSP
+    bool regularWideGrid = PspDisplay_IsWidescreen();
+#endif
 
     for (sp6C = 0; sp6C < 27; sp6C++) {
         for (ia2 = 0; ia2 < 16; ia2++) {
             v0 = &D_i5_801BE748[sp60][ia2][0];
             v1 = &D_i5_801BE748[sp60][ia2][1];
 
-            if (ia2 != 0) {
-                v0->n.ob[0] = (D_i5_801C2448[sp5C] * ((ia2 * 220.0f) - 1760.0f));
-            } else {
-                v0->n.ob[0] = -4000;
-            }
+#ifdef TARGET_PSP
+            if (regularWideGrid) {
+                v0->n.ob[0] = D_i5_801C2448[sp5C] * ((ia2 * 220.0f) - 1760.0f);
+                v1->n.ob[0] = D_i5_801C2448[(sp5C + 1) % 28] * ((ia2 * 220.0f) - 1760.0f);
+            } else
+#endif
+            {
+                if (ia2 != 0) {
+                    v0->n.ob[0] = (D_i5_801C2448[sp5C] * ((ia2 * 220.0f) - 1760.0f));
+                } else {
+                    v0->n.ob[0] = -4000;
+                }
 
-            if (ia2 != 15) {
-                v1->n.ob[0] = (D_i5_801C2448[(sp5C + 1) % 28] * ((ia2 * 220.0f) - 1760.0f));
-            } else {
-                v0[1].n.ob[0] = 4000;
+                if (ia2 != 15) {
+                    v1->n.ob[0] = (D_i5_801C2448[(sp5C + 1) % 28] * ((ia2 * 220.0f) - 1760.0f));
+                } else {
+                    v0[1].n.ob[0] = 4000;
+                }
             }
 
             v0 = &D_i5_801BE748[sp60][ia2][0];
@@ -364,6 +379,15 @@ void Ground_801B58AC(Gfx** dList, f32 arg1) {
     s32 i;
     Vtx* temp_t1;
     Vtx* temp_v0;
+#ifdef TARGET_PSP
+    bool regularWideGrid = PspDisplay_IsWidescreen();
+#endif
+
+#ifdef TARGET_PSP
+    if (regularWideGrid) {
+        PSP_RENDERER_DL_VIEWPORT_FULL_MARKER((*dList)++);
+    }
+#endif
 
     RCP_SetupDL(dList, 0x1D);
     RCP_SetFog(dList, gFogRed, gFogGreen, gFogBlue, gFogAlpha, gFogNear, gFogFar);
@@ -375,9 +399,27 @@ void Ground_801B58AC(Gfx** dList, f32 arg1) {
                      G_TX_NOMIRROR | G_TX_WRAP, 5, 5, G_TX_NOLOD, G_TX_NOLOD);
         gDPLoadTileTexture((*dList)++, aTiGroundTex1, G_IM_FMT_RGBA, G_IM_SIZ_16b, 32, 32);
         gSPMatrix((*dList)++, &gIdentityMtx, G_MTX_PUSH | G_MTX_MUL | G_MTX_MODELVIEW);
+#ifdef TARGET_PSP
+        if (regularWideGrid) {
+            gSPMatrix((*dList)++, &gIdentityMtx, G_MTX_PUSH | G_MTX_MUL | G_MTX_MODELVIEW);
+        }
+#endif
         Matrix_Translate(gGfxMatrix, D_i5_801C62D8.x, D_i5_801C62D8.y, D_i5_801C62D8.z + D_i5_801C5C10, MTXF_NEW);
         Matrix_SetGfxMtxFlags(dList, G_MTX_NOPUSH | G_MTX_MUL | G_MTX_MODELVIEW);
         gSPDisplayList((*dList)++, D_i5_801BA950);
+#ifdef TARGET_PSP
+        if (regularWideGrid) {
+            gSPPopMatrix((*dList)++, G_MTX_MODELVIEW);
+            for (i = -1; i <= 1; i += 2) {
+                gSPMatrix((*dList)++, &gIdentityMtx, G_MTX_PUSH | G_MTX_MUL | G_MTX_MODELVIEW);
+                Matrix_Translate(gGfxMatrix, D_i5_801C62D8.x + (i * 6820.0f), D_i5_801C62D8.y,
+                                 D_i5_801C62D8.z + D_i5_801C5C10, MTXF_NEW);
+                Matrix_SetGfxMtxFlags(dList, G_MTX_NOPUSH | G_MTX_MUL | G_MTX_MODELVIEW);
+                gSPDisplayList((*dList)++, D_i5_801BA950);
+                gSPPopMatrix((*dList)++, G_MTX_MODELVIEW);
+            }
+        }
+#endif
         gSPPopMatrix((*dList)++, G_MTX_MODELVIEW);
         Ground_801B4AA8(NULL, &spC4);
     }
@@ -395,19 +437,29 @@ void Ground_801B58AC(Gfx** dList, f32 arg1) {
             for (i = 0; i < 16; i++) {
                 temp_v0 = &D_i5_801BE748[D_i5_801C5C04][i][0];
                 temp_t1 = &D_i5_801BE748[D_i5_801C5C04][i][1];
-                if ((i != 0) && (i != 15)) {
+#ifdef TARGET_PSP
+                if (regularWideGrid) {
                     temp_v0->v.ob[0] = D_i5_801C2448[D_i5_801C5C08] * ((i * 220.0f) - 1760.0f);
-                } else if (i == 0) {
-                    temp_v0->v.ob[0] = -4000;
-                } else { // i == 15
-                    temp_v0->v.ob[0] = 4000;
-                }
-                if ((i != 0) && (i != 15)) {
-                    temp_t1->v.ob[0] = D_i5_801C2448[(D_i5_801C5C08 + 1) % 28] * ((i * 220.0f) - 1760.0f);
-                } else if (i == 0) {
-                    temp_t1->v.ob[0] = -4000;
-                } else { // i == 15
-                    temp_t1->v.ob[0] = 4000;
+                    temp_t1->v.ob[0] =
+                        D_i5_801C2448[(D_i5_801C5C08 + 1) % 28] * ((i * 220.0f) - 1760.0f);
+                } else
+#endif
+                {
+                    if ((i != 0) && (i != 15)) {
+                        temp_v0->v.ob[0] = D_i5_801C2448[D_i5_801C5C08] * ((i * 220.0f) - 1760.0f);
+                    } else if (i == 0) {
+                        temp_v0->v.ob[0] = -4000;
+                    } else { // i == 15
+                        temp_v0->v.ob[0] = 4000;
+                    }
+                    if ((i != 0) && (i != 15)) {
+                        temp_t1->v.ob[0] =
+                            D_i5_801C2448[(D_i5_801C5C08 + 1) % 28] * ((i * 220.0f) - 1760.0f);
+                    } else if (i == 0) {
+                        temp_t1->v.ob[0] = -4000;
+                    } else { // i == 15
+                        temp_t1->v.ob[0] = 4000;
+                    }
                 }
                 temp_v0->v.ob[1] = D_i5_801C1D48[D_i5_801C5C08][i];
                 temp_t1->v.ob[1] = D_i5_801C1D48[(D_i5_801C5C08 + 1) % 28][i];
@@ -440,6 +492,11 @@ void Ground_801B58AC(Gfx** dList, f32 arg1) {
     }
 
     D_i5_801C5C14 = spC4;
+#ifdef TARGET_PSP
+    if (regularWideGrid) {
+        PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER((*dList)++);
+    }
+#endif
 }
 
 void Ground_801B5FE0(s32 arg0, s32 arg1, s32 arg2) {
@@ -560,10 +617,19 @@ void Ground_801B68A8(Gfx** dlist, s32 arg1, s32 arg2) {
     s32 i;
     s32 j;
     s32 var;
+#ifdef TARGET_PSP
+    s32 tile;
+    bool widescreen = PspDisplay_IsWidescreen();
+#endif
 
     gDPSetupTile((*dlist)++, G_IM_FMT_RGBA, G_IM_SIZ_16b, 32, 32, 0, 0, G_TX_MIRROR | G_TX_WRAP,
                  G_TX_MIRROR | G_TX_WRAP, 5, 5, G_TX_NOLOD, G_TX_NOLOD);
     gDPLoadTileTexture((*dlist)++, aTiGroundTex1, G_IM_FMT_RGBA, G_IM_SIZ_16b, 32, 32);
+#ifdef TARGET_PSP
+    if (widescreen) {
+        gSPMatrix((*dlist)++, &gIdentityMtx, G_MTX_PUSH | G_MTX_MUL | G_MTX_MODELVIEW);
+    }
+#endif
     Matrix_Translate(gGfxMatrix, D_i5_801C62D8.x, D_i5_801C62D8.y, D_i5_801C62D8.z + D_i5_801C5C10, MTXF_NEW);
     Matrix_SetGfxMtxFlags(dlist, G_MTX_NOPUSH | G_MTX_MUL | G_MTX_MODELVIEW);
 
@@ -573,6 +639,32 @@ void Ground_801B68A8(Gfx** dlist, s32 arg1, s32 arg2) {
         gSPDisplayList((*dlist)++, &D_i5_801C2528[j]);
         j = (j + 26) % 27;
     }
+#ifdef TARGET_PSP
+    if (widescreen) {
+        gSPPopMatrix((*dlist)++, G_MTX_MODELVIEW);
+        gSPClearGeometryMode((*dlist)++, G_CULL_BACK);
+        for (tile = -2; tile <= 2; tile++) {
+            if (tile == 0) {
+                continue;
+            }
+            gSPMatrix((*dlist)++, &gIdentityMtx, G_MTX_PUSH | G_MTX_MUL | G_MTX_MODELVIEW);
+            Matrix_Translate(gGfxMatrix,
+                             D_i5_801C62D8.x + (tile * 3300.0f) - (((tile % 2) != 0) ? 220.0f : 0.0f),
+                             D_i5_801C62D8.y, D_i5_801C62D8.z + D_i5_801C5C10, MTXF_NEW);
+            if ((tile % 2) != 0) {
+                Matrix_Scale(gGfxMatrix, -1.0f, 1.0f, 1.0f, MTXF_APPLY);
+            }
+            Matrix_SetGfxMtxFlags(dlist, G_MTX_NOPUSH | G_MTX_MUL | G_MTX_MODELVIEW);
+            j = (arg1 + 25) % 27;
+            for (i = 26; i >= var; i--) {
+                gSPDisplayList((*dlist)++, &D_i5_801C2528[j]);
+                j = (j + 26) % 27;
+            }
+            gSPPopMatrix((*dlist)++, G_MTX_MODELVIEW);
+        }
+        gSPSetGeometryMode((*dlist)++, G_CULL_BACK);
+    }
+#endif
 }
 
 bool Ground_801B6AEC(f32 arg0, f32 arg1, f32 arg2) {

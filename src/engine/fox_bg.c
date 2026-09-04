@@ -282,6 +282,9 @@ void Background_DrawBackdrop(void) {
     s32 i;
     u8 levelType;
     s32 levelId;
+#ifdef TARGET_PSP
+    s32 wideSpaceBackdrop;
+#endif
 
     if (gDrawBackdrop == 0) {
         return;
@@ -295,6 +298,10 @@ void Background_DrawBackdrop(void) {
         levelType = LEVELTYPE_SPACE;
     }
     levelId = gCurrentLevel;
+#ifdef TARGET_PSP
+    wideSpaceBackdrop = ((levelId == LEVEL_SECTOR_Z) || (levelId == LEVEL_BOLSE)) &&
+                        PspDisplay_IsWidescreen();
+#endif
 
     Matrix_Push(&gGfxMatrix);
 
@@ -322,10 +329,22 @@ void Background_DrawBackdrop(void) {
                         Matrix_Translate(gGfxMatrix, 0.0f, -2500.0f, 0, MTXF_APPLY);
                     }
 #ifdef TARGET_PSP
-                    if (PspDisplay_IsWidescreen() && gCurrentLevel == LEVEL_FORTUNA) {
-                        Matrix_Translate(gGfxMatrix, -7280.0f, 0.0f, 0.0f, MTXF_APPLY);
+                    if (PspDisplay_IsWidescreen() &&
+                        ((gCurrentLevel == LEVEL_FORTUNA) || (gCurrentLevel == LEVEL_KATINA))) {
+                        Matrix_Translate(gGfxMatrix, -14560.0f, 0.0f, 0.0f, MTXF_APPLY);
                         Matrix_SetGfxMtx(&gMasterDisp);
-                        gSPDisplayList(gMasterDisp++, aFoBackdropDL);
+                        if (gCurrentLevel == LEVEL_FORTUNA) {
+                            gSPDisplayList(gMasterDisp++, aFoBackdropDL);
+                        } else {
+                            gSPDisplayList(gMasterDisp++, aKaBackdropDL);
+                        }
+                        Matrix_Translate(gGfxMatrix, 7280.0f, 0.0f, 0.0f, MTXF_APPLY);
+                        Matrix_SetGfxMtx(&gMasterDisp);
+                        if (gCurrentLevel == LEVEL_FORTUNA) {
+                            gSPDisplayList(gMasterDisp++, aFoBackdropDL);
+                        } else {
+                            gSPDisplayList(gMasterDisp++, aKaBackdropDL);
+                        }
                         Matrix_Translate(gGfxMatrix, 7280.0f, 0.0f, 0.0f, MTXF_APPLY);
                     }
 #endif
@@ -375,10 +394,22 @@ void Background_DrawBackdrop(void) {
                             break;
                     }
 #ifdef TARGET_PSP
-                    if (PspDisplay_IsWidescreen() && gCurrentLevel == LEVEL_FORTUNA) {
+                    if (PspDisplay_IsWidescreen() &&
+                        ((gCurrentLevel == LEVEL_FORTUNA) || (gCurrentLevel == LEVEL_KATINA))) {
                         Matrix_Translate(gGfxMatrix, 7280.0f, 0.0f, 0.0f, MTXF_APPLY);
                         Matrix_SetGfxMtx(&gMasterDisp);
-                        gSPDisplayList(gMasterDisp++, aFoBackdropDL);
+                        if (gCurrentLevel == LEVEL_FORTUNA) {
+                            gSPDisplayList(gMasterDisp++, aFoBackdropDL);
+                        } else {
+                            gSPDisplayList(gMasterDisp++, aKaBackdropDL);
+                        }
+                        Matrix_Translate(gGfxMatrix, 7280.0f, 0.0f, 0.0f, MTXF_APPLY);
+                        Matrix_SetGfxMtx(&gMasterDisp);
+                        if (gCurrentLevel == LEVEL_FORTUNA) {
+                            gSPDisplayList(gMasterDisp++, aFoBackdropDL);
+                        } else {
+                            gSPDisplayList(gMasterDisp++, aKaBackdropDL);
+                        }
                     }
 #endif
                     break;
@@ -608,7 +639,12 @@ void Background_DrawBackdrop(void) {
                 Matrix_Push(&gGfxMatrix);
                 sp12C = Math_RadToDeg(gPlayer[0].camYaw);
                 sp130 = Math_RadToDeg(gPlayer[0].camPitch);
-                if (((sp12C < 45.0f) || (sp12C > 315.0f)) && ((sp130 < 40.0f) || (sp130 > 325.0f))) {
+                if ((((sp12C < 45.0f) || (sp12C > 315.0f))
+#ifdef TARGET_PSP
+                     || (wideSpaceBackdrop && ((sp12C < 70.0f) || (sp12C > 290.0f)))
+#endif
+                     ) &&
+                    ((sp130 < 40.0f) || (sp130 > 325.0f))) {
                     RCP_SetupDL_36();
                     bgXpos = gStarfieldX; /* Range: 0 - 320.0f */
                     bgYpos = gStarfieldY;
@@ -640,7 +676,17 @@ void Background_DrawBackdrop(void) {
                         bgYpos = Math_ModF(bgYpos, SCREEN_HEIGHT + (60.0f * 2));
                     }
 
+#ifdef TARGET_PSP
+                    if (wideSpaceBackdrop) {
+                        bgXpos2 = (sp12C > 180.0f) ? (sp12C - 360.0f) : sp12C;
+                        bgXpos = 120.0f - (bgXpos2 * (16.0f / 3.0f)) + gStarfieldScrollX;
+                    }
+#endif
+#ifdef TARGET_PSP
+                    if (!wideSpaceBackdrop && (sp12C < 180.0f) && (bgXpos > 380.0f)) {
+#else
                     if ((sp12C < 180.0f) && (bgXpos > 380.0f)) {
+#endif
                         bgXpos = -(480.0f - bgXpos);
                     }
                     if ((sp130 > 180.0f) && (bgYpos > 280.0f)) {
@@ -948,6 +994,40 @@ void Background_DrawLensFlare(void) {
 void Background_dummy_80040CDC(void) {
 }
 
+#ifdef TARGET_PSP
+static void Background_DrawWideGroundSides(Gfx* dList, f32 offset, f32 y, f32 z, f32 scaleX, f32 scaleZ) {
+    s32 side;
+
+    for (side = -1; side <= 1; side += 2) {
+        Matrix_Push(&gGfxMatrix);
+        Matrix_Translate(gGfxMatrix, offset * side, y, z, MTXF_APPLY);
+        Matrix_Scale(gGfxMatrix, scaleX, 1.0f, scaleZ, MTXF_APPLY);
+        Matrix_SetGfxMtx(&gMasterDisp);
+        gSPDisplayList(gMasterDisp++, dList);
+        Matrix_Pop(&gGfxMatrix);
+    }
+}
+
+static void Background_DrawWideZonessWater(Gfx* dList) {
+    s32 x;
+    s32 z;
+
+    gSPClearGeometryMode(gMasterDisp++, G_CULL_BACK);
+    for (z = 0; z >= -1; z--) {
+        for (x = -1; x <= 1; x++) {
+            Matrix_Push(&gGfxMatrix);
+            Matrix_Translate(gGfxMatrix, x * 4800.0f, 0.0f, -1500.0f + (z * 4800.0f), MTXF_APPLY);
+            Matrix_Scale(gGfxMatrix, (x == 0) ? 3.0f : -3.0f, 2.0f, (z == 0) ? 3.0f : -3.0f,
+                         MTXF_APPLY);
+            Matrix_SetGfxMtx(&gMasterDisp);
+            gSPDisplayList(gMasterDisp++, dList);
+            Matrix_Pop(&gGfxMatrix);
+        }
+    }
+    gSPSetGeometryMode(gMasterDisp++, G_CULL_BACK);
+}
+#endif
+
 void Background_DrawGround(void) {
     f32 zPos;
     s32 i;
@@ -955,6 +1035,9 @@ void Background_DrawGround(void) {
     u32 yScroll;
     u16* groundTex;
     Gfx* groundDL;
+#ifdef TARGET_PSP
+    bool widescreen;
+#endif
 
     if ((gCurrentLevel != LEVEL_VENOM_2) && ((gPlayer[0].cam.eye.y > 4000.0f) || !gDrawGround)) {
         return;
@@ -963,6 +1046,9 @@ void Background_DrawGround(void) {
         Bolse_DrawDynamicGround();
         return;
     }
+#ifdef TARGET_PSP
+    widescreen = PspDisplay_IsWidescreen();
+#endif
 
     zPos = 0.0f;
     if ((gGroundType != GROUND_10) && (gGroundType != GROUND_11)) {
@@ -1027,6 +1113,11 @@ void Background_DrawGround(void) {
     }
 
     Matrix_SetGfxMtx(&gMasterDisp);
+#ifdef TARGET_PSP
+    if (widescreen) {
+        PSP_RENDERER_DL_VIEWPORT_FULL_MARKER(gMasterDisp++);
+    }
+#endif
 
     switch (gCurrentLevel) {
         case LEVEL_CORNERIA:
@@ -1062,11 +1153,6 @@ void Background_DrawGround(void) {
                         gBgColor = 0x190F; // 24, 32, 56
                         break;
                 }
-#ifdef TARGET_PSP
-                if (gGroundSurface == SURFACE_WATER) {
-                    PSP_RENDERER_DL_VIEWPORT_FULL_MARKER(gMasterDisp++);
-                }
-#endif
                 Matrix_Push(&gGfxMatrix);
                 Matrix_Translate(gGfxMatrix, 0.0f, 0.0f, -3000.0f, MTXF_APPLY);
                 Matrix_Scale(gGfxMatrix, 1.0f, 1.0f, 0.5f, MTXF_APPLY);
@@ -1075,7 +1161,7 @@ void Background_DrawGround(void) {
                 Matrix_Pop(&gGfxMatrix);
 
 #ifdef TARGET_PSP
-                if (PspDisplay_IsWidescreen() && (gGroundSurface == SURFACE_WATER)) {
+                if (widescreen && (gGroundSurface == SURFACE_WATER)) {
                     Matrix_Push(&gGfxMatrix);
                     Matrix_Translate(gGfxMatrix, -8000.0f, 0.0f, -3000.0f, MTXF_APPLY);
                     Matrix_Scale(gGfxMatrix, 1.0f, 1.0f, 0.5f, MTXF_APPLY);
@@ -1100,7 +1186,7 @@ void Background_DrawGround(void) {
                 Matrix_Pop(&gGfxMatrix);
 
 #ifdef TARGET_PSP
-                if (PspDisplay_IsWidescreen() && (gGroundSurface == SURFACE_WATER)) {
+                if (widescreen && (gGroundSurface == SURFACE_WATER)) {
                     Matrix_Push(&gGfxMatrix);
                     Matrix_Translate(gGfxMatrix, -8000.0f, 0.0f, 3000.0f, MTXF_APPLY);
                     Matrix_Scale(gGfxMatrix, 1.0f, 1.0f, 0.5f, MTXF_APPLY);
@@ -1114,11 +1200,6 @@ void Background_DrawGround(void) {
                     Matrix_SetGfxMtx(&gMasterDisp);
                     gSPDisplayList(gMasterDisp++, aCoGroundOnRailsDL);
                     Matrix_Pop(&gGfxMatrix);
-                }
-#endif
-#ifdef TARGET_PSP
-                if (gGroundSurface == SURFACE_WATER) {
-                    PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER(gMasterDisp++);
                 }
 #endif
             } else {
@@ -1164,12 +1245,22 @@ void Background_DrawGround(void) {
             Matrix_SetGfxMtx(&gMasterDisp);
             gSPDisplayList(gMasterDisp++, groundDL);
             Matrix_Pop(&gGfxMatrix);
+#ifdef TARGET_PSP
+            if (widescreen) {
+                Background_DrawWideGroundSides(groundDL, 8000.0f, 0.0f, -3000.0f, 1.0f, 0.5f);
+            }
+#endif
             Matrix_Push(&gGfxMatrix);
             Matrix_Translate(gGfxMatrix, 0.0f, 0.0f, 3000.0f, MTXF_APPLY);
             Matrix_Scale(gGfxMatrix, 1.0f, 1.0f, 0.5f, MTXF_APPLY);
             Matrix_SetGfxMtx(&gMasterDisp);
             gSPDisplayList(gMasterDisp++, groundDL);
             Matrix_Pop(&gGfxMatrix);
+#ifdef TARGET_PSP
+            if (widescreen) {
+                Background_DrawWideGroundSides(groundDL, 8000.0f, 0.0f, 3000.0f, 1.0f, 0.5f);
+            }
+#endif
             break;
 
         case LEVEL_TRAINING:
@@ -1226,12 +1317,22 @@ void Background_DrawGround(void) {
                 Matrix_SetGfxMtx(&gMasterDisp);
                 gSPDisplayList(gMasterDisp++, groundDL);
                 Matrix_Pop(&gGfxMatrix);
+#ifdef TARGET_PSP
+                if (widescreen) {
+                    Background_DrawWideGroundSides(groundDL, 8000.0f, 0.0f, -3000.0f, 1.0f, 0.5f);
+                }
+#endif
                 Matrix_Push(&gGfxMatrix);
                 Matrix_Translate(gGfxMatrix, 0.0f, 0.0f, 3000.0f, MTXF_APPLY);
                 Matrix_Scale(gGfxMatrix, 1.0f, 1.0f, 0.5f, MTXF_APPLY);
                 Matrix_SetGfxMtx(&gMasterDisp);
                 gSPDisplayList(gMasterDisp++, groundDL);
                 Matrix_Pop(&gGfxMatrix);
+#ifdef TARGET_PSP
+                if (widescreen) {
+                    Background_DrawWideGroundSides(groundDL, 8000.0f, 0.0f, 3000.0f, 1.0f, 0.5f);
+                }
+#endif
             }
 
             // Surface water
@@ -1261,16 +1362,42 @@ void Background_DrawGround(void) {
                     gDPSetPrimColor(gMasterDisp++, 0x00, 0x00, 255, 255, 255, (s32) gAquasSurfaceAlpha);
                 }
 
+#ifdef TARGET_PSP
+                if (widescreen) {
+                    Matrix_Push(&gGfxMatrix);
+                    Matrix_Translate(gGfxMatrix, 0.0f, gSurfaceWaterYPos, -9000.0f, MTXF_APPLY);
+                    Matrix_Scale(gGfxMatrix, 2.0f, 1.0f, 0.5f, MTXF_APPLY);
+                    Matrix_SetGfxMtx(&gMasterDisp);
+                    gSPDisplayList(gMasterDisp++, aAqWaterSurfaceDL);
+                    Matrix_Pop(&gGfxMatrix);
+                    Background_DrawWideGroundSides(aAqWaterSurfaceDL, 16000.0f, gSurfaceWaterYPos, -9000.0f,
+                                                   2.0f, 0.5f);
+                }
+#endif
                 Matrix_Push(&gGfxMatrix);
                 Matrix_Translate(gGfxMatrix, 0.0f, gSurfaceWaterYPos, -3000.0f, MTXF_APPLY);
                 Matrix_Scale(gGfxMatrix, 2.0f, 1.0f, 0.5f, MTXF_APPLY);
                 Matrix_SetGfxMtx(&gMasterDisp);
                 gSPDisplayList(gMasterDisp++, aAqWaterSurfaceDL);
                 Matrix_Pop(&gGfxMatrix);
+#ifdef TARGET_PSP
+                if (widescreen) {
+                    Background_DrawWideGroundSides(aAqWaterSurfaceDL, 16000.0f, gSurfaceWaterYPos, -3000.0f, 2.0f,
+                                                   0.5f);
+                }
+#endif
+                Matrix_Push(&gGfxMatrix);
                 Matrix_Translate(gGfxMatrix, 0.0f, gSurfaceWaterYPos, 3000.0f, MTXF_APPLY);
                 Matrix_Scale(gGfxMatrix, 2.0f, 1.0f, 0.5f, MTXF_APPLY);
                 Matrix_SetGfxMtx(&gMasterDisp);
                 gSPDisplayList(gMasterDisp++, aAqWaterSurfaceDL);
+                Matrix_Pop(&gGfxMatrix);
+#ifdef TARGET_PSP
+                if (widescreen) {
+                    Background_DrawWideGroundSides(aAqWaterSurfaceDL, 16000.0f, gSurfaceWaterYPos, 3000.0f, 2.0f,
+                                                   0.5f);
+                }
+#endif
             }
             break;
 
@@ -1335,16 +1462,26 @@ void Background_DrawGround(void) {
 
         case LEVEL_ZONESS:
             RCP_SetupDL_29(gFogRed, gFogGreen, gFogBlue, gFogAlpha, gFogNear, gFogFar);
+            groundDL = (gGameFrameCount % 2) != 0 ? aZoWater1DL : aZoWater2DL;
+#ifdef TARGET_PSP
+            if (widescreen) {
+                Background_DrawWideZonessWater(groundDL);
+                break;
+            }
+#endif
+            Matrix_Push(&gGfxMatrix);
             Matrix_Translate(gGfxMatrix, 0.0f, 0.0f, -1500.0f, MTXF_APPLY);
             Matrix_Scale(gGfxMatrix, 3.0f, 2.0f, 3.0f, MTXF_APPLY);
             Matrix_SetGfxMtx(&gMasterDisp);
-            if ((gGameFrameCount % 2) != 0) {
-                gSPDisplayList(gMasterDisp++, aZoWater1DL);
-            } else {
-                gSPDisplayList(gMasterDisp++, aZoWater2DL);
-            }
+            gSPDisplayList(gMasterDisp++, groundDL);
+            Matrix_Pop(&gGfxMatrix);
             break;
     }
+#ifdef TARGET_PSP
+    if (widescreen) {
+        PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER(gMasterDisp++);
+    }
+#endif
     Matrix_Pop(&gGfxMatrix);
 }
 

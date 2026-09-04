@@ -21,6 +21,9 @@
 #include "assets/ast_versus.h"
 #include "assets/ast_area_6.h"
 #include "assets/ast_zoness.h"
+#ifdef TARGET_PSP
+#include "src/psp/display.h"
+#endif
 
 UNK_TYPE D_800D2F50 = 0; // unused
 s32 sOverheadCam = 0;
@@ -2515,6 +2518,11 @@ void Play_InitLevel(void) {
     u8* ptr;
     s32 i;
     f32* fptr;
+#ifdef TARGET_PSP
+    bool regularZonessGrid;
+
+    regularZonessGrid = (gCurrentLevel == LEVEL_ZONESS) && PspDisplay_IsWidescreen();
+#endif
 
     switch (gCurrentLevel) {
         case LEVEL_TRAINING:
@@ -2621,6 +2629,17 @@ void Play_InitLevel(void) {
             }
 
             for (i = 0; i < 17 * 17; i++, mesh++) {
+#ifdef TARGET_PSP
+                if (regularZonessGrid) {
+                    if ((mesh->v.ob[0] == 1400) || (mesh->v.ob[0] == -1400)) {
+                        mesh->v.ob[0] = (mesh->v.ob[0] > 0) ? 800 : -800;
+                    }
+                    if (mesh->v.ob[2] == -1400) {
+                        mesh->v.ob[2] = -800;
+                    }
+                    continue;
+                }
+#endif
                 if (mesh->v.ob[0] == 800) {
                     mesh->v.ob[0] = 1400;
                 }
@@ -2642,6 +2661,17 @@ void Play_InitLevel(void) {
             }
 
             for (i = 0; i < 17 * 17; i++, mesh++) {
+#ifdef TARGET_PSP
+                if (regularZonessGrid) {
+                    if ((mesh->v.ob[0] == 1400) || (mesh->v.ob[0] == -1400)) {
+                        mesh->v.ob[0] = (mesh->v.ob[0] > 0) ? 800 : -800;
+                    }
+                    if (mesh->v.ob[2] == -1400) {
+                        mesh->v.ob[2] = -800;
+                    }
+                    continue;
+                }
+#endif
                 if (mesh->v.ob[0] == 800) {
                     mesh->v.ob[0] = 1400;
                 }
