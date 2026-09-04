@@ -6,8 +6,11 @@
 #define PSP_GFX_PSPGL_VIEWPORT_CENTERED_UI 1
 #define PSP_GFX_PSPGL_VIEWPORT_WIDE_UI 2
 #define PSP_GFX_PSPGL_VIEWPORT_NATIVE_HUD 3
-#define PSP_GFX_PSPGL_VIEWPORT_HUD_LEFT 4
-#define PSP_GFX_PSPGL_VIEWPORT_HUD_RIGHT 5
+#define PSP_GFX_PSPGL_VIEWPORT_HUD_TOP_LEFT 4
+#define PSP_GFX_PSPGL_VIEWPORT_HUD_TOP_RIGHT 5
+#define PSP_GFX_PSPGL_VIEWPORT_HUD_BOTTOM_LEFT 6
+#define PSP_GFX_PSPGL_VIEWPORT_HUD_BOTTOM_RIGHT 7
+#define PSP_GFX_PSPGL_VIEWPORT_HUD_TOP_CENTER 8
 
 #include "PR/ultratypes.h"
 
@@ -218,6 +221,7 @@ void PspGfxPspgl_DrawColoredSprites(const PspGfxPspglColorVertex* vertices, u32 
 void PspGfxPspgl_DrawSolidRect(float ulx, float uly, float lrx, float lry, u32 color, int blend,
                                int fullViewport);
 void PspGfxPspgl_SetViewportPolicy(int uiViewport);
+void PspGfxPspgl_SetHudAnchor(s16 x, s16 y);
 void PspGfxPspgl_BeginReplayCache(void);
 void PspGfxPspgl_EndReplayCache(void);
 void PspGfxPspgl_ReplayCache(void);

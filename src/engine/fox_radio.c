@@ -27,14 +27,36 @@
 #endif
 
 #ifdef TARGET_PSP
+#define RADIO_PSP_PLAY_ANCHOR_X 26
+#define RADIO_PSP_PLAY_ANCHOR_Y 222
+#define RADIO_PSP_CINEMATIC_ANCHOR_X 32
+#define RADIO_PSP_CINEMATIC_ANCHOR_Y 218
+
 static void Radio_PspUiBegin(s32 squareText) {
-    if (PspDisplay_IsHudScalingEnabled() && squareText) {
+    if (gGameState == GSTATE_MAP) {
+        if (PspDisplay_IsHudScalingEnabled()) {
+            PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER(gMasterDisp++);
+        } else {
+            PSP_RENDERER_DL_VIEWPORT_NATIVE_HUD_MARKER(gMasterDisp++);
+        }
+    } else if (PspDisplay_IsHudScalingEnabled() && squareText) {
         PSP_RENDERER_DL_VIEWPORT_SQUARE_TEXT_UI_MARKER(gMasterDisp++);
     } else if (PspDisplay_IsHudScalingEnabled()) {
         PSP_RENDERER_DL_VIEWPORT_WIDE_UI_MARKER(gMasterDisp++);
     } else {
-        PSP_RENDERER_DL_VIEWPORT_NATIVE_UI_MARKER(gMasterDisp++);
+        PSP_RENDERER_DL_VIEWPORT_HUD_BOTTOM_LEFT_MARKER(gMasterDisp++);
+        if (gGameState == GSTATE_PLAY) {
+            PSP_RENDERER_DL_HUD_ANCHOR_PARAM(gMasterDisp++, RADIO_PSP_PLAY_ANCHOR_X, RADIO_PSP_PLAY_ANCHOR_Y);
+        } else {
+            PSP_RENDERER_DL_HUD_ANCHOR_PARAM(gMasterDisp++, RADIO_PSP_CINEMATIC_ANCHOR_X,
+                                             RADIO_PSP_CINEMATIC_ANCHOR_Y);
+        }
     }
+}
+
+static void Radio_PspGameplayGroupBegin(void) {
+    PSP_RENDERER_DL_VIEWPORT_HUD_BOTTOM_LEFT_MARKER(gMasterDisp++);
+    PSP_RENDERER_DL_HUD_ANCHOR_PARAM(gMasterDisp++, RADIO_PSP_PLAY_ANCHOR_X, RADIO_PSP_PLAY_ANCHOR_Y);
 }
 #endif
 
@@ -443,8 +465,9 @@ void Radio_Portrait_Draw(void) {
     if ((radioPortraitTex != NULL) && (gRadioPortraitScaleY != 0.0f)) {
         portraitPosX = gRadioPortraitPosX;
 #ifdef TARGET_PSP
-        portraitPosX = PspDisplay_UiFromLeft(portraitPosX);
-        Radio_PspUiBegin(false);
+        if (PspDisplay_IsHudScalingEnabled() && (gGameState != GSTATE_MAP)) {
+            portraitPosX = PspDisplay_UiFromLeft(portraitPosX);
+        }
 #endif
         temp_fa0 = (2.0f * gRadioPortraitScaleY) + gRadioPortraitPosY;
         if ((gRadioPortraitPosY + 20.0f) <= temp_fa0) {
@@ -454,6 +477,9 @@ void Radio_Portrait_Draw(void) {
             sRadioPortraitScaleNeg = -1.0f;
         }
         sp38 = gRadioPortraitScaleY * 20.0f * sRadioPortraitScaleNeg;
+#ifdef TARGET_PSP
+        Radio_PspUiBegin(false);
+#endif
         RCP_SetupDL_76();
         gDPSetPrimColor(gMasterDisp++, 0x00, 0x00, 255, 255, 255, 255);
 
@@ -492,13 +518,9 @@ void Radio_TextBox_Draw(void) {
     s32 printPosX = gRadioPrintPosX;
 
 #ifdef TARGET_PSP
-    s32 useWideUi = (((gGameState != GSTATE_MAP) && (gRadioTextBoxScaleY != 0.0f)) ||
-                      (gRadioTextBoxScaleY == 1.3f));
-
-    textBoxPosX = PspDisplay_UiFromLeft(textBoxPosX);
-    printPosX = (s32) PspDisplay_UiFromLeft((f32) printPosX);
-    if (useWideUi) {
-        Radio_PspUiBegin(true);
+    if (PspDisplay_IsHudScalingEnabled() && (gGameState != GSTATE_MAP)) {
+        textBoxPosX = PspDisplay_UiFromLeft(textBoxPosX);
+        printPosX = (s32) PspDisplay_UiFromLeft((f32) printPosX);
     }
 #endif
 
@@ -513,6 +535,9 @@ void Radio_TextBox_Draw(void) {
 
         sp30 = temp_fa0 * D_800D4A78;
 
+#ifdef TARGET_PSP
+        Radio_PspUiBegin(false);
+#endif
         RCP_SetupDL(&gMasterDisp, RADIO_SETUPDL_85);
 
         switch (gGameState) {
@@ -536,18 +561,22 @@ void Radio_TextBox_Draw(void) {
 
         Lib_TextureRect_CI8(&gMasterDisp, texture, palette, 32, 32, textBoxPosX, gRadioTextBoxPosY + 16.0f + sp30,
                             gRadioTextBoxScaleX, gRadioTextBoxScaleY);
+#ifdef TARGET_PSP
+        PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER(gMasterDisp++);
+#endif
     }
 
     if (gRadioTextBoxScaleY == 1.3f) {
+#ifdef TARGET_PSP
+        Radio_PspUiBegin(true);
+#endif
         RCP_SetupDL(&gMasterDisp, RADIO_SETUPDL_85);
         gMsgCharIsPrinting =
             Message_DisplayText(&gMasterDisp, gRadioMsg, printPosX, gRadioPrintPosY, gRadioMsgCharIndex);
-    }
 #ifdef TARGET_PSP
-    if (useWideUi) {
         PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER(gMasterDisp++);
-    }
 #endif
+    }
 }
 
 s32 D_radio_80178748; // set to 1, never used
@@ -748,7 +777,7 @@ void Radio_Draw(void) {
         Radio_TextBox_Draw();
 
 #ifdef TARGET_PSP
-        PSP_RENDERER_DL_VIEWPORT_HUD_LEFT_MARKER(gMasterDisp++);
+        Radio_PspGameplayGroupBegin();
 #endif
         radioCharId = (s32) gRadioMsgRadioId;
 

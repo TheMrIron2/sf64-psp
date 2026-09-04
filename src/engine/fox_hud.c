@@ -90,20 +90,35 @@ void HUD_TeammateStatus_Draw(void);
 #ifdef TARGET_PSP
 typedef enum HUDPspAnchor {
     HUD_PSP_ANCHOR_CENTER,
-    HUD_PSP_ANCHOR_LEFT,
-    HUD_PSP_ANCHOR_RIGHT,
+    HUD_PSP_ANCHOR_TOP_LEFT,
+    HUD_PSP_ANCHOR_TOP_RIGHT,
+    HUD_PSP_ANCHOR_BOTTOM_LEFT,
+    HUD_PSP_ANCHOR_BOTTOM_RIGHT,
+    HUD_PSP_ANCHOR_TOP_CENTER,
 } HUDPspAnchor;
 
-static void HUD_PspLayoutBegin(HUDPspAnchor anchor) {
-    if (anchor == HUD_PSP_ANCHOR_LEFT) {
-        PSP_RENDERER_DL_VIEWPORT_HUD_LEFT_MARKER(gMasterDisp++);
-    } else if (anchor == HUD_PSP_ANCHOR_RIGHT) {
-        PSP_RENDERER_DL_VIEWPORT_HUD_RIGHT_MARKER(gMasterDisp++);
+#define HUD_PSP_RADIO_ANCHOR_X 26
+#define HUD_PSP_RADIO_ANCHOR_Y 222
+
+static void HUD_PspLayoutBegin(HUDPspAnchor anchor, s16 x, s16 y) {
+    if (anchor == HUD_PSP_ANCHOR_TOP_LEFT) {
+        PSP_RENDERER_DL_VIEWPORT_HUD_TOP_LEFT_MARKER(gMasterDisp++);
+    } else if (anchor == HUD_PSP_ANCHOR_TOP_RIGHT) {
+        PSP_RENDERER_DL_VIEWPORT_HUD_TOP_RIGHT_MARKER(gMasterDisp++);
+    } else if (anchor == HUD_PSP_ANCHOR_BOTTOM_LEFT) {
+        PSP_RENDERER_DL_VIEWPORT_HUD_BOTTOM_LEFT_MARKER(gMasterDisp++);
+    } else if (anchor == HUD_PSP_ANCHOR_BOTTOM_RIGHT) {
+        PSP_RENDERER_DL_VIEWPORT_HUD_BOTTOM_RIGHT_MARKER(gMasterDisp++);
+    } else if (anchor == HUD_PSP_ANCHOR_TOP_CENTER) {
+        PSP_RENDERER_DL_VIEWPORT_HUD_TOP_CENTER_MARKER(gMasterDisp++);
     } else if (PspDisplay_IsHudScalingEnabled()) {
         PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER(gMasterDisp++);
+        return;
     } else {
         PSP_RENDERER_DL_VIEWPORT_NATIVE_HUD_MARKER(gMasterDisp++);
+        return;
     }
+    PSP_RENDERER_DL_HUD_ANCHOR_PARAM(gMasterDisp++, x, y);
 }
 
 static void HUD_PspLayoutEnd(void) {
@@ -211,6 +226,9 @@ void HUD_TeamDownWrench_Draw(s32 arg0) {
         { -191.0f, -129.0f, -600.0f },
     };
 
+#ifdef TARGET_PSP
+    Lib_InitPerspectiveAspect(&gMasterDisp, (f32) SCREEN_WIDTH / SCREEN_HEIGHT);
+#endif
     RCP_SetupDL(&gMasterDisp, SETUPDL_36);
 
     if (arg0 == 0) {
@@ -242,6 +260,9 @@ void HUD_TeamDownWrench_Draw(s32 arg0) {
         gSPDisplayList(gMasterDisp++, aDownWrenchDL);
         Matrix_Pop(&gGfxMatrix);
     }
+#ifdef TARGET_PSP
+    Lib_InitPerspective(&gMasterDisp);
+#endif
 }
 
 void TextureRect_CI8_2(Gfx** gfxP, u8* texture, u16* palette, u32 tWidth, u32 tHeight, f32 xPos, f32 yPos, f32 xScale,
@@ -1355,7 +1376,7 @@ void HUD_DrawStatusScreens(void) {
     s32 i;
 
 #ifdef TARGET_PSP
-    HUD_PspLayoutBegin(HUD_PSP_ANCHOR_CENTER);
+    HUD_PspLayoutBegin(HUD_PSP_ANCHOR_CENTER, 160, 120);
 #endif
     for (i = 0; i < 5; i++) {
         if (sLevelClearStatusScreenTimers[i] != 0) {
@@ -2261,7 +2282,8 @@ void HUD_RadioCharacterName_Draw(void) {
         s32 namePosX = 73;
 
 #ifdef TARGET_PSP
-        PSP_RENDERER_DL_VIEWPORT_HUD_LEFT_MARKER(gMasterDisp++);
+        PSP_RENDERER_DL_VIEWPORT_HUD_BOTTOM_LEFT_MARKER(gMasterDisp++);
+        PSP_RENDERER_DL_HUD_ANCHOR_PARAM(gMasterDisp++, HUD_PSP_RADIO_ANCHOR_X, HUD_PSP_RADIO_ANCHOR_Y);
 #endif
         RCP_SetupDL(&gMasterDisp, SETUPDL_76);
         gDPSetPrimColor(gMasterDisp++, 0, 0, 255, 255, 0, 255);
@@ -2642,7 +2664,7 @@ void HUD_RadioDamage_Draw(void) {
 
     if ((D_80161788 != 0) || (D_8016178C != 0)) {
 #ifdef TARGET_PSP
-        HUD_PspLayoutBegin(HUD_PSP_ANCHOR_LEFT);
+        HUD_PspLayoutBegin(HUD_PSP_ANCHOR_BOTTOM_LEFT, HUD_PSP_RADIO_ANCHOR_X, HUD_PSP_RADIO_ANCHOR_Y);
         Lib_InitPerspectiveAspect(&gMasterDisp, (f32) SCREEN_WIDTH / SCREEN_HEIGHT);
         if (PspDisplay_IsHudScalingEnabled() && (PspDisplay_GetUiScaleY() > 1.0f)) {
             yScale = 1.025f;
@@ -3173,7 +3195,7 @@ void HUD_DrawBossHealth(void) {
 
     if ((gShowBossHealth == 1) && (gTeamShields[TEAM_ID_SLIPPY] > 0)) {
 #ifdef TARGET_PSP
-        HUD_PspLayoutBegin(HUD_PSP_ANCHOR_LEFT);
+        HUD_PspLayoutBegin(HUD_PSP_ANCHOR_TOP_LEFT, 25, 52);
 #endif
         if ((gBossHealthBar >= 0) && (D_801616BC == -1.0f)) {
             AUDIO_PLAY_SFX(NA_SE_BOSS_GAUGE_OPEN, gDefaultSfxSource, 4);
@@ -3299,7 +3321,7 @@ void HUD_DrawCountdown(s32* countdown, f32 scale) {
 
     if (gPlayState != PLAY_PAUSE) {
 #ifdef TARGET_PSP
-        HUD_PspLayoutBegin(HUD_PSP_ANCHOR_CENTER);
+        HUD_PspLayoutBegin(HUD_PSP_ANCHOR_TOP_CENTER, 176, 22);
 #endif
         HUD_DisplayCountdown(176.0f, 22.0f, countdown, scale);
 #ifdef TARGET_PSP
@@ -3631,11 +3653,16 @@ void HUD_VS_Radar(void) {
 
 void HUD_SinglePlayer(void) {
 #ifdef TARGET_PSP
-    HUD_PspLayoutBegin(HUD_PSP_ANCHOR_RIGHT);
+    HUD_PspLayoutBegin(HUD_PSP_ANCHOR_BOTTOM_RIGHT, 304, 220);
 #endif
     if (gPlayState != PLAY_PAUSE) {
         HUD_Radar();
     }
+
+#ifdef TARGET_PSP
+    HUD_PspLayoutEnd();
+    HUD_PspLayoutBegin(HUD_PSP_ANCHOR_TOP_RIGHT, 294, 28);
+#endif
 
     RCP_SetupDL_36();
     if ((gLevelMode != LEVELMODE_TURRET) && (D_hud_80161708 != 0)) {
@@ -3645,7 +3672,7 @@ void HUD_SinglePlayer(void) {
 
 #ifdef TARGET_PSP
     HUD_PspLayoutEnd();
-    HUD_PspLayoutBegin(HUD_PSP_ANCHOR_CENTER);
+    HUD_PspLayoutBegin(HUD_PSP_ANCHOR_TOP_CENTER, 160, 18);
 #endif
     HUD_IncomingMsg();
 #ifdef TARGET_PSP
@@ -3654,12 +3681,12 @@ void HUD_SinglePlayer(void) {
 
     if (D_hud_80161708 != 0) {
 #ifdef TARGET_PSP
-        HUD_PspLayoutBegin(HUD_PSP_ANCHOR_LEFT);
+        HUD_PspLayoutBegin(HUD_PSP_ANCHOR_TOP_LEFT, 20, 18);
 #endif
         HUD_Shield_GoldRings_Score(24.0f, 30.0f);
 #ifdef TARGET_PSP
         HUD_PspLayoutEnd();
-        HUD_PspLayoutBegin(HUD_PSP_ANCHOR_RIGHT);
+        HUD_PspLayoutBegin(HUD_PSP_ANCHOR_TOP_RIGHT, 288, 11);
 #endif
         if (gCurrentLevel != LEVEL_TRAINING) {
             HUD_LivesCount2_Draw(248.0f, 11.0f, gLifeCount[gPlayerNum]);
@@ -3671,7 +3698,7 @@ void HUD_SinglePlayer(void) {
 
     if (gCurrentLevel == LEVEL_TRAINING) {
 #ifdef TARGET_PSP
-        HUD_PspLayoutBegin(HUD_PSP_ANCHOR_RIGHT);
+        HUD_PspLayoutBegin(HUD_PSP_ANCHOR_TOP_RIGHT, 320, 0);
 #endif
         Training_RingPassCount_Draw();
 #ifdef TARGET_PSP
@@ -3787,7 +3814,7 @@ void HUD_Draw(void) {
 
     if (gCamCount != 1) {
 #ifdef TARGET_PSP
-        HUD_PspLayoutBegin(HUD_PSP_ANCHOR_CENTER);
+        HUD_PspLayoutBegin(HUD_PSP_ANCHOR_CENTER, 160, 120);
 #endif
         HUD_VS_Radar();
 #ifdef TARGET_PSP
@@ -3798,7 +3825,7 @@ void HUD_Draw(void) {
     }
     HUD_RadioDamage();
 #ifdef TARGET_PSP
-    HUD_PspLayoutBegin(HUD_PSP_ANCHOR_CENTER);
+    HUD_PspLayoutBegin(HUD_PSP_ANCHOR_CENTER, 160, 120);
 #endif
     HUD_PauseScreen_Update();
 #ifdef TARGET_PSP
