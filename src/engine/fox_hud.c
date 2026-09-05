@@ -111,7 +111,7 @@ static void HUD_PspLayoutBegin(HUDPspAnchor anchor, s16 x, s16 y) {
         PSP_RENDERER_DL_VIEWPORT_HUD_BOTTOM_RIGHT_MARKER(gMasterDisp++);
     } else if (anchor == HUD_PSP_ANCHOR_TOP_CENTER) {
         PSP_RENDERER_DL_VIEWPORT_HUD_TOP_CENTER_MARKER(gMasterDisp++);
-    } else if (PspDisplay_IsHudScalingEnabled()) {
+    } else if (PspDisplay_IsUiScalingEnabled()) {
         PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER(gMasterDisp++);
         return;
     } else {
@@ -2666,7 +2666,7 @@ void HUD_RadioDamage_Draw(void) {
 #ifdef TARGET_PSP
         HUD_PspLayoutBegin(HUD_PSP_ANCHOR_BOTTOM_LEFT, HUD_PSP_RADIO_ANCHOR_X, HUD_PSP_RADIO_ANCHOR_Y);
         Lib_InitPerspectiveAspect(&gMasterDisp, (f32) SCREEN_WIDTH / SCREEN_HEIGHT);
-        if (PspDisplay_IsHudScalingEnabled() && (PspDisplay_GetUiScaleY() > 1.0f)) {
+        if (PspDisplay_IsUiScalingEnabled() && (PspDisplay_GetUiScaleY() > 1.0f)) {
             yScale = 1.025f;
         }
 #endif

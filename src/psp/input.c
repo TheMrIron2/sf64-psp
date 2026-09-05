@@ -108,11 +108,11 @@ int PspInput_Poll(OSContPad* pads) {
 
     if (sceCtrlPeekBufferPositive(&pad, 1) > 0) {
         const u32 displayCombo = PSP_CTRL_SELECT | PSP_CTRL_SQUARE;
-        const u32 hudScaleCombo = PSP_CTRL_SELECT | PSP_CTRL_CROSS;
+        const u32 uiScaleCombo = PSP_CTRL_SELECT | PSP_CTRL_CROSS;
         int displayPressed = ((pad.Buttons & displayCombo) == displayCombo) &&
                              ((previousButtons & displayCombo) != displayCombo);
-        int hudScalePressed = ((pad.Buttons & hudScaleCombo) == hudScaleCombo) &&
-                              ((previousButtons & hudScaleCombo) != hudScaleCombo);
+        int uiScalePressed = ((pad.Buttons & uiScaleCombo) == uiScaleCombo) &&
+                             ((previousButtons & uiScaleCombo) != uiScaleCombo);
 
         previousButtons = pad.Buttons;
         if ((pad.Buttons & displayCombo) == displayCombo) {
@@ -120,11 +120,11 @@ int PspInput_Poll(OSContPad* pads) {
                 PspGfx_CycleDisplayMode();
             }
             pad.Buttons &= ~displayCombo;
-        } else if ((pad.Buttons & hudScaleCombo) == hudScaleCombo) {
-            if (hudScalePressed) {
-                PspDisplay_ToggleHudScaling();
+        } else if ((pad.Buttons & uiScaleCombo) == uiScaleCombo) {
+            if (uiScalePressed) {
+                PspDisplay_ToggleUiScaling();
             }
-            pad.Buttons &= ~hudScaleCombo;
+            pad.Buttons &= ~uiScaleCombo;
         } else if (PspGfxDl_TracePollControls(pad.Buttons)) {
             pad.Buttons &= ~(PSP_CTRL_SELECT | PSP_CTRL_TRIANGLE);
         } else if (PspHwCounterProfile_PollControls(pad.Buttons)) {

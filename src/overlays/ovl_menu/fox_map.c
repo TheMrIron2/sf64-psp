@@ -15,7 +15,10 @@
 #include "assets/ast_map.h"
 #include "assets/ast_text.h"
 #include "assets/ast_font_3d.h"
+#ifdef TARGET_PSP
+#include "src/psp/display.h"
 #include "src/psp/renderer.h"
+#endif
 
 #ifndef PSP_RENDERER_DIAGNOSTICS
 #define PSP_RENDERER_DIAGNOSTICS 0
@@ -2455,11 +2458,26 @@ void Map_Draw(void) {
 
     Matrix_Pop(&gGfxMatrix);
 
+#ifdef TARGET_PSP
+    if (!PspDisplay_IsUiScalingEnabled()) {
+        PSP_RENDERER_DL_VIEWPORT_NATIVE_UI_MARKER(gMasterDisp++);
+    }
+#endif
+#ifdef TARGET_PSP
+    if (!PspDisplay_IsUiScalingEnabled() && (D_menu_801CD96C || (D_menu_801CF018 != 0))) {
+        PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER(gMasterDisp++);
+    }
+#endif
     if (D_menu_801CD96C) {
         Map_GralPepperFace_Draw();
     }
 
     Map_BriefingRadio_Update();
+#ifdef TARGET_PSP
+    if (!PspDisplay_IsUiScalingEnabled() && (D_menu_801CD96C || (D_menu_801CF018 != 0))) {
+        PSP_RENDERER_DL_VIEWPORT_NATIVE_UI_MARKER(gMasterDisp++);
+    }
+#endif
 
     if (D_menu_801CEFC4) {
         Map_PathChange_DrawOptions();
@@ -2489,6 +2507,9 @@ void Map_Draw(void) {
         Map_LylatCard_Draw();
     }
 
+#ifdef TARGET_PSP
+    PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER(gMasterDisp++);
+#endif
     if (D_menu_801CEEC8 == 0) {
         Map_Texture_Sphere(gBSSMapPlanetTextures[8], SEGMENTED_TO_VIRTUAL(gAssetMapPlanetTextures[8]),
                            &D_menu_801CD818[8]);
@@ -2697,7 +2718,17 @@ void Map_Prologue_Draw(void) {
         aMapPrologue5Tex, aMapPrologue6Tex, aMapPrologue7Tex,
     };
 
+#ifdef TARGET_PSP
+    if (!PspDisplay_IsUiScalingEnabled()) {
+        PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER(gMasterDisp++);
+    }
+#endif
     Map_PrologueArwing_Draw();
+#ifdef TARGET_PSP
+    if (!PspDisplay_IsUiScalingEnabled()) {
+        PSP_RENDERER_DL_VIEWPORT_NATIVE_UI_MARKER(gMasterDisp++);
+    }
+#endif
 
     RCP_SetupDL(&gMasterDisp, SETUPDL_81);
     gDPSetPrimColor(gMasterDisp++, 0, 0, 180, 180, 180, 255);
@@ -2715,8 +2746,18 @@ void Map_Prologue_Draw(void) {
     Lib_TextureRect_IA8_MirY(&gMasterDisp, aMapPrologueTextFadeTex, 8, 16, 0.0f, sPrologueTextFadeTexBottomYpos, 40.0f,
                              1.68f);
 
+#ifdef TARGET_PSP
+    if (!PspDisplay_IsUiScalingEnabled()) {
+        PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER(gMasterDisp++);
+    }
+#endif
     Background_DrawPartialStarfield(71, 118);
     Background_DrawPartialStarfield(205, 239);
+#ifdef TARGET_PSP
+    if (!PspDisplay_IsUiScalingEnabled()) {
+        PSP_RENDERER_DL_VIEWPORT_NATIVE_UI_MARKER(gMasterDisp++);
+    }
+#endif
 
     RCP_SetupDL(&gMasterDisp, SETUPDL_76);
     gDPSetPrimColor(gMasterDisp++, 0, 0, 255, 255, 255, sPrologueCurrentTexAlpha);

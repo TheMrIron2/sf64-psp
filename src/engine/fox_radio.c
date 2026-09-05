@@ -34,14 +34,14 @@
 
 static void Radio_PspUiBegin(s32 squareText) {
     if (gGameState == GSTATE_MAP) {
-        if (PspDisplay_IsHudScalingEnabled()) {
+        if (PspDisplay_IsUiScalingEnabled()) {
             PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER(gMasterDisp++);
         } else {
-            PSP_RENDERER_DL_VIEWPORT_NATIVE_HUD_MARKER(gMasterDisp++);
+            PSP_RENDERER_DL_VIEWPORT_NATIVE_UI_MARKER(gMasterDisp++);
         }
-    } else if (PspDisplay_IsHudScalingEnabled() && squareText) {
+    } else if (PspDisplay_IsUiScalingEnabled() && squareText) {
         PSP_RENDERER_DL_VIEWPORT_SQUARE_TEXT_UI_MARKER(gMasterDisp++);
-    } else if (PspDisplay_IsHudScalingEnabled()) {
+    } else if (PspDisplay_IsUiScalingEnabled()) {
         PSP_RENDERER_DL_VIEWPORT_WIDE_UI_MARKER(gMasterDisp++);
     } else {
         PSP_RENDERER_DL_VIEWPORT_HUD_BOTTOM_LEFT_MARKER(gMasterDisp++);
@@ -57,6 +57,14 @@ static void Radio_PspUiBegin(s32 squareText) {
 static void Radio_PspGameplayGroupBegin(void) {
     PSP_RENDERER_DL_VIEWPORT_HUD_BOTTOM_LEFT_MARKER(gMasterDisp++);
     PSP_RENDERER_DL_HUD_ANCHOR_PARAM(gMasterDisp++, RADIO_PSP_PLAY_ANCHOR_X, RADIO_PSP_PLAY_ANCHOR_Y);
+}
+
+static void Radio_PspUiEnd(void) {
+    if ((gGameState == GSTATE_MAP) && !PspDisplay_IsUiScalingEnabled()) {
+        PSP_RENDERER_DL_VIEWPORT_NATIVE_UI_MARKER(gMasterDisp++);
+    } else {
+        PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER(gMasterDisp++);
+    }
 }
 #endif
 
@@ -465,7 +473,7 @@ void Radio_Portrait_Draw(void) {
     if ((radioPortraitTex != NULL) && (gRadioPortraitScaleY != 0.0f)) {
         portraitPosX = gRadioPortraitPosX;
 #ifdef TARGET_PSP
-        if (PspDisplay_IsHudScalingEnabled() && (gGameState != GSTATE_MAP)) {
+        if (PspDisplay_IsUiScalingEnabled() && (gGameState != GSTATE_MAP)) {
             portraitPosX = PspDisplay_UiFromLeft(portraitPosX);
         }
 #endif
@@ -503,7 +511,7 @@ void Radio_Portrait_Draw(void) {
                                    gRadioPortraitScaleY);
         }
 #ifdef TARGET_PSP
-        PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER(gMasterDisp++);
+        Radio_PspUiEnd();
 #endif
     }
 }
@@ -518,7 +526,7 @@ void Radio_TextBox_Draw(void) {
     s32 printPosX = gRadioPrintPosX;
 
 #ifdef TARGET_PSP
-    if (PspDisplay_IsHudScalingEnabled() && (gGameState != GSTATE_MAP)) {
+    if (PspDisplay_IsUiScalingEnabled() && (gGameState != GSTATE_MAP)) {
         textBoxPosX = PspDisplay_UiFromLeft(textBoxPosX);
         printPosX = (s32) PspDisplay_UiFromLeft((f32) printPosX);
     }
@@ -562,7 +570,7 @@ void Radio_TextBox_Draw(void) {
         Lib_TextureRect_CI8(&gMasterDisp, texture, palette, 32, 32, textBoxPosX, gRadioTextBoxPosY + 16.0f + sp30,
                             gRadioTextBoxScaleX, gRadioTextBoxScaleY);
 #ifdef TARGET_PSP
-        PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER(gMasterDisp++);
+        Radio_PspUiEnd();
 #endif
     }
 
@@ -574,7 +582,7 @@ void Radio_TextBox_Draw(void) {
         gMsgCharIsPrinting =
             Message_DisplayText(&gMasterDisp, gRadioMsg, printPosX, gRadioPrintPosY, gRadioMsgCharIndex);
 #ifdef TARGET_PSP
-        PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER(gMasterDisp++);
+        Radio_PspUiEnd();
 #endif
     }
 }
@@ -849,7 +857,7 @@ void Radio_Draw(void) {
             }
         }
 #ifdef TARGET_PSP
-        PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER(gMasterDisp++);
+        Radio_PspUiEnd();
 #endif
         if (((gCurrentRadioPortrait != RCID_STATIC) && (gCurrentRadioPortrait != RCID_STATIC + 1)) &&
             (gCurrentRadioPortrait != RCID_1000)) {

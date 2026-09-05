@@ -269,6 +269,7 @@ typedef enum {
     PSP_GFX_DL_UI_LAYOUT_AUTO,
     PSP_GFX_DL_UI_LAYOUT_WIDE,
     PSP_GFX_DL_UI_LAYOUT_SQUARE_TEXT,
+    PSP_GFX_DL_UI_LAYOUT_NATIVE,
 } PspGfxDlUiLayout;
 
 typedef struct {
@@ -4425,6 +4426,7 @@ static void psp_gfx_dl_handle_texture_rectangle(PspGfxDlContext* ctx, const Gfx*
     float s1;
     float t1;
     int sprites;
+    int pointFilter;
 
     if (ctx->uiLayout != PSP_GFX_DL_UI_LAYOUT_AUTO) {
         if ((x0Raw & 0x800) != 0) x0Raw -= 0x1000;
@@ -4459,6 +4461,8 @@ static void psp_gfx_dl_handle_texture_rectangle(PspGfxDlContext* ctx, const Gfx*
         psp_gfx_dl_effective_point_filter(ctx)) {
         psp_gfx_dl_snap_square_ui_rect(&x0, &y0, &x1, &y1);
     }
+    pointFilter = psp_gfx_dl_effective_point_filter(ctx) ||
+                  (ctx->uiLayout == PSP_GFX_DL_UI_LAYOUT_NATIVE);
 
     psp_gfx_dl_set_batch_sprites(ctx, sprites);
 
@@ -4481,7 +4485,7 @@ static void psp_gfx_dl_handle_texture_rectangle(PspGfxDlContext* ctx, const Gfx*
             (t0 < 0.0f) || (t1 < 0.0f) || (t0 > (float) ctx->textureUploadHeight) ||
                 (t1 > (float) ctx->textureUploadHeight)),
         psp_gfx_dl_alpha_test_enabled(ctx), psp_gfx_dl_blend_enabled(ctx),
-        psp_gfx_dl_premultiplied_blend_enabled(ctx), psp_gfx_dl_effective_point_filter(ctx));
+        psp_gfx_dl_premultiplied_blend_enabled(ctx), pointFilter);
     if (!sprites) {
         psp_gfx_dl_set_batch_depth(ctx, 0, 0, 0);
         psp_gfx_dl_set_batch_fog(ctx, 0, NULL);
@@ -5587,6 +5591,12 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
             if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_VIEWPORT_NATIVE_HUD) {
                 psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
                 ctx->uiLayout = PSP_GFX_DL_UI_LAYOUT_AUTO;
+                PspGfxPspgl_SetViewportPolicy(PSP_GFX_PSPGL_VIEWPORT_NATIVE_HUD);
+                continue;
+            }
+            if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_VIEWPORT_NATIVE_UI) {
+                psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+                ctx->uiLayout = PSP_GFX_DL_UI_LAYOUT_NATIVE;
                 PspGfxPspgl_SetViewportPolicy(PSP_GFX_PSPGL_VIEWPORT_NATIVE_HUD);
                 continue;
             }

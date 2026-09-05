@@ -508,7 +508,7 @@ static void psp_gfx_pspgl_select_viewport(int ui) {
         ui = PSP_GFX_PSPGL_VIEWPORT_FULL;
     }
     if ((ui >= PSP_GFX_PSPGL_VIEWPORT_HUD_TOP_LEFT) &&
-        (ui <= PSP_GFX_PSPGL_VIEWPORT_HUD_TOP_CENTER) && !PspDisplay_IsHudScalingEnabled()) {
+        (ui <= PSP_GFX_PSPGL_VIEWPORT_HUD_TOP_CENTER) && !PspDisplay_IsUiScalingEnabled()) {
         viewportKey += 16;
     }
     if (sUiViewportActive == viewportKey) return;
@@ -519,8 +519,8 @@ static void psp_gfx_pspgl_select_viewport(int ui) {
                (ui <= PSP_GFX_PSPGL_VIEWPORT_HUD_TOP_CENTER)) {
         int scaledWidth = display->ui_viewport_width;
         int scaledHeight = display->ui_viewport_height;
-        int width = PspDisplay_IsHudScalingEnabled() ? scaledWidth : 320;
-        int height = PspDisplay_IsHudScalingEnabled() ? scaledHeight : 240;
+        int width = PspDisplay_IsUiScalingEnabled() ? scaledWidth : 320;
+        int height = PspDisplay_IsUiScalingEnabled() ? scaledHeight : 240;
         int left = display->viewport_x;
         int top = display->viewport_y;
         int right = display->viewport_x + display->viewport_width;
@@ -539,7 +539,7 @@ static void psp_gfx_pspgl_select_viewport(int ui) {
             (ui == PSP_GFX_PSPGL_VIEWPORT_HUD_BOTTOM_RIGHT)) x = right - width;
         if ((ui == PSP_GFX_PSPGL_VIEWPORT_HUD_BOTTOM_LEFT) ||
             (ui == PSP_GFX_PSPGL_VIEWPORT_HUD_BOTTOM_RIGHT)) y = bottom - height;
-        if (!PspDisplay_IsHudScalingEnabled()) {
+        if (!PspDisplay_IsUiScalingEnabled()) {
             float targetX;
             float targetY;
 

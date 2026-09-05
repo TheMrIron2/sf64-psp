@@ -10,6 +10,7 @@
 
 #ifdef TARGET_PSP
 #include "src/psp/display.h"
+#include "src/psp/renderer.h"
 #endif
 #include "fox_option.h"
 #include "assets/ast_text.h"
@@ -643,6 +644,11 @@ void Option_Entry_Update(void) {
 }
 
 void Option_Entry_Draw(void) {
+#ifdef TARGET_PSP
+    if (!PspDisplay_IsUiScalingEnabled()) {
+        PSP_RENDERER_DL_VIEWPORT_NATIVE_UI_MARKER(gMasterDisp++);
+    }
+#endif
     switch (sMenuEntryState) {
         case OPTION_MAIN_MENU:
             Option_MainMenu_Draw();
@@ -696,6 +702,9 @@ void Option_Entry_Draw(void) {
         Wipe_Draw(WIPE_VERTICAL, sWipeHeight);
         Matrix_Pop(&gGfxMatrix);
     }
+#ifdef TARGET_PSP
+    PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER(gMasterDisp++);
+#endif
 }
 
 void Option_Entry_Setup(void) {

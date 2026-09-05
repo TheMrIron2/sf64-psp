@@ -14,6 +14,8 @@
 #include "src/psp/render_component.h"
 #endif
 #ifdef TARGET_PSP
+#include "src/psp/display.h"
+#include "src/psp/renderer.h"
 #include "src/psp/title_trace.h"
 #endif
 
@@ -33,6 +35,16 @@ void PspPlatform_LogLine(const char* line);
 #endif
 
 #ifdef TARGET_PSP
+static void Title_PspUiBegin(void) {
+    if (!PspDisplay_IsUiScalingEnabled()) {
+        PSP_RENDERER_DL_VIEWPORT_NATIVE_UI_MARKER(gMasterDisp++);
+    }
+}
+
+static void Title_PspUiEnd(void) {
+    PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER(gMasterDisp++);
+}
+
 static f32 PspTitle_WrapRadians(f32 angle) {
     while (angle > M_PI) {
         angle -= M_PI * 2.0f;
@@ -360,7 +372,13 @@ void Title_UpdateEntry(void) {
 void Title_Draw(void) {
     switch (sCutsceneState) {
         case TITLE_RANKING:
+#ifdef TARGET_PSP
+            Title_PspUiBegin();
+#endif
             Title_Ranking_Draw();
+#ifdef TARGET_PSP
+            Title_PspUiEnd();
+#endif
             break;
 
     case TITLE_SCREEN:
