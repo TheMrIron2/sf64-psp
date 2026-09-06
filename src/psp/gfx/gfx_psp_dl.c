@@ -273,16 +273,23 @@ typedef enum {
 } PspGfxDlUiLayout;
 
 typedef struct {
-    u32 textureId;
-    PspGfxPspglTextureRef textureRef;
     PspGfxPspglTextureEnv textureEnv;
-    u32 textureEnvColor;
-    PspGfxPspglTextureWrap wrapS;
-    PspGfxPspglTextureWrap wrapT;
     int alphaTest;
     int blend;
     int premultiplied;
     int pointFilter;
+    int primitiveTextureEnvColor;
+    int valid;
+    int dirty;
+} PspGfxDlMaterialClassification;
+
+typedef struct {
+    u32 textureId;
+    PspGfxPspglTextureRef textureRef;
+    u32 textureEnvColor;
+    PspGfxPspglTextureWrap wrapS;
+    PspGfxPspglTextureWrap wrapT;
+    PspGfxDlMaterialClassification classification;
     int valid;
     int dirty;
 } PspGfxDlEffectiveMaterialState;
@@ -675,6 +682,10 @@ static n64psp_directional_lightf
 
 static void psp_gfx_dl_mark_effective_material_dirty(PspGfxDlContext* ctx) {
     ctx->effectiveMaterial.dirty = 1;
+}
+
+static void psp_gfx_dl_mark_material_classification_dirty(PspGfxDlContext* ctx) {
+    ctx->effectiveMaterial.classification.dirty = 1;
 }
 
 static void psp_gfx_dl_mark_effective_depth_dirty(PspGfxDlContext* ctx) {
@@ -1082,11 +1093,13 @@ static int psp_gfx_dl_alpha_test_enabled(PspGfxDlContext* ctx) {
            (((ctx->otherModeL & 3U) != G_AC_NONE) || ((ctx->otherModeL & CVG_X_ALPHA) != 0));
 }
 
+static int psp_gfx_dl_is_training_backdrop_texture(const void* image) {
+    return (image == aTrBackdropBottomTex) || (image == aTrBackdropTopTex);
+}
+
 static int psp_gfx_dl_effective_point_filter(PspGfxDlContext* ctx) {
     u32 filter = ctx->otherModeH & (3U << G_MDSFT_TEXTFILT);
-    int trainingBackdrop =
-        (ctx->textureImage == aTrBackdropBottomTex) ||
-        (ctx->textureImage == aTrBackdropTopTex);
+    int trainingBackdrop = psp_gfx_dl_is_training_backdrop_texture(ctx->textureImage);
 
     return (filter == G_TF_POINT) ||
            (trainingBackdrop && psp_gfx_dl_rgba16_coverage_alpha_enabled(ctx));
@@ -1094,6 +1107,22 @@ static int psp_gfx_dl_effective_point_filter(PspGfxDlContext* ctx) {
 
 static int psp_gfx_dl_blend_enabled(PspGfxDlContext* ctx) {
     return ctx->combineUsesTextureAlpha && ((ctx->otherModeL & FORCE_BL) != 0);
+}
+
+static u32 psp_gfx_dl_material_class_other_mode_l(u32 otherModeL) {
+    u32 value = (u32) ((otherModeL & 3U) != G_AC_NONE);
+
+    value |= (u32) ((otherModeL & CVG_DST_SAVE) == CVG_DST_SAVE) << 1;
+    value |= (u32) ((otherModeL & CVG_X_ALPHA) != 0) << 2;
+    value |= (u32) ((otherModeL & FORCE_BL) != 0) << 3;
+    return value;
+}
+
+static u32 psp_gfx_dl_material_class_other_mode_h(u32 otherModeH) {
+    u32 value = (u32) ((otherModeH & (3U << G_MDSFT_CYCLETYPE)) == G_CYC_1CYCLE);
+
+    value |= (u32) ((otherModeH & (3U << G_MDSFT_TEXTFILT)) == G_TF_POINT) << 1;
+    return value;
 }
 
 static int psp_gfx_dl_depth_bias_enabled(PspGfxDlContext* ctx) {
@@ -1138,22 +1167,10 @@ static PspGfxPspglTextureEnv psp_gfx_dl_texture_env_for_combine(const PspGfxDlCo
     return PSP_GFX_PSPGL_TEX_REPLACE;
 }
 
-static u32 psp_gfx_dl_texture_env_color_for_combine(const PspGfxDlContext* ctx) {
-    if (psp_gfx_dl_baked_env_blend_texture_enabled(ctx)) {
-        return 0;
-    }
-    if (ctx->combineMode == PSP_GFX_DL_COMBINE_ENV_TEX_PRIM_ALPHA_BLEND) {
-        return psp_gfx_dl_primitive_rgb_texture_env_color(ctx);
-    }
-    return 0;
-}
-
 #if PSP_RENDERER_DIAGNOSTICS
 static u32 psp_gfx_dl_material_class_key(const PspGfxDlContext* ctx) {
     u32 key = (u32) ctx->combineMode & 0xFU;
-    int trainingBackdrop =
-        (ctx->textureImage == aTrBackdropBottomTex) ||
-        (ctx->textureImage == aTrBackdropTopTex);
+    int trainingBackdrop = psp_gfx_dl_is_training_backdrop_texture(ctx->textureImage);
 
     key |= (u32) (ctx->combineUsesTextureAlpha != 0) << 4;
     key |= (ctx->textureFormat & 0x7U) << 5;
@@ -1170,15 +1187,16 @@ static u32 psp_gfx_dl_material_class_key(const PspGfxDlContext* ctx) {
 
 static u32 psp_gfx_dl_material_class_signature(const PspGfxDlContext* ctx) {
     const PspGfxDlEffectiveMaterialState* material = &ctx->effectiveMaterial;
+    const PspGfxDlMaterialClassification* classification = &material->classification;
     int bakedEnvBlend = psp_gfx_dl_baked_env_blend_texture_enabled(ctx);
     int primitiveEnvColor =
         !bakedEnvBlend && (ctx->combineMode == PSP_GFX_DL_COMBINE_ENV_TEX_PRIM_ALPHA_BLEND);
-    u32 signature = (u32) material->textureEnv & 0x3U;
+    u32 signature = (u32) classification->textureEnv & 0x3U;
 
-    signature |= ((u32) material->alphaTest & 0x3U) << 2;
-    signature |= (u32) (material->blend != 0) << 4;
-    signature |= (u32) (material->premultiplied != 0) << 5;
-    signature |= (u32) (material->pointFilter != 0) << 6;
+    signature |= ((u32) classification->alphaTest & 0x3U) << 2;
+    signature |= (u32) (classification->blend != 0) << 4;
+    signature |= (u32) (classification->premultiplied != 0) << 5;
+    signature |= (u32) (classification->pointFilter != 0) << 6;
     signature |= (u32) bakedEnvBlend << 7;
     signature |= (u32) primitiveEnvColor << 8;
     return signature;
@@ -2942,6 +2960,7 @@ static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int pr
 
 static int psp_gfx_dl_resolve_effective_material_state(PspGfxDlContext* ctx) {
     PspGfxDlEffectiveMaterialState* material = &ctx->effectiveMaterial;
+    PspGfxDlMaterialClassification* classification = &material->classification;
     int premultiplied;
 #if PSP_RENDERER_DIAGNOSTICS
     u32 materialClassKey;
@@ -2954,7 +2973,18 @@ static int psp_gfx_dl_resolve_effective_material_state(PspGfxDlContext* ctx) {
 #if PSP_RENDERER_DIAGNOSTICS
     materialClassKey = psp_gfx_dl_material_class_key(ctx);
 #endif
-    premultiplied = psp_gfx_dl_premultiplied_blend_enabled(ctx);
+    if (!classification->valid || classification->dirty) {
+        classification->textureEnv = psp_gfx_dl_texture_env_for_combine(ctx);
+        classification->alphaTest = psp_gfx_dl_alpha_test_enabled(ctx);
+        classification->blend = psp_gfx_dl_blend_enabled(ctx);
+        classification->premultiplied = psp_gfx_dl_premultiplied_blend_enabled(ctx);
+        classification->pointFilter = psp_gfx_dl_effective_point_filter(ctx);
+        classification->primitiveTextureEnvColor =
+            classification->textureEnv == PSP_GFX_PSPGL_TEX_BLEND;
+        classification->valid = 1;
+        classification->dirty = 0;
+    }
+    premultiplied = classification->premultiplied;
     if (ctx->textureEnabled && (ctx->textureId == 0)) {
         psp_gfx_dl_prepare_texture(ctx, 1, premultiplied);
     }
@@ -2962,15 +2992,11 @@ static int psp_gfx_dl_resolve_effective_material_state(PspGfxDlContext* ctx) {
     material->textureId = ctx->textureEnabled ? ctx->textureId : 0;
     material->textureRef = ctx->textureEnabled ? ctx->textureRef : psp_gfx_dl_null_texture_ref();
     /* Frontend intent (gsSPTexture on/off), not derived from textureId. */
-    material->textureEnv = psp_gfx_dl_texture_env_for_combine(ctx);
-    material->textureEnvColor = psp_gfx_dl_texture_env_color_for_combine(ctx);
+    material->textureEnvColor = classification->primitiveTextureEnvColor
+                                    ? psp_gfx_dl_primitive_rgb_texture_env_color(ctx)
+                                    : 0;
     material->wrapS = psp_gfx_dl_texture_wrap(ctx->textureCms, ctx->textureMaskS);
     material->wrapT = psp_gfx_dl_texture_wrap(ctx->textureCmt, ctx->textureMaskT);
-    material->alphaTest = psp_gfx_dl_alpha_test_enabled(ctx);
-    material->blend = psp_gfx_dl_blend_enabled(ctx);
-    material->premultiplied = premultiplied;
-    // Preserve the Training backdrop coverage seam workaround
-    material->pointFilter = psp_gfx_dl_effective_point_filter(ctx);
     material->valid = 1;
     material->dirty = 0;
 #if PSP_RENDERER_DIAGNOSTICS
@@ -3040,10 +3066,12 @@ static void psp_gfx_dl_material_corpus_note_state(const PspGfxDlContext* ctx) {
     key = (key ^ geometryMode) * 16777619U;
     key = (key ^ textureFormat) * 16777619U;
     key = (key ^ textureSize) * 16777619U;
-    key = (key ^ (textured | ((u32) material->textureEnv << 1) | ((u32) material->wrapS << 5) |
-                  ((u32) material->wrapT << 7) | ((u32) (material->alphaTest != 0) << 9) |
-                  ((u32) (material->blend != 0) << 10) | ((u32) (material->premultiplied != 0) << 11) |
-                  ((u32) (material->pointFilter != 0) << 12) |
+    key = (key ^ (textured | ((u32) material->classification.textureEnv << 1) | ((u32) material->wrapS << 5) |
+                  ((u32) material->wrapT << 7) |
+                  ((u32) (material->classification.alphaTest != 0) << 9) |
+                  ((u32) (material->classification.blend != 0) << 10) |
+                  ((u32) (material->classification.premultiplied != 0) << 11) |
+                  ((u32) (material->classification.pointFilter != 0) << 12) |
                   ((u32) (ctx->effectiveDepth.depthTest != 0) << 13) |
                   ((u32) (ctx->effectiveDepth.depthWrite != 0) << 14) |
                   ((u32) (ctx->effectiveFog.fog != 0) << 15))) *
@@ -3074,13 +3102,13 @@ static void psp_gfx_dl_material_corpus_note_state(const PspGfxDlContext* ctx) {
     sPspGfxDlMaterialCorpus[i].applyCount = 1;
     sPspGfxDlMaterialCorpus[i].triangleCount = 0;
     sPspGfxDlMaterialCorpus[i].textured = (u8) textured;
-    sPspGfxDlMaterialCorpus[i].textureEnv = (u8) material->textureEnv;
+    sPspGfxDlMaterialCorpus[i].textureEnv = (u8) material->classification.textureEnv;
     sPspGfxDlMaterialCorpus[i].wrapS = (u8) material->wrapS;
     sPspGfxDlMaterialCorpus[i].wrapT = (u8) material->wrapT;
-    sPspGfxDlMaterialCorpus[i].alphaTest = material->alphaTest != 0;
-    sPspGfxDlMaterialCorpus[i].blend = material->blend != 0;
-    sPspGfxDlMaterialCorpus[i].premultiplied = material->premultiplied != 0;
-    sPspGfxDlMaterialCorpus[i].pointFilter = material->pointFilter != 0;
+    sPspGfxDlMaterialCorpus[i].alphaTest = material->classification.alphaTest != 0;
+    sPspGfxDlMaterialCorpus[i].blend = material->classification.blend != 0;
+    sPspGfxDlMaterialCorpus[i].premultiplied = material->classification.premultiplied != 0;
+    sPspGfxDlMaterialCorpus[i].pointFilter = material->classification.pointFilter != 0;
     sPspGfxDlMaterialCorpus[i].depthTest = ctx->effectiveDepth.depthTest != 0;
     sPspGfxDlMaterialCorpus[i].depthWrite = ctx->effectiveDepth.depthWrite != 0;
     sPspGfxDlMaterialCorpus[i].fog = ctx->effectiveFog.fog != 0;
@@ -3133,10 +3161,10 @@ static u32 psp_gfx_dl_apply_effective_batch_state(PspGfxDlContext* ctx, const Ps
         } else {
             PspProfiler_CountTrivialRejectRenderState(PSP_PROFILE_TRIVIAL_REJECT_RENDER_UNTEXTURED);
         }
-        if (ctx->effectiveMaterial.alphaTest) {
+        if (ctx->effectiveMaterial.classification.alphaTest) {
             PspProfiler_CountTrivialRejectRenderState(PSP_PROFILE_TRIVIAL_REJECT_RENDER_ALPHA_TEST);
         }
-        if (ctx->effectiveMaterial.blend) {
+        if (ctx->effectiveMaterial.classification.blend) {
             PspProfiler_CountTrivialRejectRenderState(PSP_PROFILE_TRIVIAL_REJECT_RENDER_BLEND);
         }
         if (ctx->effectiveDepth.depthTest) {
@@ -3166,12 +3194,15 @@ static u32 psp_gfx_dl_apply_effective_batch_state(PspGfxDlContext* ctx, const Ps
                                           ctx->effectiveFog.start, ctx->effectiveFog.end);
     }
     psp_gfx_dl_set_batch_texture(ctx, ctx->effectiveMaterial.textureId, ctx->effectiveMaterial.textureRef,
-                                 ctx->effectiveMaterial.textureEnv, ctx->effectiveMaterial.textureEnvColor,
+                                 ctx->effectiveMaterial.classification.textureEnv,
+                                 ctx->effectiveMaterial.textureEnvColor,
                                  ctx->combineMode, psp_gfx_dl_primitive_color(ctx),
                                  psp_gfx_dl_environment_color(ctx),
                                  wrapS, wrapT,
-                                 ctx->effectiveMaterial.alphaTest, ctx->effectiveMaterial.blend,
-                                 ctx->effectiveMaterial.premultiplied, ctx->effectiveMaterial.pointFilter);
+                                 ctx->effectiveMaterial.classification.alphaTest,
+                                 ctx->effectiveMaterial.classification.blend,
+                                 ctx->effectiveMaterial.classification.premultiplied,
+                                 ctx->effectiveMaterial.classification.pointFilter);
     (void) resolved;
     return ctx->effectiveMaterial.textureId;
 }
@@ -5071,6 +5102,7 @@ static void psp_gfx_dl_handle_set_combine(PspGfxDlContext* ctx, const Gfx* gfx) 
     u32 mux0 = gfx->words.w0 & 0x00FFFFFF;
     u32 mux1 = gfx->words.w1;
     PspGfxDlCombineMode oldCombineMode = ctx->combineMode;
+    int oldCombineUsesTextureAlpha = ctx->combineUsesTextureAlpha;
 
 #if PSP_RENDERER_DIAGNOSTICS
     ctx->combineMux0 = mux0;
@@ -5150,6 +5182,10 @@ static void psp_gfx_dl_handle_set_combine(PspGfxDlContext* ctx, const Gfx* gfx) 
         ctx->textureUploadAttempted = 0;
     }
     psp_gfx_dl_mark_effective_material_dirty(ctx);
+    if ((oldCombineMode != ctx->combineMode) ||
+        (oldCombineUsesTextureAlpha != ctx->combineUsesTextureAlpha)) {
+        psp_gfx_dl_mark_material_classification_dirty(ctx);
+    }
 }
 
 #if PSP_RENDERER_DIAGNOSTICS && PSP_ORIGINAL_FOG
@@ -5478,12 +5514,14 @@ static void psp_gfx_dl_handle_other_mode_l(PspGfxDlContext* ctx, const Gfx* gfx)
     u32 shift = (gfx->words.w0 >> 8) & 0xFF;
     u32 length = gfx->words.w0 & 0xFF;
     u32 mask;
+    u32 oldMaterialClass;
 
     if ((length == 0) || (shift >= 32) || (length > (32 - shift))) {
         psp_gfx_dl_count_unsupported(ctx, PSP_GFX_OP_F3D_SETOTHERMODE_L);
         return;
     }
     mask = (length == 32) ? 0xFFFFFFFFU : (((1U << length) - 1U) << shift);
+    oldMaterialClass = psp_gfx_dl_material_class_other_mode_l(ctx->otherModeL);
     if (psp_gfx_dl_texture_barrier_has_pending(ctx) &&
         (((ctx->otherModeL ^ gfx->words.w1) & mask &
           (0xC0000000U | 3U | CVG_X_ALPHA | FORCE_BL | Z_UPD)) != 0)) {
@@ -5491,21 +5529,29 @@ static void psp_gfx_dl_handle_other_mode_l(PspGfxDlContext* ctx, const Gfx* gfx)
     }
     ctx->otherModeL = (ctx->otherModeL & ~mask) | (gfx->words.w1 & mask);
     psp_gfx_dl_mark_effective_state_dirty(ctx);
+    if (oldMaterialClass != psp_gfx_dl_material_class_other_mode_l(ctx->otherModeL)) {
+        psp_gfx_dl_mark_material_classification_dirty(ctx);
+    }
 }
 
 static void psp_gfx_dl_handle_other_mode_h(PspGfxDlContext* ctx, const Gfx* gfx) {
     u32 shift = (gfx->words.w0 >> 8) & 0xFF;
     u32 length = gfx->words.w0 & 0xFF;
     u32 mask;
+    u32 oldMaterialClass;
 
     if ((length == 0) || (shift >= 32) || (length > (32 - shift))) {
         psp_gfx_dl_count_unsupported(ctx, PSP_GFX_OP_F3D_SETOTHERMODE_H);
         return;
     }
     mask = (length == 32) ? 0xFFFFFFFFU : (((1U << length) - 1U) << shift);
+    oldMaterialClass = psp_gfx_dl_material_class_other_mode_h(ctx->otherModeH);
     ctx->otherModeH = (ctx->otherModeH & ~mask) | (gfx->words.w1 & mask);
     if ((mask & ((3U << G_MDSFT_CYCLETYPE) | (3U << G_MDSFT_TEXTFILT))) != 0) {
         psp_gfx_dl_mark_effective_material_dirty(ctx);
+        if (oldMaterialClass != psp_gfx_dl_material_class_other_mode_h(ctx->otherModeH)) {
+            psp_gfx_dl_mark_material_classification_dirty(ctx);
+        }
     }
 }
 
@@ -5535,6 +5581,10 @@ static void psp_gfx_dl_handle_texture(PspGfxDlContext* ctx, const Gfx* gfx) {
 }
 
 static void psp_gfx_dl_handle_set_texture_image(PspGfxDlContext* ctx, const Gfx* gfx) {
+    u32 oldFormat = ctx->textureFormat;
+    u32 oldSize = ctx->textureSize;
+    int oldTrainingBackdrop = psp_gfx_dl_is_training_backdrop_texture(ctx->textureImage);
+
     ctx->textureFormat = (gfx->words.w0 >> 21) & 0x7;
     ctx->textureSize = (gfx->words.w0 >> 19) & 0x3;
     ctx->textureImage = psp_gfx_dl_resolve_ptr(ctx, gfx->words.w1);
@@ -5546,6 +5596,10 @@ static void psp_gfx_dl_handle_set_texture_image(PspGfxDlContext* ctx, const Gfx*
     ctx->textureUploadY = 0;
     ctx->textureUploadAttempted = 0;
     psp_gfx_dl_mark_effective_material_dirty(ctx);
+    if ((oldFormat != ctx->textureFormat) || (oldSize != ctx->textureSize) ||
+        (oldTrainingBackdrop != psp_gfx_dl_is_training_backdrop_texture(ctx->textureImage))) {
+        psp_gfx_dl_mark_material_classification_dirty(ctx);
+    }
 }
 
 static void psp_gfx_dl_handle_set_color_image(PspGfxDlContext* ctx, const Gfx* gfx) {
@@ -5572,6 +5626,8 @@ static void psp_gfx_dl_handle_set_tile(PspGfxDlContext* ctx, const Gfx* gfx) {
     u32 tile = (gfx->words.w1 >> 24) & 0x7;
     int oldMirrorS = ((ctx->textureCms & G_TX_MIRROR) != 0) && (ctx->textureMaskS != G_TX_NOMASK);
     int oldMirrorT = ((ctx->textureCmt & G_TX_MIRROR) != 0) && (ctx->textureMaskT != G_TX_NOMASK);
+    u32 oldFormat = ctx->textureFormat;
+    u32 oldSize = ctx->textureSize;
 
     if (tile != G_TX_RENDERTILE) {
         return;
@@ -5594,6 +5650,9 @@ static void psp_gfx_dl_handle_set_tile(PspGfxDlContext* ctx, const Gfx* gfx) {
 #endif
     ctx->textureUploadAttempted = 0;
     psp_gfx_dl_mark_effective_material_dirty(ctx);
+    if ((oldFormat != ctx->textureFormat) || (oldSize != ctx->textureSize)) {
+        psp_gfx_dl_mark_material_classification_dirty(ctx);
+    }
 }
 
 static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int premultiply) {
