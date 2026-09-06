@@ -5504,7 +5504,7 @@ static void psp_gfx_dl_handle_other_mode_h(PspGfxDlContext* ctx, const Gfx* gfx)
     }
     mask = (length == 32) ? 0xFFFFFFFFU : (((1U << length) - 1U) << shift);
     ctx->otherModeH = (ctx->otherModeH & ~mask) | (gfx->words.w1 & mask);
-    if ((mask & (3U << G_MDSFT_TEXTFILT)) != 0) {
+    if ((mask & ((3U << G_MDSFT_CYCLETYPE) | (3U << G_MDSFT_TEXTFILT))) != 0) {
         psp_gfx_dl_mark_effective_material_dirty(ctx);
     }
 }
