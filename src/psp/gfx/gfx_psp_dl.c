@@ -537,6 +537,90 @@ static u32 sPspGfxDlMaterialCorpusOverflow;
 static u32 sPspGfxDlMaterialCorpusCurrent = PSP_GFX_DL_MATERIAL_CORPUS_NONE;
 static u32 sPspGfxDlMaterialCorpusTriangles;
 static u32 sPspGfxDlMaterialCorpusUnattributed;
+
+#define PSP_GFX_DL_MATERIAL_CLASS_SEEN_ENTRIES 256
+#define PSP_GFX_DL_MATERIAL_CLASS_CACHE_WAYS 4
+
+typedef struct {
+    u32 key;
+    u32 signature;
+    u32 lastSequence;
+    u8 valid;
+} PspGfxDlMaterialClassSeenEntry;
+
+typedef struct {
+    u32 key;
+    u8 valid;
+} PspGfxDlMaterialClassCacheEntry;
+
+typedef struct {
+    PspGfxDlMaterialClassCacheEntry entries[PSP_GFX_DL_MATERIAL_CLASS_CACHE_WAYS];
+    u8 nextWay;
+} PspGfxDlMaterialClassCacheSet;
+
+typedef struct {
+    u32 dirtyResolves;
+    u32 immediateHits;
+    u32 uniqueKeys;
+    u32 seenOverflow;
+    u32 signatureMismatches;
+    u32 firstMismatchKey;
+    u32 firstMismatchExpected;
+    u32 firstMismatchActual;
+    u32 sequence;
+    u32 reuseDistance[6];
+    u32 direct16Hits;
+    u32 direct16Misses;
+    u32 assoc16Hits;
+    u32 assoc16Misses;
+    u32 direct32Hits;
+    u32 direct32Misses;
+    u32 assoc32Hits;
+    u32 assoc32Misses;
+    u32 assoc128Hits;
+    u32 assoc128Misses;
+    u32 lastKey;
+    int lastValid;
+} PspGfxDlMaterialClassStats;
+
+typedef struct {
+    u32 mux0;
+    u32 mux1;
+    u8 valid;
+} PspGfxDlCombineCacheEntry;
+
+typedef struct {
+    PspGfxDlCombineCacheEntry entries[PSP_GFX_DL_MATERIAL_CLASS_CACHE_WAYS];
+    u8 nextWay;
+} PspGfxDlCombineCacheSet;
+
+typedef struct {
+    u32 commands;
+    u32 immediateHits;
+    u32 uniqueKeys;
+    u32 seenOverflow;
+    u32 direct32Hits;
+    u32 direct32Misses;
+    u32 assoc32Hits;
+    u32 assoc32Misses;
+    u32 lastMux0;
+    u32 lastMux1;
+    int lastValid;
+} PspGfxDlCombineCacheStats;
+
+static PspGfxDlMaterialClassSeenEntry
+    sPspGfxDlMaterialClassSeen[PSP_GFX_DL_MATERIAL_CLASS_SEEN_ENTRIES];
+static PspGfxDlMaterialClassCacheEntry sPspGfxDlMaterialClassDirect16[16];
+static PspGfxDlMaterialClassCacheEntry sPspGfxDlMaterialClassDirect32[32];
+static PspGfxDlMaterialClassCacheSet sPspGfxDlMaterialClassAssoc16[4];
+static PspGfxDlMaterialClassCacheSet sPspGfxDlMaterialClassAssoc32[8];
+static PspGfxDlMaterialClassCacheSet sPspGfxDlMaterialClassAssoc128[32];
+static PspGfxDlMaterialClassStats sPspGfxDlMaterialClassStats;
+
+static PspGfxDlCombineCacheEntry sPspGfxDlCombineSeen[PSP_GFX_DL_MATERIAL_CLASS_SEEN_ENTRIES];
+static PspGfxDlCombineCacheEntry sPspGfxDlCombineDirect32[32];
+static PspGfxDlCombineCacheSet sPspGfxDlCombineAssoc32[8];
+static PspGfxDlCombineCacheStats sPspGfxDlCombineCacheStats;
 #endif
 
 static PspGfxPspglColorVertex
@@ -1063,6 +1147,263 @@ static u32 psp_gfx_dl_texture_env_color_for_combine(const PspGfxDlContext* ctx) 
     }
     return 0;
 }
+
+#if PSP_RENDERER_DIAGNOSTICS
+static u32 psp_gfx_dl_material_class_key(const PspGfxDlContext* ctx) {
+    u32 key = (u32) ctx->combineMode & 0xFU;
+    int trainingBackdrop =
+        (ctx->textureImage == aTrBackdropBottomTex) ||
+        (ctx->textureImage == aTrBackdropTopTex);
+
+    key |= (u32) (ctx->combineUsesTextureAlpha != 0) << 4;
+    key |= (ctx->textureFormat & 0x7U) << 5;
+    key |= (ctx->textureSize & 0x3U) << 8;
+    key |= (u32) ((ctx->otherModeL & 3U) != G_AC_NONE) << 10;
+    key |= (u32) ((ctx->otherModeL & CVG_DST_SAVE) == CVG_DST_SAVE) << 11;
+    key |= (u32) ((ctx->otherModeL & CVG_X_ALPHA) != 0) << 12;
+    key |= (u32) ((ctx->otherModeL & FORCE_BL) != 0) << 13;
+    key |= (u32) ((ctx->otherModeH & (3U << G_MDSFT_CYCLETYPE)) == G_CYC_1CYCLE) << 14;
+    key |= (u32) ((ctx->otherModeH & (3U << G_MDSFT_TEXTFILT)) == G_TF_POINT) << 15;
+    key |= (u32) trainingBackdrop << 16;
+    return key;
+}
+
+static u32 psp_gfx_dl_material_class_signature(const PspGfxDlContext* ctx) {
+    const PspGfxDlEffectiveMaterialState* material = &ctx->effectiveMaterial;
+    int bakedEnvBlend = psp_gfx_dl_baked_env_blend_texture_enabled(ctx);
+    int primitiveEnvColor =
+        !bakedEnvBlend && (ctx->combineMode == PSP_GFX_DL_COMBINE_ENV_TEX_PRIM_ALPHA_BLEND);
+    u32 signature = (u32) material->textureEnv & 0x3U;
+
+    signature |= ((u32) material->alphaTest & 0x3U) << 2;
+    signature |= (u32) (material->blend != 0) << 4;
+    signature |= (u32) (material->premultiplied != 0) << 5;
+    signature |= (u32) (material->pointFilter != 0) << 6;
+    signature |= (u32) bakedEnvBlend << 7;
+    signature |= (u32) primitiveEnvColor << 8;
+    return signature;
+}
+
+static u32 psp_gfx_dl_material_class_hash(u32 key) {
+    return key ^ (key >> 5) ^ (key >> 10) ^ (key >> 15);
+}
+
+static int psp_gfx_dl_material_class_direct_note(PspGfxDlMaterialClassCacheEntry* entries,
+                                                 u32 entryCount, u32 key) {
+    PspGfxDlMaterialClassCacheEntry* entry =
+        &entries[psp_gfx_dl_material_class_hash(key) & (entryCount - 1U)];
+    int hit = entry->valid && (entry->key == key);
+
+    if (!hit) {
+        entry->key = key;
+        entry->valid = 1;
+    }
+    return hit;
+}
+
+static int psp_gfx_dl_material_class_assoc_note(PspGfxDlMaterialClassCacheSet* sets,
+                                                u32 setCount, u32 key) {
+    PspGfxDlMaterialClassCacheSet* set =
+        &sets[psp_gfx_dl_material_class_hash(key) & (setCount - 1U)];
+    PspGfxDlMaterialClassCacheEntry* entry;
+    u32 way;
+
+    for (way = 0; way < PSP_GFX_DL_MATERIAL_CLASS_CACHE_WAYS; way++) {
+        entry = &set->entries[way];
+        if (entry->valid && (entry->key == key)) {
+            return 1;
+        }
+    }
+    for (way = 0; way < PSP_GFX_DL_MATERIAL_CLASS_CACHE_WAYS; way++) {
+        if (!set->entries[way].valid) {
+            break;
+        }
+    }
+    if (way == PSP_GFX_DL_MATERIAL_CLASS_CACHE_WAYS) {
+        way = set->nextWay;
+        set->nextWay = (u8) ((set->nextWay + 1U) % PSP_GFX_DL_MATERIAL_CLASS_CACHE_WAYS);
+    }
+    entry = &set->entries[way];
+    entry->key = key;
+    entry->valid = 1;
+    return 0;
+}
+
+static int psp_gfx_dl_material_class_seen_note(u32 key, u32 signature, u32* reuseDistance) {
+    PspGfxDlMaterialClassStats* stats = &sPspGfxDlMaterialClassStats;
+    u32 slot = psp_gfx_dl_material_class_hash(key) & (PSP_GFX_DL_MATERIAL_CLASS_SEEN_ENTRIES - 1U);
+    u32 probe;
+
+    *reuseDistance = 0;
+    for (probe = 0; probe < PSP_GFX_DL_MATERIAL_CLASS_SEEN_ENTRIES; probe++) {
+        PspGfxDlMaterialClassSeenEntry* entry = &sPspGfxDlMaterialClassSeen[slot];
+
+        if (!entry->valid) {
+            entry->key = key;
+            entry->signature = signature;
+            entry->lastSequence = stats->sequence;
+            entry->valid = 1;
+            stats->uniqueKeys++;
+            return 0;
+        }
+        if (entry->key == key) {
+            *reuseDistance = stats->sequence - entry->lastSequence;
+            entry->lastSequence = stats->sequence;
+            if (entry->signature != signature) {
+                if (stats->signatureMismatches == 0) {
+                    stats->firstMismatchKey = key;
+                    stats->firstMismatchExpected = entry->signature;
+                    stats->firstMismatchActual = signature;
+                }
+                stats->signatureMismatches++;
+            }
+            return 1;
+        }
+        slot = (slot + 1U) & (PSP_GFX_DL_MATERIAL_CLASS_SEEN_ENTRIES - 1U);
+    }
+    stats->seenOverflow++;
+    return -1;
+}
+
+static void psp_gfx_dl_material_class_note(u32 key, u32 signature) {
+    PspGfxDlMaterialClassStats* stats = &sPspGfxDlMaterialClassStats;
+    u32 reuseDistance;
+    int immediate = stats->lastValid && (stats->lastKey == key);
+    int seen;
+    int hit;
+
+    stats->dirtyResolves++;
+    stats->sequence++;
+    if (immediate) {
+        stats->immediateHits++;
+    }
+    seen = psp_gfx_dl_material_class_seen_note(key, signature, &reuseDistance);
+    if (seen > 0) {
+        u32 bucket = (reuseDistance <= 1U) ? 0U :
+                     (reuseDistance <= 4U) ? 1U :
+                     (reuseDistance <= 8U) ? 2U :
+                     (reuseDistance <= 16U) ? 3U :
+                     (reuseDistance <= 32U) ? 4U : 5U;
+
+        stats->reuseDistance[bucket]++;
+    }
+
+    if (!immediate) {
+        hit = psp_gfx_dl_material_class_direct_note(sPspGfxDlMaterialClassDirect16, 16, key);
+        stats->direct16Hits += hit;
+        stats->direct16Misses += !hit;
+        hit = psp_gfx_dl_material_class_assoc_note(sPspGfxDlMaterialClassAssoc16, 4, key);
+        stats->assoc16Hits += hit;
+        stats->assoc16Misses += !hit;
+        hit = psp_gfx_dl_material_class_direct_note(sPspGfxDlMaterialClassDirect32, 32, key);
+        stats->direct32Hits += hit;
+        stats->direct32Misses += !hit;
+        hit = psp_gfx_dl_material_class_assoc_note(sPspGfxDlMaterialClassAssoc32, 8, key);
+        stats->assoc32Hits += hit;
+        stats->assoc32Misses += !hit;
+        hit = psp_gfx_dl_material_class_assoc_note(sPspGfxDlMaterialClassAssoc128, 32, key);
+        stats->assoc128Hits += hit;
+        stats->assoc128Misses += !hit;
+    }
+    stats->lastKey = key;
+    stats->lastValid = 1;
+}
+
+static u32 psp_gfx_dl_combine_key_hash(u32 mux0, u32 mux1) {
+    u32 hash = mux0 ^ mux1 ^ (mux1 >> 16);
+
+    return hash ^ (hash >> 7) ^ (hash >> 15);
+}
+
+static int psp_gfx_dl_combine_direct_note(PspGfxDlCombineCacheEntry* entries,
+                                          u32 entryCount, u32 mux0, u32 mux1) {
+    PspGfxDlCombineCacheEntry* entry =
+        &entries[psp_gfx_dl_combine_key_hash(mux0, mux1) & (entryCount - 1U)];
+    int hit = entry->valid && (entry->mux0 == mux0) && (entry->mux1 == mux1);
+
+    if (!hit) {
+        entry->mux0 = mux0;
+        entry->mux1 = mux1;
+        entry->valid = 1;
+    }
+    return hit;
+}
+
+static int psp_gfx_dl_combine_assoc_note(PspGfxDlCombineCacheSet* sets, u32 setCount,
+                                         u32 mux0, u32 mux1) {
+    PspGfxDlCombineCacheSet* set =
+        &sets[psp_gfx_dl_combine_key_hash(mux0, mux1) & (setCount - 1U)];
+    PspGfxDlCombineCacheEntry* entry;
+    u32 way;
+
+    for (way = 0; way < PSP_GFX_DL_MATERIAL_CLASS_CACHE_WAYS; way++) {
+        entry = &set->entries[way];
+        if (entry->valid && (entry->mux0 == mux0) && (entry->mux1 == mux1)) {
+            return 1;
+        }
+    }
+    for (way = 0; way < PSP_GFX_DL_MATERIAL_CLASS_CACHE_WAYS; way++) {
+        if (!set->entries[way].valid) {
+            break;
+        }
+    }
+    if (way == PSP_GFX_DL_MATERIAL_CLASS_CACHE_WAYS) {
+        way = set->nextWay;
+        set->nextWay = (u8) ((set->nextWay + 1U) % PSP_GFX_DL_MATERIAL_CLASS_CACHE_WAYS);
+    }
+    entry = &set->entries[way];
+    entry->mux0 = mux0;
+    entry->mux1 = mux1;
+    entry->valid = 1;
+    return 0;
+}
+
+static void psp_gfx_dl_combine_seen_note(u32 mux0, u32 mux1) {
+    PspGfxDlCombineCacheStats* stats = &sPspGfxDlCombineCacheStats;
+    u32 slot = psp_gfx_dl_combine_key_hash(mux0, mux1) &
+               (PSP_GFX_DL_MATERIAL_CLASS_SEEN_ENTRIES - 1U);
+    u32 probe;
+
+    for (probe = 0; probe < PSP_GFX_DL_MATERIAL_CLASS_SEEN_ENTRIES; probe++) {
+        PspGfxDlCombineCacheEntry* entry = &sPspGfxDlCombineSeen[slot];
+
+        if (!entry->valid) {
+            entry->mux0 = mux0;
+            entry->mux1 = mux1;
+            entry->valid = 1;
+            stats->uniqueKeys++;
+            return;
+        }
+        if ((entry->mux0 == mux0) && (entry->mux1 == mux1)) {
+            return;
+        }
+        slot = (slot + 1U) & (PSP_GFX_DL_MATERIAL_CLASS_SEEN_ENTRIES - 1U);
+    }
+    stats->seenOverflow++;
+}
+
+static void psp_gfx_dl_combine_cache_note(u32 mux0, u32 mux1) {
+    PspGfxDlCombineCacheStats* stats = &sPspGfxDlCombineCacheStats;
+    int immediate = stats->lastValid && (stats->lastMux0 == mux0) && (stats->lastMux1 == mux1);
+    int hit;
+
+    stats->commands++;
+    if (immediate) {
+        stats->immediateHits++;
+    } else {
+        hit = psp_gfx_dl_combine_direct_note(sPspGfxDlCombineDirect32, 32, mux0, mux1);
+        stats->direct32Hits += hit;
+        stats->direct32Misses += !hit;
+        hit = psp_gfx_dl_combine_assoc_note(sPspGfxDlCombineAssoc32, 8, mux0, mux1);
+        stats->assoc32Hits += hit;
+        stats->assoc32Misses += !hit;
+    }
+    psp_gfx_dl_combine_seen_note(mux0, mux1);
+    stats->lastMux0 = mux0;
+    stats->lastMux1 = mux1;
+    stats->lastValid = 1;
+}
+#endif
 
 static u8 psp_gfx_dl_opcode(const Gfx* gfx) {
     return (u8) (gfx->words.w0 >> 24);
@@ -2602,11 +2943,17 @@ static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int pr
 static int psp_gfx_dl_resolve_effective_material_state(PspGfxDlContext* ctx) {
     PspGfxDlEffectiveMaterialState* material = &ctx->effectiveMaterial;
     int premultiplied;
+#if PSP_RENDERER_DIAGNOSTICS
+    u32 materialClassKey;
+#endif
 
     if (material->valid && !material->dirty) {
         return 0;
     }
 
+#if PSP_RENDERER_DIAGNOSTICS
+    materialClassKey = psp_gfx_dl_material_class_key(ctx);
+#endif
     premultiplied = psp_gfx_dl_premultiplied_blend_enabled(ctx);
     if (ctx->textureEnabled && (ctx->textureId == 0)) {
         psp_gfx_dl_prepare_texture(ctx, 1, premultiplied);
@@ -2626,6 +2973,9 @@ static int psp_gfx_dl_resolve_effective_material_state(PspGfxDlContext* ctx) {
     material->pointFilter = psp_gfx_dl_effective_point_filter(ctx);
     material->valid = 1;
     material->dirty = 0;
+#if PSP_RENDERER_DIAGNOSTICS
+    psp_gfx_dl_material_class_note(materialClassKey, psp_gfx_dl_material_class_signature(ctx));
+#endif
     return 1;
 }
 
@@ -4725,6 +5075,7 @@ static void psp_gfx_dl_handle_set_combine(PspGfxDlContext* ctx, const Gfx* gfx) 
 #if PSP_RENDERER_DIAGNOSTICS
     ctx->combineMux0 = mux0;
     ctx->combineMux1 = mux1;
+    psp_gfx_dl_combine_cache_note(mux0, mux1);
 #endif
 
     if (psp_gfx_dl_combine_cycle0_matches(mux0, mux1, G_CCMUX_TEXEL0, G_CCMUX_0, G_CCMUX_SHADE,
@@ -5977,6 +6328,86 @@ static void psp_gfx_dl_reset_context(PspGfxDlContext* ctx) {
 
 static u8 sPspGfxDlMaterialCorpusReported[PSP_GFX_DL_MATERIAL_CORPUS_ENTRIES];
 
+static u32 psp_gfx_dl_diagnostic_permille(u32 numerator, u32 denominator) {
+    if (denominator == 0) {
+        return 0;
+    }
+    return (u32) (((u64) numerator * 1000U) / denominator);
+}
+
+static void psp_gfx_dl_material_class_cache_report_line(u32 taskIndex, const char* policy,
+                                                        u32 entries, u32 ways,
+                                                        u32 hits, u32 misses) {
+    char line[256];
+    u32 total = hits + misses;
+
+    snprintf(line, sizeof(line),
+             "[pspgl-material-class-cache] task=%lu policy=%s entries=%lu ways=%lu "
+             "nonImmediateHits=%lu trueMisses=%lu hitPermille=%lu",
+             (unsigned long) taskIndex, policy, (unsigned long) entries, (unsigned long) ways,
+             (unsigned long) hits, (unsigned long) misses,
+             (unsigned long) psp_gfx_dl_diagnostic_permille(hits, total));
+    PspPlatform_LogLine(line);
+}
+
+static void psp_gfx_dl_material_class_cache_report(u32 taskIndex) {
+    const PspGfxDlMaterialClassStats* material = &sPspGfxDlMaterialClassStats;
+    const PspGfxDlCombineCacheStats* combine = &sPspGfxDlCombineCacheStats;
+    char line[512];
+
+    snprintf(line, sizeof(line),
+             "[pspgl-material-class] task=%lu dirty=%lu immediate=%lu immediatePermille=%lu "
+             "unique=%lu seenOverflow=%lu signatureMismatches=%lu",
+             (unsigned long) taskIndex, (unsigned long) material->dirtyResolves,
+             (unsigned long) material->immediateHits,
+             (unsigned long) psp_gfx_dl_diagnostic_permille(material->immediateHits,
+                                                            material->dirtyResolves),
+             (unsigned long) material->uniqueKeys, (unsigned long) material->seenOverflow,
+             (unsigned long) material->signatureMismatches);
+    PspPlatform_LogLine(line);
+
+    snprintf(line, sizeof(line),
+             "[pspgl-material-class-reuse] task=%lu d1=%lu d2_4=%lu d5_8=%lu d9_16=%lu "
+             "d17_32=%lu d33plus=%lu",
+             (unsigned long) taskIndex, (unsigned long) material->reuseDistance[0],
+             (unsigned long) material->reuseDistance[1], (unsigned long) material->reuseDistance[2],
+             (unsigned long) material->reuseDistance[3], (unsigned long) material->reuseDistance[4],
+             (unsigned long) material->reuseDistance[5]);
+    PspPlatform_LogLine(line);
+
+    if (material->signatureMismatches != 0) {
+        snprintf(line, sizeof(line),
+                 "[pspgl-material-class-mismatch] task=%lu key=0x%08lx expected=0x%08lx actual=0x%08lx",
+                 (unsigned long) taskIndex, (unsigned long) material->firstMismatchKey,
+                 (unsigned long) material->firstMismatchExpected,
+                 (unsigned long) material->firstMismatchActual);
+        PspPlatform_LogLine(line);
+    }
+
+    psp_gfx_dl_material_class_cache_report_line(taskIndex, "direct", 16, 1,
+                                                material->direct16Hits, material->direct16Misses);
+    psp_gfx_dl_material_class_cache_report_line(taskIndex, "set", 16, 4,
+                                                material->assoc16Hits, material->assoc16Misses);
+    psp_gfx_dl_material_class_cache_report_line(taskIndex, "direct", 32, 1,
+                                                material->direct32Hits, material->direct32Misses);
+    psp_gfx_dl_material_class_cache_report_line(taskIndex, "set", 32, 4,
+                                                material->assoc32Hits, material->assoc32Misses);
+    psp_gfx_dl_material_class_cache_report_line(taskIndex, "set", 128, 4,
+                                                material->assoc128Hits, material->assoc128Misses);
+
+    snprintf(line, sizeof(line),
+             "[pspgl-combine-cache] task=%lu commands=%lu immediate=%lu immediatePermille=%lu "
+             "unique=%lu seenOverflow=%lu direct32Hits=%lu direct32Misses=%lu "
+             "assoc32Hits=%lu assoc32Misses=%lu",
+             (unsigned long) taskIndex, (unsigned long) combine->commands,
+             (unsigned long) combine->immediateHits,
+             (unsigned long) psp_gfx_dl_diagnostic_permille(combine->immediateHits, combine->commands),
+             (unsigned long) combine->uniqueKeys, (unsigned long) combine->seenOverflow,
+             (unsigned long) combine->direct32Hits, (unsigned long) combine->direct32Misses,
+             (unsigned long) combine->assoc32Hits, (unsigned long) combine->assoc32Misses);
+    PspPlatform_LogLine(line);
+}
+
 static void psp_gfx_dl_material_corpus_report(u32 taskIndex) {
     char line[768];
     u32 total = sPspGfxDlMaterialCorpusTriangles;
@@ -6332,6 +6763,7 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
 #if PSP_RENDERER_DIAGNOSTICS
     // accumulated corpus, reported sparsely since it grows across tasks
     if ((taskIndex != 0) && ((taskIndex % 300) == 0)) {
+        psp_gfx_dl_material_class_cache_report(taskIndex);
         psp_gfx_dl_material_corpus_report(taskIndex);
     }
 #endif
