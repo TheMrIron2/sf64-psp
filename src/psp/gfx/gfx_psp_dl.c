@@ -356,6 +356,11 @@ typedef struct {
     u32 texturePaletteIndex;
     s32 textureScaleS;
     s32 textureScaleT;
+    float textureUvMulS;
+    float textureUvMulT;
+    float textureUvAddS;
+    float textureUvAddT;
+    int textureUvCoefficientsDirty;
     u32 textureWidth;
     u32 textureHeight;
     u32 textureUploadWidth;
@@ -1040,6 +1045,33 @@ static float psp_gfx_dl_normalize_s10_5_s(const PspGfxDlContext* ctx, s16 coord,
 static float psp_gfx_dl_normalize_s10_5_t(const PspGfxDlContext* ctx, s16 coord, u32 uploadSize, s32 tileOrigin) {
     return psp_gfx_dl_normalize_s10_5_scaled(coord, uploadSize, ctx->textureUploadY, tileOrigin,
                                              ctx->textureScaleT);
+}
+
+static void psp_gfx_dl_update_texture_uv_coefficients(PspGfxDlContext* ctx) {
+    float inverseSize;
+
+    if (!ctx->textureUvCoefficientsDirty) {
+        return;
+    }
+    if (ctx->textureUploadWidth != 0) {
+        inverseSize = 1.0f / (32.0f * (float) ctx->textureUploadWidth);
+        ctx->textureUvMulS = ((float) ctx->textureScaleS / 65536.0f) * inverseSize;
+        ctx->textureUvAddS = (-(float) ctx->textureTileUls * 8.0f +
+                              (float) ctx->textureUploadX * 32.0f) * inverseSize;
+    } else {
+        ctx->textureUvMulS = 0.0f;
+        ctx->textureUvAddS = 0.0f;
+    }
+    if (ctx->textureUploadHeight != 0) {
+        inverseSize = 1.0f / (32.0f * (float) ctx->textureUploadHeight);
+        ctx->textureUvMulT = ((float) ctx->textureScaleT / 65536.0f) * inverseSize;
+        ctx->textureUvAddT = (-(float) ctx->textureTileUlt * 8.0f +
+                              (float) ctx->textureUploadY * 32.0f) * inverseSize;
+    } else {
+        ctx->textureUvMulT = 0.0f;
+        ctx->textureUvAddT = 0.0f;
+    }
+    ctx->textureUvCoefficientsDirty = 0;
 }
 
 static float psp_gfx_dl_normalize_texel_coord(float coord, u32 uploadSize, u32 uploadOffset, s32 tileOrigin) {
@@ -3864,8 +3896,7 @@ static void psp_gfx_dl_build_direct_triangle_colors(PspGfxDlContext* ctx,
     }
 }
 
-static void psp_gfx_dl_emit_direct_vertex(PspGfxDlContext* ctx, const PspGfxDlVertex* src, float uScale,
-                                          float vScale) {
+static void psp_gfx_dl_emit_direct_vertex(PspGfxDlContext* ctx, const PspGfxDlVertex* src) {
     PspGfxPspglColorVertex* dst;
     u32 r;
     u32 g;
@@ -3900,27 +3931,17 @@ static void psp_gfx_dl_emit_direct_vertex(PspGfxDlContext* ctx, const PspGfxDlVe
     psp_gfx_dl_apply_depth_bias(ctx, &dst->z);
     psp_gfx_dl_vertex_color_u8(ctx, src, &r, &g, &b, &a);
     dst->color = psp_gfx_dl_pack_rgba_u8(r, g, b, a, ctx->batchPremultiplied);
-    (void) uScale;
-    (void) vScale;
-
-    dst->u = psp_gfx_dl_normalize_s10_5_s(ctx, src->s, ctx->textureUploadWidth, ctx->textureTileUls);
-    dst->v = psp_gfx_dl_normalize_s10_5_t(ctx, src->t, ctx->textureUploadHeight, ctx->textureTileUlt);
+    dst->u = (float) src->s * ctx->textureUvMulS + ctx->textureUvAddS;
+    dst->v = (float) src->t * ctx->textureUvMulT + ctx->textureUvAddT;
 }
 
 static void psp_gfx_dl_emit_direct_triangle(PspGfxDlContext* ctx, const PspGfxDlVertex* a,
                                             const PspGfxDlVertex* b, const PspGfxDlVertex* c) {
-    float uScale = 0.0f;
-    float vScale = 0.0f;
-
     PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_BATCH);
-    if ((ctx->textureUploadWidth != 0) && (ctx->textureUploadHeight != 0)) {
-        uScale = 1.0f / (32.0f * (float) ctx->textureUploadWidth);
-        vScale = 1.0f / (32.0f * (float) ctx->textureUploadHeight);
-    }
-
-    psp_gfx_dl_emit_direct_vertex(ctx, a, uScale, vScale);
-    psp_gfx_dl_emit_direct_vertex(ctx, b, uScale, vScale);
-    psp_gfx_dl_emit_direct_vertex(ctx, c, uScale, vScale);
+    psp_gfx_dl_update_texture_uv_coefficients(ctx);
+    psp_gfx_dl_emit_direct_vertex(ctx, a);
+    psp_gfx_dl_emit_direct_vertex(ctx, b);
+    psp_gfx_dl_emit_direct_vertex(ctx, c);
     PspHwCounterProfile_InnerScopeEnd(PSP_HW_SCOPE_BATCH);
 }
 
@@ -3931,8 +3952,8 @@ static int psp_gfx_dl_triangle_pretransformed(const PspGfxDlContext* ctx, const 
            (a->projectionSerial != c->projectionSerial);
 }
 
-static void psp_gfx_dl_build_direct_vertex(PspGfxDlContext* ctx, const PspGfxDlVertex* src, float uScale,
-                                           float vScale, PspGfxPspglColorVertex* dst) {
+static void psp_gfx_dl_build_direct_vertex(PspGfxDlContext* ctx, const PspGfxDlVertex* src,
+                                           PspGfxPspglColorVertex* dst) {
     if (ctx->batchPretransformed) {
         float inverseW = 1.0f / src->clipW;
 
@@ -3945,14 +3966,11 @@ static void psp_gfx_dl_build_direct_vertex(PspGfxDlContext* ctx, const PspGfxDlV
         dst->z = src->viewZ;
     }
     psp_gfx_dl_apply_depth_bias(ctx, &dst->z);
-    dst->u = ((((float) src->s * (float) ctx->textureScaleS) / 65536.0f) -
-              ((float) ctx->textureTileUls * 8.0f) + ((float) ctx->textureUploadX * 32.0f)) * uScale;
-    dst->v = ((((float) src->t * (float) ctx->textureScaleT) / 65536.0f) -
-              ((float) ctx->textureTileUlt * 8.0f) + ((float) ctx->textureUploadY * 32.0f)) * vScale;
+    dst->u = (float) src->s * ctx->textureUvMulS + ctx->textureUvAddS;
+    dst->v = (float) src->t * ctx->textureUvMulT + ctx->textureUvAddT;
 }
 
-static void psp_gfx_dl_emit_direct_vertex_unchecked(PspGfxDlContext* ctx, const PspGfxDlVertex* src,
-                                                    float uScale, float vScale) {
+static void psp_gfx_dl_emit_direct_vertex_unchecked(PspGfxDlContext* ctx, const PspGfxDlVertex* src) {
     PspGfxPspglColorVertex* dst = &PSP_GFX_DL_BATCH[ctx->batchCount];
 
 #if PSP_ORIGINAL_FOG
@@ -3961,7 +3979,7 @@ static void psp_gfx_dl_emit_direct_vertex_unchecked(PspGfxDlContext* ctx, const 
     ctx->batchCount++;
 
     psp_gfx_dl_mark_batch_component(ctx);
-    psp_gfx_dl_build_direct_vertex(ctx, src, uScale, vScale, dst);
+    psp_gfx_dl_build_direct_vertex(ctx, src, dst);
 }
 
 #if PSP_GFX_DL_HOT_STATS
@@ -4011,8 +4029,6 @@ static int psp_gfx_dl_try_emit_tri2_direct_pair(PspGfxDlContext* ctx, u8 a0, u8 
     int pretransformed0;
     int pretransformed1;
     u32 textureId;
-    float uScale = 0.0f;
-    float vScale = 0.0f;
     u32 bufferPreflush = 0;
     float area0;
     float area1;
@@ -4164,20 +4180,14 @@ static int psp_gfx_dl_try_emit_tri2_direct_pair(PspGfxDlContext* ctx, u8 a0, u8 
     } else {
         psp_gfx_dl_build_direct_pair_colors(ctx, vertices, &PSP_GFX_DL_BATCH[ctx->batchCount]);
     }
-    if (ctx->textureUploadWidth != 0) {
-        uScale = 1.0f / (32.0f * (float) ctx->textureUploadWidth);
-    }
-    if (ctx->textureUploadHeight != 0) {
-        vScale = 1.0f / (32.0f * (float) ctx->textureUploadHeight);
-    }
-
-    psp_gfx_dl_emit_direct_vertex_unchecked(ctx, emittedVertices[0], uScale, vScale);
-    psp_gfx_dl_emit_direct_vertex_unchecked(ctx, emittedVertices[1], uScale, vScale);
-    psp_gfx_dl_emit_direct_vertex_unchecked(ctx, emittedVertices[2], uScale, vScale);
+    psp_gfx_dl_update_texture_uv_coefficients(ctx);
+    psp_gfx_dl_emit_direct_vertex_unchecked(ctx, emittedVertices[0]);
+    psp_gfx_dl_emit_direct_vertex_unchecked(ctx, emittedVertices[1]);
+    psp_gfx_dl_emit_direct_vertex_unchecked(ctx, emittedVertices[2]);
     if (!mixedCull) {
-        psp_gfx_dl_emit_direct_vertex_unchecked(ctx, emittedVertices[3], uScale, vScale);
-        psp_gfx_dl_emit_direct_vertex_unchecked(ctx, emittedVertices[4], uScale, vScale);
-        psp_gfx_dl_emit_direct_vertex_unchecked(ctx, emittedVertices[5], uScale, vScale);
+        psp_gfx_dl_emit_direct_vertex_unchecked(ctx, emittedVertices[3]);
+        psp_gfx_dl_emit_direct_vertex_unchecked(ctx, emittedVertices[4]);
+        psp_gfx_dl_emit_direct_vertex_unchecked(ctx, emittedVertices[5]);
     }
     PspHwCounterProfile_InnerScopeEnd(PSP_HW_SCOPE_BATCH);
     PspProfiler_CountTriangleResult(mixedCull ? 1 : 2, mixedCull ? 1 : 0, 0, 0, mixedCull ? 1 : 2);
@@ -5590,6 +5600,7 @@ static void psp_gfx_dl_handle_texture(PspGfxDlContext* ctx, const Gfx* gfx) {
     ctx->textureEnabled = enabled;
     ctx->textureScaleS = (gfx->words.w1 >> 16) & 0xFFFF;
     ctx->textureScaleT = gfx->words.w1 & 0xFFFF;
+    ctx->textureUvCoefficientsDirty = 1;
     psp_gfx_dl_mark_effective_material_dirty(ctx);
 }
 
@@ -5608,6 +5619,7 @@ static void psp_gfx_dl_handle_set_texture_image(PspGfxDlContext* ctx, const Gfx*
     ctx->textureUploadX = 0;
     ctx->textureUploadY = 0;
     ctx->textureUploadAttempted = 0;
+    ctx->textureUvCoefficientsDirty = 1;
     psp_gfx_dl_mark_effective_material_dirty(ctx);
     if ((oldFormat != ctx->textureFormat) || (oldSize != ctx->textureSize) ||
         (oldTrainingBackdrop != psp_gfx_dl_is_training_backdrop_texture(ctx->textureImage))) {
@@ -5850,6 +5862,7 @@ static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int deferred, int pr
     } else {
         supported = 0;
     }
+    ctx->textureUvCoefficientsDirty = 1;
 
     if (supported && (ctx->textureId == 0) && PspGfxPspgl_MirrorEncodingFailed()) {
         ctx->textureMirrorFallback = 1;
@@ -5940,6 +5953,7 @@ static void psp_gfx_dl_handle_set_tile_size(PspGfxDlContext* ctx, const Gfx* gfx
     ctx->textureWidth = (lrs >> G_TEXTURE_IMAGE_FRAC) + 1;
     ctx->textureHeight = (lrt >> G_TEXTURE_IMAGE_FRAC) + 1;
     ctx->textureUploadAttempted = 0;
+    ctx->textureUvCoefficientsDirty = 1;
     psp_gfx_dl_prepare_texture(ctx, 0, psp_gfx_dl_premultiplied_blend_enabled(ctx));
     psp_gfx_dl_mark_effective_material_dirty(ctx);
 }
@@ -6379,6 +6393,7 @@ static void psp_gfx_dl_reset_context(PspGfxDlContext* ctx) {
     ctx->colorImageIsDisplay = 1;
     ctx->textureScaleS = 0xFFFF;
     ctx->textureScaleT = 0xFFFF;
+    ctx->textureUvCoefficientsDirty = 1;
     ctx->fogA = 255;
     ctx->combineUsesTextureAlpha = 1;
     ctx->modelviewSerial = 1;
