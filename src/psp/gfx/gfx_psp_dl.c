@@ -382,6 +382,7 @@ typedef struct {
     u32 geometryMode;
     u32 lightCount;
     PspGfxDlLight lights[7];
+    u32 lightRawDirections[7];
     int lightingStateDirty;
     u32 groupedLightCount;
     u8 ambientR;
@@ -1991,6 +1992,12 @@ static void psp_gfx_dl_handle_pop_mtx(PspGfxDlContext* ctx) {
     psp_gfx_dl_bump_serial(&ctx->modelviewSerial);
 }
 
+static u32 psp_gfx_dl_directional_light_raw_direction(const Light* src) {
+    return ((u32) (u8) src->l.dir[0] << 16) |
+           ((u32) (u8) src->l.dir[1] << 8) |
+           (u32) (u8) src->l.dir[2];
+}
+
 static void psp_gfx_dl_load_directional_light(PspGfxDlLight* dst, const Light* src) {
     float x;
     float y;
@@ -2178,12 +2185,18 @@ static void psp_gfx_dl_handle_movemem(PspGfxDlContext* ctx, const Gfx* gfx) {
     lightSlot = (index - G_MV_L0) >> 1;
 
     if (lightSlot < ctx->lightCount) {
-        psp_gfx_dl_load_directional_light(
-            &ctx->lights[lightSlot],
-            light
-        );
-        ctx->lightingStateDirty = 1;
-        psp_gfx_dl_stage_directional_light(ctx, lightSlot);
+        PspGfxDlLight* dst = &ctx->lights[lightSlot];
+        u32 rawDirection = psp_gfx_dl_directional_light_raw_direction(light);
+
+        if ((dst->r != light->l.col[0]) ||
+            (dst->g != light->l.col[1]) ||
+            (dst->b != light->l.col[2]) ||
+            (ctx->lightRawDirections[lightSlot] != rawDirection)) {
+            psp_gfx_dl_load_directional_light(dst, light);
+            ctx->lightRawDirections[lightSlot] = rawDirection;
+            ctx->lightingStateDirty = 1;
+            psp_gfx_dl_stage_directional_light(ctx, lightSlot);
+        }
     } else if (lightSlot == ctx->lightCount) {
         psp_gfx_dl_load_ambient_light(ctx, light);
         psp_gfx_dl_stage_ambient_light(ctx);
