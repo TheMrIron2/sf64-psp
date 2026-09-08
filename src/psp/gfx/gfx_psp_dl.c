@@ -5,7 +5,7 @@
 #include "sf64thread.h"
 #include "src/psp/gfx/gfx_psp_backend.h"
 #include "src/psp/gfx/gfx_psp_color.h"
-#include "src/psp/gfx/gfx_psp.h"
+#include "src/psp/display.h"
 #include "src/psp/hw_counter_profile.h"
 #include "src/psp/platform.h"
 #include "src/psp/profiler.h"
@@ -26,6 +26,7 @@ static u32 sPspGfxDlBackgroundFeedbackSeedColor = 0xFF000000u;
 extern u16 aTrBackdropBottomTex[];
 extern u16 aTrBackdropTopTex[];
 
+#include <n64psp/display.h>
 #include <n64psp/math.h>
 #include <n64psp/fog.h>
 #include <n64psp/lighting.h>
@@ -4755,7 +4756,7 @@ static void psp_gfx_dl_emit_rect_vertex(PspGfxDlContext* ctx,
 
     if ((ctx->uiLayout == PSP_GFX_DL_UI_LAYOUT_WIDE) ||
         (ctx->uiLayout == PSP_GFX_DL_UI_LAYOUT_SQUARE_TEXT)) {
-        const n64psp_display_config* display = PspGfx_GetDisplayConfig();
+        const n64psp_display_config* display = PspDisplay_GetConfig();
 
         dst->x = ((x + display->side_extension) * 2.0f / display->logical_width) - 1.0f;
         dst->y = 1.0f - (y / 120.0f);
@@ -4767,7 +4768,7 @@ static void psp_gfx_dl_emit_rect_vertex(PspGfxDlContext* ctx,
 }
 
 static void psp_gfx_dl_snap_square_ui_rect(float* x0, float* y0, float* x1, float* y1) {
-    const n64psp_display_config* display = PspGfx_GetDisplayConfig();
+    const n64psp_display_config* display = PspDisplay_GetConfig();
     float scaleX = (float) display->viewport_width / display->logical_width;
     float scaleY = (float) display->viewport_height / display->logical_height;
     float framebufferX = (float) display->viewport_x + (*x0 + display->side_extension) * scaleX;

@@ -18,15 +18,17 @@ endif
 #   Star Fox 64 / Fast3D display-list frontend in gfx_psp_dl.c
 #       -> backend-neutral draw state and batches
 #       -> PSPGL adapter and backend
+#       -> shared display state and PSPGL device
 #       -> public PSP bridge in renderer_pspgl.c
 # This explicit list is authoritative. The retired direct-GU renderer
 # src/psp/renderer.c and its private helpers are legacy/reference code only.
 PSP_RENDERER_C_FILES := \
-    src/psp/gfx/gfx_psp.c \
+    src/psp/display.c \
     src/psp/gfx/gfx_psp_backend_pspgl.c \
     src/psp/gfx/gfx_psp_color.c \
     src/psp/gfx/gfx_psp_dl.c \
     src/psp/gfx/gfx_pspgl.c \
+    src/psp/gfx/gfx_pspgl_device.c \
     src/psp/renderer_pspgl.c
 
 PSP_AUDIO_C_FILES := \

@@ -1,7 +1,6 @@
 #include <pspctrl.h>
 
 #include "src/psp/gfx/gfx_psp_dl.h"
-#include "src/psp/gfx/gfx_psp.h"
 #include "src/psp/display.h"
 #include "src/psp/input.h"
 #include "src/psp/hw_counter_profile.h"
@@ -117,7 +116,7 @@ int PspInput_Poll(OSContPad* pads) {
         previousButtons = pad.Buttons;
         if ((pad.Buttons & displayCombo) == displayCombo) {
             if (displayPressed) {
-                PspGfx_CycleDisplayMode();
+                PspDisplay_CycleMode();
             }
             pad.Buttons &= ~displayCombo;
         } else if ((pad.Buttons & uiScaleCombo) == uiScaleCombo) {

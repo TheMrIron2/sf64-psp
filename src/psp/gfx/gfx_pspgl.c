@@ -1,4 +1,5 @@
-#include "src/psp/gfx/gfx_psp.h"
+#include <n64psp/display.h>
+
 #include "src/psp/display.h"
 #include "src/psp/gfx/gfx_pspgl.h"
 #include "src/psp/hw_counter_profile.h"
@@ -467,10 +468,28 @@ static void psp_gfx_pspgl_load_projection_identity(void) {
     }
 }
 
+// Compensates for the raw GE depth range so its near clip remains at z 10
+static const GLfloat* psp_gfx_pspgl_depth_projection(const GLfloat* matrix, GLfloat adjusted[16]) {
+    const float nearPlane = 2.0f;
+    const float farPlane = 12800.0f;
+
+    if ((fabsf(matrix[11] + 1.0f) >= 0.0001f) || (fabsf(matrix[15]) >= 0.0001f) ||
+        (fabsf(matrix[10] + 1.0015637f) >= 0.0001f) || (fabsf(matrix[14] + 20.015638f) >= 0.001f)) {
+        return matrix;
+    }
+
+    memcpy(adjusted, matrix, sizeof(GLfloat) * 16);
+    adjusted[10] = (nearPlane + farPlane) / (nearPlane - farPlane);
+    adjusted[14] = (2.0f * nearPlane * farPlane) / (nearPlane - farPlane);
+    return adjusted;
+}
+
 static void psp_gfx_pspgl_load_projection_matrix(const GLfloat* matrix, u32 serial) {
+    GLfloat adjusted[16];
+
     psp_gfx_pspgl_matrix_mode(GL_PROJECTION);
-    if (!sStateCache.projectionValid || sStateCache.projectionIdentity ||
-        (sStateCache.projectionSerial != serial)) {
+    if (!sStateCache.projectionValid || sStateCache.projectionIdentity || (sStateCache.projectionSerial != serial)) {
+        matrix = psp_gfx_pspgl_depth_projection(matrix, adjusted);
         glLoadMatrixf(matrix);
         sStateCache.projectionValid = 1;
         sStateCache.projectionIdentity = 0;
@@ -502,7 +521,7 @@ static int psp_gfx_pspgl_is_hud_anchor_viewport(int ui) {
 }
 
 static void psp_gfx_pspgl_select_viewport(int ui) {
-    const n64psp_display_config* display = PspGfx_GetDisplayConfig();
+    const n64psp_display_config* display = PspDisplay_GetConfig();
     int viewportKey = ui;
 
     if (ui == PSP_GFX_PSPGL_VIEWPORT_WIDE_UI) {
@@ -1448,7 +1467,7 @@ static u32 psp_gfx_pspgl_get_converted_texture(const void* pixels, const u16* pa
 }
 
 void PspGfxPspgl_Init(void) {
-    const n64psp_display_config* display = PspGfx_GetDisplayConfig();
+    const n64psp_display_config* display = PspDisplay_GetConfig();
 
     PspGfxColor_Init();
     psp_gfx_pspgl_invalidate_state_cache();
@@ -1474,7 +1493,7 @@ void PspGfxPspgl_Init(void) {
 }
 
 void PspGfxPspgl_SetScissor(float ulx, float uly, float lrx, float lry) {
-    const n64psp_display_config* display = PspGfx_GetDisplayConfig();
+    const n64psp_display_config* display = PspDisplay_GetConfig();
     float scaleX = (float) display->viewport_width / PSP_GFX_PSPGL_N64_WIDTH;
     float scaleY = (float) display->viewport_height / PSP_GFX_PSPGL_N64_HEIGHT;
     GLint x0;
@@ -1540,7 +1559,7 @@ static void psp_gfx_pspgl_clear_display_borders(const n64psp_display_config* dis
 }
 
 void PspGfxPspgl_BeginFrame(void) {
-    const n64psp_display_config* display = PspGfx_GetDisplayConfig();
+    const n64psp_display_config* display = PspDisplay_GetConfig();
 
     psp_gfx_pspgl_clear_display_borders(display);
     glViewport(display->viewport_x, display->viewport_y, display->viewport_width, display->viewport_height);

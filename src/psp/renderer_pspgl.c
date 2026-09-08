@@ -1,8 +1,9 @@
 #include "PR/ultratypes.h"
 #include "sf64thread.h"
 #include "src/psp/gfx/gfx_psp_dl.h"
-#include "src/psp/gfx/gfx_psp.h"
 #include "src/psp/gfx/gfx_pspgl.h"
+#include "src/psp/gfx/gfx_pspgl_device.h"
+#include "src/psp/display.h"
 #include "src/psp/hw_counter_profile.h"
 #include "src/psp/platform.h"
 #include "src/psp/profiler.h"
@@ -69,7 +70,7 @@ static void psp_renderer_draw_perf_overlay(void) {
     bufferWidth = 0;
     pixelFormat = 0;
 
-    framebuffer = PspGfx_GetPresentedFrameBuffer(&bufferWidth, &pixelFormat);
+    framebuffer = PspGfxPspglDevice_GetPresentedFrameBuffer(&bufferWidth, &pixelFormat);
 
     if ((framebuffer == NULL) || (bufferWidth != 512)) {
         return;
@@ -228,20 +229,20 @@ static void psp_renderer_draw_starfield(void) {
 }
 
 void PspRenderer_Init(void) {
-    if (PspGfx_IsReady()) {
+    if (PspGfxPspglDevice_IsReady()) {
         return;
     }
 
-    if (!PspGfx_Init()) {
+    if (!PspDisplay_Init() || !PspGfxPspglDevice_Init()) {
         return;
     }
 
     PspGfxPspgl_Init();
     PspPlatform_LogLine("[pspgl] renderer init");
-    PspGfx_BeginFrame();
+    PspGfxPspglDevice_BeginFrame();
     PspGfxPspgl_BeginFrame();
     PspGfxPspgl_Flush();
-    PspGfx_EndFrame();
+    PspGfxPspglDevice_EndFrame();
 }
 
 void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
@@ -258,11 +259,11 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
         SceInt64 renderEnd;
     #endif
 
-        if (!PspGfx_IsReady()) {
+        if (!PspGfxPspglDevice_IsReady()) {
             PspRenderer_Init();
         }
 
-        if (!PspGfx_IsReady()) {
+        if (!PspGfxPspglDevice_IsReady()) {
             return;
         }
 
@@ -274,7 +275,7 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
         PspHwCounterProfile_ScopeBegin(PSP_HW_SCOPE_TASK);
         PspHwCounterProfile_ScopeBegin(PSP_HW_SCOPE_FRONTEND);
         PspProfiler_ComponentTaskBegin();
-        PspGfx_BeginFrame();
+        PspGfxPspglDevice_BeginFrame();
         PspGfxPspgl_BeginFrame();
 
         if ((task != NULL) && (task->task.t.data_ptr != NULL)) {
@@ -298,7 +299,7 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
 
         PspHwCounterProfile_ScopeBegin(PSP_HW_SCOPE_PRESENT);
         PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PRESENT_SWAP);
-        PspGfx_EndFrame();
+        PspGfxPspglDevice_EndFrame();
         PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PRESENT_SWAP);
         PspHwCounterProfile_ScopeEnd(PSP_HW_SCOPE_PRESENT);
         PspProfiler_ComponentTaskEnd();
