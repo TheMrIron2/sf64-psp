@@ -28,6 +28,9 @@
 #include "assets/ast_ve1_boss.h"
 #include "assets/ast_zoness.h"
 #include "actordebris.h"
+#ifdef TARGET_PSP
+#include "src/psp/renderer.h"
+#endif
 
 Vec3f D_edisplay_801615D0;
 Vec3f sViewPos;
@@ -1081,7 +1084,19 @@ void Scenery_Draw(Scenery* this, s32 cullDirection) {
                 Object_ApplyWaterDistortion();
             }
 
+#ifdef TARGET_PSP
+            if ((this->obj.id == OBJ_SCENERY_MA_TERRAIN_BUMP) &&
+                (gPlayer[0].state == PLAYERSTATE_LEVEL_INTRO)) {
+                PSP_RENDERER_DL_TERRAIN_DEPTH_BIAS_ON_MARKER(gMasterDisp++);
+            }
+#endif
             gSPDisplayList(gMasterDisp++, this->info.dList);
+#ifdef TARGET_PSP
+            if ((this->obj.id == OBJ_SCENERY_MA_TERRAIN_BUMP) &&
+                (gPlayer[0].state == PLAYERSTATE_LEVEL_INTRO)) {
+                PSP_RENDERER_DL_TERRAIN_DEPTH_BIAS_OFF_MARKER(gMasterDisp++);
+            }
+#endif
 
             if (this->obj.id == OBJ_SCENERY_CO_HIGHWAY_3) {
                 RCP_SetupDL_29(gFogRed, gFogGreen, gFogBlue, gFogAlpha, gFogNear, gFogFar);

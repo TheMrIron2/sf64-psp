@@ -101,6 +101,8 @@ extern Gfx gMapVenomCloudRuntimeDL[];
 #define PSP_GFX_DL_PERSPECTIVE_MAX_DEPTH 5
 #define PSP_GFX_DL_DEPTH_BIAS_NDC 0.0005f
 #define PSP_GFX_DL_DEPTH_BIAS_VIEW 0.5f
+#define PSP_GFX_DL_TERRAIN_DEPTH_BIAS_NDC 0.00002f
+#define PSP_GFX_DL_TERRAIN_DEPTH_BIAS_VIEW 32.0f
 
 #if PSP_RENDERER_DIAGNOSTICS
 #define PSP_GFX_DL_TRACE_MAX_RECORDS 320
@@ -439,6 +441,7 @@ typedef struct {
     int batchDepthTest;
     int batchDepthWrite;
     int batchDepthBias;
+    int terrainDepthBias;
     int batchFog;
     int batchOriginalFog;
     int batchPointFilter;
@@ -1086,10 +1089,15 @@ static float psp_gfx_dl_normalize_texel_coord(float coord, u32 uploadSize, u32 u
 }
 
 static void psp_gfx_dl_apply_depth_bias(PspGfxDlContext* ctx, float* z) {
-    if (!ctx->batchDepthBias) {
+    if (ctx->terrainDepthBias) {
+        if (ctx->batchPretransformed) {
+            *z -= PSP_GFX_DL_TERRAIN_DEPTH_BIAS_NDC;
+        } else {
+            *z += PSP_GFX_DL_TERRAIN_DEPTH_BIAS_VIEW;
+        }
+    } else if (!ctx->batchDepthBias) {
         return;
-    }
-    if (ctx->batchPretransformed) {
+    } else if (ctx->batchPretransformed) {
         *z -= PSP_GFX_DL_DEPTH_BIAS_NDC;
     } else {
         *z += PSP_GFX_DL_DEPTH_BIAS_VIEW;
@@ -1889,19 +1897,6 @@ static void psp_gfx_dl_note_matrix_changed(PspGfxDlContext* ctx, int projection)
     }
 }
 
-static void psp_gfx_dl_apply_depth_clamp_projection(float matrix[4][4]) {
-    const float nearPlane = 2.0f;
-    const float farPlane = 12800.0f;
-
-    if ((fabsf(matrix[2][3] + 1.0f) < 0.0001f) &&
-        (fabsf(matrix[3][3]) < 0.0001f) &&
-        (fabsf(matrix[2][2] + 1.0015637f) < 0.0001f) &&
-        (fabsf(matrix[3][2] + 20.015638f) < 0.001f)) {
-        matrix[2][2] = (nearPlane + farPlane) / (nearPlane - farPlane);
-        matrix[3][2] = (2.0f * nearPlane * farPlane) / (nearPlane - farPlane);
-    }
-}
-
 static void psp_gfx_dl_handle_mtx_generic(PspGfxDlContext* ctx, const void* src, u32 flags, int floating) {
     float loaded[4][4];
     float (*target)[4];
@@ -1937,9 +1932,6 @@ static void psp_gfx_dl_handle_mtx_generic(PspGfxDlContext* ctx, const void* src,
         psp_gfx_dl_mtx_copy(target, loaded);
     } else {
         psp_gfx_dl_mtx_mul(target, loaded, target);
-    }
-    if ((flags & G_MTX_PROJECTION) != 0) {
-        psp_gfx_dl_apply_depth_clamp_projection(target);
     }
     *hasTarget = 1;
     psp_gfx_dl_note_matrix_changed(ctx, (flags & G_MTX_PROJECTION) != 0);
@@ -2003,9 +1995,6 @@ static void psp_gfx_dl_handle_mtx(PspGfxDlContext* ctx, const Gfx* gfx, int floa
         psp_gfx_dl_mtx_copy(target, loaded);
     } else {
         psp_gfx_dl_mtx_mul(target, loaded, target);
-    }
-    if (projection) {
-        psp_gfx_dl_apply_depth_clamp_projection(target);
     }
     *hasTarget = 1;
     psp_gfx_dl_note_matrix_changed(ctx, projection);
@@ -5026,6 +5015,11 @@ static void psp_gfx_dl_handle_fill_rectangle(PspGfxDlContext* ctx, const Gfx* gf
     if (lrxInt <= ulxInt || lryInt <= ulyInt) {
         return;
     }
+    if (activeBackgroundRect) {
+        ulx = uly = 0.0f;
+        lrx = SCREEN_WIDTH;
+        lry = SCREEN_HEIGHT;
+    }
 
     if (primitiveFill) {
         u8 alpha = ctx->primitiveA;
@@ -6070,6 +6064,28 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
                 psp_gfx_dl_set_hud_anchor(pc++);
                 ctx->uiLayout = PSP_GFX_DL_UI_LAYOUT_AUTO;
                 PspGfxPspgl_SetViewportPolicy(PSP_GFX_PSPGL_VIEWPORT_HUD_TOP_CENTER);
+                continue;
+            }
+            if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_VIEWPORT_HUD_SCALED_TOP_LEFT) {
+                psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+                psp_gfx_dl_set_hud_anchor(pc++);
+                ctx->uiLayout = PSP_GFX_DL_UI_LAYOUT_AUTO;
+                PspGfxPspgl_SetViewportPolicy(PSP_GFX_PSPGL_VIEWPORT_HUD_SCALED_TOP_LEFT);
+                continue;
+            }
+            if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_VIEWPORT_HUD_SCALED_BOTTOM_RIGHT) {
+                psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+                psp_gfx_dl_set_hud_anchor(pc++);
+                ctx->uiLayout = PSP_GFX_DL_UI_LAYOUT_AUTO;
+                PspGfxPspgl_SetViewportPolicy(PSP_GFX_PSPGL_VIEWPORT_HUD_SCALED_BOTTOM_RIGHT);
+                continue;
+            }
+            if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_TERRAIN_DEPTH_BIAS_ON) {
+                ctx->terrainDepthBias = 1;
+                continue;
+            }
+            if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_TERRAIN_DEPTH_BIAS_OFF) {
+                ctx->terrainDepthBias = 0;
                 continue;
             }
         }

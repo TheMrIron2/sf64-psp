@@ -95,6 +95,8 @@ typedef enum HUDPspAnchor {
     HUD_PSP_ANCHOR_BOTTOM_LEFT,
     HUD_PSP_ANCHOR_BOTTOM_RIGHT,
     HUD_PSP_ANCHOR_TOP_CENTER,
+    HUD_PSP_ANCHOR_SCALED_TOP_LEFT,
+    HUD_PSP_ANCHOR_SCALED_BOTTOM_RIGHT,
 } HUDPspAnchor;
 
 #define HUD_PSP_RADIO_ANCHOR_X 26
@@ -111,6 +113,10 @@ static void HUD_PspLayoutBegin(HUDPspAnchor anchor, s16 x, s16 y) {
         PSP_RENDERER_DL_VIEWPORT_HUD_BOTTOM_RIGHT_MARKER(gMasterDisp++);
     } else if (anchor == HUD_PSP_ANCHOR_TOP_CENTER) {
         PSP_RENDERER_DL_VIEWPORT_HUD_TOP_CENTER_MARKER(gMasterDisp++);
+    } else if (anchor == HUD_PSP_ANCHOR_SCALED_TOP_LEFT) {
+        PSP_RENDERER_DL_VIEWPORT_HUD_SCALED_TOP_LEFT_MARKER(gMasterDisp++);
+    } else if (anchor == HUD_PSP_ANCHOR_SCALED_BOTTOM_RIGHT) {
+        PSP_RENDERER_DL_VIEWPORT_HUD_SCALED_BOTTOM_RIGHT_MARKER(gMasterDisp++);
     } else if (PspDisplay_IsUiScalingEnabled()) {
         PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER(gMasterDisp++);
         return;
@@ -2489,7 +2495,15 @@ void HUD_PlayerShieldGauge_Draw(f32 x, f32 y) {
 void HUD_PlayerShield_GoldRings(void) {
     HUD_PlayerShieldGauge_Update();
     HUD_PlayerShieldGauge_Draw(20.0f, 18.0f);
+#ifdef TARGET_PSP
+    HUD_PspLayoutBegin(HUD_PSP_ANCHOR_SCALED_TOP_LEFT, 20, 18);
+    Lib_InitPerspectiveAspect(&gMasterDisp, (f32) SCREEN_WIDTH / SCREEN_HEIGHT);
+#endif
     HUD_GoldRings_Draw();
+#ifdef TARGET_PSP
+    Lib_InitPerspective(&gMasterDisp);
+    HUD_PspLayoutEnd();
+#endif
 }
 
 s32 HUD_RadioDamage_Type(void) {
@@ -3653,13 +3667,15 @@ void HUD_VS_Radar(void) {
 
 void HUD_SinglePlayer(void) {
 #ifdef TARGET_PSP
-    HUD_PspLayoutBegin(HUD_PSP_ANCHOR_BOTTOM_RIGHT, 304, 220);
+    HUD_PspLayoutBegin(HUD_PSP_ANCHOR_SCALED_BOTTOM_RIGHT, 304, 220);
+    Lib_InitPerspectiveAspect(&gMasterDisp, (f32) SCREEN_WIDTH / SCREEN_HEIGHT);
 #endif
     if (gPlayState != PLAY_PAUSE) {
         HUD_Radar();
     }
 
 #ifdef TARGET_PSP
+    Lib_InitPerspective(&gMasterDisp);
     HUD_PspLayoutEnd();
     HUD_PspLayoutBegin(HUD_PSP_ANCHOR_TOP_RIGHT, 294, 28);
 #endif

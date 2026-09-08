@@ -1,4 +1,7 @@
 #include "global.h"
+#ifdef TARGET_PSP
+#include "src/psp/renderer.h"
+#endif
 
 void Wipe_Horizontal(s32 frame) {
     Graphics_FillRectangle(&gMasterDisp, 0, 0, frame, SCREEN_HEIGHT, 0, 0, 0, 255);
@@ -30,6 +33,9 @@ void Wipe_Circular(s32 frame) {
 
 void Wipe_Draw(WipeMode mode, s32 frame) {
     if (frame != 0) {
+#ifdef TARGET_PSP
+        PSP_RENDERER_DL_VIEWPORT_FULL_MARKER(gMasterDisp++);
+#endif
         switch (mode) {
             case WIPE_CIRCULAR:
                 Wipe_Circular(frame);
@@ -44,5 +50,8 @@ void Wipe_Draw(WipeMode mode, s32 frame) {
                 PRINTF("そのような フェード は ない (%d)\n"); // There is no such fade
                 break;
         }
+#ifdef TARGET_PSP
+        PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER(gMasterDisp++);
+#endif
     }
 }
