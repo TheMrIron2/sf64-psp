@@ -820,22 +820,6 @@ static u64 psp_gfx_pspgl_converted_base_hash(const void* pixels, PspGfxConverted
 }
 #endif
 
-u8 gPspGfxColorTransferLut[256];
-static int sColorTransferInitialized;
-
-void PspGfxPspgl_InitColorTransfer(void) {
-    u32 i;
-
-    if (sColorTransferInitialized) {
-        return;
-    }
-    /* Match the N64 brightness response used by the Dreamcast renderer. */
-    for (i = 0; i < 256; i++) {
-        gPspGfxColorTransferLut[i] = (u8) (255.0f * sqrtf((float) i / 255.0f));
-    }
-    sColorTransferInitialized = 1;
-}
-
 /* Decodes to transformed RGB (transfer policy) with raw alpha; also covers
  * CI4/CI8 palette entries, which route through this conversion. */
 static void psp_gfx_pspgl_rgba16_to_rgba8(u16 color, u8* out) {
@@ -1466,7 +1450,7 @@ static u32 psp_gfx_pspgl_get_converted_texture(const void* pixels, const u16* pa
 void PspGfxPspgl_Init(void) {
     const n64psp_display_config* display = PspGfx_GetDisplayConfig();
 
-    PspGfxPspgl_InitColorTransfer();
+    PspGfxColor_Init();
     psp_gfx_pspgl_invalidate_state_cache();
     glViewport(display->viewport_x, display->viewport_y, display->viewport_width, display->viewport_height);
     glDepthRangeRaw(-163939.984375f, 163939.984375f, 0, 65535);

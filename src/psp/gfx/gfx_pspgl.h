@@ -1,99 +1,24 @@
 #ifndef PSP_GFX_PSPGL_H
 #define PSP_GFX_PSPGL_H
 
-#define PSP_GFX_PSPGL_VIEWPORT_AUTO (-1)
-#define PSP_GFX_PSPGL_VIEWPORT_FULL 0
-#define PSP_GFX_PSPGL_VIEWPORT_CENTERED_UI 1
-#define PSP_GFX_PSPGL_VIEWPORT_WIDE_UI 2
-#define PSP_GFX_PSPGL_VIEWPORT_NATIVE_HUD 3
-#define PSP_GFX_PSPGL_VIEWPORT_HUD_TOP_LEFT 4
-#define PSP_GFX_PSPGL_VIEWPORT_HUD_TOP_RIGHT 5
-#define PSP_GFX_PSPGL_VIEWPORT_HUD_BOTTOM_LEFT 6
-#define PSP_GFX_PSPGL_VIEWPORT_HUD_BOTTOM_RIGHT 7
-#define PSP_GFX_PSPGL_VIEWPORT_HUD_TOP_CENTER 8
-#define PSP_GFX_PSPGL_VIEWPORT_HUD_SCALED_TOP_LEFT 9
-#define PSP_GFX_PSPGL_VIEWPORT_HUD_SCALED_BOTTOM_RIGHT 10
+#include "src/psp/gfx/gfx_psp_backend.h"
+#include "src/psp/gfx/gfx_psp_color.h"
 
-#include "PR/ultratypes.h"
+#define PSP_GFX_PSPGL_VIEWPORT_AUTO PSP_GFX_VIEWPORT_AUTO
+#define PSP_GFX_PSPGL_VIEWPORT_FULL PSP_GFX_VIEWPORT_FULL
+#define PSP_GFX_PSPGL_VIEWPORT_CENTERED_UI PSP_GFX_VIEWPORT_CENTERED_UI
+#define PSP_GFX_PSPGL_VIEWPORT_WIDE_UI PSP_GFX_VIEWPORT_WIDE_UI
+#define PSP_GFX_PSPGL_VIEWPORT_NATIVE_HUD PSP_GFX_VIEWPORT_NATIVE_HUD
+#define PSP_GFX_PSPGL_VIEWPORT_HUD_TOP_LEFT PSP_GFX_VIEWPORT_HUD_TOP_LEFT
+#define PSP_GFX_PSPGL_VIEWPORT_HUD_TOP_RIGHT PSP_GFX_VIEWPORT_HUD_TOP_RIGHT
+#define PSP_GFX_PSPGL_VIEWPORT_HUD_BOTTOM_LEFT PSP_GFX_VIEWPORT_HUD_BOTTOM_LEFT
+#define PSP_GFX_PSPGL_VIEWPORT_HUD_BOTTOM_RIGHT PSP_GFX_VIEWPORT_HUD_BOTTOM_RIGHT
+#define PSP_GFX_PSPGL_VIEWPORT_HUD_TOP_CENTER PSP_GFX_VIEWPORT_HUD_TOP_CENTER
+#define PSP_GFX_PSPGL_VIEWPORT_HUD_SCALED_TOP_LEFT PSP_GFX_VIEWPORT_HUD_SCALED_TOP_LEFT
+#define PSP_GFX_PSPGL_VIEWPORT_HUD_SCALED_BOTTOM_RIGHT PSP_GFX_VIEWPORT_HUD_SCALED_BOTTOM_RIGHT
 
-#include <stddef.h>
-
-/*
- * Renderer colour-transfer policy, matching sf64-dc (gfx_retro_dc.c): a
- * square-root transfer table256[i] = 255 * sqrt(i / 255) is applied exactly
- * once to every RGB input the fixed-function combine consumes -- vertex
- * shade colours, texture RGB at upload, primitive/environment/fog/fill
- * colours. Alpha is never transformed.
- *
- *   SF64_PSP_COLOR_TRANSFER=0  raw behaviour (transfer applied only to
- *                              calculated lighting, as before)
- *   SF64_PSP_COLOR_TRANSFER=1  sf64-dc square-root policy
- *
- * The mode is compile-time only: texture caches hold transformed texels, so
- * toggling requires a rebuild rather than runtime cache invalidation.
- */
-#ifndef SF64_PSP_COLOR_TRANSFER
-#define SF64_PSP_COLOR_TRANSFER 1
-#endif
-
-/* 255 * sqrt(i / 255) table; always built (calculated lighting uses it even
- * when SF64_PSP_COLOR_TRANSFER is 0). */
-extern u8 gPspGfxColorTransferLut[256];
-
-void PspGfxPspgl_InitColorTransfer(void);
-
-/* Policy-gated RGB transfer for everything other than calculated lighting. */
-static inline u8 psp_gfx_color_transfer_u8(u8 value) {
-#if SF64_PSP_COLOR_TRANSFER
-    return gPspGfxColorTransferLut[value];
-#else
-    return value;
-#endif
-}
-
-/* N64 RGBA5551 fill colour to the renderer vertex layout 0xAABBGGRR: 5-bit
- * channels expand to 8 bits, RGB carries the transfer policy exactly once,
- * the alpha bit expands to 0/255 untransformed. */
-static inline u32 psp_gfx_rgba5551_to_abgr8888(u16 color) {
-    u32 r5 = (color >> 11) & 0x1F;
-    u32 g5 = (color >> 6) & 0x1F;
-    u32 b5 = (color >> 1) & 0x1F;
-    u32 r = psp_gfx_color_transfer_u8((u8) ((r5 << 3) | (r5 >> 2)));
-    u32 g = psp_gfx_color_transfer_u8((u8) ((g5 << 3) | (g5 >> 2)));
-    u32 b = psp_gfx_color_transfer_u8((u8) ((b5 << 3) | (b5 >> 2)));
-    u32 a = (color & 1U) ? 255U : 0U;
-
-    return r | (g << 8) | (b << 16) | (a << 24);
-}
-
-typedef struct {
-    // native PSP GE vertex order
-    float u;
-    float v;
-    u32 color;
-    float x;
-    float y;
-    float z;
-} PspGfxPspglColorVertex;
-
-typedef char PspGfxPspglColorVertexSizeCheck[
-    (sizeof(PspGfxPspglColorVertex) == 24) ? 1 : -1
-];
-typedef char PspGfxPspglColorVertexUOffsetCheck[(offsetof(PspGfxPspglColorVertex, u) == 0) ? 1 : -1];
-typedef char PspGfxPspglColorVertexVOffsetCheck[(offsetof(PspGfxPspglColorVertex, v) == 4) ? 1 : -1];
-typedef char PspGfxPspglColorVertexColorOffsetCheck[(offsetof(PspGfxPspglColorVertex, color) == 8) ? 1 : -1];
-typedef char PspGfxPspglColorVertexXOffsetCheck[(offsetof(PspGfxPspglColorVertex, x) == 12) ? 1 : -1];
-typedef char PspGfxPspglColorVertexYOffsetCheck[(offsetof(PspGfxPspglColorVertex, y) == 16) ? 1 : -1];
-typedef char PspGfxPspglColorVertexZOffsetCheck[(offsetof(PspGfxPspglColorVertex, z) == 20) ? 1 : -1];
-
-typedef struct {
-    u32 color;
-    float x;
-    float y;
-    float z;
-} PspGfxPspglFogVertex;
-
-typedef char PspGfxPspglFogVertexSizeCheck[(sizeof(PspGfxPspglFogVertex) == 16) ? 1 : -1];
+typedef PspGfxVertex PspGfxPspglColorVertex;
+typedef PspGfxFogVertex PspGfxPspglFogVertex;
 
 typedef struct {
     PspGfxPspglColorVertex* vertices;
