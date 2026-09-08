@@ -82,7 +82,7 @@ static volatile int sViEventPending;
 static volatile int sExitRequested;
 static u32 sGfxTaskCount;
 static u32 sAudioTaskCount;
-static u32 sViCount;
+static volatile u32 sViCount;
 
 
 u32 osMemSize = 24 * 1024 * 1024;
@@ -1786,7 +1786,6 @@ static int psp_vi_thread(SceSize args, void* argp) {
     (void) argp;
 
     while (!sExitRequested) {
-        // game already divides frame pacing with gVIsPerFrame
         sceDisplayWaitVblankStart();
         PspPlatform_PostViEvent();
     }
@@ -1883,6 +1882,10 @@ void PspPlatform_SetViEvent(OSMesgQueue* mq, OSMesg msg, u32 retraceCount) {
     sViRetraceCount = retraceCount == 0 ? 1 : retraceCount;
     sViEventPending = 0;
     sceKernelCpuResumeIntr(intrState);
+}
+
+u32 PspPlatform_GetViCount(void) {
+    return sViCount;
 }
 
 void PspPlatform_PostViEvent(void) {

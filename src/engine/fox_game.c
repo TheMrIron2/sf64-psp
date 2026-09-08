@@ -4,6 +4,7 @@
 #include "assets/ast_logo.h"
 #include "mods.h"
 #ifdef TARGET_PSP
+#include "src/psp/profiler.h"
 #include "src/psp/renderer.h"
 #endif
 
@@ -399,6 +400,9 @@ void Game_Update(void) {
         }
 
         PSP_TRACE("game update: state switch");
+#ifdef TARGET_PSP
+        PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_SIMULATION_STATE);
+#endif
         switch (gGameState) {
             case GSTATE_BOOT:
                 PSP_TRACE("game update: boot");
@@ -575,6 +579,10 @@ void Game_Update(void) {
                 PSP_TRACE("game update: default");
                 break;
         }
+#ifdef TARGET_PSP
+        PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_SIMULATION_STATE);
+        PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_DRAW_GENERATION);
+#endif
 
         PSP_TRACE("game update: draw");
         Game_Draw(0);
@@ -678,6 +686,9 @@ void Game_Update(void) {
 #endif
 #if MODS_SPAWNER == 1
         Spawner();
+#endif
+#ifdef TARGET_PSP
+        PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_DRAW_GENERATION);
 #endif
     }
 }

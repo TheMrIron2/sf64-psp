@@ -2,6 +2,8 @@
 #include "sf64audio_external.h"
 #include "mods.h"
 #ifdef TARGET_PSP
+#include "global.h"
+#include "src/psp/frame_scheduler.h"
 #include "src/psp/platform.h"
 #include "src/psp/profiler.h"
 #endif
@@ -193,7 +195,7 @@ void Audio_ThreadEntry(void* arg0) {
     }
 }
 
-void Graphics_SetTask(void) {
+static void Graphics_PrepareTask(void) {
     gGfxTask->mesgQueue = &gGfxTaskMesgQueue;
     gGfxTask->msg = (OSMesg) TASK_MESG_2;
     gGfxTask->task.t.type = M_GFXTASK;
@@ -213,7 +215,15 @@ void Graphics_SetTask(void) {
     gGfxTask->task.t.yield_data_ptr = (u64*) &gOSYieldData;
     gGfxTask->task.t.yield_data_size = OS_YIELD_DATA_SIZE;
     osWritebackDCacheAll();
-    osSendMesg(&gTaskMesgQueue, gGfxTask, OS_MESG_NOBLOCK);
+}
+
+static s32 Graphics_SubmitTask(SPTask* task) {
+    return osSendMesg(&gTaskMesgQueue, task, OS_MESG_NOBLOCK);
+}
+
+void Graphics_SetTask(void) {
+    Graphics_PrepareTask();
+    Graphics_SubmitTask(gGfxTask);
 }
 
 void Graphics_InitializeTask(u32 frameCount) {
@@ -299,10 +309,143 @@ void Timer_ThreadEntry(void* arg0) {
     }
 }
 
+#ifdef TARGET_PSP
+#define PSP_PRESENTATION_VI_INTERVAL 2
+
+static u8 Graphics_GetPresentationVIs(void) {
+    u8 simulationVIs = MIN(MAX(gVIsPerFrame, 1), 4);
+
+    if ((gGameState == GSTATE_PLAY) && (gCurrentLevel == LEVEL_AQUAS) && (simulationVIs == 3)) {
+        return PSP_PRESENTATION_VI_INTERVAL;
+    }
+    return simulationVIs;
+}
+
+static void Graphics_FinalizeDisplayList(void) {
+    if (gStartNMI == 1) {
+        Graphics_NMIWipe();
+    }
+    gSPEndDisplayList(gUnkDisp1++);
+    gSPEndDisplayList(gUnkDisp2++);
+    gSPDisplayList(gMasterDisp++, gGfxPool->unkDL2);
+    gDPFullSync(gMasterDisp++);
+    gSPEndDisplayList(gMasterDisp++);
+}
+
+static SPTask* Graphics_BuildSimulationTask(void) {
+    gSysFrameCount++;
+    Graphics_InitializeTask(gSysFrameCount);
+    MQ_WAIT_FOR_MESG(&gControllerMesgQueue, NULL);
+    Controller_UpdateInput();
+    osSendMesg(&gSerialThreadMesgQueue, (OSMesg) SI_READ_CONTROLLER, OS_MESG_NOBLOCK);
+    if (gControllerPress[3].button & U_JPAD) {
+        Main_SetVIMode();
+    }
+
+    gSPSegment(gUnkDisp1++, 0, 0);
+    gSPDisplayList(gMasterDisp++, gGfxPool->unkDL1);
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_GAME_UPDATE);
+    Game_Update();
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_GAME_UPDATE);
+    Graphics_FinalizeDisplayList();
+    Graphics_PrepareTask();
+    return gGfxTask;
+}
+
+static void Graphics_WaitForTask(s32* taskInFlight) {
+    if (!*taskInFlight) {
+        return;
+    }
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_GFX_TASK_BACKPRESSURE);
+    MQ_WAIT_FOR_MESG(&gGfxTaskMesgQueue, NULL);
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_GFX_TASK_BACKPRESSURE);
+    *taskInFlight = false;
+}
+
+static void Graphics_RunPspScheduler(SPTask* reusableTask, FrameBuffer* reusableFrameBuffer, s32 taskInFlight) {
+    PspFrameScheduler scheduler;
+    PspFrameSchedule schedule;
+    SPTask* inFlightTask = taskInFlight ? reusableTask : NULL;
+    SPTask* pendingTask = NULL;
+    FrameBuffer* pendingFrameBuffer = NULL;
+    u32 currentVi = PspPlatform_GetViCount();
+    u32 submitFailed;
+    u32 renderOnly;
+
+    PspFrameScheduler_Init(&scheduler, currentVi, gVIsPerFrame, Graphics_GetPresentationVIs());
+    while (true) {
+        PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_VBLANK_WAIT);
+        MQ_WAIT_FOR_MESG(&gGfxVImesgQueue, NULL);
+        PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_VBLANK_WAIT);
+        currentVi = PspPlatform_GetViCount();
+        schedule = PspFrameScheduler_Advance(&scheduler, currentVi);
+        submitFailed = false;
+        renderOnly = false;
+
+        if (schedule.simulationDue) {
+            SPTask* nextTask = &gGfxPools[(gSysFrameCount + 1) % 2].task;
+
+            if (taskInFlight && (nextTask == inFlightTask)) {
+                Graphics_WaitForTask(&taskInFlight);
+                inFlightTask = NULL;
+            }
+            pendingTask = Graphics_BuildSimulationTask();
+            pendingFrameBuffer = gFrameBuffer;
+            PspFrameScheduler_SetSimulationVIs(&scheduler, currentVi, gVIsPerFrame);
+            PspFrameScheduler_SetPresentationVIs(&scheduler, currentVi, Graphics_GetPresentationVIs());
+        }
+
+        if (schedule.presentationDue) {
+            SPTask* task;
+
+            Graphics_WaitForTask(&taskInFlight);
+            inFlightTask = NULL;
+            if (pendingTask != NULL) {
+                task = pendingTask;
+            } else {
+                task = reusableTask;
+                renderOnly = true;
+            }
+
+            if (Graphics_SubmitTask(task) == 0) {
+                taskInFlight = true;
+                inFlightTask = task;
+                reusableTask = task;
+                if (pendingTask != NULL) {
+                    reusableFrameBuffer = pendingFrameBuffer;
+                    pendingTask = NULL;
+                    pendingFrameBuffer = NULL;
+                }
+            } else {
+                submitFailed = true;
+            }
+
+            if (!gFillScreen) {
+                osViSwapBuffer(reusableFrameBuffer);
+            }
+            Fault_SetFrameBuffer(reusableFrameBuffer, SCREEN_WIDTH, 16);
+        }
+
+        if (schedule.simulationDue) {
+            PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_AUDIO_UPDATE);
+            Audio_Update();
+            PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_AUDIO_UPDATE);
+        }
+
+        PspProfiler_RecordTimingEvent(schedule.elapsedVIs, schedule.simulationDue, schedule.presentationDue,
+                                      renderOnly, schedule.missedSimulationDeadlines,
+                                      schedule.missedPresentationDeadlines + submitFailed,
+                                      scheduler.simulationVIs, scheduler.presentationVIs);
+    }
+}
+#endif
+
 void Graphics_ThreadEntry(void* arg0) {
+#ifndef TARGET_PSP
     u8 i;
     u8 visPerFrame;
     u8 validVIsPerFrame;
+#endif
 
     PSP_TRACE("gfx game init");
     Game_Initialize();
@@ -323,6 +466,10 @@ void Graphics_ThreadEntry(void* arg0) {
         gSPEndDisplayList(gMasterDisp++);
     }
     PSP_TRACE("gfx first task");
+#ifdef TARGET_PSP
+    Graphics_PrepareTask();
+    Graphics_RunPspScheduler(gGfxTask, gFrameBuffer, Graphics_SubmitTask(gGfxTask) == 0);
+#else
     Graphics_SetTask();
     PSP_TRACE("gfx loop");
     while (true) {
@@ -419,6 +566,7 @@ void Graphics_ThreadEntry(void* arg0) {
         PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_AUDIO_UPDATE);
 #endif
     }
+#endif
 }
 
 void Main_InitMesgQueues(void) {

@@ -297,7 +297,9 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
     #endif
 
         PspHwCounterProfile_ScopeBegin(PSP_HW_SCOPE_PRESENT);
+        PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PRESENT_SWAP);
         PspGfx_EndFrame();
+        PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PRESENT_SWAP);
         PspHwCounterProfile_ScopeEnd(PSP_HW_SCOPE_PRESENT);
         PspProfiler_ComponentTaskEnd();
 

@@ -194,6 +194,7 @@ PSP_GAME_C_FILES := \
     src/overlays/ovl_unused/fox_unused.c \
     src/psp/input.c \
     src/psp/main.c \
+    src/psp/frame_scheduler.c \
     $(PSP_N64PSP_C_FILES) \
     src/psp/platform.c \
     src/psp/profiler.c \

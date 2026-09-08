@@ -529,6 +529,15 @@ static u32 sForcedActivePhaseEnds;
 static u64 sCaptureStartUs;
 static u64 sCaptureEndUs;
 static u64 sTimerReadPairOverheadUs;
+static u64 sTimingPhysicalVIs;
+static u64 sTimingSimulationTicks;
+static u64 sTimingPresentationAttempts;
+static u64 sTimingSuccessfulPresentations;
+static u64 sTimingRenderOnlyPresentations;
+static u64 sTimingMissedSimulationDeadlines;
+static u64 sTimingMissedPresentationDeadlines;
+static u32 sTimingSimulationVIs;
+static u32 sTimingPresentationVIs;
 static u32 sTri2PairFirstMismatchSeen;
 static u32 sTri2PairFirstMismatchVertex;
 static u32 sTri2PairFirstMismatchFieldMask;
@@ -776,6 +785,15 @@ PSP_PROFILE_ATTR static void psp_profiler_reset_phase_capture(void) {
 #endif
     sCaptureFrames = 0;
     sForcedActivePhaseEnds = 0;
+    sTimingPhysicalVIs = 0;
+    sTimingSimulationTicks = 0;
+    sTimingPresentationAttempts = 0;
+    sTimingSuccessfulPresentations = 0;
+    sTimingRenderOnlyPresentations = 0;
+    sTimingMissedSimulationDeadlines = 0;
+    sTimingMissedPresentationDeadlines = 0;
+    sTimingSimulationVIs = 0;
+    sTimingPresentationVIs = 0;
     sTimerReadPairOverheadUs = psp_profiler_measure_timer_overhead();
     sCaptureStartUs = psp_profiler_now_us();
     sCaptureEndUs = sCaptureStartUs;
@@ -816,9 +834,12 @@ static const char* psp_profiler_phase_name(PspProfilePhase phase) {
         "audio task dispatch",
         "audio synthesis task creation",
         "audio update work",
-        "game/update work",
+        "simulation tick and display-list build",
+        "simulation state update",
+        "draw and display-list generation",
         "graphics task completion/backpressure wait",
-        "vblank or idle wait"
+        "vblank or idle wait",
+        "present and swap"
     };
 
     return names[phase];
@@ -1353,7 +1374,7 @@ static void psp_profiler_write_frame_summary(u32 slot) {
         return;
     }
     psp_profiler_write_all(fd,
-                           "capture_frame_index,game_frame_counter,sys_frame_counter,vi_per_frame,game_state,scene_id,draw_mode,frame_start_tick,frame_interval_valid,frame_interval_us,total_profiled_frame_us_raw,total_profiled_frame_us_adjusted,graphics_task_us,game_update_us,display_list_processing_us,batch_flush_us,vertex_processing_or_upload_us,lighting_us,clipping_us,texture_processing_or_upload_us,pspgl_state_setup_us,draw_submission_us,gl_flush_us,finish_or_sync_us,gfx_backpressure_us,vblank_wait_us,incomplete_phase_mask,incomplete_phase_depth,title_valid,title_state,title_cutscene_state,title_scene_state,title_timer1,title_timer2,title_timer3,title_msg_frame_count,title_hold_timer,title_selected_team,title_team0_frame_count,title_team1_frame_count,title_team2_frame_count,title_team3_frame_count,title_team0_frame_step,title_team1_frame_step,title_team2_frame_step,title_team3_frame_step,title_team0_motion_enabled,title_team1_motion_enabled,title_team2_motion_enabled,title_team3_motion_enabled,title_light_pitch,title_light_yaw,title_team_light_dir_x,title_team_light_dir_y,title_team_light_dir_z,title_light_target_x,title_light_target_y,title_light_target_z,title_team_ambient_r,title_team_ambient_g,title_team_ambient_b,title_camera_eye_x,title_camera_eye_y,title_camera_eye_z,title_camera_at_x,title_camera_at_y,title_camera_at_z,title_flags,display_list_tasks,gvtx_commands,vertices_loaded,tri1_commands,tri2_commands,input_triangles,output_triangles,lit_vertices,lighting_evaluations,perspective_divides,batch_flushes,draw_calls,vertices_submitted,texture_uploads,texture_bytes_uploaded,vertex_stream_upload_calls,vertex_stream_upload_bytes,clipping_input_triangles,trivially_accepted_triangles,trivially_rejected_triangles,partially_clipped_triangles,generated_clipping_vertices,modelview_matrix_commands,projection_matrix_commands,matrix_compositions,glFlush_calls,sync_calls\n");
+                           "capture_frame_index,game_frame_counter,sys_frame_counter,vi_per_frame,game_state,scene_id,draw_mode,frame_start_tick,frame_interval_valid,frame_interval_us,total_profiled_frame_us_raw,total_profiled_frame_us_adjusted,graphics_task_us,game_update_us,simulation_state_us,draw_generation_us,display_list_processing_us,batch_flush_us,vertex_processing_or_upload_us,lighting_us,clipping_us,texture_processing_or_upload_us,pspgl_state_setup_us,draw_submission_us,gl_flush_us,finish_or_sync_us,present_swap_us,gfx_backpressure_us,vblank_wait_us,incomplete_phase_mask,incomplete_phase_depth,title_valid,title_state,title_cutscene_state,title_scene_state,title_timer1,title_timer2,title_timer3,title_msg_frame_count,title_hold_timer,title_selected_team,title_team0_frame_count,title_team1_frame_count,title_team2_frame_count,title_team3_frame_count,title_team0_frame_step,title_team1_frame_step,title_team2_frame_step,title_team3_frame_step,title_team0_motion_enabled,title_team1_motion_enabled,title_team2_motion_enabled,title_team3_motion_enabled,title_light_pitch,title_light_yaw,title_team_light_dir_x,title_team_light_dir_y,title_team_light_dir_z,title_light_target_x,title_light_target_y,title_light_target_z,title_team_ambient_r,title_team_ambient_g,title_team_ambient_b,title_camera_eye_x,title_camera_eye_y,title_camera_eye_z,title_camera_at_x,title_camera_at_y,title_camera_at_z,title_flags,display_list_tasks,gvtx_commands,vertices_loaded,tri1_commands,tri2_commands,input_triangles,output_triangles,lit_vertices,lighting_evaluations,perspective_divides,batch_flushes,draw_calls,vertices_submitted,texture_uploads,texture_bytes_uploaded,vertex_stream_upload_calls,vertex_stream_upload_bytes,clipping_input_triangles,trivially_accepted_triangles,trivially_rejected_triangles,partially_clipped_triangles,generated_clipping_vertices,modelview_matrix_commands,projection_matrix_commands,matrix_compositions,glFlush_calls,sync_calls\n");
     for (i = 0; i < sFrameTraceCount; i++) {
         const PspProfileFrameRecord* r = &sFrameTrace[i];
         u64 vertexUs = psp_profiler_frame_phase_adjusted(r, PSP_PROFILE_PHASE_G_VTX) +
@@ -1384,6 +1405,10 @@ static void psp_profiler_write_frame_summary(u32 slot) {
         psp_profiler_csv_append_u64(line, sizeof(line), &offset,
                                     psp_profiler_frame_phase_adjusted(r, PSP_PROFILE_PHASE_GAME_UPDATE));
         psp_profiler_csv_append_u64(line, sizeof(line), &offset,
+                                    psp_profiler_frame_phase_adjusted(r, PSP_PROFILE_PHASE_SIMULATION_STATE));
+        psp_profiler_csv_append_u64(line, sizeof(line), &offset,
+                                    psp_profiler_frame_phase_adjusted(r, PSP_PROFILE_PHASE_DRAW_GENERATION));
+        psp_profiler_csv_append_u64(line, sizeof(line), &offset,
                                     psp_profiler_frame_phase_adjusted(r, PSP_PROFILE_PHASE_DL_TRAVERSAL));
         psp_profiler_csv_append_u64(line, sizeof(line), &offset,
                                     psp_profiler_frame_phase_adjusted(r, PSP_PROFILE_PHASE_BATCH_FLUSH));
@@ -1399,6 +1424,8 @@ static void psp_profiler_write_frame_summary(u32 slot) {
         psp_profiler_csv_append_u64(line, sizeof(line), &offset,
                                     psp_profiler_frame_phase_adjusted(r, PSP_PROFILE_PHASE_GL_FLUSH));
         psp_profiler_csv_append_u64(line, sizeof(line), &offset, syncUs);
+        psp_profiler_csv_append_u64(line, sizeof(line), &offset,
+                                    psp_profiler_frame_phase_adjusted(r, PSP_PROFILE_PHASE_PRESENT_SWAP));
         psp_profiler_csv_append_u64(line, sizeof(line), &offset,
                                     psp_profiler_frame_phase_adjusted(r, PSP_PROFILE_PHASE_GFX_TASK_BACKPRESSURE));
         psp_profiler_csv_append_u64(line, sizeof(line), &offset,
@@ -1804,6 +1831,24 @@ static void psp_profiler_write_phase_files(u32 slot) {
              (unsigned long) scePowerGetBusClockFrequency(), (unsigned long) slot, PROFILE_CAPTURE_FRAMES,
              (unsigned long) sCaptureFrames, sTimerReadPairOverheadUs);
     psp_profiler_write_all(fd, line);
+    {
+        u64 captureUs = (sCaptureEndUs > sCaptureStartUs) ? (sCaptureEndUs - sCaptureStartUs) : 0;
+        u64 simulationRate = captureUs ? (sTimingSimulationTicks * 1000000000ULL) / captureUs : 0;
+        u64 attemptRate = captureUs ? (sTimingPresentationAttempts * 1000000000ULL) / captureUs : 0;
+        u64 presentedRate = captureUs ? (sTimingSuccessfulPresentations * 1000000000ULL) / captureUs : 0;
+        u64 usPerSimulation = sTimingSimulationTicks ? captureUs / sTimingSimulationTicks : 0;
+        u64 usPerPresentation = sTimingSuccessfulPresentations ? captureUs / sTimingSuccessfulPresentations : 0;
+
+        snprintf(line, sizeof(line),
+                 "[timing scheduler]\nphysical_vi_ticks,%llu\nsimulation_ticks,%llu\npresentation_attempts,%llu\nsuccessful_presentations,%llu\nrender_only_presentations,%llu\nrepeated_presentations,%llu\nmissed_simulation_deadlines,%llu\nmissed_presentation_deadlines,%llu\nskipped_presentations,%llu\nsimulation_vis,%lu\npresentation_vis,%lu\nsimulation_ticks_per_second_x1000,%llu\npresentation_attempts_per_second_x1000,%llu\nsuccessful_presentations_per_second_x1000,%llu\nwall_us_per_simulation_tick,%llu\nwall_us_per_successful_presentation,%llu\n\n",
+                 sTimingPhysicalVIs, sTimingSimulationTicks, sTimingPresentationAttempts,
+                 sTimingSuccessfulPresentations, sTimingRenderOnlyPresentations, sTimingRenderOnlyPresentations,
+                 sTimingMissedSimulationDeadlines, sTimingMissedPresentationDeadlines,
+                 sTimingMissedPresentationDeadlines, (unsigned long) sTimingSimulationVIs,
+                 (unsigned long) sTimingPresentationVIs, simulationRate, attemptRate, presentedRate,
+                 usPerSimulation, usPerPresentation);
+        psp_profiler_write_all(fd, line);
+    }
     snprintf(line, sizeof(line),
              "\n[mirror encoded texture lifetime]\nencoding_attempts,%llu\nsuccessful_encodings,%llu\nfallback_uses,%llu\nencoded_s,%llu\nencoded_t,%llu\nencoded_both,%llu\nsuccessful_source_bytes,%llu\nsuccessful_encoded_bytes,%llu\nsuccessful_additional_bytes,%llu\nencoded_uploads,%llu\nencoded_upload_bytes,%llu\nstaging_failures,%llu\nmaximum_successful_encoded_width,%lu\nmaximum_successful_encoded_height,%lu\n",
              sMirrorEncodingLifetimeAttempts, sMirrorEncodedLifetimeUploads, sMirrorEncodingLifetimeFallbackUses,
@@ -2496,6 +2541,7 @@ void PspProfiler_OnGfxTaskComplete(void) {
 #endif
     lockState = psp_profiler_lock();
     sCaptureFrames++;
+    sTimingSuccessfulPresentations++;
     frames = sCaptureFrames;
 #if PROFILE_FRAME_TRACE
     psp_profiler_capture_frame_record_locked(now, frames - 1);
@@ -2505,6 +2551,28 @@ void PspProfiler_OnGfxTaskComplete(void) {
         PspProfiler_StopCapture();
         PspProfiler_DumpCapture();
     }
+}
+
+void PspProfiler_RecordTimingEvent(u32 elapsedVIs, u32 simulationTick, u32 presentationAttempt,
+                                   u32 renderOnlyPresentation, u32 missedSimulationDeadlines,
+                                   u32 missedPresentationDeadlines, u32 simulationVIs, u32 presentationVIs) {
+    int lockState;
+
+    if (!sCaptureActive) {
+        return;
+    }
+    lockState = psp_profiler_lock();
+    if (sCaptureActive) {
+        sTimingPhysicalVIs += elapsedVIs;
+        sTimingSimulationTicks += simulationTick;
+        sTimingPresentationAttempts += presentationAttempt;
+        sTimingRenderOnlyPresentations += renderOnlyPresentation;
+        sTimingMissedSimulationDeadlines += missedSimulationDeadlines;
+        sTimingMissedPresentationDeadlines += missedPresentationDeadlines;
+        sTimingSimulationVIs = simulationVIs;
+        sTimingPresentationVIs = presentationVIs;
+    }
+    psp_profiler_unlock(lockState);
 }
 
 #if PROFILE_COMPONENTS
