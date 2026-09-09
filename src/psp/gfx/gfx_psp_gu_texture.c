@@ -15,6 +15,15 @@
 #define PSP_GFX_GU_TEXTURE_MIN_DIMENSION 8
 #define PSP_GFX_GU_TEXTURE_MAX_DIMENSION 512
 #define PSP_GFX_GU_TEXTURE_BYTES_PER_PIXEL 4
+#define PSP_GFX_GU_TEXTURE_LOOKUP_SET_COUNT 128
+#define PSP_GFX_GU_TEXTURE_LOOKUP_CANDIDATES 2
+
+typedef char PspGfxGuTextureLookupIndexCheck[
+    (PSP_GFX_GU_TEXTURE_CACHE_SLOTS < 256) ? 1 : -1
+];
+typedef char PspGfxGuTextureLookupSetCheck[
+    ((PSP_GFX_GU_TEXTURE_LOOKUP_SET_COUNT & (PSP_GFX_GU_TEXTURE_LOOKUP_SET_COUNT - 1)) == 0) ? 1 : -1
+];
 
 typedef struct {
     int valid;
@@ -47,6 +56,9 @@ static u32 sPspGfxGuTextureGeneration;
 static u32 sPspGfxGuTextureUsedBytes;
 static u32 sPspGfxGuTextureValidEntries;
 static int sPspGfxGuTextureInitialized;
+static u8 sPspGfxGuTextureLookup[PSP_GFX_GU_TEXTURE_LOOKUP_SET_COUNT][PSP_GFX_GU_TEXTURE_LOOKUP_CANDIDATES];
+static u8 sPspGfxGuTextureRgba16Lookup[PSP_GFX_GU_TEXTURE_LOOKUP_SET_COUNT]
+                                      [PSP_GFX_GU_TEXTURE_LOOKUP_CANDIDATES];
 
 static u32 psp_gfx_gu_texture_next_power_of_two(u32 value) {
     u32 result = PSP_GFX_GU_TEXTURE_MIN_DIMENSION;
@@ -119,6 +131,52 @@ static int psp_gfx_gu_texture_request_supported(const PspGfxTextureRequest* requ
         return 0;
     }
     return psp_gfx_gu_texture_dimensions(request, &uploadWidth, &uploadHeight, &dataBytes);
+}
+
+static u32 psp_gfx_gu_texture_lookup_hash_word(u32 hash, u32 value) {
+    hash ^= value;
+    hash *= 16777619U;
+    return hash;
+}
+
+static u32 psp_gfx_gu_texture_lookup_set(const PspGfxTextureRequest* request) {
+    u32 hash = 2166136261U;
+    u32 pixels = (u32) (uintptr_t) request->pixels;
+    u32 palette = (u32) (uintptr_t) request->palette;
+
+    hash = psp_gfx_gu_texture_lookup_hash_word(hash, pixels >> 3);
+    hash = psp_gfx_gu_texture_lookup_hash_word(hash, palette >> 3);
+    hash = psp_gfx_gu_texture_lookup_hash_word(hash, (u32) request->format);
+    hash = psp_gfx_gu_texture_lookup_hash_word(hash, request->width);
+    hash = psp_gfx_gu_texture_lookup_hash_word(hash, request->height);
+    hash = psp_gfx_gu_texture_lookup_hash_word(hash, request->premultiply);
+    hash = psp_gfx_gu_texture_lookup_hash_word(hash, request->softCoverage);
+    hash = psp_gfx_gu_texture_lookup_hash_word(hash, request->envBlend);
+    hash = psp_gfx_gu_texture_lookup_hash_word(hash, request->mirrorS);
+    hash = psp_gfx_gu_texture_lookup_hash_word(hash, request->mirrorT);
+    hash = psp_gfx_gu_texture_lookup_hash_word(hash, request->primitiveColor);
+    hash = psp_gfx_gu_texture_lookup_hash_word(hash, request->environmentColor);
+    return hash & (PSP_GFX_GU_TEXTURE_LOOKUP_SET_COUNT - 1);
+}
+
+static u32 psp_gfx_gu_texture_rgba16_lookup_set(const PspGfxTextureRequest* request) {
+    u32 hash = (u32) (uintptr_t) request->pixels >> 3;
+
+    hash ^= request->width << 3;
+    hash ^= request->height << 11;
+    hash ^= (u32) request->premultiply << 19;
+    hash ^= hash >> 7;
+    return hash & (PSP_GFX_GU_TEXTURE_LOOKUP_SET_COUNT - 1);
+}
+
+static void psp_gfx_gu_texture_remember_lookup(
+    u8 lookup[][PSP_GFX_GU_TEXTURE_LOOKUP_CANDIDATES], u32 set, u32 index) {
+    u8 encodedIndex = (u8) (index + 1);
+
+    if (lookup[set][0] != encodedIndex) {
+        lookup[set][1] = lookup[set][0];
+        lookup[set][0] = encodedIndex;
+    }
 }
 
 static PspHwTextureCacheClass psp_gfx_gu_texture_hw_class(PspGfxTextureFormat format) {
@@ -521,6 +579,8 @@ int PspGfxGuTexture_Init(void) {
         return 1;
     }
     memset(sPspGfxGuTextureEntries, 0, sizeof(sPspGfxGuTextureEntries));
+    memset(sPspGfxGuTextureLookup, 0, sizeof(sPspGfxGuTextureLookup));
+    memset(sPspGfxGuTextureRgba16Lookup, 0, sizeof(sPspGfxGuTextureRgba16Lookup));
     sPspGfxGuTextureFrame = 1;
     sPspGfxGuTextureAge = 0;
     sPspGfxGuTextureGeneration = 0;
@@ -564,6 +624,8 @@ void PspGfxGuTexture_Shutdown(void) {
     sPspGfxGuTextureGeneration = 0;
     sPspGfxGuTextureUsedBytes = 0;
     sPspGfxGuTextureValidEntries = 0;
+    memset(sPspGfxGuTextureLookup, 0, sizeof(sPspGfxGuTextureLookup));
+    memset(sPspGfxGuTextureRgba16Lookup, 0, sizeof(sPspGfxGuTextureRgba16Lookup));
     sPspGfxGuTextureInitialized = 0;
 }
 
@@ -577,33 +639,47 @@ int PspGfxGuTexture_Find(const PspGfxTextureRequest* request, PspGfxTextureResul
     u64 baseHash;
     PspProfileTextureCacheClass cacheClass;
 #endif
+    u32 lookupSet;
+    u32 encodedIndex;
     u32 i;
+    u8 (*lookup)[PSP_GFX_GU_TEXTURE_LOOKUP_CANDIDATES];
+    PspGfxGuTextureEntry* entry;
 
-    if (result == NULL) {
+    if ((request == NULL) || (result == NULL)) {
         return 0;
     }
     *result = (PspGfxTextureResult) { 0 };
     result->cacheResult = PSP_GFX_TEXTURE_CACHE_MISS;
-    if (!psp_gfx_gu_texture_request_supported(request)) {
-        return 0;
-    }
 #if PROFILE_PHASES
     keyHash = psp_gfx_gu_texture_key_hash(request);
     baseHash = psp_gfx_gu_texture_base_hash(request);
     cacheClass = psp_gfx_gu_texture_profile_class(request->format);
 #endif
+    if (request->format == PSP_GFX_TEXTURE_RGBA16) {
+        lookup = sPspGfxGuTextureRgba16Lookup;
+        lookupSet = psp_gfx_gu_texture_rgba16_lookup_set(request);
+    } else {
+        lookup = sPspGfxGuTextureLookup;
+        lookupSet = psp_gfx_gu_texture_lookup_set(request);
+    }
+    for (i = 0; i < PSP_GFX_GU_TEXTURE_LOOKUP_CANDIDATES; i++) {
+        encodedIndex = lookup[lookupSet][i];
+        if (encodedIndex == 0) {
+            continue;
+        }
+        entry = &sPspGfxGuTextureEntries[encodedIndex - 1];
+        if (psp_gfx_gu_texture_entry_matches(entry, request)) {
+            goto hit;
+        }
+    }
+    if (!psp_gfx_gu_texture_request_supported(request)) {
+        return 0;
+    }
     for (i = 0; i < PSP_GFX_GU_TEXTURE_CACHE_SLOTS; i++) {
-        PspGfxGuTextureEntry* entry = &sPspGfxGuTextureEntries[i];
+        entry = &sPspGfxGuTextureEntries[i];
 
         if (psp_gfx_gu_texture_entry_matches(entry, request)) {
-            psp_gfx_gu_texture_touch(entry);
-            psp_gfx_gu_texture_fill_result(entry, result, PSP_GFX_TEXTURE_CACHE_HIT, i);
-#if PROFILE_PHASES
-            PspProfiler_RecordTextureCacheLookup(cacheClass, PSP_GFX_GU_TEXTURE_CACHE_SLOTS,
-                                                 sPspGfxGuTextureValidEntries, keyHash, baseHash, 1);
-#endif
-            PspProfiler_CountTextureEvent(1, 0, 0, 0, 0);
-            return 1;
+            goto hit;
         }
     }
 #if PROFILE_PHASES
@@ -611,6 +687,18 @@ int PspGfxGuTexture_Find(const PspGfxTextureRequest* request, PspGfxTextureResul
                                          sPspGfxGuTextureValidEntries, keyHash, baseHash, 0);
 #endif
     return 0;
+
+hit:
+    i = (u32) (entry - sPspGfxGuTextureEntries);
+    psp_gfx_gu_texture_remember_lookup(lookup, lookupSet, i);
+    psp_gfx_gu_texture_touch(entry);
+    psp_gfx_gu_texture_fill_result(entry, result, PSP_GFX_TEXTURE_CACHE_HIT, i);
+#if PROFILE_PHASES
+    PspProfiler_RecordTextureCacheLookup(cacheClass, PSP_GFX_GU_TEXTURE_CACHE_SLOTS,
+                                         sPspGfxGuTextureValidEntries, keyHash, baseHash, 1);
+#endif
+    PspProfiler_CountTextureEvent(1, 0, 0, 0, 0);
+    return 1;
 }
 
 int PspGfxGuTexture_Create(const PspGfxTextureRequest* request, PspGfxTextureResult* result) {
@@ -621,11 +709,13 @@ int PspGfxGuTexture_Create(const PspGfxTextureRequest* request, PspGfxTextureRes
     u32 uploadWidth;
     u32 uploadHeight;
     u32 dataBytes;
+    u32 lookupSet;
 #if PROFILE_PHASES
     u64 keyHash;
     u64 baseHash;
 #endif
     int index;
+    u8 (*lookup)[PSP_GFX_GU_TEXTURE_LOOKUP_CANDIDATES];
 
     if (result == NULL) {
         return 0;
@@ -681,6 +771,14 @@ int PspGfxGuTexture_Create(const PspGfxTextureRequest* request, PspGfxTextureRes
     sPspGfxGuTextureUsedBytes += dataBytes;
     sPspGfxGuTextureValidEntries++;
     psp_gfx_gu_texture_touch(entry);
+    if (request->format == PSP_GFX_TEXTURE_RGBA16) {
+        lookup = sPspGfxGuTextureRgba16Lookup;
+        lookupSet = psp_gfx_gu_texture_rgba16_lookup_set(request);
+    } else {
+        lookup = sPspGfxGuTextureLookup;
+        lookupSet = psp_gfx_gu_texture_lookup_set(request);
+    }
+    psp_gfx_gu_texture_remember_lookup(lookup, lookupSet, (u32) (entry - sPspGfxGuTextureEntries));
     psp_gfx_gu_texture_fill_result(entry, result, PSP_GFX_TEXTURE_CACHE_CREATED, (u32) index);
 #if PROFILE_PHASES
     PspProfiler_RecordTextureCacheInsertion(cacheClass, PSP_GFX_GU_TEXTURE_CACHE_SLOTS,
