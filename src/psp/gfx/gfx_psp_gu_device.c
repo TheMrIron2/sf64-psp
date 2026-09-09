@@ -1,5 +1,8 @@
+#include <n64psp/display.h>
+
 #include "src/psp/gfx/gfx_psp_gu_device.h"
 
+#include "src/psp/display.h"
 #include "src/psp/platform.h"
 #include "src/psp/profiler.h"
 
@@ -40,6 +43,49 @@ static void psp_gfx_gu_device_reset_state(void) {
     sReady = 0;
     sFrameActive = 0;
     sFrameSubmitted = 0;
+}
+
+static void psp_gfx_gu_device_set_viewport(const n64psp_display_config* display) {
+    sceGuOffset(2048 - (display->framebuffer_width / 2), 2048 - (display->framebuffer_height / 2));
+    sceGuViewport(2048 - (display->framebuffer_width / 2) + display->viewport_x +
+                      (display->viewport_width / 2),
+                  2048 - (display->framebuffer_height / 2) + display->viewport_y +
+                      (display->viewport_height / 2),
+                  display->viewport_width, display->viewport_height);
+}
+
+static void psp_gfx_gu_device_clear_color_rect(int x, int y, int width, int height) {
+    if ((width <= 0) || (height <= 0)) {
+        return;
+    }
+    sceGuScissor(x, y, width, height);
+    sceGuClear(GU_COLOR_BUFFER_BIT);
+}
+
+static void psp_gfx_gu_device_clear_display_borders(const n64psp_display_config* display) {
+    int right = display->viewport_x + display->viewport_width;
+    int bottom = display->viewport_y + display->viewport_height;
+
+    if ((display->viewport_x == 0) && (display->viewport_y == 0) &&
+        (right == display->framebuffer_width) && (bottom == display->framebuffer_height)) {
+        return;
+    }
+
+    if (display->viewport_x > 0) {
+        psp_gfx_gu_device_clear_color_rect(0, 0, display->viewport_x, display->framebuffer_height);
+    }
+    if (right < display->framebuffer_width) {
+        psp_gfx_gu_device_clear_color_rect(right, 0, display->framebuffer_width - right,
+                                           display->framebuffer_height);
+    }
+    if (display->viewport_y > 0) {
+        psp_gfx_gu_device_clear_color_rect(display->viewport_x, 0, display->viewport_width,
+                                           display->viewport_y);
+    }
+    if (bottom < display->framebuffer_height) {
+        psp_gfx_gu_device_clear_color_rect(display->viewport_x, bottom, display->viewport_width,
+                                           display->framebuffer_height - bottom);
+    }
 }
 
 int PspGfxGuDevice_Init(void) {
@@ -89,6 +135,11 @@ int PspGfxGuDevice_Init(void) {
     sceGuDisable(GU_TEXTURE_2D);
     sceGuDisable(GU_ALPHA_TEST);
     sceGuDisable(GU_BLEND);
+    sceGuDisable(GU_FOG);
+    sceGuDisable(GU_LIGHTING);
+    sceGuDisable(GU_CLIP_PLANES);
+    sceGuDepthMask(GU_TRUE);
+    sceGuPixelMask(0);
 
     listResult = sceGuFinish();
     if (listResult < 0) {
@@ -121,6 +172,8 @@ int PspGfxGuDevice_IsReady(void) {
 }
 
 int PspGfxGuDevice_BeginFrame(void) {
+    const n64psp_display_config* display;
+
     if (!sReady || sFrameActive) {
         return 0;
     }
@@ -132,9 +185,24 @@ int PspGfxGuDevice_BeginFrame(void) {
 
     sFrameActive = 1;
     sFrameSubmitted = 0;
-    sceGuClearColor(PSP_GU_CLEAR_COLOR);
+    display = PspDisplay_GetConfig();
+    sceGuEnable(GU_SCISSOR_TEST);
+    sceGuScissor(0, 0, display->framebuffer_width, display->framebuffer_height);
+    sceGuDisable(GU_DEPTH_TEST);
+    sceGuDisable(GU_TEXTURE_2D);
+    sceGuDisable(GU_ALPHA_TEST);
+    sceGuDisable(GU_BLEND);
+    sceGuDisable(GU_FOG);
+    sceGuDisable(GU_LIGHTING);
+    sceGuDisable(GU_CULL_FACE);
+    sceGuDepthMask(GU_TRUE);
+    sceGuPixelMask(0);
     sceGuClearDepth(0);
-    sceGuClear(GU_COLOR_BUFFER_BIT | GU_DEPTH_BUFFER_BIT);
+    sceGuClear(GU_DEPTH_BUFFER_BIT);
+    sceGuClearColor(PSP_GU_CLEAR_COLOR);
+    psp_gfx_gu_device_clear_display_borders(display);
+    sceGuScissor(0, 0, display->framebuffer_width, display->framebuffer_height);
+    psp_gfx_gu_device_set_viewport(display);
     return 1;
 }
 
