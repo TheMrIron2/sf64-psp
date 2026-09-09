@@ -177,7 +177,7 @@ static void psp_renderer_draw_starfield(void) {
         return;
     }
 
-    PspGfxPspgl_DrawSolidRect(0.0f, 0.0f, 320.0f, 240.0f, 0xFF000000u, 0, 1);
+    PspGfxPspgl_DrawSolidRect(0.0f, 0.0f, 320.0f, 240.0f, 0xFF000000u, 0, PSP_GFX_VIEWPORT_FULL);
 
     for (first = 0; first < sStarfieldCount; first += PSPGL_STARFIELD_CHUNK_STARS) {
         u32 chunkCount = sStarfieldCount - first;
@@ -213,9 +213,8 @@ static void psp_renderer_draw_starfield(void) {
         }
 
         PspGfxPspgl_DrawColoredSprites(sStarfieldVertices, out, 0, (PspGfxPspglTextureRef) { 0 },
-                                       PSP_GFX_PSPGL_TEX_REPLACE, 0, PSP_GFX_PSPGL_WRAP_CLAMP,
-                                       PSP_GFX_PSPGL_WRAP_CLAMP, 0, 0, 0, 0, 0, 0, NULL, 0.0f, 0.0f, NULL, 0, 1,
-                                       0, 0);
+                                       PSP_GFX_PSPGL_TEX_REPLACE, 0, PSP_GFX_PSPGL_WRAP_CLAMP, PSP_GFX_PSPGL_WRAP_CLAMP,
+                                       0, 0, 0, 0, 0, 0, NULL, 0.0f, 0.0f, NULL, 0, 1, 0, PSP_GFX_VIEWPORT_FULL);
 #if PSP_RENDERER_DIAGNOSTICS
         chunks++;
 #endif

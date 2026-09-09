@@ -32,6 +32,7 @@ typedef struct {
 
 typedef char PspGfxFogVertexSizeCheck[(sizeof(PspGfxFogVertex) == 16) ? 1 : -1];
 
+// Texture handles may expire when later requests replace cache storage
 typedef struct {
     u32 opaque[4];
 } PspGfxTextureHandle;
@@ -79,6 +80,46 @@ typedef enum {
 } PspGfxTextureWrap;
 
 typedef enum {
+    PSP_GFX_TEXTURE_CI8,
+    PSP_GFX_TEXTURE_CI4,
+    PSP_GFX_TEXTURE_RGBA16,
+    PSP_GFX_TEXTURE_RGBA32,
+    PSP_GFX_TEXTURE_IA8,
+    PSP_GFX_TEXTURE_IA16,
+} PspGfxTextureFormat;
+
+typedef struct {
+    PspGfxTextureFormat format;
+    const void* pixels;
+    const u16* palette;
+    u32 width;
+    u32 height;
+    u8 premultiply;
+    u8 softCoverage;
+    u8 envBlend;
+    u8 mirrorS;
+    u8 mirrorT;
+    u32 primitiveColor;
+    u32 environmentColor;
+} PspGfxTextureRequest;
+
+typedef enum {
+    PSP_GFX_TEXTURE_CACHE_MISS,
+    PSP_GFX_TEXTURE_CACHE_HIT,
+    PSP_GFX_TEXTURE_CACHE_CREATED,
+    PSP_GFX_TEXTURE_CACHE_FAILED,
+} PspGfxTextureCacheResult;
+
+typedef struct {
+    PspGfxTextureHandle handle;
+    u32 uploadWidth;
+    u32 uploadHeight;
+    u32 uploadX;
+    u32 uploadY;
+    PspGfxTextureCacheResult cacheResult;
+} PspGfxTextureResult;
+
+typedef enum {
     PSP_GFX_VIEWPORT_AUTO = -1,
     PSP_GFX_VIEWPORT_FULL,
     PSP_GFX_VIEWPORT_CENTERED_UI,
@@ -112,73 +153,34 @@ typedef struct {
     u32 projectionSerial;
     int pretransformed;
     int pointFilter;
+    PspGfxViewportPolicy viewport;
 } PspGfxDrawState;
 
-void PspGfxBackend_SetMirrorEncoding(int mirrorS, int mirrorT);
-int PspGfxBackend_CanMirrorEncode(u32 width, u32 height, int mirrorS, int mirrorT);
-int PspGfxBackend_MirrorEncodingFailed(void);
+typedef struct {
+    const float* projectionMatrix;
+    u32 projectionSerial;
+    int pretransformed;
+    int depthTest;
+    PspGfxViewportPolicy viewport;
+} PspGfxFogDrawState;
+
+int PspGfxBackend_TextureSupported(const PspGfxTextureRequest* request);
+int PspGfxBackend_FindTexture(const PspGfxTextureRequest* request, PspGfxTextureResult* result);
+int PspGfxBackend_CreateTexture(const PspGfxTextureRequest* request, PspGfxTextureResult* result);
 void PspGfxBackend_InvalidateRgba16Texture(const u16* pixels);
 void PspGfxBackend_SetScissor(float ulx, float uly, float lrx, float lry);
 void PspGfxBackend_ClearScissor(void);
-
-int PspGfxBackend_FindCi8Texture(const u8* indices, const u16* palette, u32 width, u32 height,
-                                 PspGfxTextureHandle* texture, u32* uploadWidth, u32* uploadHeight);
-PspGfxTextureHandle PspGfxBackend_CreateCi8Texture(const u8* indices, const u16* palette, u32 width, u32 height,
-                                                   u32* uploadWidth, u32* uploadHeight);
-int PspGfxBackend_FindCi4Texture(const u8* indices, const u16* palette, u32 width, u32 height,
-                                 PspGfxTextureHandle* texture, u32* uploadWidth, u32* uploadHeight, u32* uploadX,
-                                 u32* uploadY);
-PspGfxTextureHandle PspGfxBackend_CreateCi4Texture(const u8* indices, const u16* palette, u32 width, u32 height,
-                                                   u32* uploadWidth, u32* uploadHeight, u32* uploadX, u32* uploadY);
-int PspGfxBackend_FindRgba16Texture(const u16* pixels, u32 width, u32 height, int premultiply,
-                                    PspGfxTextureHandle* texture, u32* uploadWidth, u32* uploadHeight);
-PspGfxTextureHandle PspGfxBackend_CreateRgba16Texture(const u16* pixels, u32 width, u32 height, int premultiply,
-                                                      u32* uploadWidth, u32* uploadHeight);
-int PspGfxBackend_FindRgba32Texture(const void* pixels, u32 width, u32 height, int premultiply,
-                                    PspGfxTextureHandle* texture, u32* uploadWidth, u32* uploadHeight);
-PspGfxTextureHandle PspGfxBackend_CreateRgba32Texture(const void* pixels, u32 width, u32 height, int premultiply,
-                                                      u32* uploadWidth, u32* uploadHeight);
-int PspGfxBackend_FindRgba32EnvBlendTexture(const void* pixels, u32 width, u32 height, u32 primitiveColor,
-                                            u32 environmentColor, PspGfxTextureHandle* texture, u32* uploadWidth,
-                                            u32* uploadHeight);
-PspGfxTextureHandle PspGfxBackend_CreateRgba32EnvBlendTexture(const void* pixels, u32 width, u32 height,
-                                                              u32 primitiveColor, u32 environmentColor,
-                                                              u32* uploadWidth, u32* uploadHeight);
-int PspGfxBackend_FindIa8Texture(const u8* pixels, u32 width, u32 height, PspGfxTextureHandle* texture,
-                                 u32* uploadWidth, u32* uploadHeight);
-PspGfxTextureHandle PspGfxBackend_CreateIa8Texture(const u8* pixels, u32 width, u32 height, u32* uploadWidth,
-                                                   u32* uploadHeight);
-int PspGfxBackend_FindIa8SoftCoverageTexture(const u8* pixels, u32 width, u32 height, PspGfxTextureHandle* texture,
-                                             u32* uploadWidth, u32* uploadHeight);
-PspGfxTextureHandle PspGfxBackend_CreateIa8SoftCoverageTexture(const u8* pixels, u32 width, u32 height,
-                                                               u32* uploadWidth, u32* uploadHeight);
-int PspGfxBackend_FindIa8EnvBlendTexture(const u8* pixels, u32 width, u32 height, u32 primitiveColor,
-                                         u32 environmentColor, PspGfxTextureHandle* texture, u32* uploadWidth,
-                                         u32* uploadHeight);
-PspGfxTextureHandle PspGfxBackend_CreateIa8EnvBlendTexture(const u8* pixels, u32 width, u32 height, u32 primitiveColor,
-                                                           u32 environmentColor, u32* uploadWidth, u32* uploadHeight);
-int PspGfxBackend_FindIa16Texture(const u16* pixels, u32 width, u32 height, PspGfxTextureHandle* texture,
-                                  u32* uploadWidth, u32* uploadHeight);
-PspGfxTextureHandle PspGfxBackend_CreateIa16Texture(const u16* pixels, u32 width, u32 height, u32* uploadWidth,
-                                                    u32* uploadHeight);
-int PspGfxBackend_FindIa16SoftCoverageTexture(const u16* pixels, u32 width, u32 height, PspGfxTextureHandle* texture,
-                                              u32* uploadWidth, u32* uploadHeight);
-PspGfxTextureHandle PspGfxBackend_CreateIa16SoftCoverageTexture(const u16* pixels, u32 width, u32 height,
-                                                                u32* uploadWidth, u32* uploadHeight);
 
 void PspGfxBackend_DrawTriangles(const PspGfxVertex* vertices, u32 vertexCount, const PspGfxDrawState* state);
 int PspGfxBackend_ReserveVertices(u32 vertexCapacity, PspGfxVertexReservation* reservation);
 void PspGfxBackend_DrawReservedTriangles(const PspGfxVertexReservation* reservation, u32 vertexCount,
                                          const PspGfxDrawState* state);
-void PspGfxBackend_DrawFogTriangles(const PspGfxFogVertex* vertices, u32 vertexCount, const float* projectionMatrix,
-                                    u32 projectionSerial, int pretransformed, int restoreDepthTest,
-                                    int restoreDepthWrite, PspGfxTextureHandle restoreTexture,
-                                    const PspGfxVertex* restoreVertices);
-void PspGfxBackend_DrawSprites(const PspGfxVertex* vertices, u32 vertexCount, const PspGfxDrawState* state,
-                               PspGfxViewportPolicy viewport);
-void PspGfxBackend_DrawSolidRect(float ulx, float uly, float lrx, float lry, u32 color, int blend, int fullViewport);
-void PspGfxBackend_SetViewportPolicy(PspGfxViewportPolicy viewport);
+void PspGfxBackend_DrawFogTriangles(const PspGfxFogVertex* vertices, u32 vertexCount, const PspGfxFogDrawState* state);
+void PspGfxBackend_DrawSprites(const PspGfxVertex* vertices, u32 vertexCount, const PspGfxDrawState* state);
+void PspGfxBackend_DrawSolidRect(float ulx, float uly, float lrx, float lry, u32 color, int blend,
+                                 PspGfxViewportPolicy viewport);
 void PspGfxBackend_SetHudAnchor(s16 x, s16 y);
+// Backends must invalidate replay when captured resources expire
 void PspGfxBackend_BeginReplayCache(void);
 void PspGfxBackend_EndReplayCache(void);
 void PspGfxBackend_ReplayCache(void);

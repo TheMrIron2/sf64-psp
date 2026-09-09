@@ -3,21 +3,12 @@
 
 #include "PR/ultratypes.h"
 
-// Shared square root transfer for fixed function RGB inputs
-#ifndef SF64_PSP_COLOR_TRANSFER
-#define SF64_PSP_COLOR_TRANSFER 1
-#endif
-
 extern u8 gPspGfxColorTransferLut[256];
 
 void PspGfxColor_Init(void);
 
 static inline u8 psp_gfx_color_transfer_u8(u8 value) {
-#if SF64_PSP_COLOR_TRANSFER
     return gPspGfxColorTransferLut[value];
-#else
-    return value;
-#endif
 }
 
 static inline u32 psp_gfx_rgba5551_to_abgr8888(u16 color) {
