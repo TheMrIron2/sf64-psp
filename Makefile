@@ -101,9 +101,9 @@ $(error PSP_VME=1 requires PSP_AUDIO=1)
 endif
 override PSP_AUDIO_PROFILE := 1
 endif
-override PSP_AUDIO_VME := $(PSP_AUDIO)
-override PSP_AUDIO_VME_VALIDATE := $(PSP_AUDIO_VME)
-override PSP_AUDIO_VME_BENCH := $(PSP_AUDIO_VME)
+override PSP_AUDIO_VME := $(PSP_VME)
+override PSP_AUDIO_VME_VALIDATE := $(PSP_VME)
+override PSP_AUDIO_VME_BENCH := $(PSP_VME)
 ifneq ($(PSPGL_SWAP_INTERVAL),0)
 ifneq ($(PSPGL_SWAP_INTERVAL),1)
 $(error PSPGL_SWAP_INTERVAL must be 0 or 1)
