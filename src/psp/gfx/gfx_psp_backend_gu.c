@@ -463,7 +463,7 @@ static int psp_gfx_gu_prepare_texture(const PspGfxDrawState* state) {
     } else {
         textureFunction = GU_TFX_REPLACE;
     }
-    textureComponents = (state->textureEnv == PSP_GFX_TEX_BLEND) ? GU_TCC_RGB : GU_TCC_RGBA;
+    textureComponents = GU_TCC_RGBA;
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TEXTURE_UPLOAD);
     sceGuTexMode(GU_PSM_8888, 0, 0, 0);
     sceGuTexImage(0, (int) width, (int) height, (int) width, pixels);
