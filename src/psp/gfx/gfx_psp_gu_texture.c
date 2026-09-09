@@ -72,8 +72,22 @@ static int psp_gfx_gu_texture_dimensions(const PspGfxTextureRequest* request, u3
     }
     width = psp_gfx_gu_texture_next_power_of_two(request->width);
     height = psp_gfx_gu_texture_next_power_of_two(request->height);
-    if ((width == 0) || (height == 0) || (width > PSP_GFX_GU_TEXTURE_MAX_DIMENSION) ||
-        (height > PSP_GFX_GU_TEXTURE_MAX_DIMENSION) ||
+    if ((width == 0) || (height == 0)) {
+        return 0;
+    }
+    if (request->mirrorS) {
+        if (width > (PSP_GFX_GU_TEXTURE_MAX_DIMENSION / 2U)) {
+            return 0;
+        }
+        width <<= 1;
+    }
+    if (request->mirrorT) {
+        if (height > (PSP_GFX_GU_TEXTURE_MAX_DIMENSION / 2U)) {
+            return 0;
+        }
+        height <<= 1;
+    }
+    if ((width > PSP_GFX_GU_TEXTURE_MAX_DIMENSION) || (height > PSP_GFX_GU_TEXTURE_MAX_DIMENSION) ||
         (height > (0xFFFFFFFFU / width))) {
         return 0;
     }
@@ -102,9 +116,6 @@ static int psp_gfx_gu_texture_request_supported(const PspGfxTextureRequest* requ
     }
     if (((request->format == PSP_GFX_TEXTURE_CI4) || (request->format == PSP_GFX_TEXTURE_CI8)) &&
         (request->palette == NULL)) {
-        return 0;
-    }
-    if (request->mirrorS || request->mirrorT) {
         return 0;
     }
     return psp_gfx_gu_texture_dimensions(request, &uploadWidth, &uploadHeight, &dataBytes);
@@ -368,6 +379,15 @@ static u8 psp_gfx_gu_texture_soft_coverage_alpha(u8 alpha) {
     return (u8) ((((u32) (alpha - 32U) * 255U) + 111U) / 223U);
 }
 
+static u32 psp_gfx_gu_texture_mirror_source_coord(u32 coord, u32 logicalSize, int mirror) {
+    u32 period = psp_gfx_gu_texture_next_power_of_two(logicalSize);
+
+    if (mirror && (coord >= period)) {
+        coord = (period * 2U) - 1U - coord;
+    }
+    return (coord < logicalSize) ? coord : (logicalSize - 1U);
+}
+
 static void psp_gfx_gu_texture_premultiply(u8* output) {
     output[0] = (u8) (((u32) output[0] * output[3] + 127U) / 255U);
     output[1] = (u8) (((u32) output[1] * output[3] + 127U) / 255U);
@@ -396,10 +416,10 @@ static void psp_gfx_gu_texture_decode(const PspGfxTextureRequest* request, u32 u
                                                              request->height);
 
     for (y = 0; y < uploadHeight; y++) {
-        u32 sourceY = (y < request->height) ? y : (request->height - 1);
+        u32 sourceY = psp_gfx_gu_texture_mirror_source_coord(y, request->height, request->mirrorT);
 
         for (x = 0; x < uploadWidth; x++) {
-            u32 sourceX = (x < request->width) ? x : (request->width - 1);
+            u32 sourceX = psp_gfx_gu_texture_mirror_source_coord(x, request->width, request->mirrorS);
             u32 sourceIndex = sourceY * request->width + sourceX;
             u32 outputIndex = y * uploadWidth + x;
             u8* outputPixel = &output[outputIndex * 4];
@@ -667,6 +687,16 @@ int PspGfxGuTexture_Create(const PspGfxTextureRequest* request, PspGfxTextureRes
                                             sPspGfxGuTextureValidEntries, keyHash, baseHash);
 #endif
     PspProfiler_CountTextureEvent(0, 0, 1, 1, dataBytes);
+#if PROFILE_PHASES
+    if (request->mirrorS || request->mirrorT) {
+        u32 sourceWidth = psp_gfx_gu_texture_next_power_of_two(request->width);
+        u32 sourceHeight = psp_gfx_gu_texture_next_power_of_two(request->height);
+
+        PspProfiler_CountMirrorEncodedTexture(request->mirrorS, request->mirrorT,
+                                              sourceWidth * sourceHeight * PSP_GFX_GU_TEXTURE_BYTES_PER_PIXEL,
+                                              dataBytes, 1, 1, 0, 0, uploadWidth, uploadHeight);
+    }
+#endif
     return 1;
 }
 

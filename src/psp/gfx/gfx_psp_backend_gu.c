@@ -162,6 +162,30 @@ static int psp_gfx_gu_select_viewport(PspGfxViewportPolicy policy) {
     return 1;
 }
 
+static u8 psp_gfx_gu_float_to_u8(float value) {
+    if (value <= 0.0f) {
+        return 0;
+    }
+    if (value >= 1.0f) {
+        return 255;
+    }
+    return (u8) ((value * 255.0f) + 0.5f);
+}
+
+static u32 psp_gfx_gu_fog_color(const float* color) {
+    return GU_RGBA(psp_gfx_gu_float_to_u8(color[0]), psp_gfx_gu_float_to_u8(color[1]),
+                   psp_gfx_gu_float_to_u8(color[2]), psp_gfx_gu_float_to_u8(color[3]));
+}
+
+static void psp_gfx_gu_prepare_native_fog(const PspGfxDrawState* state) {
+    if (state->fog && !state->pretransformed && (state->fogColor != NULL) && (state->fogEnd > state->fogStart)) {
+        sceGuFog(state->fogStart, state->fogEnd, psp_gfx_gu_fog_color(state->fogColor));
+        sceGuEnable(GU_FOG);
+    } else {
+        sceGuDisable(GU_FOG);
+    }
+}
+
 static void psp_gfx_gu_load_identity(void) {
     sceGuSetMatrix(GU_PROJECTION, &sPspGfxGuIdentityMatrix);
     sceGuSetMatrix(GU_VIEW, &sPspGfxGuIdentityMatrix);
@@ -246,26 +270,30 @@ static int psp_gfx_gu_prepare_texture(const PspGfxDrawState* state) {
     int wrapS;
     int wrapT;
     int textureFunction;
+    int textureComponents;
 
-    if ((state->textureEnv == PSP_GFX_TEX_BLEND) || !state->pointFilter ||
-        (state->wrapS == PSP_GFX_WRAP_MIRROR) || (state->wrapT == PSP_GFX_WRAP_MIRROR)) {
-        return 0;
-    }
     if (!PspGfxGuTexture_Resolve(state->texture, &pixels, &width, &height)) {
         return 0;
     }
 
-    wrapS = (state->wrapS == PSP_GFX_WRAP_REPEAT) ? GU_REPEAT : GU_CLAMP;
-    wrapT = (state->wrapT == PSP_GFX_WRAP_REPEAT) ? GU_REPEAT : GU_CLAMP;
-    textureFunction = (state->textureEnv == PSP_GFX_TEX_MODULATE) ? GU_TFX_MODULATE : GU_TFX_REPLACE;
+    wrapS = (state->wrapS == PSP_GFX_WRAP_CLAMP) ? GU_CLAMP : GU_REPEAT;
+    wrapT = (state->wrapT == PSP_GFX_WRAP_CLAMP) ? GU_CLAMP : GU_REPEAT;
+    if (state->textureEnv == PSP_GFX_TEX_BLEND) {
+        textureFunction = GU_TFX_BLEND;
+    } else if (state->textureEnv == PSP_GFX_TEX_MODULATE) {
+        textureFunction = GU_TFX_MODULATE;
+    } else {
+        textureFunction = GU_TFX_REPLACE;
+    }
+    textureComponents = (state->textureEnv == PSP_GFX_TEX_BLEND) ? GU_TCC_RGB : GU_TCC_RGBA;
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TEXTURE_UPLOAD);
     sceGuTexMode(GU_PSM_8888, 0, 0, 0);
     sceGuTexImage(0, (int) width, (int) height, (int) width, pixels);
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TEXTURE_UPLOAD);
-    sceGuTexFunc(textureFunction, GU_TCC_RGBA);
+    sceGuTexFunc(textureFunction, textureComponents);
     sceGuTexEnvColor(state->textureEnvColor & 0x00FFFFFFU);
     sceGuTexWrap(wrapS, wrapT);
-    sceGuTexFilter(GU_NEAREST, GU_NEAREST);
+    sceGuTexFilter(state->pointFilter ? GU_NEAREST : GU_LINEAR, state->pointFilter ? GU_NEAREST : GU_LINEAR);
     sceGuTexMapMode(GU_TEXTURE_COORDS, 0, 0);
     sceGuTexLevelMode(GU_TEXTURE_CONST, 0.0f);
     sceGuTexScale(1.0f, 1.0f);
@@ -301,9 +329,6 @@ static int psp_gfx_gu_prepare_colored_draw(const PspGfxDrawState* state) {
         return 0;
     }
 
-    if (state->fog) {
-        return 0;
-    }
     textured = PspGfxTextureHandle_IsValid(state->texture);
     if (textured && !psp_gfx_gu_prepare_texture(state)) {
         return 0;
@@ -328,7 +353,7 @@ static int psp_gfx_gu_prepare_colored_draw(const PspGfxDrawState* state) {
         sceGuDisable(GU_TEXTURE_2D);
     }
     psp_gfx_gu_prepare_alpha_blend(state, textured);
-    sceGuDisable(GU_FOG);
+    psp_gfx_gu_prepare_native_fog(state);
     sceGuDisable(GU_LIGHTING);
     sceGuDisable(GU_CULL_FACE);
     sceGuEnable(GU_CLIP_PLANES);
@@ -548,9 +573,66 @@ void PspGfxBackend_DrawReservedTriangles(const PspGfxVertexReservation* reservat
 
 void PspGfxBackend_DrawFogTriangles(const PspGfxFogVertex* vertices, u32 vertexCount,
                                     const PspGfxFogDrawState* state) {
-    (void) vertices;
-    (void) vertexCount;
-    (void) state;
+    PspGfxGuColorVertex* guVertices;
+    u32 bytes;
+    u32 i;
+
+    if ((vertices == NULL) || (vertexCount == 0) || ((vertexCount % 3) != 0) || (state == NULL)) {
+        return;
+    }
+
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
+    if (!psp_gfx_gu_select_viewport(state->viewport)) {
+        PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
+        return;
+    }
+    if (state->pretransformed || (state->projectionMatrix == NULL)) {
+        psp_gfx_gu_load_identity();
+    } else {
+        sceGuSetMatrix(GU_PROJECTION, (const ScePspFMatrix4*) state->projectionMatrix);
+        sceGuSetMatrix(GU_VIEW, &sPspGfxGuIdentityMatrix);
+        sceGuSetMatrix(GU_MODEL, &sPspGfxGuIdentityMatrix);
+    }
+    if (state->depthTest) {
+        sceGuEnable(GU_DEPTH_TEST);
+        sceGuDepthFunc(GU_EQUAL);
+    } else {
+        sceGuDisable(GU_DEPTH_TEST);
+    }
+    sceGuDepthMask(GU_TRUE);
+    sceGuDisable(GU_TEXTURE_2D);
+    sceGuDisable(GU_ALPHA_TEST);
+    sceGuEnable(GU_BLEND);
+    sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA, 0, 0);
+    sceGuDisable(GU_FOG);
+    sceGuDisable(GU_LIGHTING);
+    sceGuDisable(GU_CULL_FACE);
+    sceGuEnable(GU_CLIP_PLANES);
+    sceGuShadeModel(GU_SMOOTH);
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
+
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD);
+    guVertices = (PspGfxGuColorVertex*) psp_gfx_gu_alloc_vertices(vertexCount, sizeof(PspGfxFogVertex));
+    if (guVertices == NULL) {
+        PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD);
+        return;
+    }
+    for (i = 0; i < vertexCount; i++) {
+        guVertices[i].color = vertices[i].color;
+        guVertices[i].x = vertices[i].x;
+        guVertices[i].y = vertices[i].y;
+        guVertices[i].z = vertices[i].z;
+    }
+    bytes = vertexCount * sizeof(PspGfxFogVertex);
+    sceKernelDcacheWritebackRange(guVertices, bytes);
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD);
+
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_SUBMIT);
+    sceGuDrawArray(GU_TRIANGLES, GU_COLOR_8888 | GU_VERTEX_32BITF | GU_TRANSFORM_3D,
+                   vertexCount, 0, guVertices);
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_SUBMIT);
+    PspProfiler_CountDrawCall(vertexCount);
+    psp_gfx_gu_count_vertex_copy(bytes);
 }
 
 void PspGfxBackend_DrawSprites(const PspGfxVertex* vertices, u32 vertexCount, const PspGfxDrawState* state) {
