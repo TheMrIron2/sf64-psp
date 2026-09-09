@@ -26,6 +26,7 @@ PSP_RENDERER_C_FILES := \
     src/psp/display.c \
     src/psp/gfx/gfx_psp_color.c \
     src/psp/gfx/gfx_psp_dl.c \
+    src/psp/renderer_starfield.c \
     src/psp/renderer_bridge.c
 
 ifeq ($(PSP_GFX_BACKEND),pspgl)

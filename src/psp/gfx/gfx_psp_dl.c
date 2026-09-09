@@ -10,6 +10,7 @@
 #include "src/psp/platform.h"
 #include "src/psp/profiler.h"
 #include "src/psp/renderer.h"
+#include "src/psp/renderer_starfield.h"
 
 #if PROFILE_COMPONENTS
 #include "src/psp/render_component.h"
@@ -5918,7 +5919,7 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
         if ((opcode == G_NOOP) && PSP_RENDERER_DL_MARKER_MATCH(cmd->words.w1)) {
             if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_STARFIELD) {
     psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
-                PspRenderer_DrawPendingStarfield();
+                PspStarfield_DrawPending();
                 continue;
             }
             if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_HISTORY_BEGIN) {

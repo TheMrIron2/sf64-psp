@@ -2,6 +2,7 @@
 
 #ifdef TARGET_PSP
 #include "src/psp/display.h"
+#include "src/psp/renderer_starfield.h"
 #endif
 #include "assets/ast_katina.h"
 #include "assets/ast_venom_1.h"
@@ -132,7 +133,7 @@ void Background_DrawStarfield(void) {
      * PSP batch and drawn at the marker's position in the stream.
      */
 
-    PspRenderer_BeginStarfield();
+    PspStarfield_Begin();
 
     starCount = gStarCount;
     if (starCount != 0) {
@@ -185,18 +186,18 @@ void Background_DrawStarfield(void) {
             vx = (zCos * bx) + (zSin * by) + SCREEN_WIDTH / 2.0f;
             vy = (-zSin * bx) + (zCos * by) + SCREEN_HEIGHT / 2.0f;
             if ((vx >= 0) && (vx < SCREEN_WIDTH) && (vy > 0) && (vy < SCREEN_HEIGHT)) {
-                PspRenderer_AddStar(vx, vy, *color);
+                PspStarfield_Add(vx, vy, *color);
             }
         }
 
 #if PSP_RENDERER_DIAGNOSTICS
-        PspRenderer_StarfieldDiagCounts((u32) requested, (u32) starCount);
+        PspStarfield_DiagCounts((u32) requested, (u32) starCount);
 #else
         (void) requested;
 #endif
     }
 
-    PspRenderer_EndStarfield();
+    PspStarfield_End();
     PSP_RENDERER_DL_STARFIELD_MARKER(gMasterDisp++);
 }
 

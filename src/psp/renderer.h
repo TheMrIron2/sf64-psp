@@ -83,21 +83,7 @@
 void PspRenderer_Init(void);
 void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex);
 
-void PspRenderer_BeginStarfield(void);
-void PspRenderer_AddStar(s16 x, s16 y, u32 n64FillColor);
-void PspRenderer_EndStarfield(void);
-void PspRenderer_DrawPendingStarfield(void);
 int PspRenderer_HistoryHudCacheReady(void);
 void PspRenderer_HistoryHudCacheInvalidate(void);
-
-#ifndef PSP_RENDERER_DIAGNOSTICS
-#define PSP_RENDERER_DIAGNOSTICS 0
-#endif
-
-#if PSP_RENDERER_DIAGNOSTICS
-/* Requested/traversed source-star counts for the single aggregate starfield
- * diagnostic line; set once per field by Background_DrawStarfield. */
-void PspRenderer_StarfieldDiagCounts(u32 requested, u32 traversed);
-#endif
 
 #endif
