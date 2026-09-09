@@ -467,9 +467,66 @@ void PspGfxBackend_DrawFogTriangles(const PspGfxFogVertex* vertices, u32 vertexC
 }
 
 void PspGfxBackend_DrawSprites(const PspGfxVertex* vertices, u32 vertexCount, const PspGfxDrawState* state) {
-    (void) vertices;
-    (void) vertexCount;
-    (void) state;
+    void* guVertices;
+    u32 drawFlags;
+    u32 vertexSize;
+    int textured;
+    u32 i;
+    u32 bytes;
+
+    if ((vertices == NULL) || (vertexCount == 0) || ((vertexCount % 2) != 0) || (state == NULL)) {
+        return;
+    }
+
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
+    if (!psp_gfx_gu_prepare_colored_draw(state)) {
+        PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
+        return;
+    }
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
+
+    textured = PspGfxTextureHandle_IsValid(state->texture);
+    vertexSize = textured ? sizeof(PspGfxGuTextureVertex) : sizeof(PspGfxGuColorVertex);
+    drawFlags = GU_COLOR_8888 | GU_VERTEX_32BITF | GU_TRANSFORM_3D;
+    if (textured) {
+        drawFlags |= GU_TEXTURE_32BITF;
+    }
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD);
+    guVertices = psp_gfx_gu_alloc_vertices(vertexCount, vertexSize);
+    if (guVertices == NULL) {
+        PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD);
+        return;
+    }
+
+    for (i = 0; i < vertexCount; i++) {
+        if (textured) {
+            PspGfxGuTextureVertex* textureVertices = (PspGfxGuTextureVertex*) guVertices;
+
+            textureVertices[i].u = vertices[i].u;
+            textureVertices[i].v = vertices[i].v;
+            textureVertices[i].color = vertices[i].color;
+            textureVertices[i].x = vertices[i].x;
+            textureVertices[i].y = vertices[i].y;
+            textureVertices[i].z = vertices[i].z;
+        } else {
+            PspGfxGuColorVertex* colorVertices = (PspGfxGuColorVertex*) guVertices;
+
+            colorVertices[i].color = vertices[i].color;
+            colorVertices[i].x = vertices[i].x;
+            colorVertices[i].y = vertices[i].y;
+            colorVertices[i].z = vertices[i].z;
+        }
+    }
+
+    bytes = vertexCount * vertexSize;
+    sceKernelDcacheWritebackRange(guVertices, bytes);
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD);
+
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_SUBMIT);
+    sceGuDrawArray(GU_SPRITES, drawFlags, vertexCount, 0, guVertices);
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_SUBMIT);
+    PspProfiler_CountDrawCall(vertexCount);
+    psp_gfx_gu_count_vertex_copy(bytes);
 }
 
 void PspGfxBackend_DrawSolidRect(float ulx, float uly, float lrx, float lry, u32 color, int blend,
