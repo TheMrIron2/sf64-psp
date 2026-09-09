@@ -1,6 +1,7 @@
 #include "src/psp/gfx/gfx_psp_gu_texture.h"
 
 #include "src/psp/gfx/gfx_psp_color.h"
+#include "src/psp/hw_counter_profile.h"
 #include "src/psp/profiler.h"
 
 #include <malloc.h>
@@ -94,18 +95,46 @@ static int psp_gfx_gu_texture_request_supported(const PspGfxTextureRequest* requ
     if ((request == NULL) || (request->pixels == NULL)) {
         return 0;
     }
-    if ((request->format != PSP_GFX_TEXTURE_RGBA16) && (request->format != PSP_GFX_TEXTURE_RGBA32)) {
+    if ((request->format != PSP_GFX_TEXTURE_CI4) && (request->format != PSP_GFX_TEXTURE_CI8) &&
+        (request->format != PSP_GFX_TEXTURE_RGBA16) && (request->format != PSP_GFX_TEXTURE_RGBA32) &&
+        (request->format != PSP_GFX_TEXTURE_IA8) && (request->format != PSP_GFX_TEXTURE_IA16)) {
         return 0;
     }
-    if (request->premultiply || request->softCoverage || request->envBlend || request->mirrorS || request->mirrorT) {
+    if (((request->format == PSP_GFX_TEXTURE_CI4) || (request->format == PSP_GFX_TEXTURE_CI8)) &&
+        (request->palette == NULL)) {
+        return 0;
+    }
+    if (request->mirrorS || request->mirrorT) {
         return 0;
     }
     return psp_gfx_gu_texture_dimensions(request, &uploadWidth, &uploadHeight, &dataBytes);
 }
 
+static PspHwTextureCacheClass psp_gfx_gu_texture_hw_class(PspGfxTextureFormat format) {
+    if (format == PSP_GFX_TEXTURE_CI8) {
+        return PSP_HW_TEXTURE_CACHE_CI8;
+    }
+    if (format == PSP_GFX_TEXTURE_RGBA16) {
+        return PSP_HW_TEXTURE_CACHE_RGBA16;
+    }
+    if (format == PSP_GFX_TEXTURE_RGBA32) {
+        return PSP_HW_TEXTURE_CACHE_RGBA32;
+    }
+    return PSP_HW_TEXTURE_CACHE_CONVERTED;
+}
+
 #if PROFILE_PHASES
 static PspProfileTextureCacheClass psp_gfx_gu_texture_profile_class(PspGfxTextureFormat format) {
-    return (format == PSP_GFX_TEXTURE_RGBA16) ? PSP_PROFILE_TEXTURE_CACHE_RGBA16 : PSP_PROFILE_TEXTURE_CACHE_RGBA32;
+    if (format == PSP_GFX_TEXTURE_CI8) {
+        return PSP_PROFILE_TEXTURE_CACHE_CI8;
+    }
+    if (format == PSP_GFX_TEXTURE_RGBA16) {
+        return PSP_PROFILE_TEXTURE_CACHE_RGBA16;
+    }
+    if (format == PSP_GFX_TEXTURE_RGBA32) {
+        return PSP_PROFILE_TEXTURE_CACHE_RGBA32;
+    }
+    return PSP_PROFILE_TEXTURE_CACHE_CONVERTED;
 }
 
 static u64 psp_gfx_gu_texture_hash_word(u64 hash, u32 value) {
@@ -145,6 +174,24 @@ static u64 psp_gfx_gu_texture_key_hash(const PspGfxTextureRequest* request) {
     hash = psp_gfx_gu_texture_hash_word(hash, request->environmentColor);
     return hash;
 }
+
+static u64 psp_gfx_gu_texture_entry_key_hash(const PspGfxGuTextureEntry* entry) {
+    PspGfxTextureRequest request = { 0 };
+
+    request.pixels = entry->pixels;
+    request.palette = entry->palette;
+    request.format = entry->format;
+    request.width = entry->width;
+    request.height = entry->height;
+    request.premultiply = entry->premultiply;
+    request.softCoverage = entry->softCoverage;
+    request.envBlend = entry->envBlend;
+    request.mirrorS = entry->mirrorS;
+    request.mirrorT = entry->mirrorT;
+    request.primitiveColor = entry->primitiveColor;
+    request.environmentColor = entry->environmentColor;
+    return psp_gfx_gu_texture_key_hash(&request);
+}
 #endif
 
 static int psp_gfx_gu_texture_entry_matches(const PspGfxGuTextureEntry* entry,
@@ -167,6 +214,20 @@ static void psp_gfx_gu_texture_release_entry(PspGfxGuTextureEntry* entry) {
         sPspGfxGuTextureValidEntries--;
     }
     memset(entry, 0, sizeof(*entry));
+}
+
+static void psp_gfx_gu_texture_evict_entry(PspGfxGuTextureEntry* entry) {
+    if (entry->data != NULL) {
+        PspHwTextureCacheClass hwClass = psp_gfx_gu_texture_hw_class(entry->format);
+
+        PspHwCounterProfile_CountTextureCacheEviction(hwClass);
+        (void) hwClass;
+#if PROFILE_PHASES
+        PspProfiler_RecordTextureCacheEviction(psp_gfx_gu_texture_profile_class(entry->format),
+                                               psp_gfx_gu_texture_entry_key_hash(entry));
+#endif
+    }
+    psp_gfx_gu_texture_release_entry(entry);
 }
 
 static int psp_gfx_gu_texture_find_free_entry(void) {
@@ -209,7 +270,7 @@ static int psp_gfx_gu_texture_reserve_entry(u32 dataBytes) {
         if (victim < 0) {
             return -1;
         }
-        psp_gfx_gu_texture_release_entry(&sPspGfxGuTextureEntries[victim]);
+        psp_gfx_gu_texture_evict_entry(&sPspGfxGuTextureEntries[victim]);
     }
 
     index = psp_gfx_gu_texture_find_free_entry();
@@ -220,7 +281,7 @@ static int psp_gfx_gu_texture_reserve_entry(u32 dataBytes) {
     if (victim < 0) {
         return -1;
     }
-    psp_gfx_gu_texture_release_entry(&sPspGfxGuTextureEntries[victim]);
+    psp_gfx_gu_texture_evict_entry(&sPspGfxGuTextureEntries[victim]);
     return victim;
 }
 
@@ -236,28 +297,103 @@ static u32 psp_gfx_gu_texture_read_rgba32(const void* pixels, u32 index) {
     return ((u32) bytes[3] << 24) | ((u32) bytes[2] << 16) | ((u32) bytes[1] << 8) | bytes[0];
 }
 
-static u32 psp_gfx_gu_texture_decode_rgba16(u16 color) {
-    u8 r = psp_gfx_color_transfer_u8((u8) ((((color >> 11) & 31U) * 255U) / 31U));
-    u8 g = psp_gfx_color_transfer_u8((u8) ((((color >> 6) & 31U) * 255U) / 31U));
-    u8 b = psp_gfx_color_transfer_u8((u8) ((((color >> 1) & 31U) * 255U) / 31U));
-    u8 a = (color & 1U) ? 255 : 0;
-
-    return (u32) r | ((u32) g << 8) | ((u32) b << 16) | ((u32) a << 24);
+static void psp_gfx_gu_texture_decode_rgba16(u16 color, u8* output) {
+    output[0] = psp_gfx_color_transfer_u8((u8) ((((color >> 11) & 31U) * 255U) / 31U));
+    output[1] = psp_gfx_color_transfer_u8((u8) ((((color >> 6) & 31U) * 255U) / 31U));
+    output[2] = psp_gfx_color_transfer_u8((u8) ((((color >> 1) & 31U) * 255U) / 31U));
+    output[3] = (color & 1U) ? 255 : 0;
 }
 
-static u32 psp_gfx_gu_texture_decode_rgba32(u32 color) {
-    u8 r = psp_gfx_color_transfer_u8((u8) (color >> 24));
-    u8 g = psp_gfx_color_transfer_u8((u8) (color >> 16));
-    u8 b = psp_gfx_color_transfer_u8((u8) (color >> 8));
-    u8 a = (u8) color;
+static void psp_gfx_gu_texture_decode_rgba32(u32 color, u8* output) {
+    output[0] = psp_gfx_color_transfer_u8((u8) (color >> 24));
+    output[1] = psp_gfx_color_transfer_u8((u8) (color >> 16));
+    output[2] = psp_gfx_color_transfer_u8((u8) (color >> 8));
+    output[3] = (u8) color;
+}
 
-    return (u32) r | ((u32) g << 8) | ((u32) b << 16) | ((u32) a << 24);
+static int psp_gfx_gu_texture_is_dark_rgba16_mask(const u16* pixels, u32 width, u32 height) {
+    u32 pixelCount = width * height;
+    u32 opaqueCount = 0;
+    u32 i;
+
+    for (i = 0; i < pixelCount; i++) {
+        u16 color = psp_gfx_gu_texture_read_u16(pixels, i);
+
+        if ((color & 1U) == 0) {
+            continue;
+        }
+        opaqueCount++;
+        if (((color >> 11) & 31U) > 2U || ((color >> 6) & 31U) > 2U || ((color >> 1) & 31U) > 2U) {
+            return 0;
+        }
+    }
+    return (opaqueCount != 0) && (opaqueCount != pixelCount);
+}
+
+static u8 psp_gfx_gu_texture_filtered_rgba16_alpha(const u16* pixels, u32 width, u32 height, u32 x, u32 y) {
+    static const u32 weights[3] = { 1, 2, 1 };
+    u32 alpha = 0;
+    s32 ky;
+    s32 kx;
+
+    for (ky = -1; ky <= 1; ky++) {
+        s32 sampleY = (s32) y + ky;
+
+        if (sampleY < 0) {
+            sampleY = 0;
+        } else if (sampleY >= (s32) height) {
+            sampleY = (s32) height - 1;
+        }
+        for (kx = -1; kx <= 1; kx++) {
+            s32 sampleX = (s32) x + kx;
+            u32 weight = weights[kx + 1] * weights[ky + 1];
+
+            if (sampleX < 0) {
+                sampleX = 0;
+            } else if (sampleX >= (s32) width) {
+                sampleX = (s32) width - 1;
+            }
+            if ((psp_gfx_gu_texture_read_u16(pixels, ((u32) sampleY * width) + (u32) sampleX) & 1U) != 0) {
+                alpha += 255U * weight;
+            }
+        }
+    }
+    return (u8) ((alpha + 8U) / 16U);
+}
+
+static u8 psp_gfx_gu_texture_soft_coverage_alpha(u8 alpha) {
+    if (alpha <= 32U) {
+        return 0;
+    }
+    return (u8) ((((u32) (alpha - 32U) * 255U) + 111U) / 223U);
+}
+
+static void psp_gfx_gu_texture_premultiply(u8* output) {
+    output[0] = (u8) (((u32) output[0] * output[3] + 127U) / 255U);
+    output[1] = (u8) (((u32) output[1] * output[3] + 127U) / 255U);
+    output[2] = (u8) (((u32) output[2] * output[3] + 127U) / 255U);
+}
+
+static void psp_gfx_gu_texture_apply_env_blend(const PspGfxTextureRequest* request, u8 intensity, u8* output) {
+    u8 primitiveR = (u8) (request->primitiveColor & 0xFFU);
+    u8 primitiveG = (u8) ((request->primitiveColor >> 8) & 0xFFU);
+    u8 primitiveB = (u8) ((request->primitiveColor >> 16) & 0xFFU);
+    u8 environmentR = (u8) (request->environmentColor & 0xFFU);
+    u8 environmentG = (u8) ((request->environmentColor >> 8) & 0xFFU);
+    u8 environmentB = (u8) ((request->environmentColor >> 16) & 0xFFU);
+
+    output[0] = (u8) (((u32) environmentR * (255U - intensity) + ((u32) primitiveR * intensity) + 127U) / 255U);
+    output[1] = (u8) (((u32) environmentG * (255U - intensity) + ((u32) primitiveG * intensity) + 127U) / 255U);
+    output[2] = (u8) (((u32) environmentB * (255U - intensity) + ((u32) primitiveB * intensity) + 127U) / 255U);
 }
 
 static void psp_gfx_gu_texture_decode(const PspGfxTextureRequest* request, u32 uploadWidth, u32 uploadHeight,
-                                      u32* output) {
+                                      u8* output) {
     u32 x;
     u32 y;
+    int softenAlpha = (request->format == PSP_GFX_TEXTURE_RGBA16) && request->premultiply &&
+                      psp_gfx_gu_texture_is_dark_rgba16_mask((const u16*) request->pixels, request->width,
+                                                             request->height);
 
     for (y = 0; y < uploadHeight; y++) {
         u32 sourceY = (y < request->height) ? y : (request->height - 1);
@@ -266,13 +402,65 @@ static void psp_gfx_gu_texture_decode(const PspGfxTextureRequest* request, u32 u
             u32 sourceX = (x < request->width) ? x : (request->width - 1);
             u32 sourceIndex = sourceY * request->width + sourceX;
             u32 outputIndex = y * uploadWidth + x;
+            u8* outputPixel = &output[outputIndex * 4];
 
-            if (request->format == PSP_GFX_TEXTURE_RGBA16) {
-                output[outputIndex] = psp_gfx_gu_texture_decode_rgba16(
-                    psp_gfx_gu_texture_read_u16(request->pixels, sourceIndex));
+            if (request->format == PSP_GFX_TEXTURE_CI4) {
+                u8 packed = ((const u8*) request->pixels)[sourceIndex >> 1];
+                u8 paletteIndex = (sourceIndex & 1U) ? (packed & 0xFU) : (packed >> 4);
+
+                psp_gfx_gu_texture_decode_rgba16(psp_gfx_gu_texture_read_u16(request->palette, paletteIndex),
+                                                 outputPixel);
+            } else if (request->format == PSP_GFX_TEXTURE_CI8) {
+                u8 paletteIndex = ((const u8*) request->pixels)[sourceIndex];
+
+                psp_gfx_gu_texture_decode_rgba16(psp_gfx_gu_texture_read_u16(request->palette, paletteIndex),
+                                                 outputPixel);
+            } else if (request->format == PSP_GFX_TEXTURE_RGBA16) {
+                psp_gfx_gu_texture_decode_rgba16(psp_gfx_gu_texture_read_u16(request->pixels, sourceIndex),
+                                                 outputPixel);
+                if (softenAlpha) {
+                    outputPixel[0] = 0;
+                    outputPixel[1] = 0;
+                    outputPixel[2] = 0;
+                    outputPixel[3] = psp_gfx_gu_texture_filtered_rgba16_alpha(
+                        (const u16*) request->pixels, request->width, request->height, sourceX, sourceY);
+                }
+                if (request->premultiply) {
+                    psp_gfx_gu_texture_premultiply(outputPixel);
+                }
+            } else if (request->format == PSP_GFX_TEXTURE_RGBA32) {
+                psp_gfx_gu_texture_decode_rgba32(psp_gfx_gu_texture_read_rgba32(request->pixels, sourceIndex),
+                                                 outputPixel);
+                if (request->envBlend) {
+                    psp_gfx_gu_texture_apply_env_blend(request, outputPixel[0], outputPixel);
+                } else if (request->premultiply) {
+                    psp_gfx_gu_texture_premultiply(outputPixel);
+                }
+            } else if (request->format == PSP_GFX_TEXTURE_IA8) {
+                u8 packed = ((const u8*) request->pixels)[sourceIndex];
+                u8 intensity = psp_gfx_color_transfer_u8((u8) ((packed >> 4) * 17U));
+
+                outputPixel[3] = (packed & 0xFU) * 17U;
+                if (request->softCoverage) {
+                    outputPixel[3] = psp_gfx_gu_texture_soft_coverage_alpha(outputPixel[3]);
+                }
+                outputPixel[0] = intensity;
+                outputPixel[1] = intensity;
+                outputPixel[2] = intensity;
+                if (request->envBlend) {
+                    psp_gfx_gu_texture_apply_env_blend(request, intensity, outputPixel);
+                }
             } else {
-                output[outputIndex] = psp_gfx_gu_texture_decode_rgba32(
-                    psp_gfx_gu_texture_read_rgba32(request->pixels, sourceIndex));
+                u16 packed = psp_gfx_gu_texture_read_u16(request->pixels, sourceIndex);
+                u8 intensity = psp_gfx_color_transfer_u8((u8) (packed >> 8));
+
+                outputPixel[3] = (u8) packed;
+                if (request->softCoverage) {
+                    outputPixel[3] = psp_gfx_gu_texture_soft_coverage_alpha(outputPixel[3]);
+                }
+                outputPixel[0] = intensity;
+                outputPixel[1] = intensity;
+                outputPixel[2] = intensity;
             }
         }
     }
@@ -446,7 +634,7 @@ int PspGfxGuTexture_Create(const PspGfxTextureRequest* request, PspGfxTextureRes
     }
 
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TEXTURE_DECODE);
-    psp_gfx_gu_texture_decode(request, uploadWidth, uploadHeight, (u32*) entry->data);
+    psp_gfx_gu_texture_decode(request, uploadWidth, uploadHeight, (u8*) entry->data);
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TEXTURE_DECODE);
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TEXTURE_UPLOAD);
     sceKernelDcacheWritebackRange(entry->data, dataBytes);
