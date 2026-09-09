@@ -70,6 +70,52 @@ static float sPspGfxGuScissorLrx;
 static float sPspGfxGuScissorLry;
 static int sPspGfxGuScissorEnabled;
 
+typedef struct {
+    int valid;
+    int viewportValid;
+    int viewportOffsetX;
+    int viewportOffsetY;
+    int viewportX;
+    int viewportY;
+    int viewportWidth;
+    int viewportHeight;
+    int textureValid;
+    int textureBound;
+    PspGfxTextureHandle texture;
+    int textureFunction;
+    u32 textureEnvColor;
+    int textureWrapS;
+    int textureWrapT;
+    int texturePointFilter;
+    int textureEnabled;
+    int alphaTestEnabled;
+    int alphaTestReference;
+    int alphaTestReferenceValid;
+    int blendEnabled;
+    int blendPremultiplied;
+    int blendFuncValid;
+    int depthTestEnabled;
+    int depthFunction;
+    int depthFunctionValid;
+    int depthWrite;
+    int fogValid;
+    int fogEnabled;
+    u32 fogColor;
+    float fogStart;
+    float fogEnd;
+    int lightingEnabled;
+    int cullEnabled;
+    int clipPlanesEnabled;
+    int shadeModel;
+    int matrixValid;
+    int projectionIdentity;
+    const float* projectionMatrix;
+    u32 projectionSerial;
+    int viewModelIdentity;
+} PspGfxGuStateCache;
+
+static PspGfxGuStateCache sPspGfxGuState;
+
 typedef enum {
     PSP_GFX_GU_REPLAY_TRIANGLES,
     PSP_GFX_GU_REPLAY_SPRITES,
@@ -159,6 +205,22 @@ static void psp_gfx_gu_replay_draw_state(PspGfxGuReplayPacket* packet, const Psp
     }
 }
 
+static void psp_gfx_gu_state_invalidate(void) {
+    memset(&sPspGfxGuState, 0, sizeof(sPspGfxGuState));
+}
+
+static void psp_gfx_gu_set_capability(int capability, int enabled, int* cached) {
+    if (sPspGfxGuState.valid && (*cached == enabled)) {
+        return;
+    }
+    if (enabled) {
+        sceGuEnable(capability);
+    } else {
+        sceGuDisable(capability);
+    }
+    *cached = enabled;
+}
+
 static void psp_gfx_gu_replay_capture_colored(const PspGfxVertex* vertices, u32 vertexCount,
                                                const PspGfxDrawState* state, PspGfxGuReplayType type) {
     PspGfxGuReplayPacket* packet;
@@ -240,9 +302,27 @@ static void psp_gfx_gu_replay_restore_context(const PspGfxGuReplayPacket* packet
 }
 
 static void psp_gfx_gu_apply_viewport(const n64psp_display_config* display, int x, int y, int width, int height) {
-    sceGuOffset(2048 - (display->framebuffer_width / 2), 2048 - (display->framebuffer_height / 2));
-    sceGuViewport(2048 - (display->framebuffer_width / 2) + x + (width / 2),
-                  2048 - (display->framebuffer_height / 2) + y + (height / 2), width, height);
+    int offsetX = 2048 - (display->framebuffer_width / 2);
+    int offsetY = 2048 - (display->framebuffer_height / 2);
+    int viewportX = offsetX + x + (width / 2);
+    int viewportY = offsetY + y + (height / 2);
+
+    if (!sPspGfxGuState.viewportValid || (sPspGfxGuState.viewportOffsetX != offsetX) ||
+        (sPspGfxGuState.viewportOffsetY != offsetY)) {
+        sceGuOffset(offsetX, offsetY);
+        sPspGfxGuState.viewportOffsetX = offsetX;
+        sPspGfxGuState.viewportOffsetY = offsetY;
+    }
+    if (!sPspGfxGuState.viewportValid || (sPspGfxGuState.viewportX != viewportX) ||
+        (sPspGfxGuState.viewportY != viewportY) || (sPspGfxGuState.viewportWidth != width) ||
+        (sPspGfxGuState.viewportHeight != height)) {
+        sceGuViewport(viewportX, viewportY, width, height);
+        sPspGfxGuState.viewportX = viewportX;
+        sPspGfxGuState.viewportY = viewportY;
+        sPspGfxGuState.viewportWidth = width;
+        sPspGfxGuState.viewportHeight = height;
+    }
+    sPspGfxGuState.viewportValid = 1;
 }
 
 static int psp_gfx_gu_is_hud_anchor_viewport(PspGfxViewportPolicy policy) {
@@ -355,12 +435,105 @@ static u32 psp_gfx_gu_fog_color(const float* color) {
 }
 
 static void psp_gfx_gu_prepare_native_fog(const PspGfxDrawState* state) {
-    if (state->fog && !state->pretransformed && (state->fogColor != NULL) && (state->fogEnd > state->fogStart)) {
-        sceGuFog(state->fogStart, state->fogEnd, psp_gfx_gu_fog_color(state->fogColor));
-        sceGuEnable(GU_FOG);
-    } else {
-        sceGuDisable(GU_FOG);
+    int enabled = state->fog && !state->pretransformed && (state->fogColor != NULL) &&
+                  (state->fogEnd > state->fogStart);
+    u32 color = enabled ? psp_gfx_gu_fog_color(state->fogColor) : 0;
+
+    if (enabled && (!sPspGfxGuState.fogValid || !sPspGfxGuState.fogEnabled ||
+                    (sPspGfxGuState.fogColor != color) || (sPspGfxGuState.fogStart != state->fogStart) ||
+                    (sPspGfxGuState.fogEnd != state->fogEnd))) {
+        sceGuFog(state->fogStart, state->fogEnd, color);
     }
+    psp_gfx_gu_set_capability(GU_FOG, enabled, &sPspGfxGuState.fogEnabled);
+    if (enabled) {
+        sPspGfxGuState.fogColor = color;
+        sPspGfxGuState.fogStart = state->fogStart;
+        sPspGfxGuState.fogEnd = state->fogEnd;
+    }
+    sPspGfxGuState.fogValid = 1;
+}
+
+static void psp_gfx_gu_set_matrices(const PspGfxDrawState* state) {
+    int identity = state->pretransformed || (state->projectionMatrix == NULL);
+
+    if (!sPspGfxGuState.matrixValid || (sPspGfxGuState.projectionIdentity != identity) ||
+        (!identity && ((sPspGfxGuState.projectionMatrix != state->projectionMatrix) ||
+                       (sPspGfxGuState.projectionSerial != state->projectionSerial)))) {
+        if (identity) {
+            sceGuSetMatrix(GU_PROJECTION, &sPspGfxGuIdentityMatrix);
+        } else {
+            sceGuSetMatrix(GU_PROJECTION, (const ScePspFMatrix4*) state->projectionMatrix);
+        }
+    }
+    if (!sPspGfxGuState.matrixValid || !sPspGfxGuState.viewModelIdentity) {
+        sceGuSetMatrix(GU_VIEW, &sPspGfxGuIdentityMatrix);
+        sceGuSetMatrix(GU_MODEL, &sPspGfxGuIdentityMatrix);
+    }
+    sPspGfxGuState.projectionIdentity = identity;
+    sPspGfxGuState.projectionMatrix = state->projectionMatrix;
+    sPspGfxGuState.projectionSerial = state->projectionSerial;
+    sPspGfxGuState.viewModelIdentity = 1;
+    sPspGfxGuState.matrixValid = 1;
+}
+
+static int psp_gfx_gu_prepare_texture(const PspGfxDrawState* state) {
+    const void* pixels;
+    u32 width;
+    u32 height;
+    int wrapS;
+    int wrapT;
+    int textureFunction;
+    int pointFilter = state->pointFilter != 0;
+
+    if (!PspGfxGuTexture_Resolve(state->texture, &pixels, &width, &height)) {
+        return 0;
+    }
+
+    wrapS = (state->wrapS == PSP_GFX_WRAP_CLAMP) ? GU_CLAMP : GU_REPEAT;
+    wrapT = (state->wrapT == PSP_GFX_WRAP_CLAMP) ? GU_CLAMP : GU_REPEAT;
+    if (state->textureEnv == PSP_GFX_TEX_BLEND) {
+        textureFunction = GU_TFX_BLEND;
+    } else if (state->textureEnv == PSP_GFX_TEX_MODULATE) {
+        textureFunction = GU_TFX_MODULATE;
+    } else {
+        textureFunction = GU_TFX_REPLACE;
+    }
+
+    if (!sPspGfxGuState.textureValid) {
+        sceGuTexMode(GU_PSM_8888, 0, 0, 0);
+        sceGuTexMapMode(GU_TEXTURE_COORDS, 0, 0);
+        sceGuTexLevelMode(GU_TEXTURE_CONST, 0.0f);
+        sceGuTexScale(1.0f, 1.0f);
+        sceGuTexOffset(0.0f, 0.0f);
+    }
+    if (!sPspGfxGuState.textureValid || !sPspGfxGuState.textureBound ||
+        !PspGfxTextureHandle_Equals(sPspGfxGuState.texture, state->texture)) {
+        PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TEXTURE_UPLOAD);
+        sceGuTexImage(0, (int) width, (int) height, (int) width, pixels);
+        PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TEXTURE_UPLOAD);
+        sPspGfxGuState.texture = state->texture;
+        sPspGfxGuState.textureBound = 1;
+    }
+    if (!sPspGfxGuState.textureValid || (sPspGfxGuState.textureFunction != textureFunction)) {
+        sceGuTexFunc(textureFunction, GU_TCC_RGBA);
+        sPspGfxGuState.textureFunction = textureFunction;
+    }
+    if (!sPspGfxGuState.textureValid || (sPspGfxGuState.textureEnvColor != state->textureEnvColor)) {
+        sceGuTexEnvColor(state->textureEnvColor & 0x00FFFFFFU);
+        sPspGfxGuState.textureEnvColor = state->textureEnvColor;
+    }
+    if (!sPspGfxGuState.textureValid || (sPspGfxGuState.textureWrapS != wrapS) ||
+        (sPspGfxGuState.textureWrapT != wrapT)) {
+        sceGuTexWrap(wrapS, wrapT);
+        sPspGfxGuState.textureWrapS = wrapS;
+        sPspGfxGuState.textureWrapT = wrapT;
+    }
+    if (!sPspGfxGuState.textureValid || (sPspGfxGuState.texturePointFilter != pointFilter)) {
+        sceGuTexFilter(pointFilter ? GU_NEAREST : GU_LINEAR, pointFilter ? GU_NEAREST : GU_LINEAR);
+        sPspGfxGuState.texturePointFilter = pointFilter;
+    }
+    sPspGfxGuState.textureValid = 1;
+    return 1;
 }
 
 static void psp_gfx_gu_load_identity(void) {
@@ -421,6 +594,7 @@ static void psp_gfx_gu_count_reserved_vertex_draw(u32 vertexCount) {
 void PspGfxBackendGu_BeginFrame(void) {
     u32 i;
 
+    psp_gfx_gu_state_invalidate();
     sPspGfxGuReservationFrame++;
     if (sPspGfxGuReservationFrame == 0) {
         sPspGfxGuReservationFrame = 1;
@@ -441,62 +615,34 @@ void PspGfxBackendGu_EndFrame(void) {
     }
 }
 
-static int psp_gfx_gu_prepare_texture(const PspGfxDrawState* state) {
-    const void* pixels;
-    u32 width;
-    u32 height;
-    int wrapS;
-    int wrapT;
-    int textureFunction;
-    int textureComponents;
-
-    if (!PspGfxGuTexture_Resolve(state->texture, &pixels, &width, &height)) {
-        return 0;
-    }
-
-    wrapS = (state->wrapS == PSP_GFX_WRAP_CLAMP) ? GU_CLAMP : GU_REPEAT;
-    wrapT = (state->wrapT == PSP_GFX_WRAP_CLAMP) ? GU_CLAMP : GU_REPEAT;
-    if (state->textureEnv == PSP_GFX_TEX_BLEND) {
-        textureFunction = GU_TFX_BLEND;
-    } else if (state->textureEnv == PSP_GFX_TEX_MODULATE) {
-        textureFunction = GU_TFX_MODULATE;
-    } else {
-        textureFunction = GU_TFX_REPLACE;
-    }
-    textureComponents = GU_TCC_RGBA;
-    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TEXTURE_UPLOAD);
-    sceGuTexMode(GU_PSM_8888, 0, 0, 0);
-    sceGuTexImage(0, (int) width, (int) height, (int) width, pixels);
-    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TEXTURE_UPLOAD);
-    sceGuTexFunc(textureFunction, textureComponents);
-    sceGuTexEnvColor(state->textureEnvColor & 0x00FFFFFFU);
-    sceGuTexWrap(wrapS, wrapT);
-    sceGuTexFilter(state->pointFilter ? GU_NEAREST : GU_LINEAR, state->pointFilter ? GU_NEAREST : GU_LINEAR);
-    sceGuTexMapMode(GU_TEXTURE_COORDS, 0, 0);
-    sceGuTexLevelMode(GU_TEXTURE_CONST, 0.0f);
-    sceGuTexScale(1.0f, 1.0f);
-    sceGuTexOffset(0.0f, 0.0f);
-    sceGuEnable(GU_TEXTURE_2D);
-    return 1;
-}
-
 static void psp_gfx_gu_prepare_alpha_blend(const PspGfxDrawState* state, int textured) {
-    if (textured && state->alphaTest) {
-        sceGuAlphaFunc(GU_GREATER, (state->alphaTest > 1) ? PSP_GFX_GU_ALPHA_HALF : 0, 0xFF);
-        sceGuEnable(GU_ALPHA_TEST);
+    int alphaTest = textured && state->alphaTest;
+    int blend = textured && state->blend;
+
+    if (alphaTest) {
+        int reference = (state->alphaTest > 1) ? PSP_GFX_GU_ALPHA_HALF : 0;
+
+        if (!sPspGfxGuState.alphaTestReferenceValid ||
+            (sPspGfxGuState.alphaTestReference != reference)) {
+            sceGuAlphaFunc(GU_GREATER, reference, 0xFF);
+            sPspGfxGuState.alphaTestReference = reference;
+            sPspGfxGuState.alphaTestReferenceValid = 1;
+        }
+        psp_gfx_gu_set_capability(GU_ALPHA_TEST, 1, &sPspGfxGuState.alphaTestEnabled);
     } else {
-        sceGuDisable(GU_ALPHA_TEST);
+        psp_gfx_gu_set_capability(GU_ALPHA_TEST, 0, &sPspGfxGuState.alphaTestEnabled);
     }
 
-    if (textured && state->blend) {
-        sceGuEnable(GU_BLEND);
+    psp_gfx_gu_set_capability(GU_BLEND, blend, &sPspGfxGuState.blendEnabled);
+    if (blend && (!sPspGfxGuState.blendFuncValid ||
+                  (sPspGfxGuState.blendPremultiplied != state->premultiplied))) {
         if (state->premultiplied) {
             sceGuBlendFunc(GU_ADD, GU_FIX, GU_ONE_MINUS_SRC_ALPHA, PSP_GFX_GU_FIXED_ONE, 0);
         } else {
             sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA, 0, 0);
         }
-    } else {
-        sceGuDisable(GU_BLEND);
+        sPspGfxGuState.blendPremultiplied = state->premultiplied;
+        sPspGfxGuState.blendFuncValid = 1;
     }
 }
 
@@ -512,30 +658,29 @@ static int psp_gfx_gu_prepare_colored_draw(const PspGfxDrawState* state) {
         return 0;
     }
 
-    if (state->pretransformed || (state->projectionMatrix == NULL)) {
-        psp_gfx_gu_load_identity();
-    } else {
-        sceGuSetMatrix(GU_PROJECTION, (const ScePspFMatrix4*) state->projectionMatrix);
-        sceGuSetMatrix(GU_VIEW, &sPspGfxGuIdentityMatrix);
-        sceGuSetMatrix(GU_MODEL, &sPspGfxGuIdentityMatrix);
-    }
-
-    if (state->depthTest) {
-        sceGuEnable(GU_DEPTH_TEST);
+    psp_gfx_gu_set_matrices(state);
+    psp_gfx_gu_set_capability(GU_DEPTH_TEST, state->depthTest, &sPspGfxGuState.depthTestEnabled);
+    if (state->depthTest && (!sPspGfxGuState.depthFunctionValid ||
+                             (sPspGfxGuState.depthFunction != PSP_GFX_GU_DEPTH_FUNC))) {
         sceGuDepthFunc(PSP_GFX_GU_DEPTH_FUNC);
-    } else {
-        sceGuDisable(GU_DEPTH_TEST);
+        sPspGfxGuState.depthFunction = PSP_GFX_GU_DEPTH_FUNC;
+        sPspGfxGuState.depthFunctionValid = 1;
     }
-    sceGuDepthMask(state->depthWrite ? GU_FALSE : GU_TRUE);
-    if (!textured) {
-        sceGuDisable(GU_TEXTURE_2D);
+    if (!sPspGfxGuState.valid || (sPspGfxGuState.depthWrite != state->depthWrite)) {
+        sceGuDepthMask(state->depthWrite ? GU_FALSE : GU_TRUE);
+        sPspGfxGuState.depthWrite = state->depthWrite;
     }
+    psp_gfx_gu_set_capability(GU_TEXTURE_2D, textured, &sPspGfxGuState.textureEnabled);
     psp_gfx_gu_prepare_alpha_blend(state, textured);
     psp_gfx_gu_prepare_native_fog(state);
-    sceGuDisable(GU_LIGHTING);
-    sceGuDisable(GU_CULL_FACE);
-    sceGuEnable(GU_CLIP_PLANES);
-    sceGuShadeModel(GU_SMOOTH);
+    psp_gfx_gu_set_capability(GU_LIGHTING, 0, &sPspGfxGuState.lightingEnabled);
+    psp_gfx_gu_set_capability(GU_CULL_FACE, 0, &sPspGfxGuState.cullEnabled);
+    psp_gfx_gu_set_capability(GU_CLIP_PLANES, 1, &sPspGfxGuState.clipPlanesEnabled);
+    if (!sPspGfxGuState.valid || (sPspGfxGuState.shadeModel != GU_SMOOTH)) {
+        sceGuShadeModel(GU_SMOOTH);
+        sPspGfxGuState.shadeModel = GU_SMOOTH;
+    }
+    sPspGfxGuState.valid = 1;
     return 1;
 }
 
@@ -776,6 +921,7 @@ void PspGfxBackend_DrawFogTriangles(const PspGfxFogVertex* vertices, u32 vertexC
     psp_gfx_gu_replay_capture_fog(vertices, vertexCount, state);
 
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
+    psp_gfx_gu_state_invalidate();
     if (!psp_gfx_gu_select_viewport(state->viewport)) {
         PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
         psp_gfx_gu_replay_note_draw_failure();
@@ -904,7 +1050,11 @@ void PspGfxBackend_DrawSolidRect(float ulx, float uly, float lrx, float lry, u32
     PspGfxGuColorVertex* vertices;
     int i;
 
-    if ((lrx <= ulx) || (lry <= uly) || !psp_gfx_gu_select_viewport(viewport)) {
+    if ((lrx <= ulx) || (lry <= uly)) {
+        return;
+    }
+    psp_gfx_gu_state_invalidate();
+    if (!psp_gfx_gu_select_viewport(viewport)) {
         return;
     }
 
