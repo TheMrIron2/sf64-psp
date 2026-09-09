@@ -18,6 +18,8 @@
 #define PSP_GU_FRAMEBUFFER_BYTES (PSP_GU_FRAMEBUFFER_WIDTH * PSP_GU_SCREEN_HEIGHT * PSP_GU_BYTES_PER_PIXEL)
 #define PSP_GU_REQUIRED_VRAM (PSP_GU_FRAMEBUFFER_BYTES * 3)
 #define PSP_GU_LIST_WORDS 262144
+#define PSP_GU_DEPTH_NEAR 65535
+#define PSP_GU_DEPTH_FAR 0
 #define PSP_GU_CLEAR_COLOR GU_RGBA(0, 0, 0, 255)
 
 static unsigned int sGuList[PSP_GU_LIST_WORDS] __attribute__((aligned(64)));
@@ -131,6 +133,8 @@ int PspGfxGuDevice_Init(void) {
     sceGuScissor(0, 0, PSP_GU_SCREEN_WIDTH, PSP_GU_SCREEN_HEIGHT);
     sceGuEnable(GU_SCISSOR_TEST);
     sceGuDisable(GU_DEPTH_TEST);
+    sceGuDepthFunc(GU_GEQUAL);
+    sceGuDepthRange(PSP_GU_DEPTH_NEAR, PSP_GU_DEPTH_FAR);
     sceGuDisable(GU_CULL_FACE);
     sceGuDisable(GU_TEXTURE_2D);
     sceGuDisable(GU_ALPHA_TEST);
@@ -189,15 +193,18 @@ int PspGfxGuDevice_BeginFrame(void) {
     sceGuEnable(GU_SCISSOR_TEST);
     sceGuScissor(0, 0, display->framebuffer_width, display->framebuffer_height);
     sceGuDisable(GU_DEPTH_TEST);
+    sceGuDepthFunc(GU_GEQUAL);
+    sceGuDepthRange(PSP_GU_DEPTH_NEAR, PSP_GU_DEPTH_FAR);
     sceGuDisable(GU_TEXTURE_2D);
     sceGuDisable(GU_ALPHA_TEST);
     sceGuDisable(GU_BLEND);
     sceGuDisable(GU_FOG);
     sceGuDisable(GU_LIGHTING);
     sceGuDisable(GU_CULL_FACE);
+    sceGuDisable(GU_CLIP_PLANES);
     sceGuDepthMask(GU_TRUE);
     sceGuPixelMask(0);
-    sceGuClearDepth(0);
+    sceGuClearDepth(PSP_GU_DEPTH_FAR);
     sceGuClear(GU_DEPTH_BUFFER_BIT);
     sceGuClearColor(PSP_GU_CLEAR_COLOR);
     psp_gfx_gu_device_clear_display_borders(display);

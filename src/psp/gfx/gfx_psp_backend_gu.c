@@ -12,6 +12,7 @@
 #define PSP_GFX_GU_N64_HEIGHT 240.0f
 #define PSP_GFX_GU_LIST_BYTES (262144U * sizeof(unsigned int))
 #define PSP_GFX_GU_LIST_DRAW_RESERVE 4096U
+#define PSP_GFX_GU_DEPTH_FUNC GU_GEQUAL
 
 typedef struct {
     u32 color;
@@ -126,15 +127,20 @@ static int psp_gfx_gu_prepare_colored_draw(const PspGfxDrawState* state) {
         sceGuSetMatrix(GU_MODEL, &sPspGfxGuIdentityMatrix);
     }
 
-    sceGuDisable(GU_DEPTH_TEST);
-    sceGuDepthMask(GU_TRUE);
+    if (state->depthTest) {
+        sceGuEnable(GU_DEPTH_TEST);
+        sceGuDepthFunc(PSP_GFX_GU_DEPTH_FUNC);
+    } else {
+        sceGuDisable(GU_DEPTH_TEST);
+    }
+    sceGuDepthMask(state->depthWrite ? GU_FALSE : GU_TRUE);
     sceGuDisable(GU_TEXTURE_2D);
     sceGuDisable(GU_ALPHA_TEST);
     sceGuDisable(GU_BLEND);
     sceGuDisable(GU_FOG);
     sceGuDisable(GU_LIGHTING);
     sceGuDisable(GU_CULL_FACE);
-    sceGuDisable(GU_CLIP_PLANES);
+    sceGuEnable(GU_CLIP_PLANES);
     sceGuShadeModel(GU_SMOOTH);
     return 1;
 }
