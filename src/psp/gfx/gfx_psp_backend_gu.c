@@ -1,6 +1,7 @@
 #include <n64psp/display.h>
 
 #include "src/psp/gfx/gfx_psp_backend.h"
+#include "src/psp/gfx/gfx_psp_backend_gu.h"
 #include "src/psp/display.h"
 #include "src/psp/gfx/gfx_psp_gu_texture.h"
 #include "src/psp/profiler.h"
@@ -14,6 +15,7 @@
 #define PSP_GFX_GU_LIST_BYTES (262144U * sizeof(unsigned int))
 #define PSP_GFX_GU_LIST_DRAW_RESERVE 4096U
 #define PSP_GFX_GU_DEPTH_FUNC GU_GEQUAL
+#define PSP_GFX_GU_RESERVATION_SLOTS 64
 
 typedef struct {
     u32 color;
@@ -35,12 +37,25 @@ typedef struct {
 
 typedef char PspGfxGuTextureVertexSizeCheck[(sizeof(PspGfxGuTextureVertex) == 24) ? 1 : -1];
 
+typedef struct {
+    PspGfxVertex* vertices;
+    u32 capacity;
+    u32 token;
+    u32 frame;
+    int active;
+} PspGfxGuReservation;
+
 static const ScePspFMatrix4 sPspGfxGuIdentityMatrix __attribute__((aligned(16))) = {
     { 1.0f, 0.0f, 0.0f, 0.0f },
     { 0.0f, 1.0f, 0.0f, 0.0f },
     { 0.0f, 0.0f, 1.0f, 0.0f },
     { 0.0f, 0.0f, 0.0f, 1.0f },
 };
+
+static PspGfxGuReservation sPspGfxGuReservations[PSP_GFX_GU_RESERVATION_SLOTS];
+static u32 sPspGfxGuReservationFrame;
+static u32 sPspGfxGuReservationToken;
+static int sPspGfxGuReservationFrameActive;
 
 static int psp_gfx_gu_select_viewport(PspGfxViewportPolicy policy) {
     const n64psp_display_config* display = PspDisplay_GetConfig();
@@ -120,6 +135,37 @@ static void psp_gfx_gu_count_vertex_copy(u32 bytes) {
     PspProfiler_CountVertexStream(0, 0, 1, bytes, 0, 0, 0, PSP_GFX_GU_LIST_BYTES, highWater, 0, 0, 0, 0);
     (void) bytes;
     (void) highWater;
+}
+
+static void psp_gfx_gu_count_reserved_vertex_draw(u32 vertexCount) {
+    int checkedListBytes = sceGuCheckList();
+    u32 highWater = (checkedListBytes > 0) ? (u32) checkedListBytes : 0;
+
+    PspProfiler_CountVertexStream(1, vertexCount, 0, 0, 0, 0, 0, PSP_GFX_GU_LIST_BYTES, highWater, 0, 0, 0, 0);
+    (void) vertexCount;
+    (void) highWater;
+}
+
+void PspGfxBackendGu_BeginFrame(void) {
+    u32 i;
+
+    sPspGfxGuReservationFrame++;
+    if (sPspGfxGuReservationFrame == 0) {
+        sPspGfxGuReservationFrame = 1;
+    }
+    for (i = 0; i < PSP_GFX_GU_RESERVATION_SLOTS; i++) {
+        sPspGfxGuReservations[i].active = 0;
+    }
+    sPspGfxGuReservationFrameActive = 1;
+}
+
+void PspGfxBackendGu_EndFrame(void) {
+    u32 i;
+
+    sPspGfxGuReservationFrameActive = 0;
+    for (i = 0; i < PSP_GFX_GU_RESERVATION_SLOTS; i++) {
+        sPspGfxGuReservations[i].active = 0;
+    }
 }
 
 static int psp_gfx_gu_prepare_texture(const PspGfxDrawState* state) {
@@ -326,20 +372,91 @@ void PspGfxBackend_DrawTriangles(const PspGfxVertex* vertices, u32 vertexCount, 
 }
 
 int PspGfxBackend_ReserveVertices(u32 vertexCapacity, PspGfxVertexReservation* reservation) {
-    (void) vertexCapacity;
+    PspGfxGuReservation* guReservation = NULL;
+    PspGfxVertex* vertices;
+    u32 i;
+    u32 token;
+
     if (reservation != NULL) {
         reservation->vertices = NULL;
         reservation->token.opaque = 0;
         reservation->capacity = 0;
     }
-    return 0;
+    if (!sPspGfxGuReservationFrameActive || (reservation == NULL) || (vertexCapacity == 0) ||
+        (vertexCapacity > (0x7FFFFFFFU / sizeof(PspGfxVertex)))) {
+        return 0;
+    }
+    for (i = 0; i < PSP_GFX_GU_RESERVATION_SLOTS; i++) {
+        if (!sPspGfxGuReservations[i].active) {
+            guReservation = &sPspGfxGuReservations[i];
+            break;
+        }
+    }
+    if (guReservation == NULL) {
+        return 0;
+    }
+    vertices = (PspGfxVertex*) psp_gfx_gu_alloc_vertices(vertexCapacity, sizeof(PspGfxVertex));
+    if (vertices == NULL) {
+        return 0;
+    }
+    sPspGfxGuReservationToken++;
+    if (sPspGfxGuReservationToken == 0) {
+        sPspGfxGuReservationToken = 1;
+    }
+    token = sPspGfxGuReservationToken;
+    guReservation->vertices = vertices;
+    guReservation->capacity = vertexCapacity;
+    guReservation->token = token;
+    guReservation->frame = sPspGfxGuReservationFrame;
+    guReservation->active = 1;
+    reservation->vertices = vertices;
+    reservation->token.opaque = token;
+    reservation->capacity = vertexCapacity;
+    return 1;
 }
 
 void PspGfxBackend_DrawReservedTriangles(const PspGfxVertexReservation* reservation, u32 vertexCount,
                                          const PspGfxDrawState* state) {
-    (void) reservation;
-    (void) vertexCount;
-    (void) state;
+    PspGfxGuReservation* guReservation;
+    u32 i;
+    u32 bytes;
+
+    if (!sPspGfxGuReservationFrameActive || (reservation == NULL) || (state == NULL) ||
+        (reservation->vertices == NULL) ||
+        (reservation->token.opaque == 0) || (vertexCount == 0) || ((vertexCount % 3) != 0) ||
+        (vertexCount > reservation->capacity)) {
+        return;
+    }
+    guReservation = NULL;
+    for (i = 0; i < PSP_GFX_GU_RESERVATION_SLOTS; i++) {
+        if (sPspGfxGuReservations[i].active &&
+            (sPspGfxGuReservations[i].token == reservation->token.opaque) &&
+            (sPspGfxGuReservations[i].frame == sPspGfxGuReservationFrame) &&
+            (sPspGfxGuReservations[i].vertices == reservation->vertices) &&
+            (sPspGfxGuReservations[i].capacity == reservation->capacity)) {
+            guReservation = &sPspGfxGuReservations[i];
+            break;
+        }
+    }
+    if (guReservation == NULL) {
+        return;
+    }
+
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
+    if (!psp_gfx_gu_prepare_colored_draw(state)) {
+        PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
+        return;
+    }
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
+
+    bytes = vertexCount * sizeof(PspGfxVertex);
+    sceKernelDcacheWritebackRange(guReservation->vertices, bytes);
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_SUBMIT);
+    sceGuDrawArray(GU_TRIANGLES, GU_TEXTURE_32BITF | GU_COLOR_8888 | GU_VERTEX_32BITF | GU_TRANSFORM_3D,
+                   vertexCount, 0, guReservation->vertices);
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_SUBMIT);
+    PspProfiler_CountDrawCall(vertexCount);
+    psp_gfx_gu_count_reserved_vertex_draw(vertexCount);
 }
 
 void PspGfxBackend_DrawFogTriangles(const PspGfxFogVertex* vertices, u32 vertexCount,

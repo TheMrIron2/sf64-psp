@@ -1,5 +1,6 @@
 #include "src/psp/gfx/gfx_psp_device.h"
 
+#include "src/psp/gfx/gfx_psp_backend_gu.h"
 #include "src/psp/gfx/gfx_psp_gu_device.h"
 #include "src/psp/gfx/gfx_psp_gu_texture.h"
 
@@ -22,12 +23,16 @@ int PspGfxDevice_BeginFrame(void) {
     if (!PspGfxGuDevice_BeginFrame()) {
         return 0;
     }
+    PspGfxBackendGu_BeginFrame();
     PspGfxGuTexture_BeginFrame();
     return 1;
 }
 
 int PspGfxDevice_Submit(void) {
-    return PspGfxGuDevice_Submit();
+    int result = PspGfxGuDevice_Submit();
+
+    PspGfxBackendGu_EndFrame();
+    return result;
 }
 
 int PspGfxDevice_Present(void) {
