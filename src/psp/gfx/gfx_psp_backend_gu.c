@@ -7,6 +7,7 @@
 #include "src/psp/profiler.h"
 #include "macros.h"
 
+#include <math.h>
 #include <pspkernel.h>
 #include <pspgu.h>
 
@@ -58,6 +59,20 @@ static PspGfxGuReservation sPspGfxGuReservations[PSP_GFX_GU_RESERVATION_SLOTS];
 static u32 sPspGfxGuReservationFrame;
 static u32 sPspGfxGuReservationToken;
 static int sPspGfxGuReservationFrameActive;
+static s16 sPspGfxGuHudAnchorX;
+static s16 sPspGfxGuHudAnchorY;
+
+static void psp_gfx_gu_apply_viewport(const n64psp_display_config* display, int x, int y, int width, int height) {
+    sceGuOffset(2048 - (display->framebuffer_width / 2), 2048 - (display->framebuffer_height / 2));
+    sceGuViewport(2048 - (display->framebuffer_width / 2) + x + (width / 2),
+                  2048 - (display->framebuffer_height / 2) + y + (height / 2), width, height);
+}
+
+static int psp_gfx_gu_is_hud_anchor_viewport(PspGfxViewportPolicy policy) {
+    return ((policy >= PSP_GFX_VIEWPORT_HUD_TOP_LEFT) && (policy <= PSP_GFX_VIEWPORT_HUD_TOP_CENTER)) ||
+           (policy == PSP_GFX_VIEWPORT_HUD_SCALED_TOP_LEFT) ||
+           (policy == PSP_GFX_VIEWPORT_HUD_SCALED_BOTTOM_RIGHT);
+}
 
 static int psp_gfx_gu_select_viewport(PspGfxViewportPolicy policy) {
     const n64psp_display_config* display = PspDisplay_GetConfig();
@@ -66,30 +81,84 @@ static int psp_gfx_gu_select_viewport(PspGfxViewportPolicy policy) {
     int width;
     int height;
 
-    if ((policy == PSP_GFX_VIEWPORT_FULL) || (policy == PSP_GFX_VIEWPORT_WIDE_UI)) {
+    if (policy == PSP_GFX_VIEWPORT_WIDE_UI) {
+        policy = PSP_GFX_VIEWPORT_FULL;
+    }
+    if ((policy == PSP_GFX_VIEWPORT_CENTERED_UI) && (display->mode != N64PSP_DISPLAY_PSP_480X272)) {
+        policy = PSP_GFX_VIEWPORT_FULL;
+    }
+
+    if (policy == PSP_GFX_VIEWPORT_NATIVE_HUD) {
+        x = ((int) display->framebuffer_width - 320) / 2;
+        y = ((int) display->framebuffer_height - 240) / 2;
+        width = 320;
+        height = 240;
+    } else if (psp_gfx_gu_is_hud_anchor_viewport(policy)) {
+        int scaledWidth = display->ui_viewport_width;
+        int scaledHeight = display->ui_viewport_height;
+        int forceScaled = (policy == PSP_GFX_VIEWPORT_HUD_SCALED_TOP_LEFT) ||
+                          (policy == PSP_GFX_VIEWPORT_HUD_SCALED_BOTTOM_RIGHT);
+        int left = display->viewport_x;
+        int top = display->viewport_y;
+        int right = display->viewport_x + display->viewport_width;
+        int bottom = display->viewport_y + display->viewport_height;
+
+        width = (PspDisplay_IsUiScalingEnabled() || forceScaled) ? scaledWidth : 320;
+        height = (PspDisplay_IsUiScalingEnabled() || forceScaled) ? scaledHeight : 240;
+        x = (left + right - width) / 2;
+        y = top;
+
+        if (display->mode == N64PSP_DISPLAY_PSP_480X272) {
+            left = top = 0;
+            right = display->framebuffer_width;
+            bottom = display->framebuffer_height;
+        }
+        if ((policy == PSP_GFX_VIEWPORT_HUD_TOP_LEFT) || (policy == PSP_GFX_VIEWPORT_HUD_BOTTOM_LEFT) ||
+            (policy == PSP_GFX_VIEWPORT_HUD_SCALED_TOP_LEFT)) {
+            x = left;
+        }
+        if ((policy == PSP_GFX_VIEWPORT_HUD_TOP_RIGHT) || (policy == PSP_GFX_VIEWPORT_HUD_BOTTOM_RIGHT) ||
+            (policy == PSP_GFX_VIEWPORT_HUD_SCALED_BOTTOM_RIGHT)) {
+            x = right - width;
+        }
+        if ((policy == PSP_GFX_VIEWPORT_HUD_BOTTOM_LEFT) || (policy == PSP_GFX_VIEWPORT_HUD_BOTTOM_RIGHT) ||
+            (policy == PSP_GFX_VIEWPORT_HUD_SCALED_BOTTOM_RIGHT)) {
+            y = bottom - height;
+        }
+        if (!PspDisplay_IsUiScalingEnabled() && !forceScaled) {
+            float targetX;
+            float targetY;
+
+            if ((policy == PSP_GFX_VIEWPORT_HUD_TOP_LEFT) || (policy == PSP_GFX_VIEWPORT_HUD_BOTTOM_LEFT)) {
+                targetX = left + sPspGfxGuHudAnchorX * ((float) scaledWidth / 320.0f);
+            } else if ((policy == PSP_GFX_VIEWPORT_HUD_TOP_RIGHT) ||
+                       (policy == PSP_GFX_VIEWPORT_HUD_BOTTOM_RIGHT)) {
+                targetX = right - (320 - sPspGfxGuHudAnchorX) * ((float) scaledWidth / 320.0f);
+            } else {
+                targetX = (left + right) * 0.5f + (sPspGfxGuHudAnchorX - 160) * ((float) scaledWidth / 320.0f);
+            }
+            if ((policy == PSP_GFX_VIEWPORT_HUD_BOTTOM_LEFT) ||
+                (policy == PSP_GFX_VIEWPORT_HUD_BOTTOM_RIGHT)) {
+                targetY = bottom - (240 - sPspGfxGuHudAnchorY) * ((float) scaledHeight / 240.0f);
+            } else {
+                targetY = top + sPspGfxGuHudAnchorY * ((float) scaledHeight / 240.0f);
+            }
+            x = (int) roundf(targetX) - sPspGfxGuHudAnchorX;
+            y = (int) roundf(targetY) - sPspGfxGuHudAnchorY;
+        }
+    } else if (policy == PSP_GFX_VIEWPORT_CENTERED_UI) {
+        x = display->ui_viewport_x;
+        y = display->ui_viewport_y;
+        width = display->ui_viewport_width;
+        height = display->ui_viewport_height;
+    } else {
         x = display->viewport_x;
         y = display->viewport_y;
         width = display->viewport_width;
         height = display->viewport_height;
-    } else if ((policy == PSP_GFX_VIEWPORT_AUTO) || (policy == PSP_GFX_VIEWPORT_CENTERED_UI)) {
-        if (display->mode == N64PSP_DISPLAY_PSP_480X272) {
-            x = display->ui_viewport_x;
-            y = display->ui_viewport_y;
-            width = display->ui_viewport_width;
-            height = display->ui_viewport_height;
-        } else {
-            x = display->viewport_x;
-            y = display->viewport_y;
-            width = display->viewport_width;
-            height = display->viewport_height;
-        }
-    } else {
-        return 0;
     }
 
-    sceGuOffset(2048 - (display->framebuffer_width / 2), 2048 - (display->framebuffer_height / 2));
-    sceGuViewport(2048 - (display->framebuffer_width / 2) + x + (width / 2),
-                  2048 - (display->framebuffer_height / 2) + y + (height / 2), width, height);
+    psp_gfx_gu_apply_viewport(display, x, y, width, height);
     return 1;
 }
 
@@ -322,10 +391,7 @@ void PspGfxBackend_SetScissor(float ulx, float uly, float lrx, float lry) {
 }
 
 void PspGfxBackend_ClearScissor(void) {
-    const n64psp_display_config* display = PspDisplay_GetConfig();
-
-    sceGuScissor(0, 0, display->framebuffer_width, display->framebuffer_height);
-    sceGuEnable(GU_SCISSOR_TEST);
+    sceGuDisable(GU_SCISSOR_TEST);
 }
 
 void PspGfxBackend_DrawTriangles(const PspGfxVertex* vertices, u32 vertexCount, const PspGfxDrawState* state) {
@@ -606,8 +672,8 @@ void PspGfxBackend_DrawSolidRect(float ulx, float uly, float lrx, float lry, u32
 }
 
 void PspGfxBackend_SetHudAnchor(s16 x, s16 y) {
-    (void) x;
-    (void) y;
+    sPspGfxGuHudAnchorX = x;
+    sPspGfxGuHudAnchorY = y;
 }
 
 void PspGfxBackend_BeginReplayCache(void) {
