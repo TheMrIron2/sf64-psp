@@ -500,7 +500,7 @@ static int psp_gfx_gu_prepare_texture(const PspGfxDrawState* state) {
     }
 
     if (!sPspGfxGuState.textureValid) {
-        sceGuTexMode(GU_PSM_8888, 0, 0, 0);
+        sceGuTexMode(GU_PSM_8888, 0, 0, 1);
         sceGuTexMapMode(GU_TEXTURE_COORDS, 0, 0);
         sceGuTexLevelMode(GU_TEXTURE_CONST, 0.0f);
         sceGuTexScale(1.0f, 1.0f);

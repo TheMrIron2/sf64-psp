@@ -465,13 +465,34 @@ static void psp_gfx_gu_texture_apply_env_blend(const PspGfxTextureRequest* reque
     output[2] = (u8) (((u32) environmentB * (255U - intensity) + ((u32) primitiveB * intensity) + 127U) / 255U);
 }
 
+static u32 psp_gfx_gu_texture_swizzle_offset(u32 offset, u32 log2Width) {
+    u32 widthMask;
+    u32 blockX;
+    u32 blockY;
+
+    if (log2Width <= 4) {
+        return offset;
+    }
+    widthMask = (1U << log2Width) - 1U;
+    blockX = offset & widthMask & ~0xFU;
+    blockY = offset & (7U << log2Width);
+    return (offset & ((~7U << log2Width) | 0xFU)) | (blockX << 3) |
+           (blockY >> (log2Width - 4));
+}
+
 static void psp_gfx_gu_texture_decode(const PspGfxTextureRequest* request, u32 uploadWidth, u32 uploadHeight,
                                       u8* output) {
     u32 x;
     u32 y;
+    u32 uploadByteWidth = uploadWidth * PSP_GFX_GU_TEXTURE_BYTES_PER_PIXEL;
+    u32 log2UploadByteWidth = 0;
     int softenAlpha = (request->format == PSP_GFX_TEXTURE_RGBA16) && request->premultiply &&
                       psp_gfx_gu_texture_is_dark_rgba16_mask((const u16*) request->pixels, request->width,
                                                              request->height);
+
+    while ((1U << log2UploadByteWidth) < uploadByteWidth) {
+        log2UploadByteWidth++;
+    }
 
     for (y = 0; y < uploadHeight; y++) {
         u32 sourceY = psp_gfx_gu_texture_mirror_source_coord(y, request->height, request->mirrorT);
@@ -480,7 +501,8 @@ static void psp_gfx_gu_texture_decode(const PspGfxTextureRequest* request, u32 u
             u32 sourceX = psp_gfx_gu_texture_mirror_source_coord(x, request->width, request->mirrorS);
             u32 sourceIndex = sourceY * request->width + sourceX;
             u32 outputIndex = y * uploadWidth + x;
-            u8* outputPixel = &output[outputIndex * 4];
+            u32 outputOffset = psp_gfx_gu_texture_swizzle_offset(outputIndex * 4, log2UploadByteWidth);
+            u8* outputPixel = &output[outputOffset];
 
             if (request->format == PSP_GFX_TEXTURE_CI4) {
                 u8 packed = ((const u8*) request->pixels)[sourceIndex >> 1];
