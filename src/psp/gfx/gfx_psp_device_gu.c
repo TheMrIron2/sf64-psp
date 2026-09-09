@@ -1,9 +1,17 @@
 #include "src/psp/gfx/gfx_psp_device.h"
 
 #include "src/psp/gfx/gfx_psp_gu_device.h"
+#include "src/psp/gfx/gfx_psp_gu_texture.h"
 
 int PspGfxDevice_Init(void) {
-    return PspGfxGuDevice_Init();
+    if (!PspGfxGuDevice_Init()) {
+        return 0;
+    }
+    if (!PspGfxGuTexture_Init()) {
+        PspGfxGuDevice_Shutdown();
+        return 0;
+    }
+    return 1;
 }
 
 int PspGfxDevice_IsReady(void) {
@@ -11,7 +19,11 @@ int PspGfxDevice_IsReady(void) {
 }
 
 int PspGfxDevice_BeginFrame(void) {
-    return PspGfxGuDevice_BeginFrame();
+    if (!PspGfxGuDevice_BeginFrame()) {
+        return 0;
+    }
+    PspGfxGuTexture_BeginFrame();
+    return 1;
 }
 
 int PspGfxDevice_Submit(void) {
@@ -24,6 +36,7 @@ int PspGfxDevice_Present(void) {
 
 void PspGfxDevice_Shutdown(void) {
     PspGfxGuDevice_Shutdown();
+    PspGfxGuTexture_Shutdown();
 }
 
 void* PspGfxDevice_GetPresentedFrameBuffer(int* stride, int* pixelFormat) {
