@@ -1,6 +1,7 @@
 #include <n64psp/display.h>
 
 #include "src/psp/display.h"
+#include "src/psp/gfx/gfx_psp_backend.h"
 #include "src/psp/platform.h"
 
 static int sReady;
@@ -44,6 +45,7 @@ int PspDisplay_IsUiScalingEnabled(void) {
 
 void PspDisplay_ToggleUiScaling(void) {
     sUiScalingEnabled = !sUiScalingEnabled;
+    PspGfxBackend_ReplayCacheInvalidate();
     PspPlatform_LogLine(sUiScalingEnabled ? "[psp-display] UI scaling on" : "[psp-display] UI scaling off");
 }
 
@@ -58,6 +60,7 @@ void PspDisplay_CycleMode(void) {
     if (!n64psp_display_configure(&sDisplayConfig, mode)) {
         return;
     }
+    PspGfxBackend_ReplayCacheInvalidate();
 
     if (mode == N64PSP_DISPLAY_PSP_320X240) {
         PspPlatform_LogLine("[psp-display] original 320x240");

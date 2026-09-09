@@ -48,7 +48,15 @@ void PspPlatform_LogLine(const char* line);
 #define PSP_GFX_PSPGL_REPLAY_CACHE_DRAWS 128
 #define PSP_GFX_PSPGL_REPLAY_CACHE_VERTICES 8192
 
+typedef enum {
+    PSP_GFX_PSPGL_REPLAY_TRIANGLES,
+    PSP_GFX_PSPGL_REPLAY_SPRITES,
+    PSP_GFX_PSPGL_REPLAY_SOLID_RECT,
+    PSP_GFX_PSPGL_REPLAY_FOG,
+} PspGfxPspglReplayType;
+
 typedef struct {
+    PspGfxPspglReplayType type;
     u32 first;
     u32 count;
     u32 textureId;
@@ -64,10 +72,21 @@ typedef struct {
     float projection[16];
     u32 projectionSerial;
     int uiViewport;
-#if PSP_ORIGINAL_FOG
-    u32 fogFirst;
-    u32 fogCount;
-#endif
+    int hasFogColor;
+    int hasProjection;
+    float ulx;
+    float uly;
+    float lrx;
+    float lry;
+    u32 color;
+    int blendRect;
+    float scissorUlx;
+    float scissorUly;
+    float scissorLrx;
+    float scissorLry;
+    int scissorEnabled;
+    s16 hudAnchorX;
+    s16 hudAnchorY;
 } PspGfxPspglReplayDraw;
 
 static PspGfxPspglReplayDraw sReplayCacheDraws[PSP_GFX_PSPGL_REPLAY_CACHE_DRAWS];
@@ -80,12 +99,16 @@ static u32 sReplayCacheDrawCount;
 static u32 sReplayCacheVertexCount;
 static int sReplayCacheCapturing;
 static int sReplayCacheReady;
+static int sReplayCacheCaptureFailed;
+static int sReplayCacheReplaying;
 static int sUiViewportActive = -1;
 static s16 sHudAnchorX;
 static s16 sHudAnchorY;
-#if PSP_ORIGINAL_FOG
-static int sReplayCacheLastDrawCaptured;
-#endif
+static float sScissorUlx;
+static float sScissorUly;
+static float sScissorLrx;
+static float sScissorLry;
+static int sScissorEnabled;
 #define PSP_GFX_PSPGL_VERTEX_STREAM_SMALL_PAGES_PER_SET 256
 #define PSP_GFX_PSPGL_VERTEX_STREAM_SMALL_PAGE_VERTICES 256
 #define PSP_GFX_PSPGL_VERTEX_STREAM_LARGE_PAGES_PER_SET 32
@@ -326,6 +349,147 @@ static int psp_gfx_pspgl_texture_ref_valid(GLuint texture, const PspGfxPspglText
            (ref->state->texture == texture) && (ref->generation == ref->state->generation);
 }
 
+static void psp_gfx_pspgl_replay_capture_failed(void) {
+    sReplayCacheCaptureFailed = 1;
+    sReplayCacheReady = 0;
+}
+
+static void psp_gfx_pspgl_replay_context(PspGfxPspglReplayDraw* draw) {
+    draw->scissorUlx = sScissorUlx;
+    draw->scissorUly = sScissorUly;
+    draw->scissorLrx = sScissorLrx;
+    draw->scissorLry = sScissorLry;
+    draw->scissorEnabled = sScissorEnabled;
+    draw->hudAnchorX = sHudAnchorX;
+    draw->hudAnchorY = sHudAnchorY;
+}
+
+static void psp_gfx_pspgl_replay_capture_colored(const PspGfxPspglColorVertex* vertices, u32 vertexCount,
+                                                  PspGfxPspglReplayType type, u32 textureId,
+                                                  PspGfxPspglTextureRef textureRef,
+                                                  PspGfxPspglTextureEnv textureEnv, u32 textureEnvColor,
+                                                  PspGfxPspglTextureWrap wrapS, PspGfxPspglTextureWrap wrapT,
+                                                  int alphaTest, int blend, int premultiplied, int depthTest,
+                                                  int depthWrite, int fog, const float* fogColor, float fogStart,
+                                                  float fogEnd, const float* projectionMatrix, u32 projectionSerial,
+                                                  int pretransformed, int pointFilter, int uiViewport) {
+    PspGfxPspglReplayDraw* draw;
+
+    if (!sReplayCacheCapturing || sReplayCacheReplaying) {
+        return;
+    }
+    if ((sReplayCacheDrawCount >= PSP_GFX_PSPGL_REPLAY_CACHE_DRAWS) ||
+        (vertexCount > (PSP_GFX_PSPGL_REPLAY_CACHE_VERTICES - sReplayCacheVertexCount))) {
+        psp_gfx_pspgl_replay_capture_failed();
+        return;
+    }
+    draw = &sReplayCacheDraws[sReplayCacheDrawCount++];
+    memset(draw, 0, sizeof(*draw));
+    draw->type = type;
+    draw->first = sReplayCacheVertexCount;
+    draw->count = vertexCount;
+    draw->textureId = textureId;
+    draw->textureRef = textureRef;
+    draw->textureEnv = textureEnv;
+    draw->textureEnvColor = textureEnvColor;
+    draw->wrapS = wrapS;
+    draw->wrapT = wrapT;
+    draw->alphaTest = alphaTest;
+    draw->blend = blend;
+    draw->premultiplied = premultiplied;
+    draw->depthTest = depthTest;
+    draw->depthWrite = depthWrite;
+    draw->fog = fog;
+    draw->pretransformed = pretransformed;
+    draw->pointFilter = pointFilter;
+    draw->fogStart = fogStart;
+    draw->fogEnd = fogEnd;
+    draw->projectionSerial = projectionSerial;
+    draw->uiViewport = uiViewport;
+    if (fogColor != NULL) {
+        memcpy(draw->fogColor, fogColor, sizeof(draw->fogColor));
+        draw->hasFogColor = 1;
+    }
+    if (projectionMatrix != NULL) {
+        memcpy(draw->projection, projectionMatrix, sizeof(draw->projection));
+        draw->hasProjection = 1;
+    }
+    psp_gfx_pspgl_replay_context(draw);
+    memcpy(&sReplayCacheVertices[sReplayCacheVertexCount], vertices, vertexCount * sizeof(*vertices));
+    sReplayCacheVertexCount += vertexCount;
+}
+
+#if PSP_ORIGINAL_FOG
+static void psp_gfx_pspgl_replay_capture_fog(const PspGfxPspglFogVertex* vertices, u32 vertexCount,
+                                              const float* projectionMatrix, u32 projectionSerial,
+                                              int pretransformed, int depthTest, int uiViewport) {
+    PspGfxPspglReplayDraw* draw;
+
+    if (!sReplayCacheCapturing || sReplayCacheReplaying) {
+        return;
+    }
+    if ((sReplayCacheDrawCount >= PSP_GFX_PSPGL_REPLAY_CACHE_DRAWS) ||
+        (vertexCount > (PSP_GFX_PSPGL_REPLAY_CACHE_VERTICES - sReplayCacheFogVertexCount))) {
+        psp_gfx_pspgl_replay_capture_failed();
+        return;
+    }
+    draw = &sReplayCacheDraws[sReplayCacheDrawCount++];
+    memset(draw, 0, sizeof(*draw));
+    draw->type = PSP_GFX_PSPGL_REPLAY_FOG;
+    draw->first = sReplayCacheFogVertexCount;
+    draw->count = vertexCount;
+    draw->projectionSerial = projectionSerial;
+    draw->pretransformed = pretransformed;
+    draw->depthTest = depthTest;
+    draw->uiViewport = uiViewport;
+    if (projectionMatrix != NULL) {
+        memcpy(draw->projection, projectionMatrix, sizeof(draw->projection));
+        draw->hasProjection = 1;
+    }
+    psp_gfx_pspgl_replay_context(draw);
+    memcpy(&sReplayCacheFogVertices[sReplayCacheFogVertexCount], vertices, vertexCount * sizeof(*vertices));
+    sReplayCacheFogVertexCount += vertexCount;
+}
+#endif
+
+static void psp_gfx_pspgl_replay_capture_solid_rect(float ulx, float uly, float lrx, float lry, u32 color,
+                                                     int blend, int uiViewport) {
+    PspGfxPspglReplayDraw* draw;
+
+    if (!sReplayCacheCapturing || sReplayCacheReplaying) {
+        return;
+    }
+    if (sReplayCacheDrawCount >= PSP_GFX_PSPGL_REPLAY_CACHE_DRAWS) {
+        psp_gfx_pspgl_replay_capture_failed();
+        return;
+    }
+    draw = &sReplayCacheDraws[sReplayCacheDrawCount++];
+    memset(draw, 0, sizeof(*draw));
+    draw->type = PSP_GFX_PSPGL_REPLAY_SOLID_RECT;
+    draw->ulx = ulx;
+    draw->uly = uly;
+    draw->lrx = lrx;
+    draw->lry = lry;
+    draw->color = color;
+    draw->blendRect = blend;
+    draw->uiViewport = uiViewport;
+    psp_gfx_pspgl_replay_context(draw);
+}
+
+static int psp_gfx_pspgl_replay_state_pinned(const PspGfxPspglTextureParameterState* state) {
+    u32 i;
+
+    if (!sReplayCacheReady || (state == NULL)) {
+        return 0;
+    }
+    for (i = 0; i < sReplayCacheDrawCount; i++) {
+        if (sReplayCacheDraws[i].textureRef.state == state) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static void psp_gfx_pspgl_expire_replay_texture(const PspGfxPspglTextureParameterState* state) {
     u32 i;
 
@@ -333,11 +497,11 @@ static void psp_gfx_pspgl_expire_replay_texture(const PspGfxPspglTextureParamete
         if (sReplayCacheDraws[i].textureRef.state == state) {
             sReplayCacheCapturing = 0;
             sReplayCacheReady = 0;
+            sReplayCacheCaptureFailed = 1;
             sReplayCacheDrawCount = 0;
             sReplayCacheVertexCount = 0;
 #if PSP_ORIGINAL_FOG
             sReplayCacheFogVertexCount = 0;
-            sReplayCacheLastDrawCaptured = 0;
 #endif
             return;
         }
@@ -1265,6 +1429,7 @@ static u32 psp_gfx_pspgl_create_converted_texture(const void* pixels, const u16*
 #endif
     u32 x;
     u32 y;
+    u32 i;
 
     if ((pixels == NULL) || (width == 0) || (height == 0) || (uploadWidth == NULL) || (uploadHeight == NULL) ||
         (textureRef == NULL) || ((format == PSP_GFX_CONVERTED_CI4) && (palette == NULL))) {
@@ -1356,8 +1521,22 @@ static u32 psp_gfx_pspgl_create_converted_texture(const void* pixels, const u16*
     if (sConvertedTextureCacheCount < PSP_GFX_PSPGL_CONVERTED_TEXTURE_CACHE_SIZE) {
         entry = &sConvertedTextureCache[sConvertedTextureCacheCount++];
     } else {
-        entry = &sConvertedTextureCache[sConvertedTextureCacheReplaceIndex++];
-        sConvertedTextureCacheReplaceIndex %= PSP_GFX_PSPGL_CONVERTED_TEXTURE_CACHE_SIZE;
+        entry = NULL;
+        for (i = 0; i < PSP_GFX_PSPGL_CONVERTED_TEXTURE_CACHE_SIZE; i++) {
+            u32 candidate = (sConvertedTextureCacheReplaceIndex + i) % PSP_GFX_PSPGL_CONVERTED_TEXTURE_CACHE_SIZE;
+            PspGfxConvertedTextureCacheEntry* candidateEntry = &sConvertedTextureCache[candidate];
+            const PspGfxPspglTextureParameterState* candidateState = candidateEntry->atlased
+                ? &sGlyphAtlasParameterState : &candidateEntry->parameterState;
+
+            if (!psp_gfx_pspgl_replay_state_pinned(candidateState)) {
+                entry = candidateEntry;
+                sConvertedTextureCacheReplaceIndex = (candidate + 1) % PSP_GFX_PSPGL_CONVERTED_TEXTURE_CACHE_SIZE;
+                break;
+            }
+        }
+        if (entry == NULL) {
+            return 0;
+        }
         PspHwCounterProfile_CountTextureCacheEviction(PSP_HW_TEXTURE_CACHE_CONVERTED);
 #if PROFILE_PHASES
         PspProfiler_RecordTextureCacheEviction(
@@ -1481,6 +1660,11 @@ void PspGfxPspgl_SetScissor(float ulx, float uly, float lrx, float lry) {
     if (lrx > PSP_GFX_PSPGL_N64_WIDTH) lrx = PSP_GFX_PSPGL_N64_WIDTH;
     if (lry > PSP_GFX_PSPGL_N64_HEIGHT) lry = PSP_GFX_PSPGL_N64_HEIGHT;
     if ((lrx <= ulx) || (lry <= uly)) return;
+    sScissorUlx = ulx;
+    sScissorUly = uly;
+    sScissorLrx = lrx;
+    sScissorLry = lry;
+    sScissorEnabled = 1;
     x0 = display->viewport_x + (GLint) (ulx * scaleX);
     y0Top = (GLint) (uly * scaleY);
     x1 = display->viewport_x + (GLint) ((lrx * scaleX) + 0.5f);
@@ -1491,6 +1675,7 @@ void PspGfxPspgl_SetScissor(float ulx, float uly, float lrx, float lry) {
 }
 
 void PspGfxPspgl_ClearScissor(void) {
+    sScissorEnabled = 0;
     glDisable(GL_SCISSOR_TEST);
 }
 
@@ -1618,6 +1803,7 @@ static u32 psp_gfx_pspgl_create_ci8_texture(const u8* indices, const u16* palett
 #endif
     u32 x;
     u32 y;
+    u32 i;
 
     if ((indices == NULL) || (palette == NULL) || (width == 0) || (height == 0) || (uploadWidth == NULL) ||
         (uploadHeight == NULL) || (textureRef == NULL)) {
@@ -1653,8 +1839,19 @@ static u32 psp_gfx_pspgl_create_ci8_texture(const u8* indices, const u16* palett
     if (sTextureCacheCount < PSP_GFX_PSPGL_CI8_TEXTURE_CACHE_SIZE) {
         entry = &sTextureCache[sTextureCacheCount++];
     } else {
-        entry = &sTextureCache[sTextureCacheReplaceIndex++];
-        sTextureCacheReplaceIndex %= PSP_GFX_PSPGL_CI8_TEXTURE_CACHE_SIZE;
+        entry = NULL;
+        for (i = 0; i < PSP_GFX_PSPGL_CI8_TEXTURE_CACHE_SIZE; i++) {
+            u32 candidate = (sTextureCacheReplaceIndex + i) % PSP_GFX_PSPGL_CI8_TEXTURE_CACHE_SIZE;
+
+            if (!psp_gfx_pspgl_replay_state_pinned(&sTextureCache[candidate].parameterState)) {
+                entry = &sTextureCache[candidate];
+                sTextureCacheReplaceIndex = (candidate + 1) % PSP_GFX_PSPGL_CI8_TEXTURE_CACHE_SIZE;
+                break;
+            }
+        }
+        if (entry == NULL) {
+            return 0;
+        }
         PspHwCounterProfile_CountTextureCacheEviction(PSP_HW_TEXTURE_CACHE_CI8);
 #if PROFILE_PHASES
         PspProfiler_RecordTextureCacheEviction(
@@ -1833,6 +2030,7 @@ static u32 psp_gfx_pspgl_create_rgba16_texture(const u16* pixels, u32 width, u32
     u32 x;
     u32 y;
     int softenAlpha;
+    u32 i;
 
     if ((pixels == NULL) || (width == 0) || (height == 0) || (uploadWidth == NULL) || (uploadHeight == NULL) ||
         (textureRef == NULL)) {
@@ -1885,8 +2083,19 @@ static u32 psp_gfx_pspgl_create_rgba16_texture(const u16* pixels, u32 width, u32
             psp_gfx_pspgl_invalidate_texture_parameter_state(&entry->parameterState);
         }
     } else {
-        entry = &sRgba16TextureCache[sRgba16TextureCacheReplaceIndex++];
-        sRgba16TextureCacheReplaceIndex %= PSP_GFX_PSPGL_RGBA16_TEXTURE_CACHE_SIZE;
+        entry = NULL;
+        for (i = 0; i < PSP_GFX_PSPGL_RGBA16_TEXTURE_CACHE_SIZE; i++) {
+            u32 candidate = (sRgba16TextureCacheReplaceIndex + i) % PSP_GFX_PSPGL_RGBA16_TEXTURE_CACHE_SIZE;
+
+            if (!psp_gfx_pspgl_replay_state_pinned(&sRgba16TextureCache[candidate].parameterState)) {
+                entry = &sRgba16TextureCache[candidate];
+                sRgba16TextureCacheReplaceIndex = (candidate + 1) % PSP_GFX_PSPGL_RGBA16_TEXTURE_CACHE_SIZE;
+                break;
+            }
+        }
+        if (entry == NULL) {
+            return 0;
+        }
         PspHwCounterProfile_CountTextureCacheEviction(PSP_HW_TEXTURE_CACHE_RGBA16);
 #if PROFILE_PHASES
         PspProfiler_RecordTextureCacheEviction(
@@ -1998,6 +2207,7 @@ static u32 psp_gfx_pspgl_create_rgba32_texture(const void* pixels, u32 width, u3
 #endif
     u32 x;
     u32 y;
+    u32 i;
 
     if ((pixels == NULL) || (width == 0) || (height == 0) || (uploadWidth == NULL) || (uploadHeight == NULL) ||
         (textureRef == NULL)) {
@@ -2065,8 +2275,19 @@ static u32 psp_gfx_pspgl_create_rgba32_texture(const void* pixels, u32 width, u3
     if (sRgba32TextureCacheCount < PSP_GFX_PSPGL_RGBA32_TEXTURE_CACHE_SIZE) {
         entry = &sRgba32TextureCache[sRgba32TextureCacheCount++];
     } else {
-        entry = &sRgba32TextureCache[sRgba32TextureCacheReplaceIndex++];
-        sRgba32TextureCacheReplaceIndex %= PSP_GFX_PSPGL_RGBA32_TEXTURE_CACHE_SIZE;
+        entry = NULL;
+        for (i = 0; i < PSP_GFX_PSPGL_RGBA32_TEXTURE_CACHE_SIZE; i++) {
+            u32 candidate = (sRgba32TextureCacheReplaceIndex + i) % PSP_GFX_PSPGL_RGBA32_TEXTURE_CACHE_SIZE;
+
+            if (!psp_gfx_pspgl_replay_state_pinned(&sRgba32TextureCache[candidate].parameterState)) {
+                entry = &sRgba32TextureCache[candidate];
+                sRgba32TextureCacheReplaceIndex = (candidate + 1) % PSP_GFX_PSPGL_RGBA32_TEXTURE_CACHE_SIZE;
+                break;
+            }
+        }
+        if (entry == NULL) {
+            return 0;
+        }
         PspHwCounterProfile_CountTextureCacheEviction(PSP_HW_TEXTURE_CACHE_RGBA32);
 #if PROFILE_PHASES
         PspProfiler_RecordTextureCacheEviction(
@@ -2583,9 +2804,13 @@ void PspGfxPspgl_DrawColoredTriangles(const PspGfxPspglColorVertex* vertices, u3
                                       int fog, const float* fogColor, float fogStart, float fogEnd,
                                       const float* projectionMatrix, u32 projectionSerial, int pretransformed,
                                       int pointFilter, int uiViewport) {
-#if PSP_ORIGINAL_FOG
-    sReplayCacheLastDrawCaptured = 0;
-#endif
+    if ((vertices != NULL) && (vertexCount != 0)) {
+        psp_gfx_pspgl_replay_capture_colored(vertices, vertexCount, PSP_GFX_PSPGL_REPLAY_TRIANGLES, textureId,
+                                             textureRef, textureEnv, textureEnvColor, wrapS, wrapT, alphaTest, blend,
+                                             premultiplied, depthTest, depthWrite, fog, fogColor, fogStart, fogEnd,
+                                             projectionMatrix, projectionSerial, pretransformed, pointFilter,
+                                             uiViewport);
+    }
     psp_gfx_pspgl_draw_colored(vertices, vertexCount, GL_TRIANGLES, textureId, textureRef, textureEnv, textureEnvColor,
                                wrapS, wrapT, alphaTest, blend, premultiplied, depthTest, depthWrite, fog, fogColor,
                                fogStart, fogEnd, projectionMatrix, projectionSerial, pretransformed, pointFilter, NULL,
@@ -2601,16 +2826,8 @@ void PspGfxPspgl_DrawFogTriangles(const PspGfxPspglFogVertex* vertices, u32 vert
         return;
     }
 #if PSP_ORIGINAL_FOG
-    if (sReplayCacheCapturing && sReplayCacheLastDrawCaptured && (sReplayCacheDrawCount != 0) &&
-        ((sReplayCacheFogVertexCount + vertexCount) <= PSP_GFX_PSPGL_REPLAY_CACHE_VERTICES)) {
-        PspGfxPspglReplayDraw* draw = &sReplayCacheDraws[sReplayCacheDrawCount - 1];
-
-        draw->fogFirst = sReplayCacheFogVertexCount;
-        draw->fogCount = vertexCount;
-        memcpy(&sReplayCacheFogVertices[sReplayCacheFogVertexCount], vertices,
-               vertexCount * sizeof(*vertices));
-        sReplayCacheFogVertexCount += vertexCount;
-    }
+    psp_gfx_pspgl_replay_capture_fog(vertices, vertexCount, projectionMatrix, projectionSerial, pretransformed,
+                                     depthTest, uiViewport);
 #endif
     smallDraw = psp_gfx_pspgl_is_small_draw(vertexCount);
     largeDraw = psp_gfx_pspgl_is_large_draw(vertexCount);
@@ -2646,16 +2863,16 @@ void PspGfxPspgl_BeginReplayCache(void) {
     sReplayCacheDrawCount = 0;
     sReplayCacheVertexCount = 0;
     sReplayCacheReady = 0;
+    sReplayCacheCaptureFailed = 0;
     sReplayCacheCapturing = 1;
 #if PSP_ORIGINAL_FOG
     sReplayCacheFogVertexCount = 0;
-    sReplayCacheLastDrawCaptured = 0;
 #endif
 }
 
 void PspGfxPspgl_EndReplayCache(void) {
     sReplayCacheCapturing = 0;
-    sReplayCacheReady = (sReplayCacheDrawCount != 0);
+    sReplayCacheReady = !sReplayCacheCaptureFailed && (sReplayCacheDrawCount != 0);
 }
 
 int PspGfxPspgl_ReplayCacheReady(void) {
@@ -2668,35 +2885,61 @@ int PspGfxPspgl_ReplayCacheReady(void) {
 void PspGfxPspgl_ReplayCacheInvalidate(void) {
     sReplayCacheCapturing = 0;
     sReplayCacheReady = 0;
+    sReplayCacheCaptureFailed = 0;
     sReplayCacheDrawCount = 0;
     sReplayCacheVertexCount = 0;
 #if PSP_ORIGINAL_FOG
     sReplayCacheFogVertexCount = 0;
-    sReplayCacheLastDrawCaptured = 0;
 #endif
 }
 
 void PspGfxPspgl_ReplayCache(void) {
     u32 i;
+    u32 drawCount;
 
     if (!PspGfxPspgl_ReplayCacheReady()) {
         return;
     }
-    for (i = 0; i < sReplayCacheDrawCount; i++) {
+    drawCount = sReplayCacheDrawCount;
+    sReplayCacheReplaying = 1;
+    for (i = 0; i < drawCount; i++) {
         PspGfxPspglReplayDraw* draw = &sReplayCacheDraws[i];
-        PspGfxPspgl_DrawColoredTriangles(
-            &sReplayCacheVertices[draw->first], draw->count, draw->textureId, draw->textureRef, draw->textureEnv,
-            draw->textureEnvColor, draw->wrapS, draw->wrapT, draw->alphaTest, draw->blend, draw->premultiplied,
-            draw->depthTest, draw->depthWrite, draw->fog, draw->fogColor, draw->fogStart, draw->fogEnd,
-            draw->projection, draw->projectionSerial, draw->pretransformed, draw->pointFilter, draw->uiViewport);
+
+        PspGfxPspgl_SetHudAnchor(draw->hudAnchorX, draw->hudAnchorY);
+        if (draw->scissorEnabled) {
+            PspGfxPspgl_SetScissor(draw->scissorUlx, draw->scissorUly, draw->scissorLrx, draw->scissorLry);
+        } else {
+            PspGfxPspgl_ClearScissor();
+        }
+        if (draw->type == PSP_GFX_PSPGL_REPLAY_TRIANGLES) {
+            PspGfxPspgl_DrawColoredTriangles(
+                &sReplayCacheVertices[draw->first], draw->count, draw->textureId, draw->textureRef,
+                draw->textureEnv, draw->textureEnvColor, draw->wrapS, draw->wrapT, draw->alphaTest, draw->blend,
+                draw->premultiplied, draw->depthTest, draw->depthWrite, draw->fog,
+                draw->hasFogColor ? draw->fogColor : NULL, draw->fogStart, draw->fogEnd,
+                draw->hasProjection ? draw->projection : NULL, draw->projectionSerial, draw->pretransformed,
+                draw->pointFilter, draw->uiViewport);
+        } else if (draw->type == PSP_GFX_PSPGL_REPLAY_SPRITES) {
+            PspGfxPspgl_DrawColoredSprites(
+                &sReplayCacheVertices[draw->first], draw->count, draw->textureId, draw->textureRef,
+                draw->textureEnv, draw->textureEnvColor, draw->wrapS, draw->wrapT, draw->alphaTest, draw->blend,
+                draw->premultiplied, draw->depthTest, draw->depthWrite, draw->fog,
+                draw->hasFogColor ? draw->fogColor : NULL, draw->fogStart, draw->fogEnd,
+                draw->hasProjection ? draw->projection : NULL, draw->projectionSerial, draw->pretransformed,
+                draw->pointFilter, draw->uiViewport);
+        } else if (draw->type == PSP_GFX_PSPGL_REPLAY_SOLID_RECT) {
+            PspGfxPspgl_DrawSolidRect(draw->ulx, draw->uly, draw->lrx, draw->lry, draw->color, draw->blendRect,
+                                      draw->uiViewport);
+        }
 #if PSP_ORIGINAL_FOG
-        if (draw->fogCount != 0) {
-            PspGfxPspgl_DrawFogTriangles(&sReplayCacheFogVertices[draw->fogFirst], draw->fogCount, draw->projection,
-                                         draw->projectionSerial, draw->pretransformed, draw->depthTest,
-                                         draw->uiViewport);
+        if (draw->type == PSP_GFX_PSPGL_REPLAY_FOG) {
+            PspGfxPspgl_DrawFogTriangles(&sReplayCacheFogVertices[draw->first], draw->count,
+                                         draw->hasProjection ? draw->projection : NULL, draw->projectionSerial,
+                                         draw->pretransformed, draw->depthTest, draw->uiViewport);
         }
 #endif
     }
+    sReplayCacheReplaying = 0;
 }
 
 void PspGfxPspgl_DrawReservedColoredTriangles(const PspGfxPspglVertexReservation* reservation, u32 vertexCount,
@@ -2707,43 +2950,13 @@ void PspGfxPspgl_DrawReservedColoredTriangles(const PspGfxPspglVertexReservation
                                               const float* fogColor, float fogStart, float fogEnd,
                                               const float* projectionMatrix, u32 projectionSerial, int pretransformed,
                                               int pointFilter, int uiViewport) {
-#if PSP_ORIGINAL_FOG
-    sReplayCacheLastDrawCaptured = 0;
-#endif
     if ((reservation == NULL) || (reservation->vertices == NULL) || (vertexCount > reservation->capacity)) {
         return;
     }
-    if (sReplayCacheCapturing && (sReplayCacheDrawCount < PSP_GFX_PSPGL_REPLAY_CACHE_DRAWS) &&
-        ((sReplayCacheVertexCount + vertexCount) <= PSP_GFX_PSPGL_REPLAY_CACHE_VERTICES)) {
-        PspGfxPspglReplayDraw* draw = &sReplayCacheDraws[sReplayCacheDrawCount++];
-        draw->first = sReplayCacheVertexCount;
-        draw->count = vertexCount;
-        draw->textureId = textureId;
-        draw->textureRef = textureRef;
-        draw->textureEnv = textureEnv;
-        draw->textureEnvColor = textureEnvColor;
-        draw->wrapS = wrapS;
-        draw->wrapT = wrapT;
-        draw->alphaTest = alphaTest; draw->blend = blend; draw->premultiplied = premultiplied;
-        draw->depthTest = depthTest; draw->depthWrite = depthWrite; draw->fog = fog;
-        draw->pretransformed = pretransformed; draw->pointFilter = pointFilter;
-        memcpy(draw->fogColor, fogColor, sizeof(draw->fogColor));
-        draw->fogStart = fogStart;
-        draw->fogEnd = fogEnd;
-        memcpy(draw->projection, projectionMatrix, sizeof(draw->projection));
-        draw->projectionSerial = projectionSerial;
-        draw->uiViewport = uiViewport;
-#if PSP_ORIGINAL_FOG
-        draw->fogFirst = 0;
-        draw->fogCount = 0;
-#endif
-        memcpy(&sReplayCacheVertices[sReplayCacheVertexCount], reservation->vertices,
-               vertexCount * sizeof(*reservation->vertices));
-        sReplayCacheVertexCount += vertexCount;
-#if PSP_ORIGINAL_FOG
-        sReplayCacheLastDrawCaptured = 1;
-#endif
-    }
+    psp_gfx_pspgl_replay_capture_colored(reservation->vertices, vertexCount, PSP_GFX_PSPGL_REPLAY_TRIANGLES,
+                                         textureId, textureRef, textureEnv, textureEnvColor, wrapS, wrapT, alphaTest,
+                                         blend, premultiplied, depthTest, depthWrite, fog, fogColor, fogStart, fogEnd,
+                                         projectionMatrix, projectionSerial, pretransformed, pointFilter, uiViewport);
     psp_gfx_pspgl_draw_colored(reservation->vertices, vertexCount, GL_TRIANGLES, textureId, textureRef, textureEnv,
                                textureEnvColor, wrapS, wrapT, alphaTest, blend, premultiplied, depthTest, depthWrite,
                                fog, fogColor, fogStart, fogEnd, projectionMatrix, projectionSerial, pretransformed,
@@ -2757,6 +2970,13 @@ void PspGfxPspgl_DrawColoredSprites(const PspGfxPspglColorVertex* vertices, u32 
     float fogEnd, const float* projectionMatrix, u32 projectionSerial, int pretransformed, int pointFilter,
     int uiViewport
 ) {
+    if ((vertices != NULL) && (vertexCount != 0)) {
+        psp_gfx_pspgl_replay_capture_colored(vertices, vertexCount, PSP_GFX_PSPGL_REPLAY_SPRITES, textureId,
+                                             textureRef, textureEnv, textureEnvColor, wrapS, wrapT, alphaTest, blend,
+                                             premultiplied, depthTest, depthWrite, fog, fogColor, fogStart, fogEnd,
+                                             projectionMatrix, projectionSerial, pretransformed, pointFilter,
+                                             uiViewport);
+    }
     psp_gfx_pspgl_draw_colored(vertices, vertexCount, PSP_GFX_PSPGL_GL_SPRITES, textureId, textureRef,
                                textureEnv, textureEnvColor, wrapS, wrapT, alphaTest, blend, premultiplied,
                                depthTest, depthWrite, fog, fogColor, fogStart, fogEnd, projectionMatrix,
@@ -2765,6 +2985,8 @@ void PspGfxPspgl_DrawColoredSprites(const PspGfxPspglColorVertex* vertices, u32 
 
 void PspGfxPspgl_DrawSolidRect(float ulx, float uly, float lrx, float lry, u32 color, int blend, int uiViewport) {
     PspGfxPspglColorVertex vertices[6];
+
+    psp_gfx_pspgl_replay_capture_solid_rect(ulx, uly, lrx, lry, color, blend, uiViewport);
 
     vertices[0].u = 0.0f;
     vertices[0].v = 0.0f;

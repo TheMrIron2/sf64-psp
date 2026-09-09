@@ -10,6 +10,7 @@
 #include <math.h>
 #include <pspkernel.h>
 #include <pspgu.h>
+#include <string.h>
 
 #define PSP_GFX_GU_N64_WIDTH 320.0f
 #define PSP_GFX_GU_N64_HEIGHT 240.0f
@@ -19,6 +20,8 @@
 #define PSP_GFX_GU_RESERVATION_SLOTS 64
 #define PSP_GFX_GU_ALPHA_HALF 127
 #define PSP_GFX_GU_FIXED_ONE 0x00FFFFFFU
+#define PSP_GFX_GU_REPLAY_CACHE_DRAWS 128
+#define PSP_GFX_GU_REPLAY_CACHE_VERTICES 8192
 
 typedef struct {
     u32 color;
@@ -61,6 +64,180 @@ static u32 sPspGfxGuReservationToken;
 static int sPspGfxGuReservationFrameActive;
 static s16 sPspGfxGuHudAnchorX;
 static s16 sPspGfxGuHudAnchorY;
+static float sPspGfxGuScissorUlx;
+static float sPspGfxGuScissorUly;
+static float sPspGfxGuScissorLrx;
+static float sPspGfxGuScissorLry;
+static int sPspGfxGuScissorEnabled;
+
+typedef enum {
+    PSP_GFX_GU_REPLAY_TRIANGLES,
+    PSP_GFX_GU_REPLAY_SPRITES,
+    PSP_GFX_GU_REPLAY_SOLID_RECT,
+    PSP_GFX_GU_REPLAY_FOG,
+} PspGfxGuReplayType;
+
+typedef struct {
+    PspGfxGuReplayType type;
+    u32 first;
+    u32 count;
+    PspGfxDrawState state;
+    float fogColor[4];
+    float projection[16];
+    PspGfxFogDrawState fogState;
+    float fogProjection[16];
+    float ulx;
+    float uly;
+    float lrx;
+    float lry;
+    u32 color;
+    int blend;
+    PspGfxViewportPolicy viewport;
+    float scissorUlx;
+    float scissorUly;
+    float scissorLrx;
+    float scissorLry;
+    int scissorEnabled;
+    s16 hudAnchorX;
+    s16 hudAnchorY;
+} PspGfxGuReplayPacket;
+
+static PspGfxGuReplayPacket sPspGfxGuReplayPackets[PSP_GFX_GU_REPLAY_CACHE_DRAWS];
+static PspGfxVertex sPspGfxGuReplayVertices[PSP_GFX_GU_REPLAY_CACHE_VERTICES] __attribute__((aligned(16)));
+static PspGfxFogVertex sPspGfxGuReplayFogVertices[PSP_GFX_GU_REPLAY_CACHE_VERTICES] __attribute__((aligned(16)));
+static u32 sPspGfxGuReplayPacketCount;
+static u32 sPspGfxGuReplayVertexCount;
+static u32 sPspGfxGuReplayFogVertexCount;
+static int sPspGfxGuReplayCapturing;
+static int sPspGfxGuReplayReady;
+static int sPspGfxGuReplayCaptureFailed;
+static int sPspGfxGuReplayActive;
+
+static void psp_gfx_gu_replay_clear(void) {
+    sPspGfxGuReplayCapturing = 0;
+    sPspGfxGuReplayReady = 0;
+    sPspGfxGuReplayPacketCount = 0;
+    sPspGfxGuReplayVertexCount = 0;
+    sPspGfxGuReplayFogVertexCount = 0;
+    sPspGfxGuReplayCaptureFailed = 0;
+}
+
+static void psp_gfx_gu_replay_capture_failed(void) {
+    sPspGfxGuReplayCaptureFailed = 1;
+    sPspGfxGuReplayReady = 0;
+}
+
+static void psp_gfx_gu_replay_note_draw_failure(void) {
+    if (sPspGfxGuReplayCapturing && !sPspGfxGuReplayActive) {
+        psp_gfx_gu_replay_capture_failed();
+    }
+}
+
+static void psp_gfx_gu_replay_context(PspGfxGuReplayPacket* packet) {
+    packet->scissorUlx = sPspGfxGuScissorUlx;
+    packet->scissorUly = sPspGfxGuScissorUly;
+    packet->scissorLrx = sPspGfxGuScissorLrx;
+    packet->scissorLry = sPspGfxGuScissorLry;
+    packet->scissorEnabled = sPspGfxGuScissorEnabled;
+    packet->hudAnchorX = sPspGfxGuHudAnchorX;
+    packet->hudAnchorY = sPspGfxGuHudAnchorY;
+}
+
+static void psp_gfx_gu_replay_draw_state(PspGfxGuReplayPacket* packet, const PspGfxDrawState* state) {
+    packet->state = *state;
+    if (state->fogColor != NULL) {
+        memcpy(packet->fogColor, state->fogColor, sizeof(packet->fogColor));
+        packet->state.fogColor = packet->fogColor;
+    } else {
+        packet->state.fogColor = NULL;
+    }
+    if (state->projectionMatrix != NULL) {
+        memcpy(packet->projection, state->projectionMatrix, sizeof(packet->projection));
+        packet->state.projectionMatrix = packet->projection;
+    } else {
+        packet->state.projectionMatrix = NULL;
+    }
+}
+
+static void psp_gfx_gu_replay_capture_colored(const PspGfxVertex* vertices, u32 vertexCount,
+                                               const PspGfxDrawState* state, PspGfxGuReplayType type) {
+    PspGfxGuReplayPacket* packet;
+
+    if (!sPspGfxGuReplayCapturing || sPspGfxGuReplayActive) {
+        return;
+    }
+    if ((sPspGfxGuReplayPacketCount >= PSP_GFX_GU_REPLAY_CACHE_DRAWS) ||
+        (vertexCount > (PSP_GFX_GU_REPLAY_CACHE_VERTICES - sPspGfxGuReplayVertexCount))) {
+        psp_gfx_gu_replay_capture_failed();
+        return;
+    }
+    packet = &sPspGfxGuReplayPackets[sPspGfxGuReplayPacketCount++];
+    packet->type = type;
+    packet->first = sPspGfxGuReplayVertexCount;
+    packet->count = vertexCount;
+    psp_gfx_gu_replay_draw_state(packet, state);
+    psp_gfx_gu_replay_context(packet);
+    memcpy(&sPspGfxGuReplayVertices[sPspGfxGuReplayVertexCount], vertices,
+           vertexCount * sizeof(*vertices));
+    sPspGfxGuReplayVertexCount += vertexCount;
+}
+
+static void psp_gfx_gu_replay_capture_fog(const PspGfxFogVertex* vertices, u32 vertexCount,
+                                           const PspGfxFogDrawState* state) {
+    PspGfxGuReplayPacket* packet;
+
+    if (!sPspGfxGuReplayCapturing || sPspGfxGuReplayActive) {
+        return;
+    }
+    if ((sPspGfxGuReplayPacketCount >= PSP_GFX_GU_REPLAY_CACHE_DRAWS) ||
+        (vertexCount > (PSP_GFX_GU_REPLAY_CACHE_VERTICES - sPspGfxGuReplayFogVertexCount))) {
+        psp_gfx_gu_replay_capture_failed();
+        return;
+    }
+    packet = &sPspGfxGuReplayPackets[sPspGfxGuReplayPacketCount++];
+    packet->type = PSP_GFX_GU_REPLAY_FOG;
+    packet->first = sPspGfxGuReplayFogVertexCount;
+    packet->count = vertexCount;
+    packet->fogState = *state;
+    if (state->projectionMatrix != NULL) {
+        memcpy(packet->fogProjection, state->projectionMatrix, sizeof(packet->fogProjection));
+        packet->fogState.projectionMatrix = packet->fogProjection;
+    } else {
+        packet->fogState.projectionMatrix = NULL;
+    }
+    psp_gfx_gu_replay_context(packet);
+    memcpy(&sPspGfxGuReplayFogVertices[sPspGfxGuReplayFogVertexCount], vertices,
+           vertexCount * sizeof(*vertices));
+    sPspGfxGuReplayFogVertexCount += vertexCount;
+}
+
+static int psp_gfx_gu_replay_textures_valid(void) {
+    u32 i;
+
+    for (i = 0; i < sPspGfxGuReplayPacketCount; i++) {
+        const PspGfxGuReplayPacket* packet = &sPspGfxGuReplayPackets[i];
+        const void* pixels;
+        u32 width;
+        u32 height;
+
+        if (((packet->type == PSP_GFX_GU_REPLAY_TRIANGLES) ||
+             (packet->type == PSP_GFX_GU_REPLAY_SPRITES)) &&
+            PspGfxTextureHandle_IsValid(packet->state.texture) &&
+            !PspGfxGuTexture_Resolve(packet->state.texture, &pixels, &width, &height)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static void psp_gfx_gu_replay_restore_context(const PspGfxGuReplayPacket* packet) {
+    PspGfxBackend_SetHudAnchor(packet->hudAnchorX, packet->hudAnchorY);
+    if (packet->scissorEnabled) {
+        PspGfxBackend_SetScissor(packet->scissorUlx, packet->scissorUly, packet->scissorLrx, packet->scissorLry);
+    } else {
+        PspGfxBackend_ClearScissor();
+    }
+}
 
 static void psp_gfx_gu_apply_viewport(const n64psp_display_config* display, int x, int y, int width, int height) {
     sceGuOffset(2048 - (display->framebuffer_width / 2), 2048 - (display->framebuffer_height / 2));
@@ -252,6 +429,7 @@ void PspGfxBackendGu_BeginFrame(void) {
         sPspGfxGuReservations[i].active = 0;
     }
     sPspGfxGuReservationFrameActive = 1;
+    sPspGfxGuScissorEnabled = 0;
 }
 
 void PspGfxBackendGu_EndFrame(void) {
@@ -407,6 +585,12 @@ void PspGfxBackend_SetScissor(float ulx, float uly, float lrx, float lry) {
     if (lry > PSP_GFX_GU_N64_HEIGHT) lry = PSP_GFX_GU_N64_HEIGHT;
     if ((lrx <= ulx) || (lry <= uly)) return;
 
+    sPspGfxGuScissorUlx = ulx;
+    sPspGfxGuScissorUly = uly;
+    sPspGfxGuScissorLrx = lrx;
+    sPspGfxGuScissorLry = lry;
+    sPspGfxGuScissorEnabled = 1;
+
     x0 = display->viewport_x + (int) (ulx * scaleX);
     y0 = display->viewport_y + (int) (uly * scaleY);
     x1 = display->viewport_x + (int) ((lrx * scaleX) + 0.5f);
@@ -416,6 +600,7 @@ void PspGfxBackend_SetScissor(float ulx, float uly, float lrx, float lry) {
 }
 
 void PspGfxBackend_ClearScissor(void) {
+    sPspGfxGuScissorEnabled = 0;
     sceGuDisable(GU_SCISSOR_TEST);
 }
 
@@ -432,9 +617,12 @@ void PspGfxBackend_DrawTriangles(const PspGfxVertex* vertices, u32 vertexCount, 
         return;
     }
 
+    psp_gfx_gu_replay_capture_colored(vertices, vertexCount, state, PSP_GFX_GU_REPLAY_TRIANGLES);
+
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
     if (!psp_gfx_gu_prepare_colored_draw(state)) {
         PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
+        psp_gfx_gu_replay_note_draw_failure();
         return;
     }
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
@@ -449,6 +637,7 @@ void PspGfxBackend_DrawTriangles(const PspGfxVertex* vertices, u32 vertexCount, 
     guVertices = psp_gfx_gu_alloc_vertices(vertexCount, vertexSize);
     if (guVertices == NULL) {
         PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD);
+        psp_gfx_gu_replay_note_draw_failure();
         return;
     }
 
@@ -554,9 +743,12 @@ void PspGfxBackend_DrawReservedTriangles(const PspGfxVertexReservation* reservat
         return;
     }
 
+    psp_gfx_gu_replay_capture_colored(reservation->vertices, vertexCount, state, PSP_GFX_GU_REPLAY_TRIANGLES);
+
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
     if (!psp_gfx_gu_prepare_colored_draw(state)) {
         PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
+        psp_gfx_gu_replay_note_draw_failure();
         return;
     }
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
@@ -581,9 +773,12 @@ void PspGfxBackend_DrawFogTriangles(const PspGfxFogVertex* vertices, u32 vertexC
         return;
     }
 
+    psp_gfx_gu_replay_capture_fog(vertices, vertexCount, state);
+
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
     if (!psp_gfx_gu_select_viewport(state->viewport)) {
         PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
+        psp_gfx_gu_replay_note_draw_failure();
         return;
     }
     if (state->pretransformed || (state->projectionMatrix == NULL)) {
@@ -615,6 +810,7 @@ void PspGfxBackend_DrawFogTriangles(const PspGfxFogVertex* vertices, u32 vertexC
     guVertices = (PspGfxGuColorVertex*) psp_gfx_gu_alloc_vertices(vertexCount, sizeof(PspGfxFogVertex));
     if (guVertices == NULL) {
         PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD);
+        psp_gfx_gu_replay_note_draw_failure();
         return;
     }
     for (i = 0; i < vertexCount; i++) {
@@ -647,9 +843,12 @@ void PspGfxBackend_DrawSprites(const PspGfxVertex* vertices, u32 vertexCount, co
         return;
     }
 
+    psp_gfx_gu_replay_capture_colored(vertices, vertexCount, state, PSP_GFX_GU_REPLAY_SPRITES);
+
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
     if (!psp_gfx_gu_prepare_colored_draw(state)) {
         PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
+        psp_gfx_gu_replay_note_draw_failure();
         return;
     }
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
@@ -664,6 +863,7 @@ void PspGfxBackend_DrawSprites(const PspGfxVertex* vertices, u32 vertexCount, co
     guVertices = psp_gfx_gu_alloc_vertices(vertexCount, vertexSize);
     if (guVertices == NULL) {
         PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD);
+        psp_gfx_gu_replay_note_draw_failure();
         return;
     }
 
@@ -708,6 +908,25 @@ void PspGfxBackend_DrawSolidRect(float ulx, float uly, float lrx, float lry, u32
         return;
     }
 
+    if (sPspGfxGuReplayCapturing && !sPspGfxGuReplayActive) {
+        PspGfxGuReplayPacket* packet;
+
+        if (sPspGfxGuReplayPacketCount >= PSP_GFX_GU_REPLAY_CACHE_DRAWS) {
+            psp_gfx_gu_replay_capture_failed();
+        } else {
+            packet = &sPspGfxGuReplayPackets[sPspGfxGuReplayPacketCount++];
+            packet->type = PSP_GFX_GU_REPLAY_SOLID_RECT;
+            packet->ulx = ulx;
+            packet->uly = uly;
+            packet->lrx = lrx;
+            packet->lry = lry;
+            packet->color = color;
+            packet->blend = blend;
+            packet->viewport = viewport;
+            psp_gfx_gu_replay_context(packet);
+        }
+    }
+
     source[0] = (PspGfxGuColorVertex) { color, (ulx / 160.0f) - 1.0f, 1.0f - (uly / 120.0f), 0.0f };
     source[1] = (PspGfxGuColorVertex) { color, (lrx / 160.0f) - 1.0f, 1.0f - (uly / 120.0f), 0.0f };
     source[2] = (PspGfxGuColorVertex) { color, (lrx / 160.0f) - 1.0f, 1.0f - (lry / 120.0f), 0.0f };
@@ -738,6 +957,7 @@ void PspGfxBackend_DrawSolidRect(float ulx, float uly, float lrx, float lry, u32
     vertices = psp_gfx_gu_alloc_vertices(6, sizeof(PspGfxGuColorVertex));
     if (vertices == NULL) {
         PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD);
+        psp_gfx_gu_replay_note_draw_failure();
         return;
     }
     for (i = 0; i < 6; i++) {
@@ -759,10 +979,53 @@ void PspGfxBackend_SetHudAnchor(s16 x, s16 y) {
 }
 
 void PspGfxBackend_BeginReplayCache(void) {
+    psp_gfx_gu_replay_clear();
+    sPspGfxGuReplayCapturing = 1;
 }
 
 void PspGfxBackend_EndReplayCache(void) {
+    sPspGfxGuReplayCapturing = 0;
+    sPspGfxGuReplayReady = !sPspGfxGuReplayCaptureFailed && (sPspGfxGuReplayPacketCount != 0);
+}
+
+int PspGfxBackend_ReplayCacheReady(void) {
+    if (sPspGfxGuReplayReady && !psp_gfx_gu_replay_textures_valid()) {
+        PspGfxBackend_ReplayCacheInvalidate();
+    }
+    return sPspGfxGuReplayReady;
+}
+
+void PspGfxBackend_ReplayCacheInvalidate(void) {
+    psp_gfx_gu_replay_clear();
 }
 
 void PspGfxBackend_ReplayCache(void) {
+    u32 i;
+
+    if (!PspGfxBackend_ReplayCacheReady()) {
+        return;
+    }
+    sPspGfxGuReplayActive = 1;
+    for (i = 0; i < sPspGfxGuReplayPacketCount; i++) {
+        const PspGfxGuReplayPacket* packet = &sPspGfxGuReplayPackets[i];
+
+        psp_gfx_gu_replay_restore_context(packet);
+        switch (packet->type) {
+            case PSP_GFX_GU_REPLAY_TRIANGLES:
+                PspGfxBackend_DrawTriangles(&sPspGfxGuReplayVertices[packet->first], packet->count, &packet->state);
+                break;
+            case PSP_GFX_GU_REPLAY_SPRITES:
+                PspGfxBackend_DrawSprites(&sPspGfxGuReplayVertices[packet->first], packet->count, &packet->state);
+                break;
+            case PSP_GFX_GU_REPLAY_SOLID_RECT:
+                PspGfxBackend_DrawSolidRect(packet->ulx, packet->uly, packet->lrx, packet->lry, packet->color,
+                                            packet->blend, packet->viewport);
+                break;
+            case PSP_GFX_GU_REPLAY_FOG:
+                PspGfxBackend_DrawFogTriangles(&sPspGfxGuReplayFogVertices[packet->first], packet->count,
+                                               &packet->fogState);
+                break;
+        }
+    }
+    sPspGfxGuReplayActive = 0;
 }

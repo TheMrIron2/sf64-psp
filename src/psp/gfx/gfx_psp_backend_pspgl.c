@@ -196,6 +196,14 @@ void PspGfxBackend_EndReplayCache(void) {
     PspGfxPspgl_EndReplayCache();
 }
 
+int PspGfxBackend_ReplayCacheReady(void) {
+    return PspGfxPspgl_ReplayCacheReady();
+}
+
+void PspGfxBackend_ReplayCacheInvalidate(void) {
+    PspGfxPspgl_ReplayCacheInvalidate();
+}
+
 void PspGfxBackend_ReplayCache(void) {
     PspGfxPspgl_ReplayCache();
 }

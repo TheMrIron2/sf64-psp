@@ -373,15 +373,9 @@ void PspRenderer_DrawPendingStarfield(void) {
 }
 
 int PspRenderer_HistoryHudCacheReady(void) {
-#if PSP_GFX_BACKEND_PSPGL
-    return PspGfxPspgl_ReplayCacheReady();
-#else
-    return 0;
-#endif
+    return PspGfxBackend_ReplayCacheReady();
 }
 
 void PspRenderer_HistoryHudCacheInvalidate(void) {
-#if PSP_GFX_BACKEND_PSPGL
-    PspGfxPspgl_ReplayCacheInvalidate();
-#endif
+    PspGfxBackend_ReplayCacheInvalidate();
 }

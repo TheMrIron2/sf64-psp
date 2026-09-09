@@ -180,9 +180,10 @@ void PspGfxBackend_DrawSprites(const PspGfxVertex* vertices, u32 vertexCount, co
 void PspGfxBackend_DrawSolidRect(float ulx, float uly, float lrx, float lry, u32 color, int blend,
                                  PspGfxViewportPolicy viewport);
 void PspGfxBackend_SetHudAnchor(s16 x, s16 y);
-// Backends must invalidate replay when captured resources expire
 void PspGfxBackend_BeginReplayCache(void);
 void PspGfxBackend_EndReplayCache(void);
+int PspGfxBackend_ReplayCacheReady(void);
+void PspGfxBackend_ReplayCacheInvalidate(void);
 void PspGfxBackend_ReplayCache(void);
 
 #endif
