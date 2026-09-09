@@ -16,6 +16,8 @@
 #define PSP_GFX_GU_LIST_DRAW_RESERVE 4096U
 #define PSP_GFX_GU_DEPTH_FUNC GU_GEQUAL
 #define PSP_GFX_GU_RESERVATION_SLOTS 64
+#define PSP_GFX_GU_ALPHA_HALF 127
+#define PSP_GFX_GU_FIXED_ONE 0x00FFFFFFU
 
 typedef struct {
     u32 color;
@@ -176,8 +178,8 @@ static int psp_gfx_gu_prepare_texture(const PspGfxDrawState* state) {
     int wrapT;
     int textureFunction;
 
-    if ((state->textureEnv == PSP_GFX_TEX_BLEND) || state->alphaTest || state->blend || state->premultiplied ||
-        !state->pointFilter || (state->wrapS == PSP_GFX_WRAP_MIRROR) || (state->wrapT == PSP_GFX_WRAP_MIRROR)) {
+    if ((state->textureEnv == PSP_GFX_TEX_BLEND) || !state->pointFilter ||
+        (state->wrapS == PSP_GFX_WRAP_MIRROR) || (state->wrapT == PSP_GFX_WRAP_MIRROR)) {
         return 0;
     }
     if (!PspGfxGuTexture_Resolve(state->texture, &pixels, &width, &height)) {
@@ -201,6 +203,26 @@ static int psp_gfx_gu_prepare_texture(const PspGfxDrawState* state) {
     sceGuTexOffset(0.0f, 0.0f);
     sceGuEnable(GU_TEXTURE_2D);
     return 1;
+}
+
+static void psp_gfx_gu_prepare_alpha_blend(const PspGfxDrawState* state, int textured) {
+    if (textured && state->alphaTest) {
+        sceGuAlphaFunc(GU_GREATER, (state->alphaTest > 1) ? PSP_GFX_GU_ALPHA_HALF : 0, 0xFF);
+        sceGuEnable(GU_ALPHA_TEST);
+    } else {
+        sceGuDisable(GU_ALPHA_TEST);
+    }
+
+    if (textured && state->blend) {
+        sceGuEnable(GU_BLEND);
+        if (state->premultiplied) {
+            sceGuBlendFunc(GU_ADD, GU_FIX, GU_ONE_MINUS_SRC_ALPHA, PSP_GFX_GU_FIXED_ONE, 0);
+        } else {
+            sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA, 0, 0);
+        }
+    } else {
+        sceGuDisable(GU_BLEND);
+    }
 }
 
 static int psp_gfx_gu_prepare_colored_draw(const PspGfxDrawState* state) {
@@ -236,8 +258,7 @@ static int psp_gfx_gu_prepare_colored_draw(const PspGfxDrawState* state) {
     if (!textured) {
         sceGuDisable(GU_TEXTURE_2D);
     }
-    sceGuDisable(GU_ALPHA_TEST);
-    sceGuDisable(GU_BLEND);
+    psp_gfx_gu_prepare_alpha_blend(state, textured);
     sceGuDisable(GU_FOG);
     sceGuDisable(GU_LIGHTING);
     sceGuDisable(GU_CULL_FACE);
@@ -535,7 +556,7 @@ void PspGfxBackend_DrawSolidRect(float ulx, float uly, float lrx, float lry, u32
     PspGfxGuColorVertex* vertices;
     int i;
 
-    if (blend || (lrx <= ulx) || (lry <= uly) || !psp_gfx_gu_select_viewport(viewport)) {
+    if ((lrx <= ulx) || (lry <= uly) || !psp_gfx_gu_select_viewport(viewport)) {
         return;
     }
 
@@ -552,7 +573,12 @@ void PspGfxBackend_DrawSolidRect(float ulx, float uly, float lrx, float lry, u32
     sceGuDepthMask(GU_TRUE);
     sceGuDisable(GU_TEXTURE_2D);
     sceGuDisable(GU_ALPHA_TEST);
-    sceGuDisable(GU_BLEND);
+    if (blend) {
+        sceGuEnable(GU_BLEND);
+        sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA, 0, 0);
+    } else {
+        sceGuDisable(GU_BLEND);
+    }
     sceGuDisable(GU_FOG);
     sceGuDisable(GU_LIGHTING);
     sceGuDisable(GU_CULL_FACE);
