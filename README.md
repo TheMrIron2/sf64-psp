@@ -26,9 +26,6 @@ Special thanks:
 
 And to everyone else in the PSP scene that helped make this a reality!
 
-> [!NOTE]
-> Codex has been used as a development aid.
-
 The original README continues below. Follow the build instructions up to `make init`, and compile with `make psp`.
 
 [![Discord Invitation](https://discordapp.com/api/guilds/1190102597521133700/widget.png?style=banner2 'Starfox 64')](https://discord.gg/tuwdmuTTqc)
