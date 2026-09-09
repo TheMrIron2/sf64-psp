@@ -2042,7 +2042,7 @@ static void psp_profiler_write_phase_files(u32 slot) {
         psp_profiler_write_all(fd, line);
     }
     snprintf(line, sizeof(line),
-             "\n[PSPGL vertex stream]\nenabled,%d\nvbo_draw_calls,%llu\nvbo_vertices,%llu\nsmall_vbo_draws,%llu\nlarge_vbo_draws,%llu\nsmall_vbo_vertices,%llu\nlarge_vbo_vertices,%llu\nupload_calls,%llu\nupload_bytes,%llu\nclient_array_fallback_draws,%llu\nclient_array_fallback_vertices,%llu\npage_switches,%llu\ncapacity_bytes,%llu\nhigh_water_bytes,%llu\n",
+             "\n[vertex submission stream]\nenabled,%d\nvbo_draw_calls,%llu\nvbo_vertices,%llu\nsmall_vbo_draws,%llu\nlarge_vbo_draws,%llu\nsmall_vbo_vertices,%llu\nlarge_vbo_vertices,%llu\nupload_calls,%llu\nupload_bytes,%llu\nclient_array_fallback_draws,%llu\nclient_array_fallback_vertices,%llu\npage_switches,%llu\ncapacity_bytes,%llu\nhigh_water_bytes,%llu\n",
              1, sCounters.vboDrawCalls, sCounters.vboVertices,
              sCounters.smallVboDrawCalls, sCounters.largeVboDrawCalls, sCounters.smallVboVertices,
              sCounters.largeVboVertices, sCounters.vertexStreamUploadCalls, sCounters.vertexStreamUploadBytes,
