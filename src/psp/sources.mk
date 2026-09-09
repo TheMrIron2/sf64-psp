@@ -17,19 +17,28 @@ endif
 # Active PSP renderer architecture:
 #   Star Fox 64 / Fast3D display-list frontend in gfx_psp_dl.c
 #       -> backend-neutral draw state and batches
-#       -> PSPGL adapter and backend
-#       -> shared display state and PSPGL device
-#       -> public PSP bridge in renderer_pspgl.c
+#       -> selected backend adapter
+#       -> shared display state and selected device
+#       -> public renderer bridge in renderer_bridge.c
 # This explicit list is authoritative. The retired direct-GU renderer
 # src/psp/renderer.c and its private helpers are legacy/reference code only.
 PSP_RENDERER_C_FILES := \
     src/psp/display.c \
-    src/psp/gfx/gfx_psp_backend_pspgl.c \
     src/psp/gfx/gfx_psp_color.c \
     src/psp/gfx/gfx_psp_dl.c \
+    src/psp/renderer_bridge.c
+
+ifeq ($(PSP_GFX_BACKEND),pspgl)
+PSP_RENDERER_C_FILES += \
+    src/psp/gfx/gfx_psp_backend_pspgl.c \
+    src/psp/gfx/gfx_psp_device_pspgl.c \
     src/psp/gfx/gfx_pspgl.c \
-    src/psp/gfx/gfx_pspgl_device.c \
-    src/psp/renderer_pspgl.c
+    src/psp/gfx/gfx_pspgl_device.c
+else ifeq ($(PSP_GFX_BACKEND),gu)
+PSP_RENDERER_C_FILES += \
+    src/psp/gfx/gfx_psp_backend_gu.c \
+    src/psp/gfx/gfx_psp_gu_device.c
+endif
 
 PSP_AUDIO_C_FILES := \
     src/audio/audio_context.c \

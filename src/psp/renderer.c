@@ -2,8 +2,8 @@
  * LEGACY RENDERER NOTICE
  *
  * This direct-GU RSP/RDP renderer is not part of the current PSP build.
- * The active renderer is the PSPGL path:
- *   src/psp/renderer_pspgl.c
+ * The active renderer uses the selected backend:
+ *   src/psp/renderer_bridge.c
  *   src/psp/gfx/gfx_psp.c
  *   src/psp/gfx/gfx_psp_dl.c
  *   src/psp/gfx/gfx_pspgl.c

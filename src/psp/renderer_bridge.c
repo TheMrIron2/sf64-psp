@@ -1,13 +1,18 @@
 #include "PR/ultratypes.h"
 #include "sf64thread.h"
+#include "src/psp/gfx/gfx_psp_backend.h"
+#include "src/psp/gfx/gfx_psp_color.h"
 #include "src/psp/gfx/gfx_psp_dl.h"
-#include "src/psp/gfx/gfx_pspgl.h"
-#include "src/psp/gfx/gfx_pspgl_device.h"
+#include "src/psp/gfx/gfx_psp_device.h"
 #include "src/psp/display.h"
 #include "src/psp/hw_counter_profile.h"
 #include "src/psp/platform.h"
 #include "src/psp/profiler.h"
 #include "src/psp/renderer.h"
+
+#if PSP_GFX_BACKEND_PSPGL
+#include "src/psp/gfx/gfx_pspgl.h"
+#endif
 
 #include <pspkernel.h>
 #include <pspdebug.h>
@@ -16,18 +21,20 @@
 
 #include <stdio.h>
 
-#define PSPGL_STARFIELD_CAP 1000
-#define PSPGL_STARFIELD_VERTICES_PER_STAR 2
-#define PSPGL_STARFIELD_CHUNK_STARS 512
+#define PSP_STARFIELD_CAP 1000
+#define PSP_STARFIELD_VERTICES_PER_STAR 2
+#define PSP_STARFIELD_CHUNK_STARS 512
 
 typedef struct {
     s16 x;
     s16 y;
     u32 color;
-} PspGlStar;
+} PspStar;
 
-static PspGlStar sStarfieldStars[PSPGL_STARFIELD_CAP];
-static PspGfxPspglColorVertex sStarfieldVertices[PSPGL_STARFIELD_CHUNK_STARS * PSPGL_STARFIELD_VERTICES_PER_STAR];
+static PspStar sStarfieldStars[PSP_STARFIELD_CAP];
+#if PSP_GFX_BACKEND_PSPGL
+static PspGfxPspglColorVertex sStarfieldVertices[PSP_STARFIELD_CHUNK_STARS * PSP_STARFIELD_VERTICES_PER_STAR];
+#endif
 static u32 sStarfieldCount;
 static int sStarfieldReady;
 
@@ -70,7 +77,7 @@ static void psp_renderer_draw_perf_overlay(void) {
     bufferWidth = 0;
     pixelFormat = 0;
 
-    framebuffer = PspGfxPspglDevice_GetPresentedFrameBuffer(&bufferWidth, &pixelFormat);
+    framebuffer = PspGfxDevice_GetPresentedFrameBuffer(&bufferWidth, &pixelFormat);
 
     if ((framebuffer == NULL) || (bufferWidth != 512)) {
         return;
@@ -168,6 +175,7 @@ static void psp_renderer_log_starfield_diag(u32 chunks) {
 #endif
 
 static void psp_renderer_draw_starfield(void) {
+#if PSP_GFX_BACKEND_PSPGL
     u32 first;
 #if PSP_RENDERER_DIAGNOSTICS
     u32 chunks = 0;
@@ -179,17 +187,17 @@ static void psp_renderer_draw_starfield(void) {
 
     PspGfxPspgl_DrawSolidRect(0.0f, 0.0f, 320.0f, 240.0f, 0xFF000000u, 0, PSP_GFX_VIEWPORT_FULL);
 
-    for (first = 0; first < sStarfieldCount; first += PSPGL_STARFIELD_CHUNK_STARS) {
+    for (first = 0; first < sStarfieldCount; first += PSP_STARFIELD_CHUNK_STARS) {
         u32 chunkCount = sStarfieldCount - first;
         u32 out = 0;
         u32 i;
 
-        if (chunkCount > PSPGL_STARFIELD_CHUNK_STARS) {
-            chunkCount = PSPGL_STARFIELD_CHUNK_STARS;
+        if (chunkCount > PSP_STARFIELD_CHUNK_STARS) {
+            chunkCount = PSP_STARFIELD_CHUNK_STARS;
         }
 
         for (i = 0; i < chunkCount; i++) {
-            const PspGlStar* star = &sStarfieldStars[first + i];
+            const PspStar* star = &sStarfieldStars[first + i];
             float x0 = ((float) star->x / 160.0f) - 1.0f;
             float y0 = 1.0f - ((float) star->y / 120.0f);
             float x1 = ((float) (star->x + 1) / 160.0f) - 1.0f;
@@ -209,7 +217,7 @@ static void psp_renderer_draw_starfield(void) {
             vertex[1].color = star->color;
             vertex[1].u = 0.0f;
             vertex[1].v = 0.0f;
-            out += PSPGL_STARFIELD_VERTICES_PER_STAR;
+            out += PSP_STARFIELD_VERTICES_PER_STAR;
         }
 
         PspGfxPspgl_DrawColoredSprites(sStarfieldVertices, out, 0, (PspGfxPspglTextureRef) { 0 },
@@ -225,23 +233,28 @@ static void psp_renderer_draw_starfield(void) {
 #endif
 
     sStarfieldReady = 0;
+#else
+    sStarfieldReady = 0;
+#endif
 }
 
 void PspRenderer_Init(void) {
-    if (PspGfxPspglDevice_IsReady()) {
+    if (PspGfxDevice_IsReady()) {
         return;
     }
 
-    if (!PspDisplay_Init() || !PspGfxPspglDevice_Init()) {
+    if (!PspDisplay_Init() || !PspGfxDevice_Init()) {
         return;
     }
 
-    PspGfxPspgl_Init();
+#if PSP_GFX_BACKEND_PSPGL
     PspPlatform_LogLine("[pspgl] renderer init");
-    PspGfxPspglDevice_BeginFrame();
-    PspGfxPspgl_BeginFrame();
-    PspGfxPspgl_Flush();
-    PspGfxPspglDevice_EndFrame();
+#else
+    PspPlatform_LogLine("[gu] renderer init");
+#endif
+    PspGfxDevice_BeginFrame();
+    PspGfxDevice_Submit();
+    PspGfxDevice_Present();
 }
 
 void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
@@ -258,11 +271,11 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
         SceInt64 renderEnd;
     #endif
 
-        if (!PspGfxPspglDevice_IsReady()) {
+        if (!PspGfxDevice_IsReady()) {
             PspRenderer_Init();
         }
 
-        if (!PspGfxPspglDevice_IsReady()) {
+        if (!PspGfxDevice_IsReady()) {
             return;
         }
 
@@ -274,8 +287,7 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
         PspHwCounterProfile_ScopeBegin(PSP_HW_SCOPE_TASK);
         PspHwCounterProfile_ScopeBegin(PSP_HW_SCOPE_FRONTEND);
         PspProfiler_ComponentTaskBegin();
-        PspGfxPspglDevice_BeginFrame();
-        PspGfxPspgl_BeginFrame();
+        PspGfxDevice_BeginFrame();
 
         if ((task != NULL) && (task->task.t.data_ptr != NULL)) {
             dl = (const Gfx*) task->task.t.data_ptr;
@@ -288,7 +300,7 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
 
         PspHwCounterProfile_ScopeEnd(PSP_HW_SCOPE_FRONTEND);
         PspHwCounterProfile_ScopeBegin(PSP_HW_SCOPE_FLUSH);
-        PspGfxPspgl_Flush();
+        PspGfxDevice_Submit();
         PspHwCounterProfile_ScopeEnd(PSP_HW_SCOPE_FLUSH);
         PspHwCounterProfile_ScopeEnd(PSP_HW_SCOPE_TASK);
 
@@ -298,7 +310,7 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
 
         PspHwCounterProfile_ScopeBegin(PSP_HW_SCOPE_PRESENT);
         PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PRESENT_SWAP);
-        PspGfxPspglDevice_EndFrame();
+        PspGfxDevice_Present();
         PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PRESENT_SWAP);
         PspHwCounterProfile_ScopeEnd(PSP_HW_SCOPE_PRESENT);
         PspProfiler_ComponentTaskEnd();
@@ -330,9 +342,9 @@ void PspRenderer_BeginStarfield(void) {
 }
 
 void PspRenderer_AddStar(s16 x, s16 y, u32 n64FillColor) {
-    PspGlStar* star;
+    PspStar* star;
 
-    if (sStarfieldCount >= PSPGL_STARFIELD_CAP) {
+    if (sStarfieldCount >= PSP_STARFIELD_CAP) {
 #if PSP_RENDERER_DIAGNOSTICS
         sStarfieldDroppedStars++;
 #endif
@@ -361,9 +373,15 @@ void PspRenderer_DrawPendingStarfield(void) {
 }
 
 int PspRenderer_HistoryHudCacheReady(void) {
+#if PSP_GFX_BACKEND_PSPGL
     return PspGfxPspgl_ReplayCacheReady();
+#else
+    return 0;
+#endif
 }
 
 void PspRenderer_HistoryHudCacheInvalidate(void) {
+#if PSP_GFX_BACKEND_PSPGL
     PspGfxPspgl_ReplayCacheInvalidate();
+#endif
 }

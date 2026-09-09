@@ -18,6 +18,15 @@ MAKEFLAGS += --no-builtin-rules --no-print-directory
 TARGET := starfox64
 VERSION ?= us
 REV ?= rev1
+PSP_GFX_BACKEND ?= pspgl
+ifneq ($(filter pspgl gu,$(PSP_GFX_BACKEND)),$(PSP_GFX_BACKEND))
+$(error PSP_GFX_BACKEND must be pspgl or gu)
+endif
+ifeq ($(PSP_GFX_BACKEND),pspgl)
+PSP_GFX_BACKEND_CFLAGS := -DPSP_GFX_BACKEND_PSPGL=1 -DPSP_GFX_BACKEND_GU=0
+else
+PSP_GFX_BACKEND_CFLAGS := -DPSP_GFX_BACKEND_PSPGL=0 -DPSP_GFX_BACKEND_GU=1
+endif
 PSP_FULL ?= 1
 PROFILE_PSP ?= 0
 PROFILE_PHASES ?= 0
@@ -113,7 +122,8 @@ CC := psp-gcc
 OBJDUMP := psp-objdump
 OBJCOPY := psp-objcopy
 
-BUILD_DIR ?= build/psp
+BUILD_DIR ?= build/psp/$(PSP_GFX_BACKEND)
+PSP_PROFILE_BUILD_ROOT ?= build/psp-profile/$(PSP_GFX_BACKEND)
 PSP_TITLE ?= Star Fox 64
 PSP_EBOOT_DIR ?= src/psp/EBOOT
 PSP_EBOOT_ICON ?= $(PSP_EBOOT_DIR)/ICON0.png
@@ -172,8 +182,10 @@ PORT_DEFINES += -DNON_MATCHING -DAVOID_UB -DCOMPILER_GCC
 
 IINC := -Iinclude -Ibin/$(VERSION).$(REV) -I.
 IINC += -Ilib/ultralib/include -Ilib/ultralib/include/PR -Ilib/ultralib/include/ido
+ifeq ($(PSP_GFX_BACKEND),pspgl)
 ifeq ($(USE_LOCAL_PSPGL),1)
 IINC += -I$(PSPGL_DIR)
+endif
 endif
 IINC += -I$(PSPDEV)/psp/include -I$(PSPSDK)/include
 IINC += -Ilib/n64psp/include
@@ -190,13 +202,21 @@ endef
 PSP_OPTFLAGS ?= -O2 # -ffast-math
 SF64_GIT_SHA := $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 N64PSP_GIT_SHA := $(shell git -C lib/n64psp rev-parse HEAD 2>/dev/null || echo unknown)
-PSPGL_GIT_SHA := $(shell git -C $(PSPGL_DIR) rev-parse HEAD 2>/dev/null || echo unknown)
 SF64_GIT_DIRTY := $(shell test -z "$$(git status --porcelain 2>/dev/null)" && echo clean || echo dirty)
 N64PSP_GIT_DIRTY := $(shell test -z "$$(git -C lib/n64psp status --porcelain 2>/dev/null)" && echo clean || echo dirty)
+ifeq ($(PSP_GFX_BACKEND),pspgl)
+PSPGL_GIT_SHA := $(shell git -C $(PSPGL_DIR) rev-parse HEAD 2>/dev/null || echo unknown)
 PSPGL_GIT_DIRTY := $(shell test -z "$$(git -C $(PSPGL_DIR) status --porcelain 2>/dev/null)" && echo clean || echo dirty)
 PSPGL_SOURCE_MODE := $(if $(filter 1,$(USE_LOCAL_PSPGL)),local,system)
 PSPGL_PROFILE_GIT_SHA := $(if $(filter 1,$(USE_LOCAL_PSPGL)),$(PSPGL_GIT_SHA),system)
 PSPGL_PROFILE_GIT_DIRTY := $(if $(filter 1,$(USE_LOCAL_PSPGL)),$(PSPGL_GIT_DIRTY),system)
+else
+PSPGL_GIT_SHA := disabled
+PSPGL_GIT_DIRTY := disabled
+PSPGL_SOURCE_MODE := disabled
+PSPGL_PROFILE_GIT_SHA := disabled
+PSPGL_PROFILE_GIT_DIRTY := disabled
+endif
 PSP_COMPILER_VERSION := $(shell $(CC) --version 2>/dev/null | sed -n '1p' | sed 's/"/\\"/g; s/[[:space:]]\+/_/g')
 
 ifeq ($(PROFILE_FRAME_TRACE),1)
@@ -254,6 +274,7 @@ endif
 
 CFLAGS := -std=gnu89 -G0 -DPSP -D__PSP__ -D_PSP_FW_VERSION=600 
 CFLAGS += $(PSP_OPTFLAGS) -g3
+CFLAGS += $(PSP_GFX_BACKEND_CFLAGS)
 CFLAGS += -fno-builtin -fno-common -fno-strict-aliasing
 CFLAGS += -fwrapv -funsigned-char
 CFLAGS += -ffunction-sections -fdata-sections
@@ -288,6 +309,7 @@ endif
 CFLAGS += '-DPSPGL_GIT_SHA="$(PSPGL_PROFILE_GIT_SHA)"'
 CFLAGS += '-DPSPGL_GIT_DIRTY="$(PSPGL_PROFILE_GIT_DIRTY)"'
 CFLAGS += '-DPSPGL_SOURCE_MODE="$(PSPGL_SOURCE_MODE)"'
+CFLAGS += '-DPSP_GFX_BACKEND_NAME="$(PSP_GFX_BACKEND)"'
 CFLAGS += '-DBUILD_COMPILER="$(PSP_COMPILER_VERSION)"'
 CFLAGS += '-DBUILD_OPT_FLAGS="$(PSP_OPTFLAGS)"'
 CFLAGS += $(VERSION_DEFINES) $(COMMON_DEFINES) $(RELEASE_DEFINES)
@@ -305,6 +327,7 @@ endif
 ifeq ($(PSP_RENDERER_DIAGNOSTICS),1)
 CFLAGS += -DPSP_RENDERER_DIAGNOSTICS=1
 endif
+ifeq ($(PSP_GFX_BACKEND),pspgl)
 ifeq ($(USE_LOCAL_PSPGL),1)
 PSPGL_HEADER := $(firstword $(wildcard $(PSPGL_DIR)/GLES/egl.h) $(wildcard $(PSPGL_DIR)/GL/gl.h))
 ifeq ($(PSPGL_HEADER),)
@@ -330,6 +353,11 @@ endif
 PSPGL_CFLAGS :=
 PSPGL_LIBS := -lGL -lpspvfpu
 endif
+PSPGL_BUILD_DEPS :=
+endif
+else
+PSPGL_CFLAGS :=
+PSPGL_LIBS :=
 PSPGL_BUILD_DEPS :=
 endif
 CFLAGS += $(PSPGL_CFLAGS)
@@ -433,7 +461,7 @@ psp: $(PSP_EBOOT) $(PROFILE_OUTPUTS)
 	@printf "$(BLUE)$(PSP_EBOOT)$(NO_COL): $(GREEN)OK$(NO_COL)\n"
 
 bootstrap:
-	$(MAKE) PSP_FULL=0 BUILD_DIR=build/psp-bootstrap psp
+	$(MAKE) PSP_FULL=0 PSP_GFX_BACKEND=$(PSP_GFX_BACKEND) BUILD_DIR=build/psp-bootstrap/$(PSP_GFX_BACKEND) psp
 
 psp-profile-gprof psp-profile-phases psp-profile-combined psp-profile-builds psp-profile-artifacts: PSP_FPS_OVERLAY=0
 psp-profile-gprof psp-profile-phases psp-profile-combined psp-profile-builds psp-profile-artifacts: PSP_LOG=0
@@ -441,13 +469,13 @@ psp-profile-gprof psp-profile-phases psp-profile-combined psp-profile-builds psp
 psp-profile-gprof psp-profile-phases psp-profile-combined psp-profile-builds psp-profile-artifacts: PSP_RENDERER_DIAGNOSTICS=0
 
 psp-profile-gprof:
-	$(MAKE) PROFILE_PSP=1 PROFILE_PHASES=0 BUILD_DIR=build/psp-profile-gprof PSP_FPS_OVERLAY=$(PSP_FPS_OVERLAY) PSP_LOG=$(PSP_LOG) PSP_TRACE=$(PSP_TRACE) PSP_RENDERER_DIAGNOSTICS=$(PSP_RENDERER_DIAGNOSTICS) psp
+	$(MAKE) PROFILE_PSP=1 PROFILE_PHASES=0 PSP_GFX_BACKEND=$(PSP_GFX_BACKEND) BUILD_DIR=$(PSP_PROFILE_BUILD_ROOT)/gprof PSP_FPS_OVERLAY=$(PSP_FPS_OVERLAY) PSP_LOG=$(PSP_LOG) PSP_TRACE=$(PSP_TRACE) PSP_RENDERER_DIAGNOSTICS=$(PSP_RENDERER_DIAGNOSTICS) psp
 
 psp-profile-phases:
-	$(MAKE) PROFILE_PSP=0 PROFILE_PHASES=1 BUILD_DIR=build/psp-profile-phases PSP_FPS_OVERLAY=$(PSP_FPS_OVERLAY) PSP_LOG=$(PSP_LOG) PSP_TRACE=$(PSP_TRACE) PSP_RENDERER_DIAGNOSTICS=$(PSP_RENDERER_DIAGNOSTICS) psp
+	$(MAKE) PROFILE_PSP=0 PROFILE_PHASES=1 PSP_GFX_BACKEND=$(PSP_GFX_BACKEND) BUILD_DIR=$(PSP_PROFILE_BUILD_ROOT)/phases PSP_FPS_OVERLAY=$(PSP_FPS_OVERLAY) PSP_LOG=$(PSP_LOG) PSP_TRACE=$(PSP_TRACE) PSP_RENDERER_DIAGNOSTICS=$(PSP_RENDERER_DIAGNOSTICS) psp
 
 psp-profile-combined:
-	$(MAKE) PROFILE_PSP=1 PROFILE_PHASES=1 BUILD_DIR=build/psp-profile-combined PSP_FPS_OVERLAY=$(PSP_FPS_OVERLAY) PSP_LOG=$(PSP_LOG) PSP_TRACE=$(PSP_TRACE) PSP_RENDERER_DIAGNOSTICS=$(PSP_RENDERER_DIAGNOSTICS) psp
+	$(MAKE) PROFILE_PSP=1 PROFILE_PHASES=1 PSP_GFX_BACKEND=$(PSP_GFX_BACKEND) BUILD_DIR=$(PSP_PROFILE_BUILD_ROOT)/combined PSP_FPS_OVERLAY=$(PSP_FPS_OVERLAY) PSP_LOG=$(PSP_LOG) PSP_TRACE=$(PSP_TRACE) PSP_RENDERER_DIAGNOSTICS=$(PSP_RENDERER_DIAGNOSTICS) psp
 
 # Hardware-counter capture build (PSP_Hardware_Audit.md, Primary Finding 1).
 # Deliberately keeps phase profiling, the FPS overlay and renderer diagnostics
@@ -457,17 +485,17 @@ psp-profile-hw-counters: PSP_LOG=0
 psp-profile-hw-counters: PSP_TRACE=0
 psp-profile-hw-counters: PSP_RENDERER_DIAGNOSTICS=0
 psp-profile-hw-counters:
-	$(MAKE) PROFILE_PSP=0 PROFILE_PHASES=0 PROFILE_COMPONENTS=0 PROFILE_HW_COUNTERS=1 PROFILE_HW_COUNTER_SCOPES=$(PROFILE_HW_COUNTER_SCOPES) BUILD_DIR=build/psp-profile-hw-counters PSP_FPS_OVERLAY=$(PSP_FPS_OVERLAY) PSP_LOG=$(PSP_LOG) PSP_TRACE=$(PSP_TRACE) PSP_RENDERER_DIAGNOSTICS=$(PSP_RENDERER_DIAGNOSTICS) PSP_AUDIO=$(PSP_AUDIO) PSP_VME=$(PSP_VME) PSPGL_SWAP_INTERVAL=$(PSPGL_SWAP_INTERVAL) USE_LOCAL_PSPGL=$(USE_LOCAL_PSPGL) psp
+	$(MAKE) PROFILE_PSP=0 PROFILE_PHASES=0 PROFILE_COMPONENTS=0 PROFILE_HW_COUNTERS=1 PROFILE_HW_COUNTER_SCOPES=$(PROFILE_HW_COUNTER_SCOPES) PSP_GFX_BACKEND=$(PSP_GFX_BACKEND) BUILD_DIR=$(PSP_PROFILE_BUILD_ROOT)/hw-counters PSP_FPS_OVERLAY=$(PSP_FPS_OVERLAY) PSP_LOG=$(PSP_LOG) PSP_TRACE=$(PSP_TRACE) PSP_RENDERER_DIAGNOSTICS=$(PSP_RENDERER_DIAGNOSTICS) PSP_AUDIO=$(PSP_AUDIO) PSP_VME=$(PSP_VME) PSPGL_SWAP_INTERVAL=$(PSPGL_SWAP_INTERVAL) USE_LOCAL_PSPGL=$(USE_LOCAL_PSPGL) psp
 
 psp-profile-builds: psp-profile-gprof psp-profile-phases
 
 psp-profile-artifacts: psp-profile-builds
 	@set -eu; \
 	stamp="$$( $(DATE) -u +%Y%m%dT%H%M%SZ )"; \
-	dest="$(PROFILE_ARTIFACT_ROOT)/psp-profile-$$stamp"; \
+	dest="$(PROFILE_ARTIFACT_ROOT)/psp-profile-$(PSP_GFX_BACKEND)-$$stamp"; \
 	mkdir -p "$$dest/builds/gprof" "$$dest/builds/phases" "$$dest/raw" "$$dest/reports"; \
-	cp -f build/psp-profile-gprof/EBOOT.PBP build/psp-profile-gprof/$(TARGET).psp.elf build/psp-profile-gprof/$(TARGET).psp.map build/psp-profile-gprof/profile_build_metadata.txt build/psp-profile-gprof/PROFILE_BUILD_COMMANDS.txt build/psp-profile-gprof/SHA256SUMS "$$dest/builds/gprof/"; \
-	cp -f build/psp-profile-phases/EBOOT.PBP build/psp-profile-phases/$(TARGET).psp.elf build/psp-profile-phases/$(TARGET).psp.map build/psp-profile-phases/profile_build_metadata.txt build/psp-profile-phases/PROFILE_BUILD_COMMANDS.txt build/psp-profile-phases/SHA256SUMS "$$dest/builds/phases/"; \
+	cp -f $(PSP_PROFILE_BUILD_ROOT)/gprof/EBOOT.PBP $(PSP_PROFILE_BUILD_ROOT)/gprof/$(TARGET).psp.elf $(PSP_PROFILE_BUILD_ROOT)/gprof/$(TARGET).psp.map $(PSP_PROFILE_BUILD_ROOT)/gprof/profile_build_metadata.txt $(PSP_PROFILE_BUILD_ROOT)/gprof/PROFILE_BUILD_COMMANDS.txt $(PSP_PROFILE_BUILD_ROOT)/gprof/SHA256SUMS "$$dest/builds/gprof/"; \
+	cp -f $(PSP_PROFILE_BUILD_ROOT)/phases/EBOOT.PBP $(PSP_PROFILE_BUILD_ROOT)/phases/$(TARGET).psp.elf $(PSP_PROFILE_BUILD_ROOT)/phases/$(TARGET).psp.map $(PSP_PROFILE_BUILD_ROOT)/phases/profile_build_metadata.txt $(PSP_PROFILE_BUILD_ROOT)/phases/PROFILE_BUILD_COMMANDS.txt $(PSP_PROFILE_BUILD_ROOT)/phases/SHA256SUMS "$$dest/builds/phases/"; \
 	( cd "$$dest" && $(SHA256SUM) builds/gprof/* builds/phases/* > SHA256SUMS ); \
 	printf '%s\n' "$$dest"
 
@@ -501,12 +529,13 @@ $(PROFILE_METADATA): $(PSP_EBOOT) $(PSP_ELF) $(PSP_MAP) Makefile
 	$(call print,Writing profile metadata:,$(PSP_PROFILE_MODE),$@)
 	$(V){ \
 		printf 'profile_mode=%s\n' '$(PSP_PROFILE_LABEL)'; \
-		printf 'build_id=%s-%s-%s-sf64_%s-n64psp_%s\n' '$(PSP_PROFILE_LABEL)' '$(SF64_GIT_SHA)' '$(N64PSP_GIT_SHA)' '$(SF64_GIT_DIRTY)' '$(N64PSP_GIT_DIRTY)'; \
+		printf 'renderer_backend=%s\n' '$(PSP_GFX_BACKEND)'; \
+		printf 'build_id=%s-%s-%s-%s-sf64_%s-n64psp_%s\n' '$(PSP_PROFILE_LABEL)' '$(PSP_GFX_BACKEND)' '$(SF64_GIT_SHA)' '$(N64PSP_GIT_SHA)' '$(SF64_GIT_DIRTY)' '$(N64PSP_GIT_DIRTY)'; \
 		printf 'sf64_commit=%s\n' '$(SF64_GIT_SHA)'; \
 		printf 'sf64_worktree=%s\n' '$(SF64_GIT_DIRTY)'; \
 		printf 'n64psp_commit=%s\n' '$(N64PSP_GIT_SHA)'; \
 		printf 'n64psp_worktree=%s\n' '$(N64PSP_GIT_DIRTY)'; \
-		printf 'pspgl_source=%s\n' '$(if $(filter 1,$(USE_LOCAL_PSPGL)),local,system)'; \
+		printf 'pspgl_source=%s\n' '$(PSPGL_SOURCE_MODE)'; \
 		printf 'pspgl_commit=%s\n' '$(if $(filter 1,$(USE_LOCAL_PSPGL)),$(PSPGL_GIT_SHA),system)'; \
 		printf 'pspgl_worktree=%s\n' '$(if $(filter 1,$(USE_LOCAL_PSPGL)),$(PSPGL_GIT_DIRTY),system)'; \
 		printf 'compiler=%s\n' '$(PSP_COMPILER_VERSION)'; \
@@ -533,7 +562,7 @@ $(PROFILE_METADATA): $(PSP_EBOOT) $(PSP_ELF) $(PSP_MAP) Makefile
 		printf 'PSP_RENDERER_DIAGNOSTICS=%s\n' '$(PSP_RENDERER_DIAGNOSTICS)'; \
 		printf 'cpu_clock_runtime=recorded in profile-NNN.txt on PSP\n'; \
 		printf 'bus_clock_runtime=recorded in profile-NNN.txt on PSP\n'; \
-		printf 'build_command=make %s BUILD_DIR=%s PROFILE_PSP=%s PROFILE_PHASES=%s PROFILE_CAPTURE_FRAMES=%s PROFILE_FRAME_TRACE=%s PROFILE_FRAME_TRACE_FRAMES=%s PROFILE_COMPONENTS=%s PROFILE_TRIVIAL_REJECTS=%s PROFILE_HW_COUNTERS=$(PROFILE_HW_COUNTERS) PROFILE_HW_COUNTER_SCOPES=$(PROFILE_HW_COUNTER_SCOPES) USE_LOCAL_PSPGL=%s PSPGL_SWAP_INTERVAL=%s PSP_AUDIO=%s PSP_VME=%s PSP_FPS_OVERLAY=%s PSP_LOG=%s PSP_TRACE=%s PSP_RENDERER_DIAGNOSTICS=%s psp\n' '$(MAKECMDGOALS)' '$(BUILD_DIR)' '$(PROFILE_PSP)' '$(PROFILE_PHASES)' '$(PROFILE_CAPTURE_FRAMES)' '$(PROFILE_FRAME_TRACE)' '$(PROFILE_FRAME_TRACE_FRAMES)' '$(PROFILE_COMPONENTS)' '$(PROFILE_TRIVIAL_REJECTS)' '$(USE_LOCAL_PSPGL)' '$(PSPGL_SWAP_INTERVAL)' '$(PSP_AUDIO)' '$(PSP_VME)' '$(PSP_FPS_OVERLAY)' '$(PSP_LOG)' '$(PSP_TRACE)' '$(PSP_RENDERER_DIAGNOSTICS)'; \
+		printf 'build_command=make %s PSP_GFX_BACKEND=%s BUILD_DIR=%s PROFILE_PSP=%s PROFILE_PHASES=%s PROFILE_CAPTURE_FRAMES=%s PROFILE_FRAME_TRACE=%s PROFILE_FRAME_TRACE_FRAMES=%s PROFILE_COMPONENTS=%s PROFILE_TRIVIAL_REJECTS=%s PROFILE_HW_COUNTERS=$(PROFILE_HW_COUNTERS) PROFILE_HW_COUNTER_SCOPES=$(PROFILE_HW_COUNTER_SCOPES) USE_LOCAL_PSPGL=%s PSPGL_SWAP_INTERVAL=%s PSP_AUDIO=%s PSP_VME=%s PSP_FPS_OVERLAY=%s PSP_LOG=%s PSP_TRACE=%s PSP_RENDERER_DIAGNOSTICS=%s psp\n' '$(MAKECMDGOALS)' '$(PSP_GFX_BACKEND)' '$(BUILD_DIR)' '$(PROFILE_PSP)' '$(PROFILE_PHASES)' '$(PROFILE_CAPTURE_FRAMES)' '$(PROFILE_FRAME_TRACE)' '$(PROFILE_FRAME_TRACE_FRAMES)' '$(PROFILE_COMPONENTS)' '$(PROFILE_TRIVIAL_REJECTS)' '$(USE_LOCAL_PSPGL)' '$(PSPGL_SWAP_INTERVAL)' '$(PSP_AUDIO)' '$(PSP_VME)' '$(PSP_FPS_OVERLAY)' '$(PSP_LOG)' '$(PSP_TRACE)' '$(PSP_RENDERER_DIAGNOSTICS)'; \
 	} > $@
 
 $(PROFILE_BUILD_COMMANDS): $(PROFILE_METADATA)

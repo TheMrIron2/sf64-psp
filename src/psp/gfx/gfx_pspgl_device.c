@@ -40,28 +40,33 @@ int PspGfxPspglDevice_Init(void) {
 
     if (!eglInitialize(sDisplay, &major, &minor)) {
         psp_gfx_pspgl_device_log_failure("[pspgl] eglInitialize failed");
+        PspGfxPspglDevice_Shutdown();
         return 0;
     }
 
     if (!eglChooseConfig(sDisplay, configAttribs, &config, 1, &configCount) || configCount == 0) {
         psp_gfx_pspgl_device_log_failure("[pspgl] eglChooseConfig failed");
+        PspGfxPspglDevice_Shutdown();
         return 0;
     }
 
     sSurface = eglCreateWindowSurface(sDisplay, config, 0, NULL);
     if (sSurface == EGL_NO_SURFACE) {
         psp_gfx_pspgl_device_log_failure("[pspgl] eglCreateWindowSurface failed");
+        PspGfxPspglDevice_Shutdown();
         return 0;
     }
 
     sContext = eglCreateContext(sDisplay, config, EGL_NO_CONTEXT, NULL);
     if (sContext == EGL_NO_CONTEXT) {
         psp_gfx_pspgl_device_log_failure("[pspgl] eglCreateContext failed");
+        PspGfxPspglDevice_Shutdown();
         return 0;
     }
 
     if (!eglMakeCurrent(sDisplay, sSurface, sSurface, sContext)) {
         psp_gfx_pspgl_device_log_failure("[pspgl] eglMakeCurrent failed");
+        PspGfxPspglDevice_Shutdown();
         return 0;
     }
 
@@ -77,13 +82,40 @@ int PspGfxPspglDevice_IsReady(void) {
 void PspGfxPspglDevice_BeginFrame(void) {
 }
 
-void PspGfxPspglDevice_EndFrame(void) {
+int PspGfxPspglDevice_EndFrame(void) {
+    EGLBoolean result;
+
     if (sReady && sDisplay != EGL_NO_DISPLAY && sSurface != EGL_NO_SURFACE) {
         PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_FINISH_SYNC);
-        eglSwapBuffers(sDisplay, sSurface);
+        result = eglSwapBuffers(sDisplay, sSurface);
         PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_FINISH_SYNC);
-        PspProfiler_CountSync();
+        if (result != EGL_FALSE) {
+            PspProfiler_CountSync();
+        }
+        return result != EGL_FALSE;
     }
+
+    return 0;
+}
+
+void PspGfxPspglDevice_Shutdown(void) {
+    if (sDisplay != EGL_NO_DISPLAY) {
+        if (sContext != EGL_NO_CONTEXT) {
+            eglMakeCurrent(sDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        }
+        if (sSurface != EGL_NO_SURFACE) {
+            eglDestroySurface(sDisplay, sSurface);
+        }
+        if (sContext != EGL_NO_CONTEXT) {
+            eglDestroyContext(sDisplay, sContext);
+        }
+        eglTerminate(sDisplay);
+    }
+
+    sDisplay = EGL_NO_DISPLAY;
+    sSurface = EGL_NO_SURFACE;
+    sContext = EGL_NO_CONTEXT;
+    sReady = 0;
 }
 
 void* PspGfxPspglDevice_GetPresentedFrameBuffer(int* stride, int* pixelFormat) {

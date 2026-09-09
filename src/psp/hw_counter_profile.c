@@ -33,6 +33,9 @@
 #ifndef PSPGL_SOURCE_MODE
 #define PSPGL_SOURCE_MODE "unknown"
 #endif
+#ifndef PSP_GFX_BACKEND_NAME
+#define PSP_GFX_BACKEND_NAME "unknown"
+#endif
 #ifndef BUILD_COMPILER
 #define BUILD_COMPILER "unknown"
 #endif
@@ -395,8 +398,9 @@ static int psp_hw_dump_metadata(SceUID fd) {
              "sf64_commit,%s\n"
              "sf64_tree,%s\n"
              "n64psp_commit,%s\n"
-             "n64psp_tree,%s\n",
-             SF64_GIT_SHA, SF64_GIT_DIRTY, N64PSP_GIT_SHA, N64PSP_GIT_DIRTY);
+             "n64psp_tree,%s\n"
+             "renderer_backend,%s\n",
+             SF64_GIT_SHA, SF64_GIT_DIRTY, N64PSP_GIT_SHA, N64PSP_GIT_DIRTY, PSP_GFX_BACKEND_NAME);
     if (!psp_hw_write_all(fd, line)) {
         return 0;
     }

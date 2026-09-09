@@ -4,7 +4,8 @@
 int PspGfxPspglDevice_Init(void);
 int PspGfxPspglDevice_IsReady(void);
 void PspGfxPspglDevice_BeginFrame(void);
-void PspGfxPspglDevice_EndFrame(void);
+int PspGfxPspglDevice_EndFrame(void);
+void PspGfxPspglDevice_Shutdown(void);
 void* PspGfxPspglDevice_GetPresentedFrameBuffer(int* stride, int* pixelFormat);
 
 #endif
