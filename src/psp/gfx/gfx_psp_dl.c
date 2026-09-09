@@ -68,6 +68,9 @@ extern Gfx gMapVenomCloudRuntimeDL[];
 #ifndef PROFILE_TRIVIAL_REJECTS
 #define PROFILE_TRIVIAL_REJECTS 0
 #endif
+#ifndef PROFILE_POOL_LOOKUP
+#define PROFILE_POOL_LOOKUP 0
+#endif
 
 
 
@@ -83,7 +86,7 @@ extern Gfx gMapVenomCloudRuntimeDL[];
 #define PSP_BATCH_POOL_VERTICES 192
 #endif
 
-#if PSP_LOG_ENABLED || PSP_RENDERER_DIAGNOSTICS || PROFILE_GPROF || PROFILE_PHASES
+#if PSP_LOG_ENABLED || PSP_RENDERER_DIAGNOSTICS || PROFILE_PHASES
 #define PSP_GFX_DL_HOT_STATS 1
 #else
 #define PSP_GFX_DL_HOT_STATS 0
@@ -2490,6 +2493,26 @@ static u32 sPspGfxDlPoolDrained;
 static u32 sPspGfxDlPoolUnpooled;
 static u32 sPspGfxDlPoolPeakOpen;
 
+#if PROFILE_POOL_LOOKUP || !PROFILE_PHASES
+static u32 sPspGfxDlPoolLastHit = PSP_BATCH_POOL_SLOTS;
+#endif
+
+#if PROFILE_POOL_LOOKUP
+#define PSP_GFX_DL_POOL_HIT_POSITION_BUCKETS 6
+static u32 sPspGfxDlPoolLookupCount;
+static u32 sPspGfxDlPoolLookupHits;
+static u32 sPspGfxDlPoolLookupMisses;
+static u32 sPspGfxDlPoolLookupHitComparisons;
+static u32 sPspGfxDlPoolLookupMissComparisons;
+#if !PROFILE_PHASES || PSP_LOG_ENABLED
+static u32 sPspGfxDlPoolLookupLastHitFast;
+#endif
+static u32 sPspGfxDlPoolLookupCurrentReuse;
+static u32 sPspGfxDlPoolLookupLastReuse;
+static u32 sPspGfxDlPoolLookupOpenHistogram[PSP_BATCH_POOL_SLOTS + 1];
+static u32 sPspGfxDlPoolLookupHitPosition[PSP_GFX_DL_POOL_HIT_POSITION_BUCKETS];
+#endif
+
 static void psp_gfx_dl_pool_store(PspGfxDlContext* ctx, u32 index) {
     PspGfxDlBatchSlot* slot = &sPspGfxDlPool[index];
 
@@ -2717,31 +2740,114 @@ static void psp_gfx_dl_set_batch_texture(PspGfxDlContext* ctx, PspGfxTextureHand
             psp_gfx_dl_flush_reason(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
         }
 
-        for (i = 0; i < sPspGfxDlPoolOpen; i++) {
-            index = sPspGfxDlPoolOrder[i];
-#if PROFILE_PHASES
-            if (!mixedWrapVariant &&
-                psp_gfx_dl_pool_material_matches_without_wrap(&sPspGfxDlPool[index], texture,
-                                                              textureEnv, textureEnvColor, alphaTest, blend,
-                                                              premultiplied, pointFilter) &&
-                ((sPspGfxDlPool[index].wrapS != wrapS) || (sPspGfxDlPool[index].wrapT != wrapT))) {
-                mixedWrapVariant = 1;
-                PspProfiler_CountWrapBatching(1, 0, 0, 0);
-            }
+        {
+#if PROFILE_POOL_LOOKUP || !PROFILE_PHASES
+            int found = 0;
+#if PROFILE_POOL_LOOKUP
+            u32 comparisons = 0;
+            int fastHit = 0;
+
+            sPspGfxDlPoolLookupCount++;
+            sPspGfxDlPoolLookupOpenHistogram[sPspGfxDlPoolOpen]++;
 #endif
-            if (psp_gfx_dl_pool_material_matches(&sPspGfxDlPool[index], texture, textureEnv,
+#if !PROFILE_PHASES
+            if ((sPspGfxDlPoolLastHit < PSP_BATCH_POOL_SLOTS) &&
+                sPspGfxDlPool[sPspGfxDlPoolLastHit].open &&
+                psp_gfx_dl_pool_material_matches(&sPspGfxDlPool[sPspGfxDlPoolLastHit], texture, textureEnv,
                                                  textureEnvColor, wrapS, wrapT, alphaTest, blend,
                                                  premultiplied, pointFilter)) {
-                psp_gfx_dl_pool_park(ctx);
-                psp_gfx_dl_pool_load(ctx, index);
-                psp_gfx_dl_pool_select(ctx, index);
-                ctx->batchCombineMode = combineMode;
-                ctx->batchPrimitiveColor = primitiveColor;
-                ctx->batchEnvironmentColor = environmentColor;
-                sPspGfxDlPoolHits++;
-                PspHwCounterProfile_CountPoolEvent(PSP_HW_POOL_EVENT_HIT);
-                return;
+                index = sPspGfxDlPoolLastHit;
+                found = 1;
+#if PROFILE_POOL_LOOKUP
+                comparisons = 1;
+                fastHit = 1;
+                sPspGfxDlPoolLookupLastHitFast++;
+#endif
             }
+#endif
+            if (!found) {
+                for (i = 0; i < sPspGfxDlPoolOpen; i++) {
+                    index = sPspGfxDlPoolOrder[i];
+#if PROFILE_PHASES
+                    if (!mixedWrapVariant &&
+                        psp_gfx_dl_pool_material_matches_without_wrap(&sPspGfxDlPool[index], texture,
+                                                                      textureEnv, textureEnvColor, alphaTest, blend,
+                                                                      premultiplied, pointFilter) &&
+                        ((sPspGfxDlPool[index].wrapS != wrapS) || (sPspGfxDlPool[index].wrapT != wrapT))) {
+                        mixedWrapVariant = 1;
+                        PspProfiler_CountWrapBatching(1, 0, 0, 0);
+                    }
+#endif
+                    if (psp_gfx_dl_pool_material_matches(&sPspGfxDlPool[index], texture, textureEnv,
+                                                         textureEnvColor, wrapS, wrapT, alphaTest, blend,
+                                                         premultiplied, pointFilter)) {
+                        found = 1;
+#if PROFILE_POOL_LOOKUP
+                        comparisons++;
+#endif
+                        break;
+                    }
+#if PROFILE_POOL_LOOKUP
+                    comparisons++;
+#endif
+                }
+            }
+#if PROFILE_POOL_LOOKUP
+            if (found) {
+                sPspGfxDlPoolLookupHits++;
+                sPspGfxDlPoolLookupHitComparisons += comparisons;
+                if ((sPspGfxDlPoolCurrent >= 0) && (index == (u32) sPspGfxDlPoolCurrent)) {
+                    sPspGfxDlPoolLookupCurrentReuse++;
+                }
+                if (index == sPspGfxDlPoolLastHit) {
+                    sPspGfxDlPoolLookupLastReuse++;
+                }
+                if (!fastHit) {
+                    if (i == 0) {
+                        sPspGfxDlPoolLookupHitPosition[0]++;
+                    } else if (i == 1) {
+                        sPspGfxDlPoolLookupHitPosition[1]++;
+                    } else if (i < 4) {
+                        sPspGfxDlPoolLookupHitPosition[2]++;
+                    } else if (i < 8) {
+                        sPspGfxDlPoolLookupHitPosition[3]++;
+                    } else if (i < 16) {
+                        sPspGfxDlPoolLookupHitPosition[4]++;
+                    } else {
+                        sPspGfxDlPoolLookupHitPosition[5]++;
+                    }
+                }
+            } else {
+                sPspGfxDlPoolLookupMisses++;
+                sPspGfxDlPoolLookupMissComparisons += comparisons;
+            }
+#endif
+            if (found) {
+#if PROFILE_POOL_LOOKUP || !PROFILE_PHASES
+                sPspGfxDlPoolLastHit = index;
+#endif
+                goto psp_gfx_dl_pool_lookup_hit;
+            }
+#else
+            for (i = 0; i < sPspGfxDlPoolOpen; i++) {
+                index = sPspGfxDlPoolOrder[i];
+#if PROFILE_PHASES
+                if (!mixedWrapVariant &&
+                    psp_gfx_dl_pool_material_matches_without_wrap(&sPspGfxDlPool[index], texture,
+                                                                  textureEnv, textureEnvColor, alphaTest, blend,
+                                                                  premultiplied, pointFilter) &&
+                    ((sPspGfxDlPool[index].wrapS != wrapS) || (sPspGfxDlPool[index].wrapT != wrapT))) {
+                    mixedWrapVariant = 1;
+                    PspProfiler_CountWrapBatching(1, 0, 0, 0);
+                }
+#endif
+                if (psp_gfx_dl_pool_material_matches(&sPspGfxDlPool[index], texture, textureEnv,
+                                                     textureEnvColor, wrapS, wrapT, alphaTest, blend,
+                                                     premultiplied, pointFilter)) {
+                    goto psp_gfx_dl_pool_lookup_hit;
+                }
+            }
+#endif
         }
 
         psp_gfx_dl_pool_park(ctx);
@@ -2761,6 +2867,17 @@ static void psp_gfx_dl_set_batch_texture(PspGfxDlContext* ctx, PspGfxTextureHand
         ctx->batchPremultiplied = premultiplied;
         ctx->batchPointFilter = pointFilter;
         psp_gfx_dl_pool_store(ctx, index);
+        return;
+
+psp_gfx_dl_pool_lookup_hit:
+        psp_gfx_dl_pool_park(ctx);
+        psp_gfx_dl_pool_load(ctx, index);
+        psp_gfx_dl_pool_select(ctx, index);
+        ctx->batchCombineMode = combineMode;
+        ctx->batchPrimitiveColor = primitiveColor;
+        ctx->batchEnvironmentColor = environmentColor;
+        sPspGfxDlPoolHits++;
+        PspHwCounterProfile_CountPoolEvent(PSP_HW_POOL_EVENT_HIT);
         return;
     }
 
@@ -6533,6 +6650,55 @@ static void psp_gfx_dl_pool_report(u32 taskIndex) {
 }
 #endif
 
+#if PSP_LOG_ENABLED && PROFILE_POOL_LOOKUP
+static void psp_gfx_dl_pool_lookup_report(u32 taskIndex) {
+    char line[1024];
+    u32 i;
+    u32 lineUsed;
+
+    snprintf(line, sizeof(line),
+             "[pspgl-pool-lookup] task=%lu lookups=%lu hits=%lu misses=%lu hitCmp=%lu missCmp=%lu "
+             "lastFast=%lu currentReuse=%lu lastReuse=%lu peakOpen=%lu",
+             (unsigned long) taskIndex, (unsigned long) sPspGfxDlPoolLookupCount,
+             (unsigned long) sPspGfxDlPoolLookupHits, (unsigned long) sPspGfxDlPoolLookupMisses,
+             (unsigned long) sPspGfxDlPoolLookupHitComparisons,
+             (unsigned long) sPspGfxDlPoolLookupMissComparisons,
+             (unsigned long) sPspGfxDlPoolLookupLastHitFast,
+             (unsigned long) sPspGfxDlPoolLookupCurrentReuse,
+             (unsigned long) sPspGfxDlPoolLookupLastReuse,
+             (unsigned long) sPspGfxDlPoolPeakOpen);
+    PspPlatform_LogLine(line);
+
+    lineUsed = (u32) snprintf(line, sizeof(line), "[pspgl-pool-open-hist] task=%lu",
+                              (unsigned long) taskIndex);
+    for (i = 0; i <= PSP_BATCH_POOL_SLOTS; i++) {
+        if (sPspGfxDlPoolLookupOpenHistogram[i] == 0) {
+            continue;
+        }
+        if (lineUsed > (sizeof(line) - 32)) {
+            PspPlatform_LogLine(line);
+            lineUsed = (u32) snprintf(line, sizeof(line), "[pspgl-pool-open-hist] task=%lu",
+                                      (unsigned long) taskIndex);
+        }
+        lineUsed += (u32) snprintf(line + lineUsed, sizeof(line) - lineUsed, " %lu:%lu",
+                                   (unsigned long) i,
+                                   (unsigned long) sPspGfxDlPoolLookupOpenHistogram[i]);
+    }
+    PspPlatform_LogLine(line);
+
+    snprintf(line, sizeof(line),
+             "[pspgl-pool-hit-pos] task=%lu scan0=%lu scan1=%lu scan2_3=%lu scan4_7=%lu "
+             "scan8_15=%lu scan16plus=%lu",
+             (unsigned long) taskIndex, (unsigned long) sPspGfxDlPoolLookupHitPosition[0],
+             (unsigned long) sPspGfxDlPoolLookupHitPosition[1],
+             (unsigned long) sPspGfxDlPoolLookupHitPosition[2],
+             (unsigned long) sPspGfxDlPoolLookupHitPosition[3],
+             (unsigned long) sPspGfxDlPoolLookupHitPosition[4],
+             (unsigned long) sPspGfxDlPoolLookupHitPosition[5]);
+    PspPlatform_LogLine(line);
+}
+#endif
+
 #if PSP_RENDERER_DIAGNOSTICS
 int PspGfxDl_TracePollControls(u32 rawButtons) {
     const u32 combo = PSP_CTRL_SELECT | PSP_CTRL_TRIANGLE;
@@ -6625,6 +6791,9 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
 #if PSP_LOG_ENABLED
     if ((taskIndex != 0) && ((taskIndex % 300) == 0)) {
         psp_gfx_dl_pool_report(taskIndex);
+#if PROFILE_POOL_LOOKUP
+        psp_gfx_dl_pool_lookup_report(taskIndex);
+#endif
     }
 #endif
 
