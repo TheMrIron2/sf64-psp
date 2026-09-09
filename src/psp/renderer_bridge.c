@@ -4,6 +4,7 @@
 #include "src/psp/gfx/gfx_psp_dl.h"
 #include "src/psp/gfx/gfx_psp_device.h"
 #include "src/psp/display.h"
+#include "src/psp/frame_interpolation.h"
 #include "src/psp/hw_counter_profile.h"
 #include "src/psp/platform.h"
 #include "src/psp/profiler.h"
@@ -173,6 +174,7 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
             PspGfxDl_GetLastWork(&hwCommands, &hwLoadedVertices, &hwSubmittedVertices);
     #endif
         }
+        PspFrameInterpolation_FinishPresentation(task);
 
         PspHwCounterProfile_ScopeEnd(PSP_HW_SCOPE_FRONTEND);
         PspHwCounterProfile_ScopeBegin(PSP_HW_SCOPE_FLUSH);

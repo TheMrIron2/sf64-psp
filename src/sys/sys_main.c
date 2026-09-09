@@ -3,6 +3,7 @@
 #include "mods.h"
 #ifdef TARGET_PSP
 #include "global.h"
+#include "src/psp/frame_interpolation.h"
 #include "src/psp/frame_scheduler.h"
 #include "src/psp/platform.h"
 #include "src/psp/profiler.h"
@@ -114,6 +115,9 @@ void Main_Initialize(void) {
     gFillScreenColor = 0;
     gFillScreen = false;
     gCurrentTask = NULL;
+#ifdef TARGET_PSP
+    PspFrameInterpolation_Reset();
+#endif
 
     for (i = 0; i < ARRAY_COUNT(sAudioTasks); i += 1) {
         sAudioTasks[i] = NULL;
@@ -321,6 +325,11 @@ static u8 Graphics_GetPresentationVIs(void) {
     return simulationVIs;
 }
 
+static s32 Graphics_InterpolationEligible(void) {
+    return (gGameState == GSTATE_PLAY) && (gCurrentLevel == LEVEL_AQUAS) && (gDrawMode == DRAW_PLAY) &&
+           (gPlayState != PLAY_PAUSE) && (gVIsPerFrame == 3);
+}
+
 static void Graphics_FinalizeDisplayList(void) {
     if (gStartNMI == 1) {
         Graphics_NMIWipe();
@@ -332,9 +341,11 @@ static void Graphics_FinalizeDisplayList(void) {
     gSPEndDisplayList(gMasterDisp++);
 }
 
-static SPTask* Graphics_BuildSimulationTask(void) {
+static SPTask* Graphics_BuildSimulationTask(u32 simulationVi) {
     gSysFrameCount++;
     Graphics_InitializeTask(gSysFrameCount);
+    PspFrameInterpolation_BeginSimulationFrame(gGfxTask, simulationVi, gVIsPerFrame,
+                                               Graphics_InterpolationEligible());
     MQ_WAIT_FOR_MESG(&gControllerMesgQueue, NULL);
     Controller_UpdateInput();
     osSendMesg(&gSerialThreadMesgQueue, (OSMesg) SI_READ_CONTROLLER, OS_MESG_NOBLOCK);
@@ -347,6 +358,7 @@ static SPTask* Graphics_BuildSimulationTask(void) {
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_GAME_UPDATE);
     Game_Update();
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_GAME_UPDATE);
+    PspFrameInterpolation_EndSimulationFrame(gGfxTask, Graphics_InterpolationEligible());
     Graphics_FinalizeDisplayList();
     Graphics_PrepareTask();
     return gGfxTask;
@@ -366,6 +378,7 @@ static void Graphics_RunPspScheduler(SPTask* reusableTask, FrameBuffer* reusable
     PspFrameScheduler scheduler;
     PspFrameSchedule schedule;
     SPTask* inFlightTask = taskInFlight ? reusableTask : NULL;
+    SPTask* inFlightDependency = NULL;
     SPTask* pendingTask = NULL;
     FrameBuffer* pendingFrameBuffer = NULL;
     u32 currentVi = PspPlatform_GetViCount();
@@ -385,11 +398,12 @@ static void Graphics_RunPspScheduler(SPTask* reusableTask, FrameBuffer* reusable
         if (schedule.simulationDue) {
             SPTask* nextTask = &gGfxPools[(gSysFrameCount + 1) % 2].task;
 
-            if (taskInFlight && (nextTask == inFlightTask)) {
+            if (taskInFlight && ((nextTask == inFlightTask) || (nextTask == inFlightDependency))) {
                 Graphics_WaitForTask(&taskInFlight);
                 inFlightTask = NULL;
+                inFlightDependency = NULL;
             }
-            pendingTask = Graphics_BuildSimulationTask();
+            pendingTask = Graphics_BuildSimulationTask(currentVi);
             pendingFrameBuffer = gFrameBuffer;
             PspFrameScheduler_SetSimulationVIs(&scheduler, currentVi, gVIsPerFrame);
             PspFrameScheduler_SetPresentationVIs(&scheduler, currentVi, Graphics_GetPresentationVIs());
@@ -400,6 +414,7 @@ static void Graphics_RunPspScheduler(SPTask* reusableTask, FrameBuffer* reusable
 
             Graphics_WaitForTask(&taskInFlight);
             inFlightTask = NULL;
+            inFlightDependency = NULL;
             if (pendingTask != NULL) {
                 task = pendingTask;
             } else {
@@ -407,6 +422,8 @@ static void Graphics_RunPspScheduler(SPTask* reusableTask, FrameBuffer* reusable
                 renderOnly = true;
             }
 
+            inFlightDependency =
+                PspFrameInterpolation_PreparePresentation(task, currentVi, scheduler.presentationVIs, renderOnly);
             if (Graphics_SubmitTask(task) == 0) {
                 taskInFlight = true;
                 inFlightTask = task;
@@ -418,6 +435,7 @@ static void Graphics_RunPspScheduler(SPTask* reusableTask, FrameBuffer* reusable
                 }
             } else {
                 submitFailed = true;
+                inFlightDependency = NULL;
             }
 
             if (!gFillScreen) {
@@ -445,6 +463,8 @@ void Graphics_ThreadEntry(void* arg0) {
     u8 i;
     u8 visPerFrame;
     u8 validVIsPerFrame;
+#else
+    u32 initialVi;
 #endif
 
     PSP_TRACE("gfx game init");
@@ -453,11 +473,19 @@ void Graphics_ThreadEntry(void* arg0) {
     osSendMesg(&gSerialThreadMesgQueue, (OSMesg) SI_READ_CONTROLLER, OS_MESG_NOBLOCK);
     PSP_TRACE("gfx init task 0");
     Graphics_InitializeTask(gSysFrameCount);
+#ifdef TARGET_PSP
+    initialVi = PspPlatform_GetViCount();
+    PspFrameInterpolation_BeginSimulationFrame(gGfxTask, initialVi, gVIsPerFrame,
+                                               Graphics_InterpolationEligible());
+#endif
     {
         gSPSegment(gUnkDisp1++, 0, 0);
         gSPDisplayList(gMasterDisp++, gGfxPool->unkDL1);
         PSP_TRACE("gfx first update");
         Game_Update();
+#ifdef TARGET_PSP
+        PspFrameInterpolation_EndSimulationFrame(gGfxTask, Graphics_InterpolationEligible());
+#endif
         PSP_TRACE("gfx first update done");
         gSPEndDisplayList(gUnkDisp1++);
         gSPEndDisplayList(gUnkDisp2++);
@@ -468,6 +496,7 @@ void Graphics_ThreadEntry(void* arg0) {
     PSP_TRACE("gfx first task");
 #ifdef TARGET_PSP
     Graphics_PrepareTask();
+    PspFrameInterpolation_PreparePresentation(gGfxTask, initialVi, Graphics_GetPresentationVIs(), false);
     Graphics_RunPspScheduler(gGfxTask, gFrameBuffer, Graphics_SubmitTask(gGfxTask) == 0);
 #else
     Graphics_SetTask();

@@ -537,10 +537,19 @@ static u64 sTimingSimulationTicks;
 static u64 sTimingPresentationAttempts;
 static u64 sTimingSuccessfulPresentations;
 static u64 sTimingRenderOnlyPresentations;
+static u64 sTimingRepeatedPresentations;
 static u64 sTimingMissedSimulationDeadlines;
 static u64 sTimingMissedPresentationDeadlines;
 static u32 sTimingSimulationVIs;
 static u32 sTimingPresentationVIs;
+static u64 sInterpolationRequested;
+static u64 sInterpolationInterpolated;
+static u64 sInterpolationExact;
+static u64 sInterpolationFallback;
+static u64 sInterpolationMissingHistory;
+static u64 sInterpolationTopologyMismatch;
+static u64 sInterpolationEligibleMatrices;
+static u64 sInterpolationInterpolatedMatrices;
 static u32 sTri2PairFirstMismatchSeen;
 static u32 sTri2PairFirstMismatchVertex;
 static u32 sTri2PairFirstMismatchFieldMask;
@@ -793,10 +802,19 @@ PSP_PROFILE_ATTR static void psp_profiler_reset_phase_capture(void) {
     sTimingPresentationAttempts = 0;
     sTimingSuccessfulPresentations = 0;
     sTimingRenderOnlyPresentations = 0;
+    sTimingRepeatedPresentations = 0;
     sTimingMissedSimulationDeadlines = 0;
     sTimingMissedPresentationDeadlines = 0;
     sTimingSimulationVIs = 0;
     sTimingPresentationVIs = 0;
+    sInterpolationRequested = 0;
+    sInterpolationInterpolated = 0;
+    sInterpolationExact = 0;
+    sInterpolationFallback = 0;
+    sInterpolationMissingHistory = 0;
+    sInterpolationTopologyMismatch = 0;
+    sInterpolationEligibleMatrices = 0;
+    sInterpolationInterpolatedMatrices = 0;
     sTimerReadPairOverheadUs = psp_profiler_measure_timer_overhead();
     sCaptureStartUs = psp_profiler_now_us();
     sCaptureEndUs = sCaptureStartUs;
@@ -1845,13 +1863,19 @@ static void psp_profiler_write_phase_files(u32 slot) {
         snprintf(line, sizeof(line),
                  "[timing scheduler]\nphysical_vi_ticks,%llu\nsimulation_ticks,%llu\npresentation_attempts,%llu\nsuccessful_presentations,%llu\nrender_only_presentations,%llu\nrepeated_presentations,%llu\nmissed_simulation_deadlines,%llu\nmissed_presentation_deadlines,%llu\nskipped_presentations,%llu\nsimulation_vis,%lu\npresentation_vis,%lu\nsimulation_ticks_per_second_x1000,%llu\npresentation_attempts_per_second_x1000,%llu\nsuccessful_presentations_per_second_x1000,%llu\nwall_us_per_simulation_tick,%llu\nwall_us_per_successful_presentation,%llu\n\n",
                  sTimingPhysicalVIs, sTimingSimulationTicks, sTimingPresentationAttempts,
-                 sTimingSuccessfulPresentations, sTimingRenderOnlyPresentations, sTimingRenderOnlyPresentations,
+                 sTimingSuccessfulPresentations, sTimingRenderOnlyPresentations, sTimingRepeatedPresentations,
                  sTimingMissedSimulationDeadlines, sTimingMissedPresentationDeadlines,
                  sTimingMissedPresentationDeadlines, (unsigned long) sTimingSimulationVIs,
                  (unsigned long) sTimingPresentationVIs, simulationRate, attemptRate, presentedRate,
                  usPerSimulation, usPerPresentation);
         psp_profiler_write_all(fd, line);
     }
+    snprintf(line, sizeof(line),
+             "[frame interpolation]\nrequested_presentations,%llu\ninterpolated_presentations,%llu\nexact_state_presentations,%llu\nfallback_presentations,%llu\nmissing_history_or_timing,%llu\ntopology_mismatches,%llu\neligible_world_matrices,%llu\ninterpolated_world_matrices,%llu\n\n",
+             sInterpolationRequested, sInterpolationInterpolated, sInterpolationExact, sInterpolationFallback,
+             sInterpolationMissingHistory, sInterpolationTopologyMismatch, sInterpolationEligibleMatrices,
+             sInterpolationInterpolatedMatrices);
+    psp_profiler_write_all(fd, line);
     snprintf(line, sizeof(line),
              "\n[mirror encoded texture lifetime]\nencoding_attempts,%llu\nsuccessful_encodings,%llu\nfallback_uses,%llu\nencoded_s,%llu\nencoded_t,%llu\nencoded_both,%llu\nsuccessful_source_bytes,%llu\nsuccessful_encoded_bytes,%llu\nsuccessful_additional_bytes,%llu\nencoded_uploads,%llu\nencoded_upload_bytes,%llu\nstaging_failures,%llu\nmaximum_successful_encoded_width,%lu\nmaximum_successful_encoded_height,%lu\n",
              sMirrorEncodingLifetimeAttempts, sMirrorEncodedLifetimeUploads, sMirrorEncodingLifetimeFallbackUses,
@@ -2574,6 +2598,29 @@ void PspProfiler_RecordTimingEvent(u32 elapsedVIs, u32 simulationTick, u32 prese
         sTimingMissedPresentationDeadlines += missedPresentationDeadlines;
         sTimingSimulationVIs = simulationVIs;
         sTimingPresentationVIs = presentationVIs;
+    }
+    psp_profiler_unlock(lockState);
+}
+
+void PspProfiler_RecordInterpolation(u32 requested, u32 interpolated, u32 exact, u32 fallback,
+                                     u32 missingHistory, u32 topologyMismatch, u32 eligibleMatrices,
+                                     u32 interpolatedMatrices, u32 repeatedPresentation) {
+    int lockState;
+
+    if (!sCaptureActive) {
+        return;
+    }
+    lockState = psp_profiler_lock();
+    if (sCaptureActive) {
+        sInterpolationRequested += requested;
+        sInterpolationInterpolated += interpolated;
+        sInterpolationExact += exact;
+        sInterpolationFallback += fallback;
+        sInterpolationMissingHistory += missingHistory;
+        sInterpolationTopologyMismatch += topologyMismatch;
+        sInterpolationEligibleMatrices += eligibleMatrices;
+        sInterpolationInterpolatedMatrices += interpolatedMatrices;
+        sTimingRepeatedPresentations += repeatedPresentation;
     }
     psp_profiler_unlock(lockState);
 }

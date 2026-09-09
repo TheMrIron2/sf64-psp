@@ -4,6 +4,7 @@
 #include "assets/ast_logo.h"
 #include "mods.h"
 #ifdef TARGET_PSP
+#include "src/psp/frame_interpolation.h"
 #include "src/psp/profiler.h"
 #include "src/psp/renderer.h"
 #endif
@@ -585,6 +586,9 @@ void Game_Update(void) {
 #endif
 
         PSP_TRACE("game update: draw");
+#ifdef TARGET_PSP
+        PspFrameInterpolation_SetWorldScope(true);
+#endif
         Game_Draw(0);
         PSP_TRACE("game update: draw done");
 
@@ -633,6 +637,9 @@ void Game_Update(void) {
             HUD_8008CB8C();
         }
 
+#ifdef TARGET_PSP
+        PspFrameInterpolation_SetWorldScope(false);
+#endif
         partialFill = false;
 
         if (gCamCount == 1) {

@@ -1,4 +1,5 @@
 #include "src/psp/gfx/gfx_psp_dl.h"
+#include "src/psp/frame_interpolation.h"
 
 #include "buffers.h"
 #include "macros.h"
@@ -1943,6 +1944,7 @@ static void psp_gfx_dl_handle_mtx_generic(PspGfxDlContext* ctx, const void* src,
 static void psp_gfx_dl_handle_mtx(PspGfxDlContext* ctx, const Gfx* gfx, int floating) {
     const void* src = psp_gfx_dl_resolve_ptr(ctx, gfx->words.w1);
     u32 flags = (gfx->words.w0 >> 16) & 0xFF;
+    Matrix interpolated;
     float decoded[4][4];
     const float (*loaded)[4];
     float (*target)[4];
@@ -1980,7 +1982,9 @@ static void psp_gfx_dl_handle_mtx(PspGfxDlContext* ctx, const Gfx* gfx, int floa
     }
     PspProfiler_CountMatrixCommand(projection, !load && *hasTarget);
 
-    if (floating) {
+    if (floating && PspFrameInterpolation_ResolveMatrix((const Mtx*) src, flags, &interpolated)) {
+        loaded = interpolated.m;
+    } else if (floating) {
         loaded = (const float (*)[4]) src;
     } else {
         psp_gfx_dl_mtx_l2f(decoded, (const Mtx*) src);

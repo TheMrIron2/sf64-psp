@@ -2,6 +2,7 @@
 
 #if defined(TARGET_PSP)
 #include <n64psp/trig.h>
+#include "src/psp/frame_interpolation.h"
 #include "src/psp/renderer.h"
 
 #define SF64_MATRIX_SINCOS(angle, outSn, outCs) \
@@ -537,6 +538,7 @@ void Matrix_SetGfxMtxFromMatrix(Gfx** gfx, const Matrix* src, u32 flags) {
     Mtx* dest = gGfxMtx++;
 
     *(Matrix*) dest = *src;
+    PspFrameInterpolation_RecordMatrix(dest, flags);
     PSP_RENDERER_DL_MTXF((*gfx)++, dest, flags);
 }
 #endif

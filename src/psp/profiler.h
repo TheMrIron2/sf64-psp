@@ -173,6 +173,9 @@ void PspProfiler_OnGfxTaskComplete(void);
 void PspProfiler_RecordTimingEvent(u32 elapsedVIs, u32 simulationTick, u32 presentationAttempt,
                                    u32 renderOnlyPresentation, u32 missedSimulationDeadlines,
                                    u32 missedPresentationDeadlines, u32 simulationVIs, u32 presentationVIs);
+void PspProfiler_RecordInterpolation(u32 requested, u32 interpolated, u32 exact, u32 fallback,
+                                     u32 missingHistory, u32 topologyMismatch, u32 eligibleMatrices,
+                                     u32 interpolatedMatrices, u32 repeatedPresentation);
 void PspProfiler_CountDisplayListTask(void);
 void PspProfiler_CountOpcode(u8 opcode);
 void PspProfiler_CountGvtx(u32 count, u32 lit);
@@ -244,6 +247,10 @@ void PspProfiler_CountTrivialRejectRenderState(PspProfileTrivialRejectRenderStat
 #define PspProfiler_RecordTimingEvent(elapsedVIs, simulationTick, presentationAttempt, renderOnlyPresentation, \
                                       missedSimulationDeadlines, missedPresentationDeadlines, simulationVIs, \
                                       presentationVIs) ((void) 0)
+#define PspProfiler_RecordInterpolation(requested, interpolated, exact, fallback, missingHistory, \
+                                        topologyMismatch, eligibleMatrices, interpolatedMatrices, \
+                                        repeatedPresentation) \
+    ((void) 0)
 #define PspProfiler_CountDisplayListTask() ((void) 0)
 #define PspProfiler_CountOpcode(opcode) ((void) 0)
 #define PspProfiler_CountGvtx(count, lit) ((void) 0)
