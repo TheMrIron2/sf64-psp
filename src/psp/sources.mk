@@ -37,6 +37,7 @@ PSP_RENDERER_C_FILES += \
 else ifeq ($(PSP_GFX_BACKEND),gu)
 PSP_RENDERER_C_FILES += \
     src/psp/gfx/gfx_psp_backend_gu.c \
+    src/psp/gfx/gfx_psp_device_gu.c \
     src/psp/gfx/gfx_psp_gu_device.c
 endif
 
