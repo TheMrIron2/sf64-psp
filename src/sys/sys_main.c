@@ -316,8 +316,24 @@ void Timer_ThreadEntry(void* arg0) {
 #ifdef TARGET_PSP
 #define PSP_AQUAS_SIMULATION_VI_INTERVAL 3
 #define PSP_AQUAS_PRESENTATION_VI_INTERVAL 2
-#define PSP_TRAINING_SIMULATION_VI_INTERVAL 2
-#define PSP_TRAINING_PRESENTATION_VI_INTERVAL 1
+#define PSP_30FPS_SIMULATION_VI_INTERVAL 2
+#define PSP_60FPS_PRESENTATION_VI_INTERVAL 1
+
+static s32 Graphics_Is60FpsScene(void) {
+    if (gVIsPerFrame != PSP_30FPS_SIMULATION_VI_INTERVAL) {
+        return false;
+    }
+    if ((gGameState == GSTATE_TITLE) && (gDrawMode == DRAW_TITLE)) {
+        return true;
+    }
+    if ((gGameState == GSTATE_MENU) && (gDrawMode == DRAW_OPTION)) {
+        return true;
+    }
+    if ((gGameState != GSTATE_PLAY) || (gDrawMode != DRAW_PLAY) || (gPlayState == PLAY_PAUSE)) {
+        return false;
+    }
+    return (gCurrentLevel == LEVEL_TRAINING) || (gCurrentLevel == LEVEL_CORNERIA);
+}
 
 static u8 Graphics_GetPresentationVIs(void) {
     u8 simulationVIs = MIN(MAX(gVIsPerFrame, 1), 4);
@@ -326,19 +342,18 @@ static u8 Graphics_GetPresentationVIs(void) {
         (simulationVIs == PSP_AQUAS_SIMULATION_VI_INTERVAL)) {
         return PSP_AQUAS_PRESENTATION_VI_INTERVAL;
     }
-    if ((gGameState == GSTATE_PLAY) && (gCurrentLevel == LEVEL_TRAINING) &&
-        (simulationVIs == PSP_TRAINING_SIMULATION_VI_INTERVAL)) {
-        return PSP_TRAINING_PRESENTATION_VI_INTERVAL;
+    if (Graphics_Is60FpsScene() && (simulationVIs == PSP_30FPS_SIMULATION_VI_INTERVAL)) {
+        return PSP_60FPS_PRESENTATION_VI_INTERVAL;
     }
     return simulationVIs;
 }
 
 static s32 Graphics_InterpolationEligible(void) {
-    if ((gGameState != GSTATE_PLAY) || (gDrawMode != DRAW_PLAY) || (gPlayState == PLAY_PAUSE)) {
-        return false;
+    if (Graphics_Is60FpsScene()) {
+        return true;
     }
-    return ((gCurrentLevel == LEVEL_AQUAS) && (gVIsPerFrame == PSP_AQUAS_SIMULATION_VI_INTERVAL)) ||
-           ((gCurrentLevel == LEVEL_TRAINING) && (gVIsPerFrame == PSP_TRAINING_SIMULATION_VI_INTERVAL));
+    return (gGameState == GSTATE_PLAY) && (gDrawMode == DRAW_PLAY) && (gPlayState != PLAY_PAUSE) &&
+           (gCurrentLevel == LEVEL_AQUAS) && (gVIsPerFrame == PSP_AQUAS_SIMULATION_VI_INTERVAL);
 }
 
 static void Graphics_FinalizeDisplayList(void) {
