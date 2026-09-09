@@ -314,20 +314,31 @@ void Timer_ThreadEntry(void* arg0) {
 }
 
 #ifdef TARGET_PSP
-#define PSP_PRESENTATION_VI_INTERVAL 2
+#define PSP_AQUAS_SIMULATION_VI_INTERVAL 3
+#define PSP_AQUAS_PRESENTATION_VI_INTERVAL 2
+#define PSP_TRAINING_SIMULATION_VI_INTERVAL 2
+#define PSP_TRAINING_PRESENTATION_VI_INTERVAL 1
 
 static u8 Graphics_GetPresentationVIs(void) {
     u8 simulationVIs = MIN(MAX(gVIsPerFrame, 1), 4);
 
-    if ((gGameState == GSTATE_PLAY) && (gCurrentLevel == LEVEL_AQUAS) && (simulationVIs == 3)) {
-        return PSP_PRESENTATION_VI_INTERVAL;
+    if ((gGameState == GSTATE_PLAY) && (gCurrentLevel == LEVEL_AQUAS) &&
+        (simulationVIs == PSP_AQUAS_SIMULATION_VI_INTERVAL)) {
+        return PSP_AQUAS_PRESENTATION_VI_INTERVAL;
+    }
+    if ((gGameState == GSTATE_PLAY) && (gCurrentLevel == LEVEL_TRAINING) &&
+        (simulationVIs == PSP_TRAINING_SIMULATION_VI_INTERVAL)) {
+        return PSP_TRAINING_PRESENTATION_VI_INTERVAL;
     }
     return simulationVIs;
 }
 
 static s32 Graphics_InterpolationEligible(void) {
-    return (gGameState == GSTATE_PLAY) && (gCurrentLevel == LEVEL_AQUAS) && (gDrawMode == DRAW_PLAY) &&
-           (gPlayState != PLAY_PAUSE) && (gVIsPerFrame == 3);
+    if ((gGameState != GSTATE_PLAY) || (gDrawMode != DRAW_PLAY) || (gPlayState == PLAY_PAUSE)) {
+        return false;
+    }
+    return ((gCurrentLevel == LEVEL_AQUAS) && (gVIsPerFrame == PSP_AQUAS_SIMULATION_VI_INTERVAL)) ||
+           ((gCurrentLevel == LEVEL_TRAINING) && (gVIsPerFrame == PSP_TRAINING_SIMULATION_VI_INTERVAL));
 }
 
 static void Graphics_FinalizeDisplayList(void) {

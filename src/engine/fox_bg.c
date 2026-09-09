@@ -1,6 +1,7 @@
 #include "global.h"
 
 #ifdef TARGET_PSP
+#include "src/psp/frame_interpolation.h"
 #include "src/psp/display.h"
 #include "src/psp/renderer_starfield.h"
 #endif
@@ -1038,6 +1039,7 @@ void Background_DrawGround(void) {
     Gfx* groundDL;
 #ifdef TARGET_PSP
     bool widescreen;
+    bool trainingGroundWrapped;
 #endif
 
     if ((gCurrentLevel != LEVEL_VENOM_2) && ((gPlayer[0].cam.eye.y > 4000.0f) || !gDrawGround)) {
@@ -1049,6 +1051,7 @@ void Background_DrawGround(void) {
     }
 #ifdef TARGET_PSP
     widescreen = PspDisplay_IsWidescreen();
+    trainingGroundWrapped = false;
 #endif
 
     zPos = 0.0f;
@@ -1269,7 +1272,13 @@ void Background_DrawGround(void) {
             if (gLevelMode == LEVELMODE_ON_RAILS) {
                 if (gPathTexScroll > 290.0f) {
                     gPathTexScroll -= 290.0f;
+#ifdef TARGET_PSP
+                    trainingGroundWrapped = true;
+#endif
                 }
+#ifdef TARGET_PSP
+                PspFrameInterpolation_SetMatrixScrollWrap(trainingGroundWrapped ? 290.0f : 0.0f, 0.5f);
+#endif
                 Matrix_Push(&gGfxMatrix);
                 Matrix_Translate(gGfxMatrix, 0.0f, 0.0f, -3000.0f + gPathTexScroll, MTXF_APPLY);
                 Matrix_Scale(gGfxMatrix, 1.0f, 1.0f, 0.5f, MTXF_APPLY);
@@ -1283,6 +1292,9 @@ void Background_DrawGround(void) {
                 Matrix_SetGfxMtx(&gMasterDisp);
                 gSPDisplayList(gMasterDisp++, aTrGroundDL);
                 Matrix_Pop(&gGfxMatrix);
+#ifdef TARGET_PSP
+                PspFrameInterpolation_SetMatrixScrollWrap(0.0f, 1.0f);
+#endif
             } else {
                 for (i = 0; i < ARRAY_COUNT(sGroundPositions360x); i++) {
                     Matrix_Push(&gGfxMatrix);

@@ -24,8 +24,11 @@ typedef struct {
     u8 simulationVIs;
     u8 valid;
     u8 eligible;
+    f32 scrollWrapDistance;
+    f32 scrollWrapScale;
     u8 flags[PSP_FRAME_INTERPOLATION_MATRIX_CAPACITY];
     u8 world[PSP_FRAME_INTERPOLATION_MATRIX_CAPACITY];
+    u8 scrollWrap[PSP_FRAME_INTERPOLATION_MATRIX_CAPACITY];
     PspFrameInterpolationPresentation presentation;
 } PspFrameInterpolationPool;
 
@@ -34,6 +37,8 @@ static u32 sGeneration;
 static s32 sRecordingPool = -1;
 static s32 sPresentationPool = -1;
 static s32 sWorldScope;
+static f32 sScrollWrapDistance;
+static f32 sScrollWrapScale = 1.0f;
 
 static s32 psp_frame_interpolation_pool_for_task(const SPTask* task) {
     if (task == &gGfxPools[0].task) {
@@ -79,6 +84,8 @@ void PspFrameInterpolation_Reset(void) {
     sRecordingPool = -1;
     sPresentationPool = -1;
     sWorldScope = false;
+    sScrollWrapDistance = 0.0f;
+    sScrollWrapScale = 1.0f;
 }
 
 void PspFrameInterpolation_BeginSimulationFrame(SPTask* task, u32 simulationVi, u8 simulationVIs, s32 record) {
@@ -87,6 +94,8 @@ void PspFrameInterpolation_BeginSimulationFrame(SPTask* task, u32 simulationVi, 
 
     sRecordingPool = -1;
     sWorldScope = false;
+    sScrollWrapDistance = 0.0f;
+    sScrollWrapScale = 1.0f;
     if (pool < 0) {
         return;
     }
@@ -99,6 +108,8 @@ void PspFrameInterpolation_BeginSimulationFrame(SPTask* task, u32 simulationVi, 
     state->simulationVIs = simulationVIs;
     state->valid = false;
     state->eligible = false;
+    state->scrollWrapDistance = 0.0f;
+    state->scrollWrapScale = 1.0f;
     psp_frame_interpolation_clear_presentation(&state->presentation);
     if (record) {
         sRecordingPool = pool;
@@ -107,6 +118,11 @@ void PspFrameInterpolation_BeginSimulationFrame(SPTask* task, u32 simulationVi, 
 
 void PspFrameInterpolation_SetWorldScope(s32 enabled) {
     sWorldScope = enabled != 0;
+}
+
+void PspFrameInterpolation_SetMatrixScrollWrap(f32 distance, f32 scale) {
+    sScrollWrapDistance = distance;
+    sScrollWrapScale = scale;
 }
 
 void PspFrameInterpolation_RecordMatrix(const Mtx* matrix, u32 flags) {
@@ -126,6 +142,11 @@ void PspFrameInterpolation_RecordMatrix(const Mtx* matrix, u32 flags) {
     world = sWorldScope && ((flags & G_MTX_PROJECTION) == 0);
     state->flags[index] = (u8) flags;
     state->world[index] = world;
+    state->scrollWrap[index] = world && (sScrollWrapDistance != 0.0f);
+    if (state->scrollWrap[index]) {
+        state->scrollWrapDistance = sScrollWrapDistance;
+        state->scrollWrapScale = sScrollWrapScale;
+    }
     if (world) {
         state->worldCount++;
         state->worldEnd = index + 1;
@@ -141,6 +162,8 @@ void PspFrameInterpolation_EndSimulationFrame(SPTask* task, s32 eligible) {
     }
     sRecordingPool = -1;
     sWorldScope = false;
+    sScrollWrapDistance = 0.0f;
+    sScrollWrapScale = 1.0f;
 }
 
 static s32 psp_frame_interpolation_topology_matches(const PspFrameInterpolationPool* current,
@@ -216,6 +239,7 @@ s32 PspFrameInterpolation_ResolveMatrix(const Mtx* currentMatrix, u32 flags, Mat
     PspFrameInterpolationPresentation* presentation;
     const Matrix* currentValue;
     const Matrix* previousValue;
+    Matrix adjustedCurrent;
     f32 alpha;
     u32 row;
     u32 column;
@@ -240,6 +264,15 @@ s32 PspFrameInterpolation_ResolveMatrix(const Mtx* currentMatrix, u32 flags, Mat
 
     currentValue = (const Matrix*) currentMatrix;
     previousValue = (const Matrix*) &gGfxPools[pool ^ 1].mtx[index];
+    if (current->scrollWrap[index] && !sPools[pool ^ 1].scrollWrap[index] &&
+        (current->scrollWrapScale != 0.0f)) {
+        adjustedCurrent = *currentValue;
+        for (column = 0; column < 4; column++) {
+            adjustedCurrent.m[3][column] +=
+                adjustedCurrent.m[2][column] * (current->scrollWrapDistance / current->scrollWrapScale);
+        }
+        currentValue = &adjustedCurrent;
+    }
     alpha = presentation->alpha;
     for (row = 0; row < 4; row++) {
         for (column = 0; column < 4; column++) {
