@@ -31,7 +31,7 @@
 #include "prevent_bss_reordering2.h"
 // #include "prevent_bss_reordering3.h"
 
-/* Capacity of the runtime star arrays allocated by Play_GenerateStarfield(). */
+// Capacity of the arrays allocated by Play_GenerateStarfield()
 #define STARFIELD_SOURCE_CAPACITY 1000
 
 
@@ -319,6 +319,9 @@ void Background_DrawBackdrop(void) {
                 case LEVEL_KATINA:
                 case LEVEL_VENOM_2:
                 case LEVEL_VERSUS:
+#ifdef TARGET_PSP
+                    PspFrameInterpolation_SetMatrixWrap(PSP_FRAME_INTERPOLATION_WRAP_X, 7280.0f, 1.0f);
+#endif
                     bgYpos = (gPlayer[gPlayerNum].camPitch * -6000.0f) - (gPlayer[gPlayerNum].cam.eye.y * 0.4f);
                     bgXpos2 =
                         Math_ModF(Math_RadToDeg(gPlayer[gPlayerNum].camYaw) * (-7280.0f / 360.0f) * 5.0f, 7280.0f);
@@ -414,10 +417,17 @@ void Background_DrawBackdrop(void) {
                         }
                     }
 #endif
+#ifdef TARGET_PSP
+                    PspFrameInterpolation_SetMatrixWrap(PSP_FRAME_INTERPOLATION_WRAP_NONE, 0.0f, 1.0f);
+#endif
                     break;
 
                 case LEVEL_CORNERIA:
                 case LEVEL_VENOM_1:
+#ifdef TARGET_PSP
+                    // backdrop repeats every 7280 units
+                    PspFrameInterpolation_SetMatrixWrap(PSP_FRAME_INTERPOLATION_WRAP_X, 7280.0f, 1.0f);
+#endif
                     bgYpos = (gPlayer[gPlayerNum].camPitch * -6000.0f) - (gPlayer[gPlayerNum].cam.eye.y * 0.6f);
                     bgXpos2 =
                         Math_ModF(Math_RadToDeg(gPlayer[gPlayerNum].camYaw) * (-7280.0f / 360.0f) * 5.0f, 7280.0f);
@@ -468,6 +478,9 @@ void Background_DrawBackdrop(void) {
                         }
                     }
 #endif
+#ifdef TARGET_PSP
+                    PspFrameInterpolation_SetMatrixWrap(PSP_FRAME_INTERPOLATION_WRAP_NONE, 0.0f, 1.0f);
+#endif
                     break;
 
                 case LEVEL_VENOM_ANDROSS:
@@ -478,6 +491,9 @@ void Background_DrawBackdrop(void) {
                             Matrix_SetGfxMtx(&gMasterDisp);
                             gSPDisplayList(gMasterDisp++, aVe2BackdropDL);
                         } else if ((gDrawBackdrop == 3) || (gDrawBackdrop == 4)) {
+#ifdef TARGET_PSP
+                            PspFrameInterpolation_SetMatrixWrap(PSP_FRAME_INTERPOLATION_WRAP_X, 7280.0f, 1.0f);
+#endif
                             RCP_SetupDL(&gMasterDisp, SETUPDL_62);
 
                             if (gDrawBackdrop == 4) {
@@ -504,6 +520,9 @@ void Background_DrawBackdrop(void) {
                             Matrix_Translate(gGfxMatrix, 7280.0f, 0.0f, 0.0f, MTXF_APPLY);
                             Matrix_SetGfxMtx(&gMasterDisp);
                             gSPDisplayList(gMasterDisp++, aVe2AndBrainBackdropDL);
+#ifdef TARGET_PSP
+                            PspFrameInterpolation_SetMatrixWrap(PSP_FRAME_INTERPOLATION_WRAP_NONE, 0.0f, 1.0f);
+#endif
                         } else {
                         fake_label: // fake
                             RCP_SetupDL(&gMasterDisp, SETUPDL_62);
@@ -537,6 +556,9 @@ void Background_DrawBackdrop(void) {
 
                 case LEVEL_AQUAS:
                     if (gPlayer[0].state == PLAYERSTATE_LEVEL_INTRO) {
+#ifdef TARGET_PSP
+                        PspFrameInterpolation_SetMatrixWrap(PSP_FRAME_INTERPOLATION_WRAP_X, 7280.0f, 1.0f);
+#endif
                         bgXpos2 = Math_RadToDeg(gPlayer[gPlayerNum].camYaw) - gPlayer[gPlayerNum].yRot_114;
                         bgYpos = (gPlayer[gPlayerNum].camPitch * -7000.0f) - (gPlayer[gPlayerNum].cam.eye.y * 0.6f);
                         bgXpos2 = Math_ModF(bgXpos2 * -40.44444f * 2.0f, 7280.0f); // close to 7280.0f / 180.0f
@@ -567,6 +589,9 @@ void Background_DrawBackdrop(void) {
                             gSPDisplayList(gMasterDisp++, aAqBackdropDL);
                         }
                         Matrix_Pop(&gGfxMatrix);
+#ifdef TARGET_PSP
+                        PspFrameInterpolation_SetMatrixWrap(PSP_FRAME_INTERPOLATION_WRAP_NONE, 0.0f, 1.0f);
+#endif
                     }
                     break;
 
@@ -574,6 +599,9 @@ void Background_DrawBackdrop(void) {
                 case LEVEL_ZONESS:
                 case LEVEL_MACBETH:
                 case LEVEL_TITANIA:
+#ifdef TARGET_PSP
+                    PspFrameInterpolation_SetMatrixWrap(PSP_FRAME_INTERPOLATION_WRAP_X, 7280.0f, 1.0f);
+#endif
                     sp12C = Math_RadToDeg(gPlayer[gPlayerNum].camYaw) - gPlayer[gPlayerNum].yRot_114;
                     bgYpos = (gPlayer[gPlayerNum].camPitch * -7000.0f) - (gPlayer[gPlayerNum].cam.eye.y * 0.6f);
                     bgXpos2 = sp12C * -40.44444f * 2.0f; // close to 7280.0f / 180.0f
@@ -632,6 +660,9 @@ void Background_DrawBackdrop(void) {
                     } else if (gCurrentLevel == LEVEL_SOLAR) {
                         gSPDisplayList(gMasterDisp++, aSoBackdropDL);
                     }
+#ifdef TARGET_PSP
+                    PspFrameInterpolation_SetMatrixWrap(PSP_FRAME_INTERPOLATION_WRAP_NONE, 0.0f, 1.0f);
+#endif
                     break;
             }
             break;
@@ -1039,7 +1070,6 @@ void Background_DrawGround(void) {
     Gfx* groundDL;
 #ifdef TARGET_PSP
     bool widescreen;
-    bool trainingGroundWrapped;
 #endif
 
     if ((gCurrentLevel != LEVEL_VENOM_2) && ((gPlayer[0].cam.eye.y > 4000.0f) || !gDrawGround)) {
@@ -1051,7 +1081,6 @@ void Background_DrawGround(void) {
     }
 #ifdef TARGET_PSP
     widescreen = PspDisplay_IsWidescreen();
-    trainingGroundWrapped = false;
 #endif
 
     zPos = 0.0f;
@@ -1272,12 +1301,9 @@ void Background_DrawGround(void) {
             if (gLevelMode == LEVELMODE_ON_RAILS) {
                 if (gPathTexScroll > 290.0f) {
                     gPathTexScroll -= 290.0f;
-#ifdef TARGET_PSP
-                    trainingGroundWrapped = true;
-#endif
                 }
 #ifdef TARGET_PSP
-                PspFrameInterpolation_SetMatrixScrollWrap(trainingGroundWrapped ? 290.0f : 0.0f, 0.5f);
+                PspFrameInterpolation_SetMatrixWrap(PSP_FRAME_INTERPOLATION_WRAP_Z, 290.0f, 0.5f);
 #endif
                 Matrix_Push(&gGfxMatrix);
                 Matrix_Translate(gGfxMatrix, 0.0f, 0.0f, -3000.0f + gPathTexScroll, MTXF_APPLY);
@@ -1293,7 +1319,7 @@ void Background_DrawGround(void) {
                 gSPDisplayList(gMasterDisp++, aTrGroundDL);
                 Matrix_Pop(&gGfxMatrix);
 #ifdef TARGET_PSP
-                PspFrameInterpolation_SetMatrixScrollWrap(0.0f, 1.0f);
+                PspFrameInterpolation_SetMatrixWrap(PSP_FRAME_INTERPOLATION_WRAP_NONE, 0.0f, 1.0f);
 #endif
             } else {
                 for (i = 0; i < ARRAY_COUNT(sGroundPositions360x); i++) {

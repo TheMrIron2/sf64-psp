@@ -156,6 +156,11 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
             return;
         }
 
+        if (!PspFrameInterpolation_ShouldPresent(task)) {
+            PspFrameInterpolation_FinishPresentation(task);
+            return;
+        }
+
     #if PSP_FPS_OVERLAY
         renderStart = sceKernelGetSystemTimeWide();
     #endif

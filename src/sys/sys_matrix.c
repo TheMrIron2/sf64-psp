@@ -518,13 +518,22 @@ void Matrix_LookAt(Matrix* mtx, f32 xEye, f32 yEye, f32 zEye, f32 xAt, f32 yAt, 
 }
 
 // Converts the current Gfx matrix to a Mtx and sets it to the display list
+#ifdef TARGET_PSP
+static void Matrix_SetGfxMtxFromMatrixTagged(Gfx** gfx, const Matrix* src, u32 flags, const void* drawSite);
+#endif
+
 void Matrix_SetGfxMtx(Gfx** gfx) {
+#ifdef TARGET_PSP
+    Matrix_SetGfxMtxFromMatrixTagged(gfx, gGfxMatrix, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_MODELVIEW,
+                                     __builtin_return_address(0));
+#else
     Matrix_SetGfxMtxFlags(gfx, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_MODELVIEW);
+#endif
 }
 
 void Matrix_SetGfxMtxFlags(Gfx** gfx, u32 flags) {
 #ifdef TARGET_PSP
-    Matrix_SetGfxMtxFromMatrix(gfx, gGfxMatrix, flags);
+    Matrix_SetGfxMtxFromMatrixTagged(gfx, gGfxMatrix, flags, __builtin_return_address(0));
 #else
     Matrix_ToMtx(gGfxMtx);
     gSPMatrix((*gfx)++, gGfxMtx++, flags);
@@ -535,10 +544,14 @@ void Matrix_SetGfxMtxFlags(Gfx** gfx, u32 flags) {
 typedef char MatrixMtxSizeCheck[(sizeof(Matrix) == sizeof(Mtx)) ? 1 : -1];
 
 void Matrix_SetGfxMtxFromMatrix(Gfx** gfx, const Matrix* src, u32 flags) {
+    Matrix_SetGfxMtxFromMatrixTagged(gfx, src, flags, __builtin_return_address(0));
+}
+
+static void Matrix_SetGfxMtxFromMatrixTagged(Gfx** gfx, const Matrix* src, u32 flags, const void* drawSite) {
     Mtx* dest = gGfxMtx++;
 
     *(Matrix*) dest = *src;
-    PspFrameInterpolation_RecordMatrix(dest, flags);
+    PspFrameInterpolation_RecordMatrix(dest, flags, drawSite);
     PSP_RENDERER_DL_MTXF((*gfx)++, dest, flags);
 }
 #endif
