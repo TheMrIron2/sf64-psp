@@ -31,6 +31,7 @@ typedef struct {
     u8 wrapAxis[PSP_FRAME_INTERPOLATION_MATRIX_CAPACITY];
     f32 wrapPeriod[PSP_FRAME_INTERPOLATION_MATRIX_CAPACITY];
     const void* drawSite[PSP_FRAME_INTERPOLATION_MATRIX_CAPACITY];
+    const void* identity[PSP_FRAME_INTERPOLATION_MATRIX_CAPACITY];
     PspFrameInterpolationPresentation presentation;
 } PspFrameInterpolationPool;
 
@@ -39,6 +40,7 @@ static u32 sGeneration;
 static s32 sRecordingPool = -1;
 static s32 sPresentationPool = -1;
 static s32 sWorldScope;
+static const void* sMatrixIdentity;
 static PspFrameInterpolationWrapAxis sWrapAxis;
 static f32 sWrapPeriod;
 
@@ -88,6 +90,7 @@ void PspFrameInterpolation_Reset(void) {
     sRecordingPool = -1;
     sPresentationPool = -1;
     sWorldScope = false;
+    sMatrixIdentity = NULL;
     sWrapAxis = PSP_FRAME_INTERPOLATION_WRAP_NONE;
     sWrapPeriod = 0.0f;
 }
@@ -98,6 +101,7 @@ void PspFrameInterpolation_BeginSimulationFrame(SPTask* task, u32 simulationVi, 
 
     sRecordingPool = -1;
     sWorldScope = false;
+    sMatrixIdentity = NULL;
     sWrapAxis = PSP_FRAME_INTERPOLATION_WRAP_NONE;
     sWrapPeriod = 0.0f;
     if (pool < 0) {
@@ -120,6 +124,10 @@ void PspFrameInterpolation_BeginSimulationFrame(SPTask* task, u32 simulationVi, 
 
 void PspFrameInterpolation_SetWorldScope(s32 enabled) {
     sWorldScope = enabled != 0;
+}
+
+void PspFrameInterpolation_SetMatrixIdentity(const void* identity) {
+    sMatrixIdentity = identity;
 }
 
 void PspFrameInterpolation_SetMatrixWrap(PspFrameInterpolationWrapAxis axis, f32 distance, f32 scale) {
@@ -151,6 +159,7 @@ void PspFrameInterpolation_RecordMatrix(const Mtx* matrix, u32 flags, const void
     state->flags[index] = (u8) flags;
     state->world[index] = world;
     state->drawSite[index] = drawSite;
+    state->identity[index] = world ? sMatrixIdentity : NULL;
     state->wrapAxis[index] = world ? (u8) sWrapAxis : PSP_FRAME_INTERPOLATION_WRAP_NONE;
     state->wrapPeriod[index] = world ? sWrapPeriod : 0.0f;
     if (world) {
@@ -168,6 +177,7 @@ void PspFrameInterpolation_EndSimulationFrame(SPTask* task, s32 eligible) {
     }
     sRecordingPool = -1;
     sWorldScope = false;
+    sMatrixIdentity = NULL;
     sWrapAxis = PSP_FRAME_INTERPOLATION_WRAP_NONE;
     sWrapPeriod = 0.0f;
 }
@@ -179,9 +189,12 @@ static s32 psp_frame_interpolation_topology_matches(const PspFrameInterpolationP
     if ((current->worldEnd != previous->worldEnd) || (current->worldCount != previous->worldCount)) {
         return false;
     }
+    /* A call site can submit many objects from a pool. The instance identity
+     * prevents equal-sized draw streams from pairing different objects. */
     for (i = 0; i < current->worldEnd; i++) {
         if ((current->flags[i] != previous->flags[i]) || (current->world[i] != previous->world[i]) ||
             (current->world[i] && ((current->drawSite[i] != previous->drawSite[i]) ||
+                                   (current->identity[i] != previous->identity[i]) ||
                                    (current->wrapAxis[i] != previous->wrapAxis[i]) ||
                                    (current->wrapPeriod[i] != previous->wrapPeriod[i])))) {
             return false;

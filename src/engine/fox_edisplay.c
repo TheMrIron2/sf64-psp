@@ -29,6 +29,7 @@
 #include "assets/ast_zoness.h"
 #include "actordebris.h"
 #ifdef TARGET_PSP
+#include "src/psp/frame_interpolation.h"
 #include "src/psp/renderer.h"
 #endif
 
@@ -1743,6 +1744,9 @@ void Object_DrawAll(s32 cullDirection) {
 
         for (i = 0, scenery360 = gScenery360; i < 200; i++, scenery360++) {
             if ((scenery360->obj.status == OBJ_ACTIVE) && (scenery360->obj.id != OBJ_SCENERY_LEVEL_OBJECTS)) {
+#ifdef TARGET_PSP
+                PspFrameInterpolation_SetMatrixIdentity(&scenery360->obj);
+#endif
                 if (gCurrentLevel == LEVEL_BOLSE) {
                     spAC.x = scenery360->sfxSource[0];
                     spAC.y = scenery360->sfxSource[1];
@@ -1760,6 +1764,9 @@ void Object_DrawAll(s32 cullDirection) {
 
         for (i = 0, scenery = &gScenery[0]; i < ARRAY_COUNT(gScenery); i++, scenery++) {
             if (scenery->obj.status >= OBJ_ACTIVE) {
+#ifdef TARGET_PSP
+                PspFrameInterpolation_SetMatrixIdentity(&scenery->obj);
+#endif
                 if (cullDirection > 0) {
                     Display_SetSecondLight(&scenery->obj.pos);
                 }
@@ -1773,6 +1780,9 @@ void Object_DrawAll(s32 cullDirection) {
 
     for (i = 0, boss = &gBosses[0]; i < ARRAY_COUNT(gBosses); i++, boss++) {
         if ((boss->obj.status >= OBJ_ACTIVE) && (boss->obj.id != OBJ_BOSS_BO_BASE_SHIELD)) {
+#ifdef TARGET_PSP
+            PspFrameInterpolation_SetMatrixIdentity(&boss->obj);
+#endif
             if ((boss->timer_05C % 2) == 0) {
                 RCP_SetupDL_29(gFogRed, gFogGreen, gFogBlue, gFogAlpha, gFogNear, gFogFar);
             } else {
@@ -1797,6 +1807,9 @@ void Object_DrawAll(s32 cullDirection) {
 
     for (i = 0, sprite = &gSprites[0]; i < ARRAY_COUNT(gSprites); i++, sprite++) {
         if ((sprite->obj.status >= OBJ_ACTIVE) && func_enmy_80060FE4(&sprite->obj.pos, -12000.0f)) {
+#ifdef TARGET_PSP
+            PspFrameInterpolation_SetMatrixIdentity(&sprite->obj);
+#endif
             Matrix_Push(&gGfxMatrix);
 
             if ((sprite->obj.id == OBJ_SPRITE_CO_RUIN1) || (sprite->obj.id == OBJ_SPRITE_CO_RUIN2)) {
@@ -1812,6 +1825,9 @@ void Object_DrawAll(s32 cullDirection) {
 
     for (i = 0, actor = &gActors[0]; i < ARRAY_COUNT(gActors); i++, actor++) {
         if (actor->obj.status >= OBJ_ACTIVE) {
+#ifdef TARGET_PSP
+            PspFrameInterpolation_SetMatrixIdentity(&actor->obj);
+#endif
             if ((actor->timer_0C6 % 2) == 0) {
                 if (gCurrentLevel == LEVEL_UNK_15) {
                     RCP_SetupDL_23();
@@ -1871,6 +1887,9 @@ void Object_DrawAll(s32 cullDirection) {
 
     for (i = 0, item = &gItems[0]; i < ARRAY_COUNT(gItems); i++, item++) {
         if (item->obj.status >= OBJ_ACTIVE) {
+#ifdef TARGET_PSP
+            PspFrameInterpolation_SetMatrixIdentity(&item->obj);
+#endif
             Matrix_Push(&gGfxMatrix);
             RCP_SetupDL(&gMasterDisp, SETUPDL_29);
             Object_SetCullDirection(cullDirection);
@@ -1881,6 +1900,9 @@ void Object_DrawAll(s32 cullDirection) {
 
     Lights_SetOneLight(&gMasterDisp, gLight1x, gLight1y, gLight1z, gLight1R, gLight1G, gLight1B, gAmbientR, gAmbientG,
                        gAmbientB);
+#ifdef TARGET_PSP
+    PspFrameInterpolation_SetMatrixIdentity(NULL);
+#endif
 }
 
 void Effect_DrawAll(s32 arg0) {
@@ -1892,6 +1914,9 @@ void Effect_DrawAll(s32 arg0) {
 
     for (i = 0, effect = &gEffects[0]; i < ARRAY_COUNT(gEffects); i++, effect++) {
         if (effect->obj.status >= OBJ_ACTIVE) {
+#ifdef TARGET_PSP
+            PspFrameInterpolation_SetMatrixIdentity(&effect->obj);
+#endif
             if (effect->info.unk_14 == 1) {
                 effect->obj.rot.y = RAD_TO_DEG(-gPlayer[gPlayerNum].camYaw);
                 effect->obj.rot.x = RAD_TO_DEG(gPlayer[gPlayerNum].camPitch);
@@ -1917,6 +1942,9 @@ void Effect_DrawAll(s32 arg0) {
 
     for (i = 0, boss = &gBosses[0]; i < ARRAY_COUNT(gBosses); i++, boss++) {
         if ((boss->obj.status >= OBJ_ACTIVE) && (boss->obj.id == OBJ_BOSS_BO_BASE_SHIELD)) {
+#ifdef TARGET_PSP
+            PspFrameInterpolation_SetMatrixIdentity(&boss->obj);
+#endif
             if ((boss->timer_05C % 2) == 0) {
                 RCP_SetupDL_29(gFogRed, gFogGreen, gFogBlue, gFogAlpha, gFogNear, gFogFar);
             } else {
@@ -1928,6 +1956,9 @@ void Effect_DrawAll(s32 arg0) {
             Matrix_Pop(&gGfxMatrix);
         }
     }
+#ifdef TARGET_PSP
+    PspFrameInterpolation_SetMatrixIdentity(NULL);
+#endif
 }
 
 void Object_Draw(s32 arg0) {
