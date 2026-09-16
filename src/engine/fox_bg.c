@@ -187,7 +187,7 @@ void Background_DrawStarfield(void) {
             vx = (zCos * bx) + (zSin * by) + SCREEN_WIDTH / 2.0f;
             vy = (-zSin * bx) + (zCos * by) + SCREEN_HEIGHT / 2.0f;
             if ((vx >= 0) && (vx < SCREEN_WIDTH) && (vy > 0) && (vy < SCREEN_HEIGHT)) {
-                PspStarfield_Add(vx, vy, *color);
+                PspStarfield_Add((u16) i, vx, vy, *color);
             }
         }
 

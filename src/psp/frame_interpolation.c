@@ -1,6 +1,7 @@
 #include "global.h"
 #include "src/psp/frame_interpolation.h"
 #include "src/psp/profiler.h"
+#include "src/psp/renderer_starfield.h"
 
 #define PSP_FRAME_INTERPOLATION_MATRIX_CAPACITY 0x480
 
@@ -93,6 +94,7 @@ void PspFrameInterpolation_Reset(void) {
     sMatrixIdentity = NULL;
     sWrapAxis = PSP_FRAME_INTERPOLATION_WRAP_NONE;
     sWrapPeriod = 0.0f;
+    PspStarfield_Reset();
 }
 
 void PspFrameInterpolation_BeginSimulationFrame(SPTask* task, u32 simulationVi, u8 simulationVIs, s32 record) {
@@ -104,6 +106,7 @@ void PspFrameInterpolation_BeginSimulationFrame(SPTask* task, u32 simulationVi, 
     sMatrixIdentity = NULL;
     sWrapAxis = PSP_FRAME_INTERPOLATION_WRAP_NONE;
     sWrapPeriod = 0.0f;
+    PspStarfield_BeginSimulationFrame(task);
     if (pool < 0) {
         return;
     }
@@ -214,6 +217,7 @@ SPTask* PspFrameInterpolation_PreparePresentation(SPTask* task, u32 presentation
     s32 pool = psp_frame_interpolation_pool_for_task(task);
 
     sPresentationPool = -1;
+    PspStarfield_PreparePresentation(task, NULL, 1.0f);
     if (pool < 0) {
         return NULL;
     }
@@ -254,6 +258,7 @@ SPTask* PspFrameInterpolation_PreparePresentation(SPTask* task, u32 presentation
     presentation->interpolated = 1;
     presentation->alpha = (f32) offset / (f32) span;
     sPresentationPool = pool;
+    PspStarfield_PreparePresentation(task, &gGfxPools[pool ^ 1].task, presentation->alpha);
     return &gGfxPools[pool ^ 1].task;
 }
 
