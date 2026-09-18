@@ -13,6 +13,7 @@ typedef struct {
 
 typedef struct {
     u32 elapsedVIs;
+    u32 simulationDeadlineVi;
     u32 missedSimulationDeadlines;
     u32 missedPresentationDeadlines;
     u8 simulationDue;

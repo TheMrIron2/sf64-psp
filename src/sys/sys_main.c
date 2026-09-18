@@ -429,7 +429,7 @@ static void Graphics_RunPspScheduler(SPTask* reusableTask, FrameBuffer* reusable
                 inFlightTask = NULL;
                 inFlightDependency = NULL;
             }
-            pendingTask = Graphics_BuildSimulationTask(currentVi);
+            pendingTask = Graphics_BuildSimulationTask(schedule.simulationDeadlineVi);
             pendingFrameBuffer = gFrameBuffer;
             PspFrameScheduler_SetSimulationVIs(&scheduler, currentVi, gVIsPerFrame);
             PspFrameScheduler_SetPresentationVIs(&scheduler, currentVi, Graphics_GetPresentationVIs());

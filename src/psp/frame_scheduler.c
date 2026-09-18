@@ -37,6 +37,7 @@ PspFrameSchedule PspFrameScheduler_Advance(PspFrameScheduler* scheduler, u32 cur
         scheduler->nextSimulationVi =
             psp_frame_scheduler_advance_deadline(scheduler->nextSimulationVi, currentVi, scheduler->simulationVIs,
                                                  &schedule.missedSimulationDeadlines);
+        schedule.simulationDeadlineVi = scheduler->nextSimulationVi - scheduler->simulationVIs;
     }
     if ((s32) (currentVi - scheduler->nextPresentationVi) >= 0) {
         schedule.presentationDue = 1;
