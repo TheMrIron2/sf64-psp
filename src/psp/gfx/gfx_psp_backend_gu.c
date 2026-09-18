@@ -906,6 +906,7 @@ void PspGfxBackend_DrawReservedTriangles(const PspGfxVertexReservation* reservat
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_SUBMIT);
     PspProfiler_CountDrawCall(vertexCount);
     psp_gfx_gu_count_reserved_vertex_draw(vertexCount);
+    guReservation->active = 0;
 }
 
 void PspGfxBackend_DrawFogTriangles(const PspGfxFogVertex* vertices, u32 vertexCount,
