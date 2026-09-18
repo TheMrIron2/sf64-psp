@@ -3,7 +3,6 @@
 
 #include "PR/ultratypes.h"
 #include "libultra/ultra64.h"
-#include "src/psp/hw_counter_profile.h"
 
 typedef struct {
     u32 commandCount;

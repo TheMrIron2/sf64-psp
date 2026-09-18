@@ -4546,6 +4546,7 @@ static u32 psp_gfx_dl_emit_clipped_triangle(PspGfxDlContext* ctx, const PspGfxDl
     u32 emittedCount = 0;
     u32 plane;
     u32 i;
+    u32 combinedClipCode = a->clipCode | b->clipCode | c->clipCode;
 
     PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_CLIPPING);
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_CLIPPING);
@@ -4553,6 +4554,9 @@ static u32 psp_gfx_dl_emit_clipped_triangle(PspGfxDlContext* ctx, const PspGfxDl
     psp_gfx_dl_build_clip_vertex(ctx, b, &input[1]);
     psp_gfx_dl_build_clip_vertex(ctx, c, &input[2]);
     for (plane = 0; plane < PSP_GFX_DL_CLIP_PLANES; plane++) {
+        if ((combinedClipCode & (1U << plane)) == 0) {
+            continue;
+        }
         vertexCount = psp_gfx_dl_clip_polygon_plane(input, vertexCount, output, plane);
         if (vertexCount < 3) {
             PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_CLIPPING);
