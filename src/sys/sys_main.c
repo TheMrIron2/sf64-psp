@@ -7,6 +7,7 @@
 #include "src/psp/frame_scheduler.h"
 #include "src/psp/platform.h"
 #include "src/psp/profiler.h"
+#include "src/psp/renderer.h"
 #endif
 
 #if defined(TARGET_PSP) && !defined(PSP_TRACE_ENABLED)
@@ -318,6 +319,7 @@ void Timer_ThreadEntry(void* arg0) {
 #define PSP_AQUAS_PRESENTATION_VI_INTERVAL 2
 #define PSP_30FPS_SIMULATION_VI_INTERVAL 2
 #define PSP_60FPS_PRESENTATION_VI_INTERVAL 1
+#define PSP_MAX_SIMULATION_TICKS_PER_WAKE 2
 
 static s32 Graphics_Is60FpsScene(void) {
     if (gVIsPerFrame != PSP_30FPS_SIMULATION_VI_INTERVAL) {
@@ -400,6 +402,12 @@ static void Graphics_WaitForTask(s32* taskInFlight) {
     *taskInFlight = false;
 }
 
+static void Graphics_UpdateAudio(void) {
+    PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_AUDIO_UPDATE);
+    Audio_Update();
+    PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_AUDIO_UPDATE);
+}
+
 static void Graphics_RunPspScheduler(SPTask* reusableTask, FrameBuffer* reusableFrameBuffer, s32 taskInFlight) {
     PspFrameScheduler scheduler;
     PspFrameSchedule schedule;
@@ -408,6 +416,7 @@ static void Graphics_RunPspScheduler(SPTask* reusableTask, FrameBuffer* reusable
     SPTask* pendingTask = NULL;
     FrameBuffer* pendingFrameBuffer = NULL;
     u32 currentVi = PspPlatform_GetViCount();
+    u32 simulationTicks;
     u32 submitFailed;
     u32 renderOnly;
 
@@ -418,19 +427,33 @@ static void Graphics_RunPspScheduler(SPTask* reusableTask, FrameBuffer* reusable
         PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_VBLANK_WAIT);
         currentVi = PspPlatform_GetViCount();
         schedule = PspFrameScheduler_Advance(&scheduler, currentVi);
+        simulationTicks = 0;
         submitFailed = false;
         renderOnly = false;
 
         if (schedule.simulationDue) {
-            SPTask* nextTask = &gGfxPools[(gSysFrameCount + 1) % 2].task;
+            u32 simulationDeadlineVi;
+            u32 simulationTick;
 
-            if (taskInFlight && ((nextTask == inFlightTask) || (nextTask == inFlightDependency))) {
-                Graphics_WaitForTask(&taskInFlight);
-                inFlightTask = NULL;
-                inFlightDependency = NULL;
+            simulationTicks = MIN(schedule.missedSimulationDeadlines + 1, PSP_MAX_SIMULATION_TICKS_PER_WAKE);
+            simulationDeadlineVi =
+                schedule.simulationDeadlineVi - ((simulationTicks - 1) * scheduler.simulationVIs);
+
+            for (simulationTick = 0; simulationTick < simulationTicks; simulationTick++) {
+                SPTask* nextTask = &gGfxPools[(gSysFrameCount + 1) % 2].task;
+
+                if (taskInFlight && ((nextTask == inFlightTask) || (nextTask == inFlightDependency))) {
+                    Graphics_WaitForTask(&taskInFlight);
+                    inFlightTask = NULL;
+                    inFlightDependency = NULL;
+                }
+                pendingTask = Graphics_BuildSimulationTask(simulationDeadlineVi);
+                pendingFrameBuffer = gFrameBuffer;
+                simulationDeadlineVi += scheduler.simulationVIs;
+                if ((simulationTick + 1) < simulationTicks) {
+                    Graphics_UpdateAudio();
+                }
             }
-            pendingTask = Graphics_BuildSimulationTask(schedule.simulationDeadlineVi);
-            pendingFrameBuffer = gFrameBuffer;
             PspFrameScheduler_SetSimulationVIs(&scheduler, currentVi, gVIsPerFrame);
             PspFrameScheduler_SetPresentationVIs(&scheduler, currentVi, Graphics_GetPresentationVIs());
         }
@@ -471,12 +494,11 @@ static void Graphics_RunPspScheduler(SPTask* reusableTask, FrameBuffer* reusable
         }
 
         if (schedule.simulationDue) {
-            PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_AUDIO_UPDATE);
-            Audio_Update();
-            PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_AUDIO_UPDATE);
+            Graphics_UpdateAudio();
         }
+        PspRenderer_RecordSimulationTicks(simulationTicks);
 
-        PspProfiler_RecordTimingEvent(schedule.elapsedVIs, schedule.simulationDue, schedule.presentationDue,
+        PspProfiler_RecordTimingEvent(schedule.elapsedVIs, simulationTicks, schedule.presentationDue,
                                       renderOnly, schedule.missedSimulationDeadlines,
                                       schedule.missedPresentationDeadlines + submitFailed,
                                       scheduler.simulationVIs, scheduler.presentationVIs);

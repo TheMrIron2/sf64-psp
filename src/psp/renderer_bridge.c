@@ -25,9 +25,12 @@
 
 static SceInt64 sPerfWindowStart;
 static u32 sPerfWindowFrames;
+static volatile u32 sPerfSimulationTicks;
+static u32 sPerfWindowSimulationTicks;
 static u64 sPerfRenderAccumUs;
 
 static u32 sPerfFpsTenths;
+static u32 sPerfSimulationTenths;
 static u32 sPerfGfxMsTenths;
 static int sPerfReady;
 
@@ -66,9 +69,11 @@ static void psp_renderer_draw_perf_overlay(void) {
     pspDebugScreenSetXY(0, 0);
 
     pspDebugScreenPrintf(
-        "FPS %lu.%lu  GFX %lu.%lums   ",
+        "FPS %lu.%lu  SIM %lu.%lu  GFX %lu.%lums   ",
         (unsigned long) (sPerfFpsTenths / 10),
         (unsigned long) (sPerfFpsTenths % 10),
+        (unsigned long) (sPerfSimulationTenths / 10),
+        (unsigned long) (sPerfSimulationTenths % 10),
         (unsigned long) (sPerfGfxMsTenths / 10),
         (unsigned long) (sPerfGfxMsTenths % 10)
     );
@@ -78,12 +83,14 @@ static void psp_renderer_perf_frame_complete(u64 renderUs) {
     SceInt64 now;
     u64 elapsed;
     u64 fpsNumerator;
+    u32 simulationTicks;
     u64 renderDenominator;
 
     now = sceKernelGetSystemTimeWide();
 
     if (sPerfWindowStart == 0) {
         sPerfWindowStart = now;
+        sPerfWindowSimulationTicks = sPerfSimulationTicks;
         return;
     }
 
@@ -97,9 +104,13 @@ static void psp_renderer_perf_frame_complete(u64 renderUs) {
     }
 
     fpsNumerator = (u64) sPerfWindowFrames * 10000000ULL;
+    simulationTicks = sPerfSimulationTicks;
 
     sPerfFpsTenths =
         (u32) ((fpsNumerator + (elapsed / 2ULL)) / elapsed);
+    sPerfSimulationTenths =
+        (u32) ((((u64) (simulationTicks - sPerfWindowSimulationTicks) * 10000000ULL) + (elapsed / 2ULL)) /
+               elapsed);
 
     renderDenominator = (u64) sPerfWindowFrames * 100ULL;
 
@@ -109,11 +120,20 @@ static void psp_renderer_perf_frame_complete(u64 renderUs) {
 
     sPerfWindowStart = now;
     sPerfWindowFrames = 0;
+    sPerfWindowSimulationTicks = simulationTicks;
     sPerfRenderAccumUs = 0;
     sPerfReady = 1;
 }
 
 #endif
+
+void PspRenderer_RecordSimulationTicks(u32 ticks) {
+#if PSP_FPS_OVERLAY
+    sPerfSimulationTicks += ticks;
+#else
+    (void) ticks;
+#endif
+}
 
 void PspRenderer_Init(void) {
     if (PspGfxDevice_IsReady()) {

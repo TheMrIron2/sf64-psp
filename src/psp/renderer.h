@@ -82,6 +82,7 @@
 
 void PspRenderer_Init(void);
 void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex);
+void PspRenderer_RecordSimulationTicks(u32 ticks);
 
 int PspRenderer_HistoryHudCacheReady(void);
 void PspRenderer_HistoryHudCacheInvalidate(void);
