@@ -81,6 +81,7 @@ typedef struct {
     int viewportHeight;
     int textureValid;
     int textureBound;
+    int texturePsm;
     PspGfxTextureHandle texture;
     int textureFunction;
     u32 textureEnvColor;
@@ -281,11 +282,12 @@ static int psp_gfx_gu_replay_textures_valid(void) {
         const void* pixels;
         u32 width;
         u32 height;
+        int psm;
 
         if (((packet->type == PSP_GFX_GU_REPLAY_TRIANGLES) ||
              (packet->type == PSP_GFX_GU_REPLAY_SPRITES)) &&
             PspGfxTextureHandle_IsValid(packet->state.texture) &&
-            !PspGfxGuTexture_Resolve(packet->state.texture, &pixels, &width, &height)) {
+            !PspGfxGuTexture_Resolve(packet->state.texture, &pixels, &width, &height, &psm)) {
             return 0;
         }
     }
@@ -480,12 +482,13 @@ static int psp_gfx_gu_prepare_texture(const PspGfxDrawState* state) {
     const void* pixels;
     u32 width;
     u32 height;
+    int texturePsm;
     int wrapS;
     int wrapT;
     int textureFunction;
     int pointFilter = state->pointFilter != 0;
 
-    if (!PspGfxGuTexture_Resolve(state->texture, &pixels, &width, &height)) {
+    if (!PspGfxGuTexture_Resolve(state->texture, &pixels, &width, &height, &texturePsm)) {
         return 0;
     }
 
@@ -499,8 +502,11 @@ static int psp_gfx_gu_prepare_texture(const PspGfxDrawState* state) {
         textureFunction = GU_TFX_REPLACE;
     }
 
+    if (!sPspGfxGuState.textureValid || (sPspGfxGuState.texturePsm != texturePsm)) {
+        sceGuTexMode(texturePsm, 0, 0, 1);
+        sPspGfxGuState.texturePsm = texturePsm;
+    }
     if (!sPspGfxGuState.textureValid) {
-        sceGuTexMode(GU_PSM_8888, 0, 0, 1);
         sceGuTexMapMode(GU_TEXTURE_COORDS, 0, 0);
         sceGuTexLevelMode(GU_TEXTURE_CONST, 0.0f);
         sceGuTexScale(1.0f, 1.0f);

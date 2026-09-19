@@ -10,6 +10,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <pspgu.h>
+
 #define PSP_GFX_GU_TEXTURE_CACHE_SLOTS 128
 #define PSP_GFX_GU_TEXTURE_CACHE_BYTES (2U * 1024U * 1024U)
 #define PSP_GFX_GU_TEXTURE_MIN_DIMENSION 8
@@ -47,6 +49,7 @@ typedef struct {
     u32 generation;
     u32 lastFrame;
     u32 age;
+    u8 psm;
 } PspGfxGuTextureEntry;
 
 static PspGfxGuTextureEntry sPspGfxGuTextureEntries[PSP_GFX_GU_TEXTURE_CACHE_SLOTS];
@@ -480,15 +483,54 @@ static u32 psp_gfx_gu_texture_swizzle_offset(u32 offset, u32 log2Width) {
            (blockY >> (log2Width - 4));
 }
 
+static int psp_gfx_gu_texture_should_soften_alpha(const PspGfxTextureRequest* request) {
+    return (request->format == PSP_GFX_TEXTURE_RGBA16) && request->premultiply &&
+           psp_gfx_gu_texture_is_dark_rgba16_mask((const u16*) request->pixels, request->width,
+                                                   request->height);
+}
+
+static int psp_gfx_gu_texture_candidate_psm(const PspGfxTextureRequest* request, int softenAlpha) {
+    if ((request->format == PSP_GFX_TEXTURE_CI4) || (request->format == PSP_GFX_TEXTURE_CI8) ||
+        ((request->format == PSP_GFX_TEXTURE_RGBA16) && !softenAlpha)) {
+        return GU_PSM_5551;
+    }
+    return GU_PSM_8888;
+}
+
+static u8 sPspGfxGuTextureTransformed5[32];
+
+static void psp_gfx_gu_texture_init_transformed5(void) {
+    u32 value;
+
+    for (value = 0; value < 32U; value++) {
+        u8 transformed = psp_gfx_color_transfer_u8((u8) ((value * 255U) / 31U));
+
+        sPspGfxGuTextureTransformed5[value] = (u8) ((((u32) transformed * 31U) + 127U) / 255U);
+    }
+}
+
+static u16 psp_gfx_gu_texture_pack_rgba16_5551(u16 color, int premultiply) {
+    u16 red = sPspGfxGuTextureTransformed5[(color >> 11) & 31U];
+    u16 green = sPspGfxGuTextureTransformed5[(color >> 6) & 31U];
+    u16 blue = sPspGfxGuTextureTransformed5[(color >> 1) & 31U];
+    u16 alpha = (color & 1U) ? 0x8000U : 0;
+
+    if (premultiply && (alpha == 0)) {
+        return 0;
+    }
+    return (u16) (alpha | (blue << 10) | (green << 5) | red);
+}
+
 static void psp_gfx_gu_texture_decode(const PspGfxTextureRequest* request, u32 uploadWidth, u32 uploadHeight,
-                                      u8* output) {
+                                      int psm,
+                                      int softenAlpha, u8* output) {
     u32 x;
     u32 y;
-    u32 uploadByteWidth = uploadWidth * PSP_GFX_GU_TEXTURE_BYTES_PER_PIXEL;
+    u32 outputBytesPerPixel = PSP_GFX_GU_TEXTURE_BYTES_PER_PIXEL;
+
+    outputBytesPerPixel = (psm == GU_PSM_5551) ? 2U : 4U;
+    u32 uploadByteWidth = uploadWidth * outputBytesPerPixel;
     u32 log2UploadByteWidth = 0;
-    int softenAlpha = (request->format == PSP_GFX_TEXTURE_RGBA16) && request->premultiply &&
-                      psp_gfx_gu_texture_is_dark_rgba16_mask((const u16*) request->pixels, request->width,
-                                                             request->height);
 
     while ((1U << log2UploadByteWidth) < uploadByteWidth) {
         log2UploadByteWidth++;
@@ -501,7 +543,32 @@ static void psp_gfx_gu_texture_decode(const PspGfxTextureRequest* request, u32 u
             u32 sourceX = psp_gfx_gu_texture_mirror_source_coord(x, request->width, request->mirrorS);
             u32 sourceIndex = sourceY * request->width + sourceX;
             u32 outputIndex = y * uploadWidth + x;
-            u32 outputOffset = psp_gfx_gu_texture_swizzle_offset(outputIndex * 4, log2UploadByteWidth);
+            u32 outputOffset = psp_gfx_gu_texture_swizzle_offset(outputIndex * outputBytesPerPixel,
+                                                                  log2UploadByteWidth);
+            if ((psm == GU_PSM_5551) &&
+                ((request->format == PSP_GFX_TEXTURE_CI4) || (request->format == PSP_GFX_TEXTURE_CI8) ||
+                 (request->format == PSP_GFX_TEXTURE_RGBA16))) {
+                u16 sourceColor;
+                u16 packed;
+
+                if (request->format == PSP_GFX_TEXTURE_CI4) {
+                    u8 source = ((const u8*) request->pixels)[sourceIndex >> 1];
+                    u8 paletteIndex = (sourceIndex & 1U) ? (source & 0xFU) : (source >> 4);
+
+                    sourceColor = psp_gfx_gu_texture_read_u16(request->palette, paletteIndex);
+                } else if (request->format == PSP_GFX_TEXTURE_CI8) {
+                    u8 paletteIndex = ((const u8*) request->pixels)[sourceIndex];
+
+                    sourceColor = psp_gfx_gu_texture_read_u16(request->palette, paletteIndex);
+                } else {
+                    sourceColor = psp_gfx_gu_texture_read_u16(request->pixels, sourceIndex);
+                }
+                packed = psp_gfx_gu_texture_pack_rgba16_5551(
+                    sourceColor, request->format == PSP_GFX_TEXTURE_RGBA16 && request->premultiply);
+                output[outputOffset] = (u8) packed;
+                output[outputOffset + 1] = (u8) (packed >> 8);
+                continue;
+            }
             u8* outputPixel = &output[outputOffset];
 
             if (request->format == PSP_GFX_TEXTURE_CI4) {
@@ -609,6 +676,7 @@ int PspGfxGuTexture_Init(void) {
     sPspGfxGuTextureUsedBytes = 0;
     sPspGfxGuTextureValidEntries = 0;
     PspGfxColor_Init();
+    psp_gfx_gu_texture_init_transformed5();
     sPspGfxGuTextureInitialized = 1;
     return 1;
 }
@@ -732,6 +800,8 @@ int PspGfxGuTexture_Create(const PspGfxTextureRequest* request, PspGfxTextureRes
     u32 uploadHeight;
     u32 dataBytes;
     u32 lookupSet;
+    int psm;
+    int softenAlpha;
 #if PROFILE_PHASES
     u64 keyHash;
     u64 baseHash;
@@ -749,6 +819,12 @@ int PspGfxGuTexture_Create(const PspGfxTextureRequest* request, PspGfxTextureRes
         return 0;
     }
 
+    softenAlpha = psp_gfx_gu_texture_should_soften_alpha(request);
+    psm = psp_gfx_gu_texture_candidate_psm(request, softenAlpha);
+    if (psm == GU_PSM_5551) {
+        dataBytes = uploadWidth * uploadHeight * 2U;
+    }
+
 #if PROFILE_PHASES
     cacheClass = psp_gfx_gu_texture_profile_class(request->format);
     keyHash = psp_gfx_gu_texture_key_hash(request);
@@ -764,9 +840,8 @@ int PspGfxGuTexture_Create(const PspGfxTextureRequest* request, PspGfxTextureRes
     if (entry->data == NULL) {
         return 0;
     }
-
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TEXTURE_DECODE);
-    psp_gfx_gu_texture_decode(request, uploadWidth, uploadHeight, (u8*) entry->data);
+    psp_gfx_gu_texture_decode(request, uploadWidth, uploadHeight, psm, softenAlpha, (u8*) entry->data);
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TEXTURE_DECODE);
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TEXTURE_UPLOAD);
     sceKernelDcacheWritebackRange(entry->data, dataBytes);
@@ -787,6 +862,7 @@ int PspGfxGuTexture_Create(const PspGfxTextureRequest* request, PspGfxTextureRes
     entry->primitiveColor = request->primitiveColor;
     entry->environmentColor = request->environmentColor;
     entry->dataBytes = dataBytes;
+    entry->psm = (u8) psm;
     entry->generation = psp_gfx_gu_texture_next_generation();
     entry->valid = 1;
     entry->retired = 0;
@@ -837,11 +913,13 @@ void PspGfxGuTexture_InvalidateRgba16(const u16* pixels) {
     }
 }
 
-int PspGfxGuTexture_Resolve(PspGfxTextureHandle handle, const void** pixels, u32* width, u32* height) {
+int PspGfxGuTexture_Resolve(PspGfxTextureHandle handle, const void** pixels, u32* width, u32* height,
+                            int* psm) {
     u32 index;
     PspGfxGuTextureEntry* entry;
 
-    if (!PspGfxTextureHandle_IsValid(handle) || (pixels == NULL) || (width == NULL) || (height == NULL)) {
+    if (!PspGfxTextureHandle_IsValid(handle) || (pixels == NULL) || (width == NULL) || (height == NULL) ||
+        (psm == NULL)) {
         return 0;
     }
     index = handle.opaque[0] - 1;
@@ -857,5 +935,6 @@ int PspGfxGuTexture_Resolve(PspGfxTextureHandle handle, const void** pixels, u32
     *pixels = entry->data;
     *width = entry->uploadWidth;
     *height = entry->uploadHeight;
+    *psm = entry->psm;
     return 1;
 }
