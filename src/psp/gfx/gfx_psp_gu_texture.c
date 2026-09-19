@@ -1,6 +1,7 @@
 #include "src/psp/gfx/gfx_psp_gu_texture.h"
 
 #include "src/psp/gfx/gfx_psp_color.h"
+#include "src/psp/gfx/gfx_psp_gu_device.h"
 #include "src/psp/hw_counter_profile.h"
 #include "src/psp/profiler.h"
 
@@ -13,10 +14,14 @@
 #include <pspgu.h>
 
 #define PSP_GFX_GU_TEXTURE_CACHE_SLOTS 128
-#define PSP_GFX_GU_TEXTURE_CACHE_BYTES (2U * 1024U * 1024U)
+#define PSP_GFX_GU_TEXTURE_CACHE_BYTES (1261568U)
+#define PSP_GFX_GU_TEXTURE_RAM_CACHE_BYTES (2U * 1024U * 1024U)
 #define PSP_GFX_GU_TEXTURE_MIN_DIMENSION 8
 #define PSP_GFX_GU_TEXTURE_MAX_DIMENSION 512
 #define PSP_GFX_GU_TEXTURE_BYTES_PER_PIXEL 4
+#define PSP_GFX_GU_TEXTURE_ARENA_ALIGNMENT 64U
+#define PSP_GFX_GU_TEXTURE_UNCACHED_ALIAS 0x40000000U
+#define PSP_GFX_GU_TEXTURE_ARENA_BLOCKS ((PSP_GFX_GU_TEXTURE_CACHE_SLOTS * 2) + 1)
 #define PSP_GFX_GU_TEXTURE_LOOKUP_SET_COUNT 128
 #define PSP_GFX_GU_TEXTURE_LOOKUP_CANDIDATES 2
 
@@ -26,6 +31,11 @@ typedef char PspGfxGuTextureLookupIndexCheck[
 typedef char PspGfxGuTextureLookupSetCheck[
     ((PSP_GFX_GU_TEXTURE_LOOKUP_SET_COUNT & (PSP_GFX_GU_TEXTURE_LOOKUP_SET_COUNT - 1)) == 0) ? 1 : -1
 ];
+
+typedef enum {
+    PSP_GFX_GU_TEXTURE_STORAGE_RAM,
+    PSP_GFX_GU_TEXTURE_STORAGE_EDRAM,
+} PspGfxGuTextureStorage;
 
 typedef struct {
     int valid;
@@ -50,15 +60,32 @@ typedef struct {
     u32 lastFrame;
     u32 age;
     u8 psm;
+    u8 storage;
+    u8 arenaAllocated;
+    u32 arenaOffset;
+    u8 mutableRetired;
 } PspGfxGuTextureEntry;
+
+typedef struct {
+    u32 offset;
+    u32 bytes;
+    u8 active;
+    u8 allocated;
+} PspGfxGuTextureArenaBlock;
 
 static PspGfxGuTextureEntry sPspGfxGuTextureEntries[PSP_GFX_GU_TEXTURE_CACHE_SLOTS];
 static u32 sPspGfxGuTextureFrame;
 static u32 sPspGfxGuTextureAge;
 static u32 sPspGfxGuTextureGeneration;
 static u32 sPspGfxGuTextureUsedBytes;
+static u32 sPspGfxGuTextureEdramUsedBytes;
+static u32 sPspGfxGuTextureRamUsedBytes;
+static u32 sPspGfxGuTextureCacheBytes = PSP_GFX_GU_TEXTURE_CACHE_BYTES;
 static u32 sPspGfxGuTextureValidEntries;
 static int sPspGfxGuTextureInitialized;
+static void* sPspGfxGuTextureArenaBase;
+static u32 sPspGfxGuTextureArenaBytes;
+static PspGfxGuTextureArenaBlock sPspGfxGuTextureArenaBlocks[PSP_GFX_GU_TEXTURE_ARENA_BLOCKS];
 static u8 sPspGfxGuTextureLookup[PSP_GFX_GU_TEXTURE_LOOKUP_SET_COUNT][PSP_GFX_GU_TEXTURE_LOOKUP_CANDIDATES];
 static u8 sPspGfxGuTextureRgba16Lookup[PSP_GFX_GU_TEXTURE_LOOKUP_SET_COUNT]
                                       [PSP_GFX_GU_TEXTURE_LOOKUP_CANDIDATES];
@@ -73,6 +100,132 @@ static u32 psp_gfx_gu_texture_next_power_of_two(u32 value) {
         result <<= 1;
     }
     return result;
+}
+
+static u32 psp_gfx_gu_texture_ram_cache_bytes(void) {
+    return PSP_GFX_GU_TEXTURE_RAM_CACHE_BYTES;
+}
+
+static u32 psp_gfx_gu_texture_supported_cache_bytes(void) {
+    u32 cacheBytes = sPspGfxGuTextureCacheBytes;
+    u32 ramBytes = psp_gfx_gu_texture_ram_cache_bytes();
+
+    return (ramBytes > cacheBytes) ? ramBytes : cacheBytes;
+}
+
+static u32 psp_gfx_gu_texture_align_arena_bytes(u32 bytes) {
+    if (bytes > (0xFFFFFFFFU - (PSP_GFX_GU_TEXTURE_ARENA_ALIGNMENT - 1U))) {
+        return 0;
+    }
+    return (bytes + (PSP_GFX_GU_TEXTURE_ARENA_ALIGNMENT - 1U)) &
+           ~(PSP_GFX_GU_TEXTURE_ARENA_ALIGNMENT - 1U);
+}
+
+static u32 psp_gfx_gu_texture_arena_reserved_bytes(u32 dataBytes) {
+    return psp_gfx_gu_texture_align_arena_bytes(dataBytes);
+}
+
+static void psp_gfx_gu_texture_arena_init(void* base, u32 bytes) {
+    memset(sPspGfxGuTextureArenaBlocks, 0, sizeof(sPspGfxGuTextureArenaBlocks));
+    sPspGfxGuTextureArenaBase = base;
+    sPspGfxGuTextureArenaBytes = bytes;
+    sPspGfxGuTextureArenaBlocks[0].bytes = bytes;
+    sPspGfxGuTextureArenaBlocks[0].active = 1;
+}
+
+static int psp_gfx_gu_texture_arena_find_free_block(void) {
+    u32 i;
+
+    for (i = 0; i < PSP_GFX_GU_TEXTURE_ARENA_BLOCKS; i++) {
+        if (!sPspGfxGuTextureArenaBlocks[i].active) {
+            return (int) i;
+        }
+    }
+    return -1;
+}
+
+static void* psp_gfx_gu_texture_arena_alloc(u32 bytes, u32* offset) {
+    u32 i;
+    u32 alignedBytes = psp_gfx_gu_texture_align_arena_bytes(bytes);
+
+    if ((alignedBytes == 0) || (alignedBytes > sPspGfxGuTextureArenaBytes)) {
+        return NULL;
+    }
+    for (i = 0; i < PSP_GFX_GU_TEXTURE_ARENA_BLOCKS; i++) {
+        PspGfxGuTextureArenaBlock* block = &sPspGfxGuTextureArenaBlocks[i];
+        int splitIndex;
+
+        if (!block->active || block->allocated || (block->bytes < alignedBytes)) {
+            continue;
+        }
+        if (block->bytes != alignedBytes) {
+            splitIndex = psp_gfx_gu_texture_arena_find_free_block();
+            if (splitIndex < 0) {
+                return NULL;
+            }
+            sPspGfxGuTextureArenaBlocks[splitIndex].offset = block->offset + alignedBytes;
+            sPspGfxGuTextureArenaBlocks[splitIndex].bytes = block->bytes - alignedBytes;
+            sPspGfxGuTextureArenaBlocks[splitIndex].active = 1;
+            sPspGfxGuTextureArenaBlocks[splitIndex].allocated = 0;
+            block->bytes = alignedBytes;
+        }
+        block->allocated = 1;
+        *offset = block->offset;
+        return (void*) ((uintptr_t) sPspGfxGuTextureArenaBase + block->offset);
+    }
+    return NULL;
+}
+
+static void psp_gfx_gu_texture_arena_coalesce(void);
+
+static int psp_gfx_gu_texture_arena_free(u32 offset) {
+    u32 i;
+
+    for (i = 0; i < PSP_GFX_GU_TEXTURE_ARENA_BLOCKS; i++) {
+        PspGfxGuTextureArenaBlock* block = &sPspGfxGuTextureArenaBlocks[i];
+
+        if (block->active && block->allocated && (block->offset == offset)) {
+            block->allocated = 0;
+            psp_gfx_gu_texture_arena_coalesce();
+            break;
+        }
+    }
+    if (i == PSP_GFX_GU_TEXTURE_ARENA_BLOCKS) {
+        return 0;
+    }
+    return 1;
+}
+
+static void psp_gfx_gu_texture_arena_coalesce(void) {
+    u32 i;
+    int changed;
+
+    do {
+        changed = 0;
+        for (i = 0; i < PSP_GFX_GU_TEXTURE_ARENA_BLOCKS; i++) {
+            u32 j;
+            PspGfxGuTextureArenaBlock* first = &sPspGfxGuTextureArenaBlocks[i];
+
+            if (!first->active || first->allocated) {
+                continue;
+            }
+            for (j = 0; j < PSP_GFX_GU_TEXTURE_ARENA_BLOCKS; j++) {
+                PspGfxGuTextureArenaBlock* second = &sPspGfxGuTextureArenaBlocks[j];
+
+                if ((i == j) || !second->active || second->allocated ||
+                    (first->offset + first->bytes != second->offset)) {
+                    continue;
+                }
+                first->bytes += second->bytes;
+                second->active = 0;
+                changed = 1;
+                break;
+            }
+            if (changed) {
+                break;
+            }
+        }
+    } while (changed);
 }
 
 static int psp_gfx_gu_texture_dimensions(const PspGfxTextureRequest* request, u32* uploadWidth,
@@ -107,7 +260,7 @@ static int psp_gfx_gu_texture_dimensions(const PspGfxTextureRequest* request, u3
         return 0;
     }
     pixels = width * height;
-    if (pixels > (PSP_GFX_GU_TEXTURE_CACHE_BYTES / PSP_GFX_GU_TEXTURE_BYTES_PER_PIXEL)) {
+    if (pixels > (psp_gfx_gu_texture_supported_cache_bytes() / PSP_GFX_GU_TEXTURE_BYTES_PER_PIXEL)) {
         return 0;
     }
     *uploadWidth = width;
@@ -195,6 +348,7 @@ static PspHwTextureCacheClass psp_gfx_gu_texture_hw_class(PspGfxTextureFormat fo
     return PSP_HW_TEXTURE_CACHE_CONVERTED;
 }
 
+
 #if PROFILE_PHASES
 static PspProfileTextureCacheClass psp_gfx_gu_texture_profile_class(PspGfxTextureFormat format) {
     if (format == PSP_GFX_TEXTURE_CI8) {
@@ -277,10 +431,52 @@ static int psp_gfx_gu_texture_entry_matches(const PspGfxGuTextureEntry* entry,
            (entry->environmentColor == request->environmentColor);
 }
 
+static int psp_gfx_gu_texture_mutable_refresh_candidate(
+    const PspGfxGuTextureEntry* entry, const PspGfxTextureRequest* request,
+    u32 dataBytes, u32 uploadWidth, u32 uploadHeight, int psm) {
+    if (!entry->mutableRetired || entry->valid || !entry->retired || (entry->data == NULL) ||
+        !entry->arenaAllocated || (entry->storage != PSP_GFX_GU_TEXTURE_STORAGE_EDRAM) ||
+        (entry->lastFrame + 1U >= sPspGfxGuTextureFrame)) {
+        return 0;
+    }
+    return (entry->pixels == request->pixels) && (entry->palette == request->palette) &&
+           (entry->format == request->format) && (entry->width == request->width) &&
+           (entry->height == request->height) && (entry->uploadWidth == uploadWidth) &&
+           (entry->uploadHeight == uploadHeight) && (entry->dataBytes == dataBytes) &&
+           (entry->psm == psm) && (entry->premultiply == request->premultiply) &&
+           (entry->softCoverage == request->softCoverage) &&
+           (entry->envBlend == request->envBlend) && (entry->mirrorS == request->mirrorS) &&
+           (entry->mirrorT == request->mirrorT) &&
+           (entry->primitiveColor == request->primitiveColor) &&
+           (entry->environmentColor == request->environmentColor);
+}
+
+static int psp_gfx_gu_texture_find_mutable_refresh_entry(
+    const PspGfxTextureRequest* request, u32 dataBytes, u32 uploadWidth, u32 uploadHeight, int psm) {
+    u32 i;
+
+    for (i = 0; i < PSP_GFX_GU_TEXTURE_CACHE_SLOTS; i++) {
+        if (psp_gfx_gu_texture_mutable_refresh_candidate(
+                &sPspGfxGuTextureEntries[i], request, dataBytes, uploadWidth, uploadHeight, psm)) {
+            return (int) i;
+        }
+    }
+    return -1;
+}
+
 static void psp_gfx_gu_texture_release_entry(PspGfxGuTextureEntry* entry) {
     if (entry->data != NULL) {
-        free(entry->data);
+        if (entry->arenaAllocated) {
+            psp_gfx_gu_texture_arena_free(entry->arenaOffset);
+        } else {
+            free(entry->data);
+        }
         sPspGfxGuTextureUsedBytes -= entry->dataBytes;
+        if (entry->storage == PSP_GFX_GU_TEXTURE_STORAGE_EDRAM) {
+            sPspGfxGuTextureEdramUsedBytes -= entry->dataBytes;
+        } else {
+            sPspGfxGuTextureRamUsedBytes -= entry->dataBytes;
+        }
     }
     if (entry->valid) {
         sPspGfxGuTextureValidEntries--;
@@ -314,7 +510,12 @@ static int psp_gfx_gu_texture_find_free_entry(void) {
     return -1;
 }
 
-static int psp_gfx_gu_texture_find_victim(void) {
+static int psp_gfx_gu_texture_entry_has_storage(const PspGfxGuTextureEntry* entry,
+                                                PspGfxGuTextureStorage storage) {
+    return entry->storage == storage;
+}
+
+static int psp_gfx_gu_texture_find_victim_for_storage(PspGfxGuTextureStorage storage, int restrictStorage) {
     u32 i;
     int victim = -1;
     u32 oldestAge = 0xFFFFFFFFU;
@@ -322,7 +523,11 @@ static int psp_gfx_gu_texture_find_victim(void) {
     for (i = 0; i < PSP_GFX_GU_TEXTURE_CACHE_SLOTS; i++) {
         PspGfxGuTextureEntry* entry = &sPspGfxGuTextureEntries[i];
 
-        if ((entry->data == NULL) || (entry->lastFrame == sPspGfxGuTextureFrame)) {
+        if ((entry->data == NULL) || (entry->lastFrame == sPspGfxGuTextureFrame) ||
+            (restrictStorage && !psp_gfx_gu_texture_entry_has_storage(entry, storage))) {
+            continue;
+        }
+        if (entry->mutableRetired) {
             continue;
         }
         if ((victim < 0) || (entry->age < oldestAge)) {
@@ -333,28 +538,109 @@ static int psp_gfx_gu_texture_find_victim(void) {
     return victim;
 }
 
-static int psp_gfx_gu_texture_reserve_entry(u32 dataBytes) {
+static int psp_gfx_gu_texture_find_victim(void) {
+    return psp_gfx_gu_texture_find_victim_for_storage(PSP_GFX_GU_TEXTURE_STORAGE_RAM, 0);
+}
+
+
+static u32 psp_gfx_gu_texture_storage_used_bytes(PspGfxGuTextureStorage storage) {
+    return (storage == PSP_GFX_GU_TEXTURE_STORAGE_EDRAM) ? sPspGfxGuTextureEdramUsedBytes
+                                                          : sPspGfxGuTextureRamUsedBytes;
+}
+
+static void* psp_gfx_gu_texture_edram_cached_alias(void* data) {
+    return (void*) ((uintptr_t) data & ~(uintptr_t) PSP_GFX_GU_TEXTURE_UNCACHED_ALIAS);
+}
+
+static int psp_gfx_gu_texture_reserve_arena_entry(u32 dataBytes, PspGfxGuTextureStorage storage,
+                                                  void** data, u32* arenaOffset) {
     int index;
     int victim;
+    u32 arenaBytes = psp_gfx_gu_texture_arena_reserved_bytes(dataBytes);
+    u32 cacheBytes = PSP_GFX_GU_TEXTURE_CACHE_BYTES;
 
-    while ((sPspGfxGuTextureUsedBytes > (PSP_GFX_GU_TEXTURE_CACHE_BYTES - dataBytes))) {
-        victim = psp_gfx_gu_texture_find_victim();
+    if ((data == NULL) || (arenaOffset == NULL) || (dataBytes > cacheBytes) || (arenaBytes == 0) ||
+        (arenaBytes > cacheBytes)) {
+        return -1;
+    }
+    for (;;) {
+        while (psp_gfx_gu_texture_storage_used_bytes(storage) > (cacheBytes - dataBytes)) {
+            victim = psp_gfx_gu_texture_find_victim_for_storage(storage, 1);
+            if (victim < 0) {
+                return -1;
+            }
+            psp_gfx_gu_texture_evict_entry(&sPspGfxGuTextureEntries[victim]);
+        }
+        index = psp_gfx_gu_texture_find_free_entry();
+        if (index < 0) {
+            victim = psp_gfx_gu_texture_find_victim();
+            if (victim < 0) {
+                return -1;
+            }
+            psp_gfx_gu_texture_evict_entry(&sPspGfxGuTextureEntries[victim]);
+            continue;
+        }
+        *data = psp_gfx_gu_texture_arena_alloc(arenaBytes, arenaOffset);
+        if (*data != NULL) {
+            return index;
+        }
+        victim = psp_gfx_gu_texture_find_victim_for_storage(storage, 1);
         if (victim < 0) {
             return -1;
         }
         psp_gfx_gu_texture_evict_entry(&sPspGfxGuTextureEntries[victim]);
     }
+}
 
-    index = psp_gfx_gu_texture_find_free_entry();
-    if (index >= 0) {
-        return index;
-    }
-    victim = psp_gfx_gu_texture_find_victim();
-    if (victim < 0) {
+static int psp_gfx_gu_texture_reserve_ram_entry(u32 dataBytes, void** data, u32* arenaOffset) {
+    int index;
+    int victim;
+    u32 cacheBytes = psp_gfx_gu_texture_ram_cache_bytes();
+
+    if ((data == NULL) || (arenaOffset == NULL) || (dataBytes > cacheBytes)) {
         return -1;
     }
-    psp_gfx_gu_texture_evict_entry(&sPspGfxGuTextureEntries[victim]);
-    return victim;
+    for (;;) {
+        while (sPspGfxGuTextureRamUsedBytes > (cacheBytes - dataBytes)) {
+            victim = psp_gfx_gu_texture_find_victim_for_storage(PSP_GFX_GU_TEXTURE_STORAGE_RAM, 1);
+            if (victim < 0) {
+                return -1;
+            }
+            psp_gfx_gu_texture_evict_entry(&sPspGfxGuTextureEntries[victim]);
+        }
+        index = psp_gfx_gu_texture_find_free_entry();
+        if (index < 0) {
+            victim = psp_gfx_gu_texture_find_victim();
+            if (victim < 0) {
+                return -1;
+            }
+            psp_gfx_gu_texture_evict_entry(&sPspGfxGuTextureEntries[victim]);
+            continue;
+        }
+        *data = memalign(16, dataBytes);
+        *arenaOffset = 0;
+        if (*data != NULL) {
+            return index;
+        }
+        return -1;
+    }
+}
+
+static int psp_gfx_gu_texture_reserve_entry(u32 dataBytes, void** data, u32* arenaOffset,
+                                            PspGfxGuTextureStorage* storage, int* arenaAllocated) {
+    int index;
+
+    *storage = PSP_GFX_GU_TEXTURE_STORAGE_RAM;
+    *arenaAllocated = 0;
+    index = psp_gfx_gu_texture_reserve_arena_entry(dataBytes, PSP_GFX_GU_TEXTURE_STORAGE_EDRAM,
+                                                    data, arenaOffset);
+    if (index >= 0) {
+        *storage = PSP_GFX_GU_TEXTURE_STORAGE_EDRAM;
+        *arenaAllocated = 1;
+        return index;
+    }
+    index = psp_gfx_gu_texture_reserve_ram_entry(dataBytes, data, arenaOffset);
+    return index;
 }
 
 static u16 psp_gfx_gu_texture_read_u16(const void* pixels, u32 index) {
@@ -674,7 +960,23 @@ int PspGfxGuTexture_Init(void) {
     sPspGfxGuTextureAge = 0;
     sPspGfxGuTextureGeneration = 0;
     sPspGfxGuTextureUsedBytes = 0;
+    sPspGfxGuTextureEdramUsedBytes = 0;
+    sPspGfxGuTextureRamUsedBytes = 0;
+    sPspGfxGuTextureCacheBytes = PSP_GFX_GU_TEXTURE_CACHE_BYTES;
     sPspGfxGuTextureValidEntries = 0;
+    {
+        void* arenaBase;
+        u32 arenaBytes;
+
+        if (!PspGfxGuDevice_GetTextureEdramArena(&arenaBase, &arenaBytes)) {
+            return 0;
+        }
+        if (arenaBytes < PSP_GFX_GU_TEXTURE_CACHE_BYTES) {
+            return 0;
+        }
+        arenaBytes = PSP_GFX_GU_TEXTURE_CACHE_BYTES;
+        psp_gfx_gu_texture_arena_init(arenaBase, arenaBytes);
+    }
     PspGfxColor_Init();
     psp_gfx_gu_texture_init_transformed5();
     sPspGfxGuTextureInitialized = 1;
@@ -695,6 +997,9 @@ void PspGfxGuTexture_BeginFrame(void) {
         PspGfxGuTextureEntry* entry = &sPspGfxGuTextureEntries[i];
 
         if (entry->retired && (entry->lastFrame != sPspGfxGuTextureFrame)) {
+            if (entry->mutableRetired) {
+                continue;
+            }
             psp_gfx_gu_texture_release_entry(entry);
         }
     }
@@ -713,7 +1018,13 @@ void PspGfxGuTexture_Shutdown(void) {
     sPspGfxGuTextureAge = 0;
     sPspGfxGuTextureGeneration = 0;
     sPspGfxGuTextureUsedBytes = 0;
+    sPspGfxGuTextureEdramUsedBytes = 0;
+    sPspGfxGuTextureRamUsedBytes = 0;
+    sPspGfxGuTextureCacheBytes = PSP_GFX_GU_TEXTURE_CACHE_BYTES;
     sPspGfxGuTextureValidEntries = 0;
+    sPspGfxGuTextureArenaBase = NULL;
+    sPspGfxGuTextureArenaBytes = 0;
+    memset(sPspGfxGuTextureArenaBlocks, 0, sizeof(sPspGfxGuTextureArenaBlocks));
     memset(sPspGfxGuTextureLookup, 0, sizeof(sPspGfxGuTextureLookup));
     memset(sPspGfxGuTextureRgba16Lookup, 0, sizeof(sPspGfxGuTextureRgba16Lookup));
     sPspGfxGuTextureInitialized = 0;
@@ -802,12 +1113,18 @@ int PspGfxGuTexture_Create(const PspGfxTextureRequest* request, PspGfxTextureRes
     u32 lookupSet;
     int psm;
     int softenAlpha;
+    void* data;
+    u32 arenaOffset;
 #if PROFILE_PHASES
     u64 keyHash;
     u64 baseHash;
 #endif
     int index;
     u8 (*lookup)[PSP_GFX_GU_TEXTURE_LOOKUP_CANDIDATES];
+    PspGfxGuTextureStorage storage;
+    int arenaAllocated;
+    void* decodeData;
+    int mutableRefresh;
 
     if (result == NULL) {
         return 0;
@@ -831,20 +1148,45 @@ int PspGfxGuTexture_Create(const PspGfxTextureRequest* request, PspGfxTextureRes
     baseHash = psp_gfx_gu_texture_base_hash(request);
 #endif
     PspProfiler_CountTextureEvent(0, 1, 0, 0, 0);
-    index = psp_gfx_gu_texture_reserve_entry(dataBytes);
-    if (index < 0) {
-        return 0;
+    mutableRefresh = 0;
+    index = psp_gfx_gu_texture_find_mutable_refresh_entry(
+        request, dataBytes, uploadWidth, uploadHeight, psm);
+    if (index >= 0) {
+        entry = &sPspGfxGuTextureEntries[index];
+        data = entry->data;
+        arenaOffset = entry->arenaOffset;
+        storage = (PspGfxGuTextureStorage) entry->storage;
+        arenaAllocated = entry->arenaAllocated;
+        mutableRefresh = 1;
+    } else {
+        index = psp_gfx_gu_texture_reserve_entry(dataBytes, &data, &arenaOffset, &storage,
+                                                 &arenaAllocated);
+        if (index < 0) {
+            return 0;
+        }
     }
     entry = &sPspGfxGuTextureEntries[index];
-    entry->data = memalign(16, dataBytes);
-    if (entry->data == NULL) {
-        return 0;
+    entry->data = data;
+    entry->storage = (u8) storage;
+    entry->arenaAllocated = (u8) arenaAllocated;
+    entry->arenaOffset = arenaOffset;
+    if (mutableRefresh) {
+        entry->mutableRetired = 0;
     }
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TEXTURE_DECODE);
-    psp_gfx_gu_texture_decode(request, uploadWidth, uploadHeight, psm, softenAlpha, (u8*) entry->data);
+    decodeData = entry->data;
+    if (entry->storage == PSP_GFX_GU_TEXTURE_STORAGE_EDRAM) {
+        decodeData = psp_gfx_gu_texture_edram_cached_alias(entry->data);
+    }
+    psp_gfx_gu_texture_decode(request, uploadWidth, uploadHeight, psm, softenAlpha, (u8*) decodeData);
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TEXTURE_DECODE);
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TEXTURE_UPLOAD);
-    sceKernelDcacheWritebackRange(entry->data, dataBytes);
+    if (entry->storage == PSP_GFX_GU_TEXTURE_STORAGE_RAM) {
+        sceKernelDcacheWritebackRange(entry->data, dataBytes);
+    }
+    if (entry->storage == PSP_GFX_GU_TEXTURE_STORAGE_EDRAM) {
+        sceKernelDcacheWritebackRange(decodeData, dataBytes);
+    }
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TEXTURE_UPLOAD);
 
     entry->pixels = request->pixels;
@@ -863,10 +1205,19 @@ int PspGfxGuTexture_Create(const PspGfxTextureRequest* request, PspGfxTextureRes
     entry->environmentColor = request->environmentColor;
     entry->dataBytes = dataBytes;
     entry->psm = (u8) psm;
-    entry->generation = psp_gfx_gu_texture_next_generation();
+    if (!mutableRefresh) {
+        entry->generation = psp_gfx_gu_texture_next_generation();
+    }
     entry->valid = 1;
     entry->retired = 0;
-    sPspGfxGuTextureUsedBytes += dataBytes;
+    if (!mutableRefresh) {
+        sPspGfxGuTextureUsedBytes += dataBytes;
+        if (entry->storage == PSP_GFX_GU_TEXTURE_STORAGE_EDRAM) {
+            sPspGfxGuTextureEdramUsedBytes += dataBytes;
+        } else {
+            sPspGfxGuTextureRamUsedBytes += dataBytes;
+        }
+    }
     sPspGfxGuTextureValidEntries++;
     psp_gfx_gu_texture_touch(entry);
     if (request->format == PSP_GFX_TEXTURE_RGBA16) {
@@ -895,7 +1246,6 @@ int PspGfxGuTexture_Create(const PspGfxTextureRequest* request, PspGfxTextureRes
 #endif
     return 1;
 }
-
 void PspGfxGuTexture_InvalidateRgba16(const u16* pixels) {
     u32 i;
 
@@ -906,6 +1256,8 @@ void PspGfxGuTexture_InvalidateRgba16(const u16* pixels) {
         PspGfxGuTextureEntry* entry = &sPspGfxGuTextureEntries[i];
 
         if (entry->valid && (entry->format == PSP_GFX_TEXTURE_RGBA16) && (entry->pixels == pixels)) {
+            entry->mutableRetired = (entry->uploadWidth == 32U) &&
+                                    (entry->uploadHeight == 32U) && (entry->dataBytes == 2048U);
             entry->valid = 0;
             entry->retired = 1;
             sPspGfxGuTextureValidEntries--;

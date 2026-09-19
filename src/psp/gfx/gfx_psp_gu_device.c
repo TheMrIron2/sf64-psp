@@ -17,6 +17,8 @@
 #define PSP_GU_BYTES_PER_PIXEL 2
 #define PSP_GU_FRAMEBUFFER_BYTES (PSP_GU_FRAMEBUFFER_WIDTH * PSP_GU_SCREEN_HEIGHT * PSP_GU_BYTES_PER_PIXEL)
 #define PSP_GU_REQUIRED_VRAM (PSP_GU_FRAMEBUFFER_BYTES * 3)
+#define PSP_GU_EDRAM_ALIGNMENT 64U
+#define PSP_GU_UNCACHED_ALIAS 0x40000000U
 #define PSP_GU_LIST_WORDS 262144
 #define PSP_GU_DEPTH_NEAR 65535
 #define PSP_GU_DEPTH_FAR 0
@@ -26,6 +28,8 @@ static unsigned int sGuList[PSP_GU_LIST_WORDS] __attribute__((aligned(64)));
 static unsigned int sDrawBufferOffset;
 static unsigned int sDisplayBufferOffset;
 static unsigned int sDepthBufferOffset;
+static void* sTextureEdramBase;
+static unsigned int sTextureEdramBytes;
 static unsigned int sPresentedBufferOffset;
 static int sGuInitialized;
 static int sReady;
@@ -40,6 +44,8 @@ static void psp_gfx_gu_device_reset_state(void) {
     sDrawBufferOffset = 0;
     sDisplayBufferOffset = 0;
     sDepthBufferOffset = 0;
+    sTextureEdramBase = NULL;
+    sTextureEdramBytes = 0;
     sPresentedBufferOffset = 0;
     sGuInitialized = 0;
     sReady = 0;
@@ -110,6 +116,9 @@ int PspGfxGuDevice_Init(void) {
     sDrawBufferOffset = 0;
     sDisplayBufferOffset = PSP_GU_FRAMEBUFFER_BYTES;
     sDepthBufferOffset = PSP_GU_FRAMEBUFFER_BYTES * 2;
+    sTextureEdramBase = (void*) (((uintptr_t) sceGeEdramGetAddr() + PSP_GU_REQUIRED_VRAM) |
+                                 PSP_GU_UNCACHED_ALIAS);
+    sTextureEdramBytes = (vramSize - PSP_GU_REQUIRED_VRAM) & ~(PSP_GU_EDRAM_ALIGNMENT - 1U);
     sPresentedBufferOffset = sDisplayBufferOffset;
 
     if (sceGuInit() < 0) {
@@ -281,4 +290,13 @@ void* PspGfxGuDevice_GetPresentedFrameBuffer(int* stride, int* pixelFormat) {
     }
 
     return (void*) ((uintptr_t) sceGeEdramGetAddr() + (uintptr_t) sPresentedBufferOffset);
+}
+
+int PspGfxGuDevice_GetTextureEdramArena(void** base, u32* bytes) {
+    if ((base == NULL) || (bytes == NULL) || !sGuInitialized) {
+        return 0;
+    }
+    *base = sTextureEdramBase;
+    *bytes = sTextureEdramBytes;
+    return (sTextureEdramBase != NULL) && (sTextureEdramBytes != 0);
 }
