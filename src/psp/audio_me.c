@@ -1,3 +1,13 @@
+/*
+    This code is heavily based on work by mcidclain researching
+    and implementing VME on the PSP, as well as his work and
+    Daedalus's for Media Engine audio control.
+
+    Samples used as reference: https://github.com/mcidclan/psp-virtual-mobile-engine-ext
+    ME Custom Core: https://github.com/mcidclan/psp-media-engine-custom-core
+    DaedalusX64 ME Code: https://github.com/DaedalusX64/daedalus/tree/master/Source/SysPSP/PRX/MediaEngine
+*/
+
 #include <pspkernel.h>
 #include <pspintrman.h>
 #include <pspthreadman.h>

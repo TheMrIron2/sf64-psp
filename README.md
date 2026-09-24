@@ -23,6 +23,7 @@ Special thanks:
 - Falco Girgis: Guidance based on sf64-dc
 - jnmartin84: sf64-dc, used as reference and initial `ultra_reimpl.c`
 - DaedalusX64: VFPU implementations and architectural guidance
+- mcidclan: VME research and Media Engine implementation
 
 And to everyone else in the PSP scene that helped make this a reality!
 
