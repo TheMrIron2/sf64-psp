@@ -4,6 +4,10 @@
 #include "src/psp/frame_interpolation.h"
 #include "src/psp/display.h"
 #include "src/psp/renderer_starfield.h"
+#include "src/psp/zoness_water_rebatch.h"
+// Newlib allocation headers conflict with the game libc types
+void* malloc(size_t size);
+void free(void* pointer);
 #endif
 #include "assets/ast_katina.h"
 #include "assets/ast_venom_1.h"
@@ -1028,6 +1032,32 @@ void Background_dummy_80040CDC(void) {
 }
 
 #ifdef TARGET_PSP
+static Gfx sZonessWaterRebatch[2][PSP_WATER_REBATCH_COMMANDS];
+static int sZonessWaterRebatchReady[2];
+
+static Gfx* Background_GetWaterDisplayList(Gfx* source) {
+    u32 index;
+
+    if (source == aZoWater1DL) {
+        index = 0;
+    } else if (source == aZoWater2DL) {
+        index = 1;
+    } else {
+        return source;
+    }
+    if (sZonessWaterRebatchReady[index] == 0) {
+        PspWaterRebatchScratch* scratch = malloc(sizeof(*scratch));
+        int commands = 0;
+
+        if (scratch != NULL) {
+            commands = PspWaterRebatch_Build(sZonessWaterRebatch[index], source, scratch);
+            free(scratch);
+        }
+        sZonessWaterRebatchReady[index] = (commands == PSP_WATER_REBATCH_COMMANDS) ? 1 : -1;
+    }
+    return sZonessWaterRebatchReady[index] > 0 ? sZonessWaterRebatch[index] : source;
+}
+
 static void Background_DrawWideGroundSides(Gfx* dList, f32 offset, f32 y, f32 z, f32 scaleX, f32 scaleZ) {
     s32 side;
 
@@ -1503,6 +1533,7 @@ void Background_DrawGround(void) {
             RCP_SetupDL_29(gFogRed, gFogGreen, gFogBlue, gFogAlpha, gFogNear, gFogFar);
             groundDL = (gGameFrameCount % 2) != 0 ? aZoWater1DL : aZoWater2DL;
 #ifdef TARGET_PSP
+            groundDL = Background_GetWaterDisplayList(groundDL);
             if (widescreen) {
                 Background_DrawWideZonessWater(groundDL);
                 break;
