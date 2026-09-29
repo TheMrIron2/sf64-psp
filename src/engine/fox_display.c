@@ -4,6 +4,7 @@
 #include "assets/ast_landmaster.h"
 #include "assets/ast_versus.h"
 #include "assets/ast_sector_z.h"
+#include "src/psp/command_source.h"
 
 Vec3f D_display_801613B0[4];
 Vec3f D_display_801613E0[4];
@@ -1760,11 +1761,13 @@ void Display_Update(void) {
     Matrix_MultVec3f(gCalcMatrix, &tempVec, &playerCamUp);
 
     if (gStarCount != 0) {
+        PSP_COMMAND_SOURCE_MARK(gMasterDisp++, PSP_COMMAND_SOURCE_STARFIELD);
         gStarfieldRoll = DEG_TO_RAD(gPlayer[0].camRoll);
         Camera_SetStarfieldPos(gPlayCamEye.x, gPlayCamEye.y, gPlayCamEye.z, gPlayCamAt.x, gPlayCamAt.y, gPlayCamAt.z);
         Background_DrawStarfield();
     }
 
+    PSP_COMMAND_SOURCE_MARK(gMasterDisp++, PSP_COMMAND_SOURCE_BACKDROP);
     Background_DrawBackdrop();
     Background_DrawSun();
     Matrix_Push(&gGfxMatrix);
@@ -1777,11 +1780,13 @@ void Display_Update(void) {
             Matrix_Push(&gGfxMatrix);
             Matrix_Translate(gGfxMatrix, 0.0f, gCameraShakeY, 0.0f, MTXF_APPLY);
             Matrix_SetGfxMtx(&gMasterDisp);
+            PSP_COMMAND_SOURCE_MARK(gMasterDisp++, PSP_COMMAND_SOURCE_GROUND);
             Ground_801B58AC(&gMasterDisp, gPathGroundScroll);
             gPathGroundScroll = 0.0f;
             Matrix_Pop(&gGfxMatrix);
         } else if (gGroundSurface != SURFACE_WATER) {
             gDrawAquasSurfaceWater = false;
+            PSP_COMMAND_SOURCE_MARK(gMasterDisp++, PSP_COMMAND_SOURCE_GROUND);
             Background_DrawGround();
         }
     }
@@ -1789,6 +1794,7 @@ void Display_Update(void) {
     Lights_SetOneLight(&gMasterDisp, gLight2x, gLight2y, gLight2z, gLight2R, gLight2G, gLight2B, gAmbientR, gAmbientG,
                        gAmbientB);
 
+    PSP_COMMAND_SOURCE_MARK(gMasterDisp++, PSP_COMMAND_SOURCE_PLAYER);
     for (i = 0, player = &gPlayer[0]; i < gCamCount; i++, player++) {
         playerPos.x = player->pos.x;
         playerPos.y = player->pos.y;
@@ -1803,6 +1809,7 @@ void Display_Update(void) {
                            gAmbientG, gAmbientB);
         Matrix_Push(&gGfxMatrix);
         Matrix_Scale(gGfxMatrix, 1.0f, -1.0f, 1.0f, MTXF_APPLY);
+        PSP_COMMAND_SOURCE_MARK(gMasterDisp++, PSP_COMMAND_SOURCE_PLAYER_REFLECTION);
         for (i = 0, player = &gPlayer[0]; i < gCamCount; i++, player++) {
             playerPos.x = player->pos.x;
             playerPos.y = player->pos.y;
@@ -1814,7 +1821,9 @@ void Display_Update(void) {
 
     Lights_SetOneLight(&gMasterDisp, gLight1x, gLight1y, gLight1z, gLight1R, gLight1G, gLight1B, gAmbientR, gAmbientG,
                        gAmbientB);
+    PSP_COMMAND_SOURCE_MARK(gMasterDisp++, PSP_COMMAND_SOURCE_SCENERY);
     Object_Draw(1);
+    PSP_COMMAND_SOURCE_MARK(gMasterDisp++, PSP_COMMAND_SOURCE_SHOTS);
     TexturedLine_Draw();
     gReflectY = 1;
     PlayerShot_DrawAll();
@@ -1827,6 +1836,7 @@ void Display_Update(void) {
         Matrix_Pop(&gGfxMatrix);
     }
 
+    PSP_COMMAND_SOURCE_MARK(gMasterDisp++, PSP_COMMAND_SOURCE_PLAYER_DETAILS);
     gReflectY = -1;
 
     if ((gGroundSurface == SURFACE_WATER) && (gPlayer[0].state != PLAYERSTATE_LEVEL_INTRO)) {
@@ -1842,21 +1852,26 @@ void Display_Update(void) {
     }
 
     if (gCurrentLevel == LEVEL_AQUAS) {
+        PSP_COMMAND_SOURCE_MARK(gMasterDisp++, PSP_COMMAND_SOURCE_EFFECTS);
         Effect_Draw(0);
     }
 
     if ((gGroundSurface == SURFACE_WATER) || (gAqDrawMode != 0)) {
         gDrawAquasSurfaceWater = true;
+        PSP_COMMAND_SOURCE_MARK(gMasterDisp++, PSP_COMMAND_SOURCE_EFFECTS_REFLECTION);
         Effect_Draw(1);
+        PSP_COMMAND_SOURCE_MARK(gMasterDisp++, PSP_COMMAND_SOURCE_GROUND);
         Background_DrawGround();
     }
 
     if ((gCurrentLevel != LEVEL_AQUAS) &&
         (((gCurrentLevel != LEVEL_CORNERIA) && (gCurrentLevel != LEVEL_VENOM_ANDROSS)) ||
          ((gPlayer[0].state != PLAYERSTATE_LEVEL_COMPLETE) && (gPlayer[0].state != PLAYERSTATE_LEVEL_INTRO)))) {
+        PSP_COMMAND_SOURCE_MARK(gMasterDisp++, PSP_COMMAND_SOURCE_EFFECTS);
         Effect_Draw(0);
     }
 
+    PSP_COMMAND_SOURCE_MARK(gMasterDisp++, PSP_COMMAND_SOURCE_PLAYER_DETAILS);
     gReflectY = 1;
 
     for (i = 0, player = &gPlayer[0]; i < gCamCount; i++, player++) {
@@ -1873,9 +1888,11 @@ void Display_Update(void) {
 
     if (((gCurrentLevel == LEVEL_CORNERIA) || (gCurrentLevel == LEVEL_VENOM_ANDROSS)) &&
         ((gPlayer[0].state == PLAYERSTATE_LEVEL_COMPLETE) || (gPlayer[0].state == PLAYERSTATE_LEVEL_INTRO))) {
+        PSP_COMMAND_SOURCE_MARK(gMasterDisp++, PSP_COMMAND_SOURCE_EFFECTS);
         Effect_Draw(0);
     }
 
+    PSP_COMMAND_SOURCE_MARK(gMasterDisp++, PSP_COMMAND_SOURCE_HUD);
     BonusText_DrawAll();
     Matrix_Pop(&gGfxMatrix);
     Display_ActorMarks();

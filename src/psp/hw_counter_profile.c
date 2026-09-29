@@ -1,4 +1,5 @@
 #include "src/psp/hw_counter_profile.h"
+#include "src/psp/texture_attribution.h"
 
 #if PROFILE_HW_COUNTERS
 
@@ -77,6 +78,8 @@
 #define PSP_HW_TEXTURE_BARRIER_SOURCE_COUNT 4
 #define PSP_HW_VBLANK_US 16667
 #define PSP_HW_VBLANK_BUCKET_COUNT 4
+#define PSP_HW_DL_SOURCE_SLOTS 4096
+#define PSP_HW_EFFECT_TYPE_COUNT 512
 
 typedef enum {
     PSP_HW_STATUS_READY,
@@ -97,7 +100,9 @@ typedef enum {
     PSP_HW_STEP_SCOPES,
     PSP_HW_STEP_COUNTERS,
     PSP_HW_STEP_DIAGNOSTICS,
-    PSP_HW_STEP_PACING
+    PSP_HW_STEP_PACING,
+    PSP_HW_STEP_SOURCES,
+    PSP_HW_STEP_FRAMES
 } PspHwCounterStep;
 
 typedef enum {
@@ -162,11 +167,44 @@ typedef struct {
     u32 frames;
 } PspHwCounterTotals;
 
+typedef struct {
+    u32 frameIntervalUs;
+    u32 taskUs;
+    u32 presentUs;
+    u32 commands;
+    u32 loadedVertices;
+    u32 submittedVertices;
+    u32 textureUploadBytes;
+    u32 taskCounter[PSP_HW_COUNTER_COUNT];
+    u32 commandSources[PSP_COMMAND_SOURCE_COUNT];
+    u32 commandSourceUs[PSP_COMMAND_SOURCE_COUNT];
+    u32 waterUs[PSP_WATER_TILE_COUNT];
+    u32 waterInputTriangles[PSP_WATER_TILE_COUNT];
+    u32 waterEmittedTriangles[PSP_WATER_TILE_COUNT];
+    u32 topEffectId;
+    u32 topEffectUs;
+    u32 secondEffectId;
+    u32 secondEffectUs;
+    u32 effectTotalUs;
+    u32 waterGroupsSkipped;
+    u32 waterPairsSkipped;
+    u32 waterCommandsSkipped;
+#if PSP_GFX_BACKEND_GU
+    u32 texture[PSP_HW_TEXTURE_FRAME_COUNT];
+#endif
+} PspHwFrameRecord;
+
 static const char* sPspHwCounterNames[PSP_HW_COUNTER_COUNT] = {
     "systemck",   "cpuck",         "internal_stall", "memory_stall", "copz_stall",
     "vfpu_stall", "sleep",         "bus_access",     "uncached_load", "uncached_store",
     "cached_load", "cached_store", "i_miss",         "d_miss",        "d_writeback",
     "cop0_inst",  "fpu_inst",      "vfpu_inst",      "local_bus"
+};
+
+static const char* sPspHwCommandSourceNames[PSP_COMMAND_SOURCE_COUNT] = {
+    "unattributed", "starfield", "backdrop", "ground", "player", "player_reflection",
+    "scenery", "boss", "sprite", "actor", "item", "shots", "effects",
+    "effects_reflection", "player_details", "hud"
 };
 
 static const char* sPspHwScopeNames[PSP_HW_SCOPE_COUNT] = {
@@ -202,9 +240,57 @@ static const char* sPspHwSceneNames[] = { "title", "corneria", "light", "other" 
  * host0 is the PSPLINK host directory and catches both refusing writes */
 static const char* sPspHwRoots[PSP_HW_ROOT_COUNT] = { PSP_HW_PROFILE_DIR, PSP_HW_PROFILE_DIR_EF0, "host0:" };
 static const char sPspHwRootLetters[PSP_HW_ROOT_COUNT] = { 'M', 'E', 'H' };
-static const char* sPspHwStepNames[] = { "OK", "SLOT", "OPEN", "META", "WORK", "SCOPE", "CTRS", "DIAG", "PACE" };
+static const char* sPspHwStepNames[] = { "OK", "SLOT", "OPEN", "META", "WORK", "SCOPE", "CTRS", "DIAG", "PACE", "SOURCE", "FRAMES" };
 
 static PspHwCounterTotals sPspHwTotals;
+static PspHwFrameRecord sPspHwFrames[PSP_HW_COUNTER_CAPTURE_FRAMES];
+static PspCommandSourceStats sPspHwCurrentCommandSources[PSP_COMMAND_SOURCE_COUNT];
+static u32 sPspHwCommandSourceMismatchFrames;
+static struct {
+    u64 commands;
+    u64 vertexCommands;
+    u64 triangleCommands;
+    u64 displayListCalls;
+    u64 frontendUs;
+} sPspHwCommandSourceTotals[PSP_COMMAND_SOURCE_COUNT];
+static struct {
+    u32 source;
+    u32 rawTarget;
+    u32 resolvedTarget;
+    u32 calls;
+    u64 inclusiveCommands;
+} sPspHwDlSources[PSP_HW_DL_SOURCE_SLOTS];
+static u32 sPspHwDlSourceUsed;
+static u32 sPspHwDlSourceOverflowCalls;
+static u64 sPspHwDlSourceOverflowCommands;
+static int sPspHwDlSourceFull;
+static u64 sPspHwWaterGroupsSeen;
+static u64 sPspHwWaterGroupsEvaluated;
+static u64 sPspHwWaterGroupsSkipped;
+static u64 sPspHwWaterPairsSkipped;
+static u64 sPspHwWaterCommandsSkipped;
+static u32 sPspHwCurrentWaterGroupsSkipped;
+static u32 sPspHwCurrentWaterPairsSkipped;
+static u32 sPspHwCurrentWaterCommandsSkipped;
+static struct {
+    u64 elapsedUs;
+    u64 commands;
+    u64 loadedVertices;
+    u64 inputTriangles;
+    u64 emittedTriangles;
+    u32 calls;
+    u32 zeroOutputCalls;
+} sPspHwWaterTotals[PSP_WATER_TILE_COUNT];
+static u32 sPspHwCurrentWaterUs[PSP_WATER_TILE_COUNT];
+static u32 sPspHwCurrentWaterInput[PSP_WATER_TILE_COUNT];
+static u32 sPspHwCurrentWaterEmitted[PSP_WATER_TILE_COUNT];
+static struct {
+    u64 elapsedUs;
+    u64 commands;
+    u32 calls;
+    u32 maxFrameUs;
+} sPspHwEffectTotals[PSP_HW_EFFECT_TYPE_COUNT];
+static u32 sPspHwCurrentEffectUs[PSP_HW_EFFECT_TYPE_COUNT];
 static PspHwCounterSample sPspHwScopeStart[PSP_HW_SCOPE_COUNT];
 static const volatile PspDebugProfilerRegs* sPspHwRegs;
 static PspHwCounterSource sPspHwSource;
@@ -225,6 +311,8 @@ static u64 sPspHwLastFrameBeginUs;
 static u32 sPspHwCurrentFrameIntervalUs;
 static u32 sPspHwCurrentTaskUs;
 static u32 sPspHwCurrentPresentUs;
+static u32 sPspHwCurrentTaskCounters[PSP_HW_COUNTER_COUNT];
+static u64 sPspHwLastTextureUploadBytes;
 static int sPspHwFrameBeginValid;
 static int sPspHwCurrentFrameIntervalValid;
 static int sPspHwCurrentTaskValid;
@@ -351,6 +439,10 @@ static int psp_hw_write_all(SceUID fd, const char* text) {
     }
     return 1;
 }
+
+#if PSP_GFX_BACKEND_GU
+#include "src/psp/texture_attribution.inc.c"
+#endif
 
 static int psp_hw_find_slot(u32 root, char* path, u32 pathSize, u32* slotOut) {
     SceIoStat stat;
@@ -546,6 +638,12 @@ static int psp_hw_dump_diagnostics(SceUID fd) {
         }
     }
 
+#if PSP_GFX_BACKEND_GU
+    if (!psp_hw_texture_dump(fd)) {
+        return 0;
+    }
+#endif
+
     if (!psp_hw_write_all(fd, "\n[batch flush reasons]\nreason,count,vertices,count_per_frame_x1000\n")) {
         return 0;
     }
@@ -613,6 +711,283 @@ static int psp_hw_dump_pacing(SceUID fd) {
     return 1;
 }
 
+static int psp_hw_dump_command_sources(SceUID fd) {
+    char line[384];
+    u32 frame;
+    u32 source;
+
+    snprintf(line, sizeof(line), "\n[command source diagnostics]\nmetric,value\n"
+                                 "source_mismatch_frames,%lu\n\n[command sources]\n"
+                                 "source,commands,per_frame_x1000,vertex_commands,triangle_commands,"
+                                 "display_list_calls,frontend_us,frontend_us_per_frame_x1000\n",
+             (unsigned long) sPspHwCommandSourceMismatchFrames);
+    if (!psp_hw_write_all(fd, line)) {
+        return 0;
+    }
+    for (source = 0; source < PSP_COMMAND_SOURCE_COUNT; source++) {
+        snprintf(line, sizeof(line), "%s,%llu,%llu,%llu,%llu,%llu,%llu,%llu\n", sPspHwCommandSourceNames[source],
+                 (unsigned long long) sPspHwCommandSourceTotals[source].commands,
+                 (unsigned long long) psp_hw_ratio(sPspHwCommandSourceTotals[source].commands, sPspHwTotals.frames),
+                 (unsigned long long) sPspHwCommandSourceTotals[source].vertexCommands,
+                 (unsigned long long) sPspHwCommandSourceTotals[source].triangleCommands,
+                 (unsigned long long) sPspHwCommandSourceTotals[source].displayListCalls,
+                 (unsigned long long) sPspHwCommandSourceTotals[source].frontendUs,
+                 (unsigned long long) psp_hw_ratio(sPspHwCommandSourceTotals[source].frontendUs, sPspHwTotals.frames));
+        if (!psp_hw_write_all(fd, line)) {
+            return 0;
+        }
+    }
+    if (!psp_hw_write_all(fd, "\n[command source frames]\nframe")) {
+        return 0;
+    }
+    for (source = 0; source < PSP_COMMAND_SOURCE_COUNT; source++) {
+        snprintf(line, sizeof(line), ",%s", sPspHwCommandSourceNames[source]);
+        if (!psp_hw_write_all(fd, line)) {
+            return 0;
+        }
+    }
+    if (!psp_hw_write_all(fd, "\n")) {
+        return 0;
+    }
+    for (frame = 0; frame < sPspHwTotals.frames; frame++) {
+        u32 length = (u32) snprintf(line, sizeof(line), "%lu", (unsigned long) frame);
+
+        for (source = 0; source < PSP_COMMAND_SOURCE_COUNT; source++) {
+            length += (u32) snprintf(line + length, sizeof(line) - length, ",%lu",
+                                     (unsigned long) sPspHwFrames[frame].commandSources[source]);
+        }
+        line[length++] = '\n';
+        line[length] = 0;
+        if (!psp_hw_write_all(fd, line)) {
+            return 0;
+        }
+    }
+    if (!psp_hw_write_all(fd, "\n[command source timing frames]\nframe")) {
+        return 0;
+    }
+    for (source = 0; source < PSP_COMMAND_SOURCE_COUNT; source++) {
+        snprintf(line, sizeof(line), ",%s", sPspHwCommandSourceNames[source]);
+        if (!psp_hw_write_all(fd, line)) {
+            return 0;
+        }
+    }
+    if (!psp_hw_write_all(fd, "\n")) {
+        return 0;
+    }
+    for (frame = 0; frame < sPspHwTotals.frames; frame++) {
+        u32 length = (u32) snprintf(line, sizeof(line), "%lu", (unsigned long) frame);
+
+        for (source = 0; source < PSP_COMMAND_SOURCE_COUNT; source++) {
+            length += (u32) snprintf(line + length, sizeof(line) - length, ",%lu",
+                                     (unsigned long) sPspHwFrames[frame].commandSourceUs[source]);
+        }
+        line[length++] = '\n';
+        line[length] = 0;
+        if (!psp_hw_write_all(fd, line)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int psp_hw_dump_water_and_effects(SceUID fd) {
+    char line[384];
+    u32 tile;
+    u32 id;
+    u32 frame;
+
+    snprintf(line, sizeof(line), "\n[water group cull]\nmetric,value\ngroups_seen,%llu\n"
+                                 "groups_evaluated,%llu\ngroups_skipped,%llu\n"
+                                 "triangle_pairs_skipped,%llu\ncommands_skipped,%llu\n",
+             (unsigned long long) sPspHwWaterGroupsSeen,
+             (unsigned long long) sPspHwWaterGroupsEvaluated,
+             (unsigned long long) sPspHwWaterGroupsSkipped,
+             (unsigned long long) sPspHwWaterPairsSkipped,
+             (unsigned long long) sPspHwWaterCommandsSkipped);
+    if (!psp_hw_write_all(fd, line) ||
+        !psp_hw_write_all(fd, "\n[water group cull frames]\nframe,groups_skipped,triangle_pairs_skipped,"
+                              "commands_skipped\n")) {
+        return 0;
+    }
+    for (frame = 0; frame < sPspHwTotals.frames; frame++) {
+        snprintf(line, sizeof(line), "%lu,%lu,%lu,%lu\n", (unsigned long) frame,
+                 (unsigned long) sPspHwFrames[frame].waterGroupsSkipped,
+                 (unsigned long) sPspHwFrames[frame].waterPairsSkipped,
+                 (unsigned long) sPspHwFrames[frame].waterCommandsSkipped);
+        if (!psp_hw_write_all(fd, line)) {
+            return 0;
+        }
+    }
+    if (!psp_hw_write_all(fd, "\n[water tiles]\ntile,x,z,calls,frontend_us,commands,loaded_vertices,"
+                              "input_triangles,emitted_triangles,zero_output_calls\n")) {
+        return 0;
+    }
+    for (tile = 0; tile < PSP_WATER_TILE_COUNT; tile++) {
+        snprintf(line, sizeof(line), "%lu,%ld,%ld,%lu,%llu,%llu,%llu,%llu,%llu,%lu\n",
+                 (unsigned long) tile, (long) (tile % 3) - 1, -(long) (tile / 3),
+                 (unsigned long) sPspHwWaterTotals[tile].calls,
+                 (unsigned long long) sPspHwWaterTotals[tile].elapsedUs,
+                 (unsigned long long) sPspHwWaterTotals[tile].commands,
+                 (unsigned long long) sPspHwWaterTotals[tile].loadedVertices,
+                 (unsigned long long) sPspHwWaterTotals[tile].inputTriangles,
+                 (unsigned long long) sPspHwWaterTotals[tile].emittedTriangles,
+                 (unsigned long) sPspHwWaterTotals[tile].zeroOutputCalls);
+        if (!psp_hw_write_all(fd, line)) {
+            return 0;
+        }
+    }
+    if (!psp_hw_write_all(fd, "\n[water tile frames]\nframe")) {
+        return 0;
+    }
+    for (tile = 0; tile < PSP_WATER_TILE_COUNT; tile++) {
+        snprintf(line, sizeof(line), ",tile%lu_us", (unsigned long) tile);
+        if (!psp_hw_write_all(fd, line)) {
+            return 0;
+        }
+    }
+    for (tile = 0; tile < PSP_WATER_TILE_COUNT; tile++) {
+        snprintf(line, sizeof(line), ",tile%lu_input", (unsigned long) tile);
+        if (!psp_hw_write_all(fd, line)) {
+            return 0;
+        }
+    }
+    for (tile = 0; tile < PSP_WATER_TILE_COUNT; tile++) {
+        snprintf(line, sizeof(line), ",tile%lu_emitted", (unsigned long) tile);
+        if (!psp_hw_write_all(fd, line)) {
+            return 0;
+        }
+    }
+    if (!psp_hw_write_all(fd, "\n")) {
+        return 0;
+    }
+    for (frame = 0; frame < sPspHwTotals.frames; frame++) {
+        u32 length = (u32) snprintf(line, sizeof(line), "%lu", (unsigned long) frame);
+
+        for (tile = 0; tile < PSP_WATER_TILE_COUNT; tile++) {
+            length += (u32) snprintf(line + length, sizeof(line) - length, ",%lu",
+                                     (unsigned long) sPspHwFrames[frame].waterUs[tile]);
+        }
+        for (tile = 0; tile < PSP_WATER_TILE_COUNT; tile++) {
+            length += (u32) snprintf(line + length, sizeof(line) - length, ",%lu",
+                                     (unsigned long) sPspHwFrames[frame].waterInputTriangles[tile]);
+        }
+        for (tile = 0; tile < PSP_WATER_TILE_COUNT; tile++) {
+            length += (u32) snprintf(line + length, sizeof(line) - length, ",%lu",
+                                     (unsigned long) sPspHwFrames[frame].waterEmittedTriangles[tile]);
+        }
+        line[length++] = '\n';
+        line[length] = 0;
+        if (!psp_hw_write_all(fd, line)) {
+            return 0;
+        }
+    }
+    if (!psp_hw_write_all(fd, "\n[effect types]\nid,calls,commands,frontend_us,max_frame_us\n")) {
+        return 0;
+    }
+    for (id = 0; id < PSP_HW_EFFECT_TYPE_COUNT; id++) {
+        if (sPspHwEffectTotals[id].calls == 0) {
+            continue;
+        }
+        snprintf(line, sizeof(line), "%lu,%lu,%llu,%llu,%lu\n", (unsigned long) id,
+                 (unsigned long) sPspHwEffectTotals[id].calls,
+                 (unsigned long long) sPspHwEffectTotals[id].commands,
+                 (unsigned long long) sPspHwEffectTotals[id].elapsedUs,
+                 (unsigned long) sPspHwEffectTotals[id].maxFrameUs);
+        if (!psp_hw_write_all(fd, line)) {
+            return 0;
+        }
+    }
+    if (!psp_hw_write_all(fd, "\n[effect type frames]\nframe,top_id,top_us,second_id,second_us,total_us\n")) {
+        return 0;
+    }
+    for (frame = 0; frame < sPspHwTotals.frames; frame++) {
+        snprintf(line, sizeof(line), "%lu,%lu,%lu,%lu,%lu,%lu\n", (unsigned long) frame,
+                 (unsigned long) sPspHwFrames[frame].topEffectId,
+                 (unsigned long) sPspHwFrames[frame].topEffectUs,
+                 (unsigned long) sPspHwFrames[frame].secondEffectId,
+                 (unsigned long) sPspHwFrames[frame].secondEffectUs,
+                 (unsigned long) sPspHwFrames[frame].effectTotalUs);
+        if (!psp_hw_write_all(fd, line)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int psp_hw_dump_display_list_sources(SceUID fd) {
+    char line[192];
+    u32 slot;
+
+    snprintf(line, sizeof(line), "\n[display list source diagnostics]\nmetric,value\n"
+                                 "table_slots,%u\ntable_used,%lu\noverflow_calls,%lu\n"
+                                 "overflow_inclusive_commands,%llu\n",
+             PSP_HW_DL_SOURCE_SLOTS, (unsigned long) sPspHwDlSourceUsed,
+             (unsigned long) sPspHwDlSourceOverflowCalls,
+             (unsigned long long) sPspHwDlSourceOverflowCommands);
+    if (!psp_hw_write_all(fd, line) ||
+        !psp_hw_write_all(fd, "\n[display list sources]\nsource,raw_target,resolved_target,calls,"
+                              "inclusive_commands\n")) {
+        return 0;
+    }
+    for (slot = 0; slot < PSP_HW_DL_SOURCE_SLOTS; slot++) {
+        if (sPspHwDlSources[slot].calls == 0) {
+            continue;
+        }
+        snprintf(line, sizeof(line), "%s,0x%08lx,0x%08lx,%lu,%llu\n",
+                 sPspHwCommandSourceNames[sPspHwDlSources[slot].source],
+                 (unsigned long) sPspHwDlSources[slot].rawTarget,
+                 (unsigned long) sPspHwDlSources[slot].resolvedTarget,
+                 (unsigned long) sPspHwDlSources[slot].calls,
+                 (unsigned long long) sPspHwDlSources[slot].inclusiveCommands);
+        if (!psp_hw_write_all(fd, line)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int psp_hw_dump_frames(SceUID fd) {
+    char line[384];
+    u32 frame;
+    u32 counter;
+
+    if (!psp_hw_write_all(fd, "\n[frames]\nframe,frame_interval_us,task_us,present_us,commands,"
+                              "loaded_vertices,submitted_vertices,texture_upload_bytes")) {
+        return 0;
+    }
+    for (counter = 0; counter < PSP_HW_COUNTER_COUNT; counter++) {
+        snprintf(line, sizeof(line), ",%s", sPspHwCounterNames[counter]);
+        if (!psp_hw_write_all(fd, line)) {
+            return 0;
+        }
+    }
+    if (!psp_hw_write_all(fd, "\n")) {
+        return 0;
+    }
+
+    for (frame = 0; frame < sPspHwTotals.frames; frame++) {
+        const PspHwFrameRecord* record = &sPspHwFrames[frame];
+        u32 length;
+
+        length = (u32) snprintf(line, sizeof(line), "%lu,%lu,%lu,%lu,%lu,%lu,%lu,%lu",
+                                (unsigned long) frame, (unsigned long) record->frameIntervalUs,
+                                (unsigned long) record->taskUs, (unsigned long) record->presentUs,
+                                (unsigned long) record->commands, (unsigned long) record->loadedVertices,
+                                (unsigned long) record->submittedVertices,
+                                (unsigned long) record->textureUploadBytes);
+        for (counter = 0; counter < PSP_HW_COUNTER_COUNT; counter++) {
+            length += (u32) snprintf(line + length, sizeof(line) - length, ",%lu",
+                                     (unsigned long) record->taskCounter[counter]);
+        }
+        line[length++] = '\n';
+        line[length] = 0;
+        if (!psp_hw_write_all(fd, line)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static int psp_hw_dump_to_root(u32 root) {
     char path[112];
     SceUID fd;
@@ -645,6 +1020,14 @@ static int psp_hw_dump_to_root(u32 root) {
         sPspHwErrorStep = PSP_HW_STEP_DIAGNOSTICS;
     } else if (!psp_hw_dump_pacing(fd)) {
         sPspHwErrorStep = PSP_HW_STEP_PACING;
+    } else if (!psp_hw_dump_command_sources(fd)) {
+        sPspHwErrorStep = PSP_HW_STEP_SOURCES;
+    } else if (!psp_hw_dump_water_and_effects(fd)) {
+        sPspHwErrorStep = PSP_HW_STEP_SOURCES;
+    } else if (!psp_hw_dump_display_list_sources(fd)) {
+        sPspHwErrorStep = PSP_HW_STEP_SOURCES;
+    } else if (!psp_hw_dump_frames(fd)) {
+        sPspHwErrorStep = PSP_HW_STEP_FRAMES;
     } else {
         sPspHwErrorStep = PSP_HW_STEP_NONE;
     }
@@ -679,6 +1062,24 @@ static void psp_hw_start(void) {
         return;
     }
     memset(&sPspHwTotals, 0, sizeof(sPspHwTotals));
+    memset(sPspHwCommandSourceTotals, 0, sizeof(sPspHwCommandSourceTotals));
+    sPspHwCommandSourceMismatchFrames = 0;
+    memset(sPspHwDlSources, 0, sizeof(sPspHwDlSources));
+    memset(sPspHwWaterTotals, 0, sizeof(sPspHwWaterTotals));
+    memset(sPspHwEffectTotals, 0, sizeof(sPspHwEffectTotals));
+    sPspHwDlSourceUsed = 0;
+    sPspHwDlSourceOverflowCalls = 0;
+    sPspHwDlSourceOverflowCommands = 0;
+    sPspHwDlSourceFull = 0;
+    sPspHwWaterGroupsSeen = 0;
+    sPspHwWaterGroupsEvaluated = 0;
+    sPspHwWaterGroupsSkipped = 0;
+    sPspHwWaterPairsSkipped = 0;
+    sPspHwWaterCommandsSkipped = 0;
+#if PSP_GFX_BACKEND_GU
+    psp_hw_texture_reset();
+#endif
+    sPspHwLastTextureUploadBytes = 0;
     sPspHwFrameBeginValid = 0;
     sPspHwWarmupFrames = PSP_HW_COUNTER_WARMUP_FRAMES;
     sPspHwStopRequested = 0;
@@ -707,6 +1108,9 @@ static void psp_hw_service_dump(void) {
 
 void PspHwCounterProfile_Init(void) {
     memset(&sPspHwTotals, 0, sizeof(sPspHwTotals));
+#if PSP_GFX_BACKEND_GU
+    psp_hw_texture_reset();
+#endif
     sPspHwCaptureActive = 0;
     sPspHwStopRequested = 0;
     sPspHwFrameArmed = 0;
@@ -793,6 +1197,9 @@ void PspHwCounterProfile_FrameBegin(void) {
     /* Every scope runs on this thread so the pointer only needs refreshing per frame */
     psp_hw_bind_counters();
     sPspHwFrameArmed = 1;
+#if PSP_GFX_BACKEND_GU
+    memset(sPspHwTextureFrame, 0, sizeof(sPspHwTextureFrame));
+#endif
     sPspHwCurrentFrameIntervalValid = sPspHwFrameBeginValid;
     if (sPspHwCurrentFrameIntervalValid) {
         sPspHwCurrentFrameIntervalUs = (u32) (now - sPspHwLastFrameBeginUs);
@@ -801,9 +1208,24 @@ void PspHwCounterProfile_FrameBegin(void) {
     sPspHwFrameBeginValid = 1;
     sPspHwCurrentTaskValid = 0;
     sPspHwCurrentPresentValid = 0;
+    memset(sPspHwCurrentTaskCounters, 0, sizeof(sPspHwCurrentTaskCounters));
+    memset(sPspHwCurrentCommandSources, 0, sizeof(sPspHwCurrentCommandSources));
+    memset(sPspHwCurrentWaterUs, 0, sizeof(sPspHwCurrentWaterUs));
+    memset(sPspHwCurrentWaterInput, 0, sizeof(sPspHwCurrentWaterInput));
+    memset(sPspHwCurrentWaterEmitted, 0, sizeof(sPspHwCurrentWaterEmitted));
+    memset(sPspHwCurrentEffectUs, 0, sizeof(sPspHwCurrentEffectUs));
+    sPspHwCurrentWaterGroupsSkipped = 0;
+    sPspHwCurrentWaterPairsSkipped = 0;
+    sPspHwCurrentWaterCommandsSkipped = 0;
 }
 
 void PspHwCounterProfile_FrameEnd(u32 commands, u32 loadedVertices, u32 submittedVertices) {
+    PspHwFrameRecord* record;
+    u64 textureUploadBytes = 0;
+    u32 textureClass;
+    u32 source;
+    u32 sourceCommands = 0;
+
     if (!sPspHwFrameArmed) {
         if (sPspHwCaptureActive && sPspHwStopRequested && (sPspHwWarmupFrames != 0)) {
             /* Aborted during warmup, nothing recorded */
@@ -828,6 +1250,59 @@ void PspHwCounterProfile_FrameEnd(u32 commands, u32 loadedVertices, u32 submitte
         psp_hw_record_pacing(PSP_HW_PACING_TASK_AND_PRESENT,
                              sPspHwCurrentTaskUs + sPspHwCurrentPresentUs);
     }
+    record = &sPspHwFrames[sPspHwTotals.frames];
+    record->frameIntervalUs = sPspHwCurrentFrameIntervalValid ? sPspHwCurrentFrameIntervalUs : 0;
+    record->taskUs = sPspHwCurrentTaskValid ? sPspHwCurrentTaskUs : 0;
+    record->presentUs = sPspHwCurrentPresentValid ? sPspHwCurrentPresentUs : 0;
+    record->commands = commands;
+#if PSP_GFX_BACKEND_GU
+    memcpy(record->texture, sPspHwTextureFrame, sizeof(record->texture));
+#endif
+    record->loadedVertices = loadedVertices;
+    record->submittedVertices = submittedVertices;
+    memcpy(record->taskCounter, sPspHwCurrentTaskCounters, sizeof(record->taskCounter));
+    for (source = 0; source < PSP_COMMAND_SOURCE_COUNT; source++) {
+        record->commandSources[source] = sPspHwCurrentCommandSources[source].commands;
+        record->commandSourceUs[source] = sPspHwCurrentCommandSources[source].frontendUs;
+        sourceCommands += record->commandSources[source];
+    }
+    memcpy(record->waterUs, sPspHwCurrentWaterUs, sizeof(record->waterUs));
+    memcpy(record->waterInputTriangles, sPspHwCurrentWaterInput, sizeof(record->waterInputTriangles));
+    memcpy(record->waterEmittedTriangles, sPspHwCurrentWaterEmitted, sizeof(record->waterEmittedTriangles));
+    record->topEffectId = PSP_EFFECT_TYPE_END;
+    record->topEffectUs = 0;
+    record->secondEffectId = PSP_EFFECT_TYPE_END;
+    record->secondEffectUs = 0;
+    record->effectTotalUs = 0;
+    record->waterGroupsSkipped = sPspHwCurrentWaterGroupsSkipped;
+    record->waterPairsSkipped = sPspHwCurrentWaterPairsSkipped;
+    record->waterCommandsSkipped = sPspHwCurrentWaterCommandsSkipped;
+    for (source = 0; source < PSP_HW_EFFECT_TYPE_COUNT; source++) {
+        u32 effectUs = sPspHwCurrentEffectUs[source];
+
+        record->effectTotalUs += effectUs;
+        if (effectUs > record->topEffectUs) {
+            record->secondEffectUs = record->topEffectUs;
+            record->secondEffectId = record->topEffectId;
+            record->topEffectUs = effectUs;
+            record->topEffectId = source;
+        } else if (effectUs > record->secondEffectUs) {
+            record->secondEffectUs = effectUs;
+            record->secondEffectId = source;
+        }
+        if (effectUs > sPspHwEffectTotals[source].maxFrameUs) {
+            sPspHwEffectTotals[source].maxFrameUs = effectUs;
+        }
+    }
+    if (sourceCommands != commands) {
+        sPspHwCommandSourceMismatchFrames++;
+    }
+    for (textureClass = 0; textureClass < PSP_HW_TEXTURE_CACHE_COUNT; textureClass++) {
+        textureUploadBytes += sPspHwTotals.textureCache[textureClass].uploadBytes;
+    }
+    record->textureUploadBytes = (u32) (textureUploadBytes - sPspHwLastTextureUploadBytes);
+    sPspHwLastTextureUploadBytes = textureUploadBytes;
+
     sPspHwTotals.commands += commands;
     sPspHwTotals.loadedVertices += loadedVertices;
     sPspHwTotals.submittedVertices += submittedVertices;
@@ -874,7 +1349,12 @@ void PspHwCounterProfile_ScopeEnd(PspHwCounterScope scope) {
         return;
     }
     for (i = 0; i < PSP_HW_COUNTER_COUNT; i++) {
-        totals->counter[i] += (u32) (end.counter[i] - start->counter[i]);
+        u32 delta = (u32) (end.counter[i] - start->counter[i]);
+
+        totals->counter[i] += delta;
+        if (scope == PSP_HW_SCOPE_TASK) {
+            sPspHwCurrentTaskCounters[i] = delta;
+        }
     }
 }
 
@@ -925,6 +1405,113 @@ void PspHwCounterProfile_CountPoolEvent(PspHwPoolEvent event) {
         return;
     }
     sPspHwTotals.poolEvents[event]++;
+}
+
+void PspHwCounterProfile_RecordCommandSources(const PspCommandSourceStats* stats) {
+    u32 source;
+
+    if (!sPspHwFrameArmed) {
+        return;
+    }
+    for (source = 0; source < PSP_COMMAND_SOURCE_COUNT; source++) {
+        sPspHwCurrentCommandSources[source] = stats[source];
+        sPspHwCommandSourceTotals[source].commands += stats[source].commands;
+        sPspHwCommandSourceTotals[source].vertexCommands += stats[source].vertexCommands;
+        sPspHwCommandSourceTotals[source].triangleCommands += stats[source].triangleCommands;
+        sPspHwCommandSourceTotals[source].displayListCalls += stats[source].displayListCalls;
+        sPspHwCommandSourceTotals[source].frontendUs += stats[source].frontendUs;
+    }
+}
+
+void PspHwCounterProfile_RecordWaterTile(u32 tile, u32 elapsedUs, u32 commands, u32 loadedVertices,
+                                         u32 inputTriangles, u32 emittedTriangles) {
+    if (!sPspHwFrameArmed || tile >= PSP_WATER_TILE_COUNT) {
+        return;
+    }
+    sPspHwWaterTotals[tile].elapsedUs += elapsedUs;
+    sPspHwWaterTotals[tile].commands += commands;
+    sPspHwWaterTotals[tile].loadedVertices += loadedVertices;
+    sPspHwWaterTotals[tile].inputTriangles += inputTriangles;
+    sPspHwWaterTotals[tile].emittedTriangles += emittedTriangles;
+    sPspHwWaterTotals[tile].calls++;
+    sPspHwWaterTotals[tile].zeroOutputCalls += emittedTriangles == 0;
+    sPspHwCurrentWaterUs[tile] += elapsedUs;
+    sPspHwCurrentWaterInput[tile] += inputTriangles;
+    sPspHwCurrentWaterEmitted[tile] += emittedTriangles;
+}
+
+void PspHwCounterProfile_RecordEffectType(u32 id, u32 elapsedUs, u32 commands) {
+    if (!sPspHwFrameArmed || id >= PSP_HW_EFFECT_TYPE_COUNT) {
+        return;
+    }
+    sPspHwEffectTotals[id].elapsedUs += elapsedUs;
+    sPspHwEffectTotals[id].commands += commands;
+    sPspHwEffectTotals[id].calls++;
+    sPspHwCurrentEffectUs[id] += elapsedUs;
+}
+
+void PspHwCounterProfile_CountWaterGroupSeen(void) {
+    if (sPspHwFrameArmed) {
+        sPspHwWaterGroupsSeen++;
+    }
+}
+
+void PspHwCounterProfile_CountWaterGroupEvaluated(void) {
+    if (sPspHwFrameArmed) {
+        sPspHwWaterGroupsEvaluated++;
+    }
+}
+
+void PspHwCounterProfile_CountWaterGroupSkipped(u32 pairs, u32 commands) {
+    if (!sPspHwFrameArmed) {
+        return;
+    }
+    sPspHwWaterGroupsSkipped++;
+    sPspHwWaterPairsSkipped += pairs;
+    sPspHwWaterCommandsSkipped += commands;
+    sPspHwCurrentWaterGroupsSkipped++;
+    sPspHwCurrentWaterPairsSkipped += pairs;
+    sPspHwCurrentWaterCommandsSkipped += commands;
+}
+
+int PspHwCounterProfile_IsCapturingTask(void) {
+    return sPspHwFrameArmed;
+}
+
+void PspHwCounterProfile_RecordDisplayList(u32 source, u32 rawTarget, const void* resolvedTarget, u32 commands) {
+    u32 resolved = (u32) (unsigned long) resolvedTarget;
+    u32 slot;
+    u32 probe;
+
+    if (!sPspHwFrameArmed || (source >= PSP_COMMAND_SOURCE_COUNT)) {
+        return;
+    }
+    if (sPspHwDlSourceFull) {
+        sPspHwDlSourceOverflowCalls++;
+        sPspHwDlSourceOverflowCommands += commands;
+        return;
+    }
+    slot = (rawTarget * 2654435761U ^ resolved * 2246822519U ^ source * 3266489917U) &
+           (PSP_HW_DL_SOURCE_SLOTS - 1U);
+    for (probe = 0; probe < PSP_HW_DL_SOURCE_SLOTS; probe++) {
+        if (sPspHwDlSources[slot].calls == 0) {
+            sPspHwDlSources[slot].source = source;
+            sPspHwDlSources[slot].rawTarget = rawTarget;
+            sPspHwDlSources[slot].resolvedTarget = resolved;
+            sPspHwDlSourceUsed++;
+        } else if ((sPspHwDlSources[slot].source != source) ||
+                   (sPspHwDlSources[slot].rawTarget != rawTarget) ||
+                   (sPspHwDlSources[slot].resolvedTarget != resolved)) {
+            slot = (slot + 1U) & (PSP_HW_DL_SOURCE_SLOTS - 1U);
+            continue;
+        }
+        sPspHwDlSources[slot].calls++;
+        sPspHwDlSources[slot].inclusiveCommands += commands;
+        return;
+    }
+    sPspHwDlSourceFull = 1;
+    sPspHwDlSourceOverflowCalls++;
+    sPspHwDlSourceOverflowCommands += commands;
 }
 
 void PspHwCounterProfile_DrawStatus(void) {

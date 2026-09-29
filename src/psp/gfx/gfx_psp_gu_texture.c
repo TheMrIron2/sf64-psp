@@ -3,6 +3,7 @@
 #include "src/psp/gfx/gfx_psp_color.h"
 #include "src/psp/gfx/gfx_psp_gu_device.h"
 #include "src/psp/hw_counter_profile.h"
+#include "src/psp/texture_attribution.h"
 #include "src/psp/profiler.h"
 
 #include <malloc.h>
@@ -484,6 +485,32 @@ static void psp_gfx_gu_texture_release_entry(PspGfxGuTextureEntry* entry) {
     memset(entry, 0, sizeof(*entry));
 }
 
+#if PROFILE_HW_COUNTERS
+static void psp_gfx_gu_texture_note_retirement(const PspGfxGuTextureEntry* entry, PspHwTextureRetireReason reason) {
+    PspGfxTextureRequest request;
+
+    if (entry->data == NULL) {
+        return;
+    }
+    request.pixels = entry->pixels;
+    request.palette = entry->palette;
+    request.format = entry->format;
+    request.width = entry->width;
+    request.height = entry->height;
+    request.premultiply = entry->premultiply;
+    request.softCoverage = entry->softCoverage;
+    request.envBlend = entry->envBlend;
+    request.mirrorS = entry->mirrorS;
+    request.mirrorT = entry->mirrorT;
+    request.primitiveColor = entry->primitiveColor;
+    request.environmentColor = entry->environmentColor;
+    PspHwCounterProfile_TextureRetire(&request, reason, entry->dataBytes, entry->retired,
+                                     entry->storage == PSP_GFX_GU_TEXTURE_STORAGE_EDRAM);
+}
+#else
+#define psp_gfx_gu_texture_note_retirement(entry, reason) ((void) 0)
+#endif
+
 static void psp_gfx_gu_texture_evict_entry(PspGfxGuTextureEntry* entry) {
     if (entry->data != NULL) {
         PspHwTextureCacheClass hwClass = psp_gfx_gu_texture_hw_class(entry->format);
@@ -569,6 +596,7 @@ static int psp_gfx_gu_texture_reserve_arena_entry(u32 dataBytes, PspGfxGuTexture
             if (victim < 0) {
                 return -1;
             }
+            psp_gfx_gu_texture_note_retirement(&sPspGfxGuTextureEntries[victim], PSP_HW_TEXTURE_EDRAM_BUDGET);
             psp_gfx_gu_texture_evict_entry(&sPspGfxGuTextureEntries[victim]);
         }
         index = psp_gfx_gu_texture_find_free_entry();
@@ -577,6 +605,7 @@ static int psp_gfx_gu_texture_reserve_arena_entry(u32 dataBytes, PspGfxGuTexture
             if (victim < 0) {
                 return -1;
             }
+            psp_gfx_gu_texture_note_retirement(&sPspGfxGuTextureEntries[victim], PSP_HW_TEXTURE_SLOT_PRESSURE);
             psp_gfx_gu_texture_evict_entry(&sPspGfxGuTextureEntries[victim]);
             continue;
         }
@@ -588,6 +617,7 @@ static int psp_gfx_gu_texture_reserve_arena_entry(u32 dataBytes, PspGfxGuTexture
         if (victim < 0) {
             return -1;
         }
+        psp_gfx_gu_texture_note_retirement(&sPspGfxGuTextureEntries[victim], PSP_HW_TEXTURE_EDRAM_ALLOC);
         psp_gfx_gu_texture_evict_entry(&sPspGfxGuTextureEntries[victim]);
     }
 }
@@ -606,6 +636,7 @@ static int psp_gfx_gu_texture_reserve_ram_entry(u32 dataBytes, void** data, u32*
             if (victim < 0) {
                 return -1;
             }
+            psp_gfx_gu_texture_note_retirement(&sPspGfxGuTextureEntries[victim], PSP_HW_TEXTURE_RAM_BUDGET);
             psp_gfx_gu_texture_evict_entry(&sPspGfxGuTextureEntries[victim]);
         }
         index = psp_gfx_gu_texture_find_free_entry();
@@ -614,6 +645,7 @@ static int psp_gfx_gu_texture_reserve_ram_entry(u32 dataBytes, void** data, u32*
             if (victim < 0) {
                 return -1;
             }
+            psp_gfx_gu_texture_note_retirement(&sPspGfxGuTextureEntries[victim], PSP_HW_TEXTURE_SLOT_PRESSURE);
             psp_gfx_gu_texture_evict_entry(&sPspGfxGuTextureEntries[victim]);
             continue;
         }
@@ -1125,6 +1157,9 @@ int PspGfxGuTexture_Create(const PspGfxTextureRequest* request, PspGfxTextureRes
     int arenaAllocated;
     void* decodeData;
     int mutableRefresh;
+#if PROFILE_HW_COUNTERS
+    PspHwTextureCreateSample attribution;
+#endif
 
     if (result == NULL) {
         return 0;
@@ -1136,6 +1171,9 @@ int PspGfxGuTexture_Create(const PspGfxTextureRequest* request, PspGfxTextureRes
         return 0;
     }
 
+#if PROFILE_HW_COUNTERS
+    PspHwCounterProfile_TextureCreateBegin(request, &attribution);
+#endif
     softenAlpha = psp_gfx_gu_texture_should_soften_alpha(request);
     psm = psp_gfx_gu_texture_candidate_psm(request, softenAlpha);
     if (psm == GU_PSM_5551) {
@@ -1148,6 +1186,9 @@ int PspGfxGuTexture_Create(const PspGfxTextureRequest* request, PspGfxTextureRes
     baseHash = psp_gfx_gu_texture_base_hash(request);
 #endif
     PspProfiler_CountTextureEvent(0, 1, 0, 0, 0);
+#if PROFILE_HW_COUNTERS
+    PspHwCounterProfile_TextureCreateStage(&attribution, PSP_HW_TEXTURE_PREPARE);
+#endif
     mutableRefresh = 0;
     index = psp_gfx_gu_texture_find_mutable_refresh_entry(
         request, dataBytes, uploadWidth, uploadHeight, psm);
@@ -1162,6 +1203,10 @@ int PspGfxGuTexture_Create(const PspGfxTextureRequest* request, PspGfxTextureRes
         index = psp_gfx_gu_texture_reserve_entry(dataBytes, &data, &arenaOffset, &storage,
                                                  &arenaAllocated);
         if (index < 0) {
+#if PROFILE_HW_COUNTERS
+            PspHwCounterProfile_TextureCreateStage(&attribution, PSP_HW_TEXTURE_RESERVE);
+            PspHwCounterProfile_TextureCreateEnd(request, &attribution, 0, 0, 0, 0);
+#endif
             return 0;
         }
     }
@@ -1173,6 +1218,9 @@ int PspGfxGuTexture_Create(const PspGfxTextureRequest* request, PspGfxTextureRes
     if (mutableRefresh) {
         entry->mutableRetired = 0;
     }
+#if PROFILE_HW_COUNTERS
+    PspHwCounterProfile_TextureCreateStage(&attribution, PSP_HW_TEXTURE_RESERVE);
+#endif
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TEXTURE_DECODE);
     decodeData = entry->data;
     if (entry->storage == PSP_GFX_GU_TEXTURE_STORAGE_EDRAM) {
@@ -1180,6 +1228,9 @@ int PspGfxGuTexture_Create(const PspGfxTextureRequest* request, PspGfxTextureRes
     }
     psp_gfx_gu_texture_decode(request, uploadWidth, uploadHeight, psm, softenAlpha, (u8*) decodeData);
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TEXTURE_DECODE);
+#if PROFILE_HW_COUNTERS
+    PspHwCounterProfile_TextureCreateStage(&attribution, PSP_HW_TEXTURE_DECODE);
+#endif
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TEXTURE_UPLOAD);
     if (entry->storage == PSP_GFX_GU_TEXTURE_STORAGE_RAM) {
         sceKernelDcacheWritebackRange(entry->data, dataBytes);
@@ -1188,6 +1239,9 @@ int PspGfxGuTexture_Create(const PspGfxTextureRequest* request, PspGfxTextureRes
         sceKernelDcacheWritebackRange(decodeData, dataBytes);
     }
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TEXTURE_UPLOAD);
+#if PROFILE_HW_COUNTERS
+    PspHwCounterProfile_TextureCreateStage(&attribution, PSP_HW_TEXTURE_WRITEBACK);
+#endif
 
     entry->pixels = request->pixels;
     entry->palette = request->palette;
@@ -1244,6 +1298,10 @@ int PspGfxGuTexture_Create(const PspGfxTextureRequest* request, PspGfxTextureRes
                                               dataBytes, 1, 1, 0, 0, uploadWidth, uploadHeight);
     }
 #endif
+#if PROFILE_HW_COUNTERS
+    PspHwCounterProfile_TextureCreateEnd(request, &attribution, dataBytes, uploadWidth * uploadHeight,
+                                        storage == PSP_GFX_GU_TEXTURE_STORAGE_EDRAM, mutableRefresh);
+#endif
     return 1;
 }
 void PspGfxGuTexture_InvalidateRgba16(const u16* pixels) {
@@ -1256,6 +1314,7 @@ void PspGfxGuTexture_InvalidateRgba16(const u16* pixels) {
         PspGfxGuTextureEntry* entry = &sPspGfxGuTextureEntries[i];
 
         if (entry->valid && (entry->format == PSP_GFX_TEXTURE_RGBA16) && (entry->pixels == pixels)) {
+            psp_gfx_gu_texture_note_retirement(entry, PSP_HW_TEXTURE_INVALIDATE);
             entry->mutableRetired = (entry->uploadWidth == 32U) &&
                                     (entry->uploadHeight == 32U) && (entry->dataBytes == 2048U);
             entry->valid = 0;

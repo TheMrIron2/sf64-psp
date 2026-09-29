@@ -7,6 +7,7 @@
 #include "src/psp/frame_interpolation.h"
 #include "src/psp/profiler.h"
 #include "src/psp/renderer.h"
+#include "src/psp/command_source.h"
 #endif
 
 #if defined(TARGET_PSP) && defined(PSP_TRACE_ENABLED) && PSP_TRACE_ENABLED
@@ -643,6 +644,7 @@ void Game_Update(void) {
         partialFill = false;
 
         if (gCamCount == 1) {
+            PSP_COMMAND_SOURCE_MARK(gMasterDisp++, PSP_COMMAND_SOURCE_HUD);
             Graphics_FillRectangle(&gMasterDisp, 0, 0, SCREEN_WIDTH - 1, SCREEN_HEIGHT - 1, gPlayerGlareReds[0],
                                    gPlayerGlareGreens[0], gPlayerGlareBlues[0], gPlayerGlareAlphas[0]);
             if ((gDrawMode == DRAW_PLAY) || (gDrawMode == DRAW_ENDING)) {

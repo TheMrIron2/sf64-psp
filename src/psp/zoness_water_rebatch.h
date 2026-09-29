@@ -2,9 +2,12 @@
 #define PSP_ZONESS_WATER_REBATCH_H
 
 // Included with the game Gfx and u32 definitions
-#define PSP_WATER_REBATCH_COMMANDS 374
+#define PSP_WATER_REBATCH_COMMANDS 382
 #define PSP_WATER_REBATCH_PAIRS 256
 #define PSP_WATER_REBATCH_SLOTS 63
+#define PSP_WATER_REBATCH_GROUPS 8
+
+#include "src/psp/zoness_water_cull.h"
 
 typedef struct {
     u32 slots[16];
@@ -32,7 +35,9 @@ static int PspWaterRebatch_Load(Gfx* out, u32* output, u32 address, u32 count, u
     return 1;
 }
 
-static int PspWaterRebatch_Build(Gfx* out, const Gfx* source, PspWaterRebatchScratch* scratch) {
+static int PspWaterRebatch_Build(Gfx* out, const Gfx* source, PspWaterRebatchScratch* scratch,
+                                 PspWaterRebatchBounds* bounds, const Vtx* mesh,
+                                 PspWaterRebatchXz* xzSnapshot) {
     static const u32 prefixOpcodes[8] = { 0xE8, 0xF5, 0xF2, 0xFD, 0xE8, 0xF5, 0xE6, 0xF3 };
     u32 input;
     u32 output = 8;
@@ -41,6 +46,12 @@ static int PspWaterRebatch_Build(Gfx* out, const Gfx* source, PspWaterRebatchScr
     u32 loaded = 0;
     u32 first;
     u32 i;
+    u32 group = 0;
+    u32 meshAddress = (u32) (unsigned long) mesh;
+    for (i = 0; i < 289; i++) {
+        xzSnapshot[i].x = mesh[i].v.ob[0];
+        xzSnapshot[i].z = mesh[i].v.ob[2];
+    }
 
     for (i = 0; i < 16; i++) {
         scratch->slots[i] = 0;
@@ -98,6 +109,7 @@ static int PspWaterRebatch_Build(Gfx* out, const Gfx* source, PspWaterRebatchScr
         u32 end = first;
         u32 count = 0;
         u32 start;
+        u32 marker;
 
         while (end < PSP_WATER_REBATCH_PAIRS) {
             u32 previousCount = count;
@@ -128,6 +140,35 @@ static int PspWaterRebatch_Build(Gfx* out, const Gfx* source, PspWaterRebatchScr
             }
             scratch->vertices[j] = address;
         }
+        if (group >= PSP_WATER_REBATCH_GROUPS) {
+            return 0;
+        }
+        bounds[group].minX = bounds[group].minZ = 32767;
+        bounds[group].maxX = bounds[group].maxZ = -32768;
+        bounds[group].pairs = (u16) (end - first);
+        bounds[group].meshAddress = meshAddress;
+        bounds[group].xzSnapshotAddress = (u32) (unsigned long) xzSnapshot;
+        for (i = 0; i < count; i++) {
+            u32 address = scratch->vertices[i];
+            u32 index;
+            const Vtx* vertex;
+
+            if (address < meshAddress || address - meshAddress >= 289U * 16U ||
+                ((address - meshAddress) & 15U) != 0) {
+                return 0;
+            }
+            index = (address - meshAddress) / 16U;
+            vertex = &mesh[index];
+            if (vertex->v.ob[0] < bounds[group].minX) bounds[group].minX = vertex->v.ob[0];
+            if (vertex->v.ob[0] > bounds[group].maxX) bounds[group].maxX = vertex->v.ob[0];
+            if (vertex->v.ob[2] < bounds[group].minZ) bounds[group].minZ = vertex->v.ob[2];
+            if (vertex->v.ob[2] > bounds[group].maxZ) bounds[group].maxZ = vertex->v.ob[2];
+        }
+        marker = output++;
+        if (marker >= PSP_WATER_REBATCH_COMMANDS) {
+            return 0;
+        }
+        out[marker].words.w1 = (u32) (unsigned long) &bounds[group];
         start = 0;
         while (start < count) {
             u32 next = start + 1;
@@ -154,6 +195,15 @@ static int PspWaterRebatch_Build(Gfx* out, const Gfx* source, PspWaterRebatchScr
             out[output].words.w0 = 0xB1000000U | words[0];
             out[output++].words.w1 = words[1];
         }
+        if (output - marker - 1U > 255U) {
+            return 0;
+        }
+        out[marker].words.w0 = PSP_WATER_GROUP_MARKER | (output - marker - 1U);
+        group++;
+    }
+
+    if (group != PSP_WATER_REBATCH_GROUPS) {
+        return 0;
     }
 
     // Restore every vertex slot written by the original list

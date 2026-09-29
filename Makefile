@@ -635,6 +635,12 @@ $(BUILD_DIR)/src/psp/audio_mixer.o: CFLAGS += -std=gnu99 -fno-tree-loop-distribu
 
 $(BUILD_DIR)/src/libultra/libc/string.o: lib/n64psp/include/n64psp/detail/memory_psp_impl.h
 
+$(BUILD_DIR)/src/psp/hw_counter_profile.o: src/psp/hw_counter_profile.h src/psp/texture_attribution.h src/psp/texture_attribution.inc.c
+$(BUILD_DIR)/src/psp/gfx/gfx_psp_gu_texture.o: src/psp/texture_attribution.h
+$(BUILD_DIR)/src/engine/fox_bg.o: src/psp/command_source.h src/psp/zoness_water_rebatch.h src/psp/zoness_water_cull.h
+$(BUILD_DIR)/src/psp/gfx/gfx_psp_dl.o: src/psp/hw_counter_profile.h src/psp/zoness_water_cull.h
+$(BUILD_DIR)/src/psp/input.o: src/psp/hw_counter_profile.h
+
 $(BUILD_DIR)/%.o: %.S Makefile src/psp/sources.mk $(COMPILE_FLAGS_STAMP)
 	@mkdir -p $(dir $@)
 	$(call print,Assembling:,$<,$@)

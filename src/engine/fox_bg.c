@@ -1,6 +1,7 @@
 #include "global.h"
 
 #ifdef TARGET_PSP
+#include "src/psp/command_source.h"
 #include "src/psp/frame_interpolation.h"
 #include "src/psp/display.h"
 #include "src/psp/renderer_starfield.h"
@@ -1034,6 +1035,8 @@ void Background_dummy_80040CDC(void) {
 #ifdef TARGET_PSP
 static Gfx sZonessWaterRebatch[2][PSP_WATER_REBATCH_COMMANDS];
 static int sZonessWaterRebatchReady[2];
+static PspWaterRebatchBounds sZonessWaterGroupBounds[2][PSP_WATER_REBATCH_GROUPS];
+static PspWaterRebatchXz sZonessWaterXzSnapshot[2][289];
 
 static Gfx* Background_GetWaterDisplayList(Gfx* source) {
     u32 index;
@@ -1050,7 +1053,10 @@ static Gfx* Background_GetWaterDisplayList(Gfx* source) {
         int commands = 0;
 
         if (scratch != NULL) {
-            commands = PspWaterRebatch_Build(sZonessWaterRebatch[index], source, scratch);
+            commands = PspWaterRebatch_Build(sZonessWaterRebatch[index], source, scratch,
+                                            sZonessWaterGroupBounds[index],
+                                            index == 0 ? D_ZO_6009ED0 : D_ZO_600C780,
+                                            sZonessWaterXzSnapshot[index]);
             free(scratch);
         }
         sZonessWaterRebatchReady[index] = (commands == PSP_WATER_REBATCH_COMMANDS) ? 1 : -1;
@@ -1078,6 +1084,7 @@ static void Background_DrawWideZonessWater(Gfx* dList) {
     gSPClearGeometryMode(gMasterDisp++, G_CULL_BACK);
     for (z = 0; z >= -1; z--) {
         for (x = -1; x <= 1; x++) {
+            PSP_WATER_TILE_MARK(gMasterDisp++, 1 + (-z * 3) + (x + 1));
             Matrix_Push(&gGfxMatrix);
             Matrix_Translate(gGfxMatrix, x * 4800.0f, 0.0f, -1500.0f + (z * 4800.0f), MTXF_APPLY);
             Matrix_Scale(gGfxMatrix, (x == 0) ? 3.0f : -3.0f, 2.0f, (z == 0) ? 3.0f : -3.0f,
@@ -1087,6 +1094,7 @@ static void Background_DrawWideZonessWater(Gfx* dList) {
             Matrix_Pop(&gGfxMatrix);
         }
     }
+    PSP_WATER_TILE_MARK(gMasterDisp++, 0);
     gSPSetGeometryMode(gMasterDisp++, G_CULL_BACK);
 }
 #endif

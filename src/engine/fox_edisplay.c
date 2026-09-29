@@ -5,6 +5,7 @@
 
 #include "prevent_bss_reordering.h"
 #include "global.h"
+#include "src/psp/command_source.h"
 #include "sf64object.h"
 #include "assets/ast_katina.h"
 #include "assets/ast_venom_1.h"
@@ -1735,6 +1736,7 @@ void Object_DrawAll(s32 cullDirection) {
     Item* item;
     Scenery* scenery;
 
+    PSP_COMMAND_SOURCE_MARK(gMasterDisp++, PSP_COMMAND_SOURCE_SCENERY);
     if ((gLevelMode == LEVELMODE_ALL_RANGE) && (gCurrentLevel != LEVEL_KATINA)) {
         RCP_SetupDL_29(gFogRed, gFogGreen, gFogBlue, gFogAlpha, gFogNear, gFogFar);
 
@@ -1778,6 +1780,7 @@ void Object_DrawAll(s32 cullDirection) {
         }
     }
 
+    PSP_COMMAND_SOURCE_MARK(gMasterDisp++, PSP_COMMAND_SOURCE_BOSS);
     for (i = 0, boss = &gBosses[0]; i < ARRAY_COUNT(gBosses); i++, boss++) {
         if ((boss->obj.status >= OBJ_ACTIVE) && (boss->obj.id != OBJ_BOSS_BO_BASE_SHIELD)) {
 #ifdef TARGET_PSP
@@ -1805,6 +1808,7 @@ void Object_DrawAll(s32 cullDirection) {
     Lights_SetOneLight(&gMasterDisp, gLight1x, gLight1y, gLight1z, gLight1R, gLight1G, gLight1B, gAmbientR, gAmbientG,
                        gAmbientB);
 
+    PSP_COMMAND_SOURCE_MARK(gMasterDisp++, PSP_COMMAND_SOURCE_SPRITE);
     for (i = 0, sprite = &gSprites[0]; i < ARRAY_COUNT(gSprites); i++, sprite++) {
         if ((sprite->obj.status >= OBJ_ACTIVE) && func_enmy_80060FE4(&sprite->obj.pos, -12000.0f)) {
 #ifdef TARGET_PSP
@@ -1823,6 +1827,7 @@ void Object_DrawAll(s32 cullDirection) {
         }
     }
 
+    PSP_COMMAND_SOURCE_MARK(gMasterDisp++, PSP_COMMAND_SOURCE_ACTOR);
     for (i = 0, actor = &gActors[0]; i < ARRAY_COUNT(gActors); i++, actor++) {
         if (actor->obj.status >= OBJ_ACTIVE) {
 #ifdef TARGET_PSP
@@ -1885,6 +1890,7 @@ void Object_DrawAll(s32 cullDirection) {
 
     Lights_SetOneLight(&gMasterDisp, -60, -60, 60, 150, 150, 150, 20, 20, 20);
 
+    PSP_COMMAND_SOURCE_MARK(gMasterDisp++, PSP_COMMAND_SOURCE_ITEM);
     for (i = 0, item = &gItems[0]; i < ARRAY_COUNT(gItems); i++, item++) {
         if (item->obj.status >= OBJ_ACTIVE) {
 #ifdef TARGET_PSP
@@ -1914,6 +1920,7 @@ void Effect_DrawAll(s32 arg0) {
 
     for (i = 0, effect = &gEffects[0]; i < ARRAY_COUNT(gEffects); i++, effect++) {
         if (effect->obj.status >= OBJ_ACTIVE) {
+            PSP_EFFECT_TYPE_MARK(gMasterDisp++, effect->obj.id);
 #ifdef TARGET_PSP
             PspFrameInterpolation_SetMatrixIdentity(&effect->obj);
 #endif
@@ -1937,6 +1944,7 @@ void Effect_DrawAll(s32 arg0) {
                     Matrix_Pop(&gGfxMatrix);
                 }
             }
+            PSP_EFFECT_TYPE_MARK(gMasterDisp++, PSP_EFFECT_TYPE_END);
         }
     }
 

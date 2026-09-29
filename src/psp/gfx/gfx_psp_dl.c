@@ -12,6 +12,7 @@
 #include "src/psp/profiler.h"
 #include "src/psp/renderer.h"
 #include "src/psp/renderer_starfield.h"
+#include "src/psp/zoness_water_cull.h"
 
 #if PROFILE_COMPONENTS
 #include "src/psp/render_component.h"
@@ -21,6 +22,9 @@
 #include <math.h>
 #include <stddef.h>
 #include <stdio.h>
+#if PROFILE_HW_COUNTERS
+#include <pspthreadman.h>
+#endif
 
 static int sPspGfxDlBackgroundFeedbackPrimed = 0;
 static u32 sPspGfxDlBackgroundFeedbackSeedColor = 0xFF000000u;
@@ -324,6 +328,31 @@ typedef struct {
 typedef struct {
     PspGfxDlStats stats;
     u32 taskIndex;
+#if PROFILE_HW_COUNTERS
+    u32 commandSource;
+    u32 commandSourceStartUs;
+    int commandSourceTimingActive;
+    PspCommandSourceStats commandSources[PSP_COMMAND_SOURCE_COUNT];
+    u32 waterTile;
+    u32 waterDlDepth;
+    u32 waterInputTriangles;
+    u32 waterEmittedTriangles;
+#endif
+    n64psp_mat4f waterClipMatrix;
+    u32 waterClipModelviewSerial;
+    u32 waterClipProjectionSerial;
+    int waterClipMatrixValid;
+    u32 waterYMeshAddress;
+    s16 waterMinY;
+    s16 waterMaxY;
+    int waterYBoundsValid;
+    int waterXzStable;
+#if PROFILE_HW_COUNTERS
+    u32 effectType;
+    u32 effectStartUs;
+    u32 effectStartCommands;
+    int effectTimingActive;
+#endif
     u32 segments[16];
     PspGfxDlVertex vertices[PSP_GFX_DL_MAX_VERTICES];
     float modelview[4][4];
@@ -1721,6 +1750,77 @@ static void psp_gfx_dl_prepare_batch_matrices(PspGfxDlContext* ctx) {
 
     ctx->cachedProjectionSerial = ctx->projectionSerial;
     ctx->alignedMatricesValid = 1;
+}
+
+static int psp_gfx_dl_water_group_outside(PspGfxDlContext* ctx, const PspWaterRebatchBounds* bounds) {
+    const n64psp_mat4f* matrix;
+    float minCoord[3];
+    float maxCoord[3];
+    u32 plane;
+    u32 axis;
+
+    if (!ctx->hasProjection || bounds == NULL) {
+        return 0;
+    }
+    if (!ctx->waterYBoundsValid || ctx->waterYMeshAddress != bounds->meshAddress) {
+        const Vtx* mesh = (const Vtx*) psp_gfx_dl_resolve_ptr(ctx, bounds->meshAddress);
+        const PspWaterRebatchXz* xzSnapshot =
+            (const PspWaterRebatchXz*) psp_gfx_dl_resolve_ptr(ctx, bounds->xzSnapshotAddress);
+        u32 i;
+
+        if (mesh == NULL || xzSnapshot == NULL) {
+            return 0;
+        }
+        ctx->waterMinY = 32767;
+        ctx->waterMaxY = -32768;
+        ctx->waterXzStable = 1;
+        for (i = 0; i < 289; i++) {
+            s16 y = mesh[i].v.ob[1];
+
+            if (y < ctx->waterMinY) ctx->waterMinY = y;
+            if (y > ctx->waterMaxY) ctx->waterMaxY = y;
+            if (mesh[i].v.ob[0] != xzSnapshot[i].x || mesh[i].v.ob[2] != xzSnapshot[i].z) {
+                ctx->waterXzStable = 0;
+            }
+        }
+        ctx->waterYMeshAddress = bounds->meshAddress;
+        ctx->waterYBoundsValid = 1;
+    }
+    if (!ctx->waterXzStable) {
+        return 0;
+    }
+    psp_gfx_dl_prepare_batch_matrices(ctx);
+    if (!ctx->waterClipMatrixValid || ctx->waterClipModelviewSerial != ctx->modelviewSerial ||
+        ctx->waterClipProjectionSerial != ctx->projectionSerial) {
+        n64psp_mat4f_mul(&ctx->waterClipMatrix, &ctx->alignedMatrices.projection,
+                         &ctx->alignedMatrices.modelview);
+        ctx->waterClipModelviewSerial = ctx->modelviewSerial;
+        ctx->waterClipProjectionSerial = ctx->projectionSerial;
+        ctx->waterClipMatrixValid = 1;
+    }
+    matrix = &ctx->waterClipMatrix;
+    minCoord[0] = (float) bounds->minX - 1.0f;
+    maxCoord[0] = (float) bounds->maxX + 1.0f;
+    minCoord[1] = (float) ctx->waterMinY - 1.0f;
+    maxCoord[1] = (float) ctx->waterMaxY + 1.0f;
+    minCoord[2] = (float) bounds->minZ - 1.0f;
+    maxCoord[2] = (float) bounds->maxZ + 1.0f;
+    PspHwCounterProfile_CountWaterGroupEvaluated();
+    for (plane = 0; plane < 6; plane++) {
+        u32 component = plane / 2;
+        float sign = (plane & 1U) ? -1.0f : 1.0f;
+        float maximum = matrix->m[3][3] + sign * matrix->m[3][component];
+
+        for (axis = 0; axis < 3; axis++) {
+            float coefficient = matrix->m[axis][3] + sign * matrix->m[axis][component];
+
+            maximum += coefficient * (coefficient >= 0.0f ? maxCoord[axis] : minCoord[axis]);
+        }
+        if (maximum < -0.0001f) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static u32 psp_gfx_dl_prepare_vertex_projection(PspGfxDlContext* ctx, u32 count) {
@@ -4321,6 +4421,11 @@ static int psp_gfx_dl_try_emit_tri2_direct_pair(PspGfxDlContext* ctx, u8 a0, u8 
     }
     PspHwCounterProfile_InnerScopeEnd(PSP_HW_SCOPE_BATCH);
     PspProfiler_CountTriangleResult(mixedCull ? 1 : 2, mixedCull ? 1 : 0, 0, 0, mixedCull ? 1 : 2);
+#if PROFILE_HW_COUNTERS
+    if (ctx->waterTile != 0) {
+        ctx->waterEmittedTriangles += mixedCull ? 1 : 2;
+    }
+#endif
     PspProfiler_CountTrianglePath(mixedCull ? 1 : 2, 0, 0, 0, emittedVertexCount);
     if (mixedCull) {
         PspProfiler_CountTri2CullMixedResult(1, 0, emittedVertexCount, bufferPreflush);
@@ -4866,6 +4971,11 @@ static void psp_gfx_dl_emit_tri(PspGfxDlContext* ctx, u8 a, u8 b, u8 c) {
     ctx->stats.triangleCount++;
 #if PSP_RENDERER_DIAGNOSTICS
     psp_gfx_dl_material_corpus_add_triangles(1);
+#endif
+#if PROFILE_HW_COUNTERS
+    if (ctx->waterTile != 0) {
+        ctx->waterEmittedTriangles += emittedTriangles;
+    }
 #endif
     if ((texture != 0) && (emittedTriangles != 0)) {
         ctx->stats.texturedTriangleCount++;
@@ -6164,6 +6274,65 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
         }
 #endif
 
+        if ((opcode == G_NOOP) && PSP_WATER_GROUP_MARKER_MATCH(cmd->words.w0)) {
+            const PspWaterRebatchBounds* bounds =
+                (const PspWaterRebatchBounds*) psp_gfx_dl_resolve_ptr(ctx, cmd->words.w1);
+
+            PspHwCounterProfile_CountWaterGroupSeen();
+            if (psp_gfx_dl_water_group_outside(ctx, bounds)) {
+                u32 skip = cmd->words.w0 & 0xffU;
+
+                pc += skip;
+                PspHwCounterProfile_CountWaterGroupSkipped(bounds->pairs, skip);
+            }
+            continue;
+        }
+#if PROFILE_HW_COUNTERS
+        if ((opcode == G_NOOP) && PSP_COMMAND_SOURCE_TAG_MATCH(cmd->words.w1)) {
+            u32 source = PSP_COMMAND_SOURCE_TAG_ID(cmd->words.w1);
+
+            if (ctx->commandSourceTimingActive) {
+                u32 now = sceKernelGetSystemTimeLow();
+
+                ctx->commandSources[ctx->commandSource].frontendUs += now - ctx->commandSourceStartUs;
+                ctx->commandSourceStartUs = now;
+            }
+            ctx->commandSource = source < PSP_COMMAND_SOURCE_COUNT ? source : PSP_COMMAND_SOURCE_UNATTRIBUTED;
+            continue;
+        }
+        if ((opcode == G_NOOP) && PSP_WATER_TILE_TAG_MATCH(cmd->words.w1)) {
+            ctx->waterTile = PSP_WATER_TILE_TAG_ID(cmd->words.w1);
+            continue;
+        }
+        if ((opcode == G_NOOP) && PSP_EFFECT_TYPE_TAG_MATCH(cmd->words.w1)) {
+            u32 id = PSP_EFFECT_TYPE_TAG_ID(cmd->words.w1);
+            u32 now = 0;
+
+            if (ctx->commandSourceTimingActive) {
+                now = sceKernelGetSystemTimeLow();
+                if (ctx->effectTimingActive) {
+                    PspHwCounterProfile_RecordEffectType(ctx->effectType, now - ctx->effectStartUs,
+                                                         ctx->stats.commandCount - ctx->effectStartCommands);
+                }
+            }
+            ctx->effectTimingActive = ctx->commandSourceTimingActive && (id != PSP_EFFECT_TYPE_END);
+            if (ctx->effectTimingActive) {
+                ctx->effectType = id;
+                ctx->effectStartUs = now;
+                ctx->effectStartCommands = ctx->stats.commandCount;
+            }
+            continue;
+        }
+        ctx->commandSources[ctx->commandSource].commands++;
+        if (opcode == PSP_GFX_OP_F3D_VTX) {
+            ctx->commandSources[ctx->commandSource].vertexCommands++;
+        } else if ((opcode == PSP_GFX_OP_F3D_TRI1) || (opcode == PSP_GFX_OP_F3D_TRI2)) {
+            ctx->commandSources[ctx->commandSource].triangleCommands++;
+        } else if (opcode == PSP_GFX_OP_F3D_DL) {
+            ctx->commandSources[ctx->commandSource].displayListCalls++;
+        }
+#endif
+
         ctx->stats.commandCount++;
         PspProfiler_CountOpcode(opcode);
 
@@ -6174,6 +6343,17 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
         if (opcode == PSP_GFX_OP_F3D_DL) {
             const Gfx* child = (const Gfx*) psp_gfx_dl_resolve_ptr(ctx, cmd->words.w1);
             int noPush = ((cmd->words.w0 >> 16) & 0xFF) == G_DL_NOPUSH;
+#if PROFILE_HW_COUNTERS
+            u32 source = ctx->commandSource;
+            u32 beforeChildCommands = ctx->stats.commandCount;
+            u32 waterTile = ctx->waterTile;
+            u32 beforeWaterVertices = ctx->stats.vertexCount;
+            u32 beforeWaterInputs = ctx->waterInputTriangles;
+            u32 beforeWaterEmitted = ctx->waterEmittedTriangles;
+            u32 waterStartUs = (waterTile != 0 && waterTile <= PSP_WATER_TILE_COUNT &&
+                                ctx->waterDlDepth == 0 && ctx->commandSourceTimingActive)
+                                   ? sceKernelGetSystemTimeLow() : 0;
+#endif
 #if PSP_LOG_ENABLED || PSP_RENDERER_DIAGNOSTICS
             int childHasEnd = (child != NULL) && psp_gfx_dl_has_bounded_end(child);
 #else
@@ -6221,7 +6401,24 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
 
             ctx->stats.nestedDlFollowed++;
             PspProfiler_CountNestedDisplayListCall();
+#if PROFILE_HW_COUNTERS
+            if (waterStartUs != 0) {
+                ctx->waterDlDepth = 1;
+            }
+#endif
             psp_gfx_dl_run_internal(ctx, child, depth + 1);
+#if PROFILE_HW_COUNTERS
+            if (waterStartUs != 0 && waterTile <= PSP_WATER_TILE_COUNT) {
+                ctx->waterDlDepth = 0;
+                PspHwCounterProfile_RecordWaterTile(waterTile - 1, sceKernelGetSystemTimeLow() - waterStartUs,
+                                                    ctx->stats.commandCount - beforeChildCommands,
+                                                    ctx->stats.vertexCount - beforeWaterVertices,
+                                                    ctx->waterInputTriangles - beforeWaterInputs,
+                                                    ctx->waterEmittedTriangles - beforeWaterEmitted);
+            }
+            PspHwCounterProfile_RecordDisplayList(source, cmd->words.w1, child,
+                                                  ctx->stats.commandCount - beforeChildCommands);
+#endif
             if (noPush) {
                 return 1;
             }
@@ -6357,6 +6554,9 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
             half1 = pc++;
             half2 = pc++;
             ctx->stats.commandCount += 2;
+#if PROFILE_HW_COUNTERS
+            ctx->commandSources[ctx->commandSource].commands += 2;
+#endif
 #if PSP_RENDERER_DIAGNOSTICS
             psp_gfx_dl_trace_rectangle(ctx, cmd, depth, 1);
 #endif
@@ -6378,6 +6578,11 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
         }
 
         if (opcode == PSP_GFX_OP_F3D_TRI1) {
+#if PROFILE_HW_COUNTERS
+            if (ctx->waterTile != 0) {
+                ctx->waterInputTriangles++;
+            }
+#endif
             u32 w1 = cmd->words.w1;
             u8 a = psp_gfx_dl_decode_tri_index((w1 >> 16) & 0xFF);
             u8 b = psp_gfx_dl_decode_tri_index((w1 >> 8) & 0xFF);
@@ -6395,6 +6600,11 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
         }
 
         if (opcode == PSP_GFX_OP_F3D_TRI2) {
+#if PROFILE_HW_COUNTERS
+            if (ctx->waterTile != 0) {
+                ctx->waterInputTriangles += 2;
+            }
+#endif
             u32 w0 = cmd->words.w0;
             u32 w1 = cmd->words.w1;
             u8 a0 = psp_gfx_dl_decode_tri_index((w0 >> 16) & 0xFF);
@@ -6788,7 +6998,20 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
 #endif
     PspProfiler_CountDisplayListTask();
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_DL_TRAVERSAL);
+#if PROFILE_HW_COUNTERS
+    ctx->commandSourceTimingActive = PspHwCounterProfile_IsCapturingTask();
+    if (ctx->commandSourceTimingActive) {
+        ctx->commandSourceStartUs = sceKernelGetSystemTimeLow();
+    }
+#endif
     psp_gfx_dl_run_internal(ctx, dl, 0);
+#if PROFILE_HW_COUNTERS
+    if (ctx->commandSourceTimingActive) {
+        ctx->commandSources[ctx->commandSource].frontendUs +=
+            sceKernelGetSystemTimeLow() - ctx->commandSourceStartUs;
+    }
+    PspHwCounterProfile_RecordCommandSources(ctx->commandSources);
+#endif
 #if PROFILE_TRIVIAL_REJECTS
     psp_gfx_dl_trivial_reject_scope_clear_for_task(ctx);
 #endif
