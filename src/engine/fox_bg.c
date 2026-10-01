@@ -1079,20 +1079,16 @@ static void Background_DrawWideGroundSides(Gfx* dList, f32 offset, f32 y, f32 z,
 
 static void Background_DrawWideZonessWater(Gfx* dList) {
     s32 x;
-    s32 z;
 
     gSPClearGeometryMode(gMasterDisp++, G_CULL_BACK);
-    for (z = 0; z >= -1; z--) {
-        for (x = -1; x <= 1; x++) {
-            PSP_WATER_TILE_MARK(gMasterDisp++, 1 + (-z * 3) + (x + 1));
-            Matrix_Push(&gGfxMatrix);
-            Matrix_Translate(gGfxMatrix, x * 4800.0f, 0.0f, -1500.0f + (z * 4800.0f), MTXF_APPLY);
-            Matrix_Scale(gGfxMatrix, (x == 0) ? 3.0f : -3.0f, 2.0f, (z == 0) ? 3.0f : -3.0f,
-                         MTXF_APPLY);
-            Matrix_SetGfxMtx(&gMasterDisp);
-            gSPDisplayList(gMasterDisp++, dList);
-            Matrix_Pop(&gGfxMatrix);
-        }
+    for (x = -1; x <= 1; x++) {
+        PSP_WATER_TILE_MARK(gMasterDisp++, 1 + (x + 1));
+        Matrix_Push(&gGfxMatrix);
+        Matrix_Translate(gGfxMatrix, x * 8400.0f, 0.0f, -1500.0f, MTXF_APPLY);
+        Matrix_Scale(gGfxMatrix, (x == 0) ? 3.0f : -3.0f, 2.0f, 3.0f, MTXF_APPLY);
+        Matrix_SetGfxMtx(&gMasterDisp);
+        gSPDisplayList(gMasterDisp++, dList);
+        Matrix_Pop(&gGfxMatrix);
     }
     PSP_WATER_TILE_MARK(gMasterDisp++, 0);
     gSPSetGeometryMode(gMasterDisp++, G_CULL_BACK);
