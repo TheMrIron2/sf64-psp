@@ -3394,25 +3394,10 @@ static void psp_gfx_dl_material_corpus_add_rejected(u32 count) {
 }
 #endif
 
-static int psp_gfx_dl_apply_effective_batch_state(PspGfxDlContext* ctx, const PspGfxDlVertex* vertex,
-                                                  int pretransformed,
-                                                  const PspGfxDlVertex* const* vertices, u32 count) {
-    int materialResolved;
-    int depthResolved;
-    int fogResolved;
-    int resolved;
-    PspGfxTextureWrap wrapS;
-    PspGfxTextureWrap wrapT;
-
-    psp_gfx_dl_resolve_effective_state(ctx, vertex, pretransformed, &materialResolved, &depthResolved, &fogResolved);
-    wrapS = ctx->effectiveMaterial.wrapS;
-    wrapT = ctx->effectiveMaterial.wrapT;
-    if (wrapS == PSP_GFX_WRAP_MIRROR) {
-        wrapS = psp_gfx_dl_texture_fallback_wrap(vertices, count, ctx->textureUploadWidth, 0);
-    }
-    if (wrapT == PSP_GFX_WRAP_MIRROR) {
-        wrapT = psp_gfx_dl_texture_fallback_wrap(vertices, count, ctx->textureUploadHeight, 1);
-    }
+#if PROFILE_PHASES || PSP_RENDERER_DIAGNOSTICS || PROFILE_TRIVIAL_REJECTS
+static void psp_gfx_dl_note_effective_batch_state(PspGfxDlContext* ctx, int resolved,
+                                                   int materialResolved, int depthResolved, int fogResolved,
+                                                   PspGfxTextureWrap wrapS, PspGfxTextureWrap wrapT) {
 #if PROFILE_PHASES
     psp_gfx_dl_profile_triangle_wrap(ctx, ctx->textureCms, ctx->textureMaskS, wrapS);
     psp_gfx_dl_profile_triangle_wrap(ctx, ctx->textureCmt, ctx->textureMaskT, wrapT);
@@ -3420,7 +3405,6 @@ static int psp_gfx_dl_apply_effective_batch_state(PspGfxDlContext* ctx, const Ps
     if ((ctx->batchWrapS != wrapS) || (ctx->batchWrapT != wrapT)) {
         PspProfiler_CountWrapBatching(0, 1, 0, 0);
     }
-    resolved = materialResolved || depthResolved || fogResolved || (ctx->batchWrapS != wrapS) || (ctx->batchWrapT != wrapT);
     PspProfiler_CountEffectiveState(resolved ? 1 : 0, resolved ? 0 : 1, materialResolved, depthResolved,
                                     fogResolved);
 #if PSP_RENDERER_DIAGNOSTICS
@@ -3455,6 +3439,32 @@ static int psp_gfx_dl_apply_effective_batch_state(PspGfxDlContext* ctx, const Ps
         }
     }
 #endif
+}
+#else
+#define psp_gfx_dl_note_effective_batch_state(...) ((void) 0)
+#endif
+
+static int psp_gfx_dl_apply_effective_batch_state(PspGfxDlContext* ctx, const PspGfxDlVertex* vertex,
+                                                  int pretransformed,
+                                                  const PspGfxDlVertex* const* vertices, u32 count) {
+    int materialResolved;
+    int depthResolved;
+    int fogResolved;
+    int resolved;
+    PspGfxTextureWrap wrapS;
+    PspGfxTextureWrap wrapT;
+
+    psp_gfx_dl_resolve_effective_state(ctx, vertex, pretransformed, &materialResolved, &depthResolved, &fogResolved);
+    wrapS = ctx->effectiveMaterial.wrapS;
+    wrapT = ctx->effectiveMaterial.wrapT;
+    if (wrapS == PSP_GFX_WRAP_MIRROR) {
+        wrapS = psp_gfx_dl_texture_fallback_wrap(vertices, count, ctx->textureUploadWidth, 0);
+    }
+    if (wrapT == PSP_GFX_WRAP_MIRROR) {
+        wrapT = psp_gfx_dl_texture_fallback_wrap(vertices, count, ctx->textureUploadHeight, 1);
+    }
+    resolved = materialResolved || depthResolved || fogResolved || (ctx->batchWrapS != wrapS) || (ctx->batchWrapT != wrapT);
+    psp_gfx_dl_note_effective_batch_state(ctx, resolved, materialResolved, depthResolved, fogResolved, wrapS, wrapT);
     if (!resolved) {
         return PspGfxTextureHandle_IsValid(ctx->effectiveMaterial.texture);
     }
@@ -4242,7 +4252,7 @@ static void psp_gfx_dl_count_tri2_pair_fog_stats(PspGfxDlContext* ctx, const Psp
 static int psp_gfx_dl_culls_area(u32 geometryMode, float area);
 
 static int psp_gfx_dl_try_emit_tri2_direct_pair(PspGfxDlContext* ctx, u8 a0, u8 b0, u8 c0,
-                                                u8 a1, u8 b1, u8 c1) {
+                                                u8 a1, u8 b1, u8 c1, u32* triangleProjectionSerial) {
     const PspGfxDlVertex* va0;
     const PspGfxDlVertex* vb0;
     const PspGfxDlVertex* vc0;
@@ -4367,7 +4377,18 @@ static int psp_gfx_dl_try_emit_tri2_direct_pair(PspGfxDlContext* ctx, u8 a0, u8 
     psp_gfx_dl_count_tri2_pair_triangle_stats(ctx, va1, vb1, vc1);
 #endif
 
-    texture = psp_gfx_dl_apply_effective_batch_state(ctx, emittedVertices[0], pretransformed0, vertices, 6);
+    // A projected triangle run keeps material and depth state until a fallback
+    if (pretransformed0 || (*triangleProjectionSerial != va0->projectionSerial)) {
+        texture = psp_gfx_dl_apply_effective_batch_state(ctx, emittedVertices[0], pretransformed0, vertices, 6);
+        *triangleProjectionSerial = !pretransformed0 &&
+                                    (ctx->effectiveMaterial.wrapS != PSP_GFX_WRAP_MIRROR) &&
+                                    (ctx->effectiveMaterial.wrapT != PSP_GFX_WRAP_MIRROR)
+                                        ? va0->projectionSerial : 0;
+    } else {
+        texture = PspGfxTextureHandle_IsValid(ctx->effectiveMaterial.texture);
+        psp_gfx_dl_note_effective_batch_state(ctx, 0, 0, 0, 0,
+                                              ctx->effectiveMaterial.wrapS, ctx->effectiveMaterial.wrapT);
+    }
 #if PROFILE_PHASES
     psp_gfx_dl_profile_mirror_texture(ctx, ctx->batchWrapS == PSP_GFX_WRAP_CLAMP,
                                       ctx->batchWrapT == PSP_GFX_WRAP_CLAMP, mixedCull ? 1 : 2);
@@ -6136,6 +6157,7 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
     while (ctx->stats.commandCount < PSP_GFX_DL_MAX_COMMANDS) {
         const Gfx* cmd = pc++;
         u8 opcode = psp_gfx_dl_opcode(cmd);
+        u32 triangleProjectionSerial = 0;
 
         // Consume adjacent triangles without repeating state command dispatch
         while ((opcode == PSP_GFX_OP_F3D_TRI1) || (opcode == PSP_GFX_OP_F3D_TRI2)) {
@@ -6162,6 +6184,7 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
 #if PSP_RENDERER_DIAGNOSTICS
                 psp_gfx_dl_trace_triangle(ctx, cmd, depth, a, b, c);
 #endif
+                triangleProjectionSerial = 0;
                 psp_gfx_dl_emit_tri(ctx, a, b, c);
                 PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TRIANGLE);
                 PspHwCounterProfile_InnerScopeEnd(PSP_HW_SCOPE_TRIANGLE);
@@ -6191,7 +6214,9 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
                 PspProfiler_CountTri2OutcomeMatrix(psp_gfx_dl_classify_triangle_outcome(ctx, a0, b0, c0),
                                                    psp_gfx_dl_classify_triangle_outcome(ctx, a1, b1, c1));
 #endif
-                if (!psp_gfx_dl_try_emit_tri2_direct_pair(ctx, a0, b0, c0, a1, b1, c1)) {
+                if (!psp_gfx_dl_try_emit_tri2_direct_pair(ctx, a0, b0, c0, a1, b1, c1,
+                                                          &triangleProjectionSerial)) {
+                    triangleProjectionSerial = 0;
                     psp_gfx_dl_emit_tri(ctx, a0, b0, c0);
                     psp_gfx_dl_emit_tri(ctx, a1, b1, c1);
                 }
