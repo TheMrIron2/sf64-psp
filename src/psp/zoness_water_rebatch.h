@@ -2,7 +2,7 @@
 #define PSP_ZONESS_WATER_REBATCH_H
 
 // Included with the game Gfx and u32 definitions
-#define PSP_WATER_REBATCH_COMMANDS 382
+#define PSP_WATER_REBATCH_COMMANDS 376
 #define PSP_WATER_REBATCH_PAIRS 256
 #define PSP_WATER_REBATCH_SLOTS 63
 #define PSP_WATER_REBATCH_GROUPS 8
@@ -206,19 +206,7 @@ static int PspWaterRebatch_Build(Gfx* out, const Gfx* source, PspWaterRebatchScr
         return 0;
     }
 
-    // Restore every vertex slot written by the original list
-    i = 0;
-    while (i < 16) {
-        u32 next = i + 1;
-
-        while ((next < 16) && (scratch->slots[next] == scratch->slots[next - 1] + 16U)) {
-            next++;
-        }
-        if (!PspWaterRebatch_Load(out, &output, scratch->slots[i], next - i, i)) {
-            return 0;
-        }
-        i = next;
-    }
+    // Subsequent Zoness geometry loads its own vertices before drawing
     if (output >= PSP_WATER_REBATCH_COMMANDS) {
         return 0;
     }
