@@ -839,6 +839,47 @@ static u16 psp_gfx_gu_texture_pack_rgba16_5551(u16 color, int premultiply) {
     return (u16) (alpha | (blue << 10) | (green << 5) | red);
 }
 
+static void psp_gfx_gu_texture_decode_ia8(const PspGfxTextureRequest* request, u32 uploadWidth,
+                                          u32 uploadHeight, u8* output) {
+    u32 rgb[16];
+    u32 alpha[16];
+    u32 log2UploadByteWidth = 0;
+    u32 value;
+    u32 x;
+    u32 y;
+
+    // IA8 intensity and alpha each have sixteen values per upload
+    for (value = 0; value < 16; value++) {
+        u8 intensity = psp_gfx_color_transfer_u8((u8) (value * 17U));
+        u8 color[3] = { intensity, intensity, intensity };
+        u8 opacity = (u8) (value * 17U);
+
+        if (request->envBlend) {
+            psp_gfx_gu_texture_apply_env_blend(request, intensity, color);
+        }
+        if (request->softCoverage) {
+            opacity = psp_gfx_gu_texture_soft_coverage_alpha(opacity);
+        }
+        rgb[value] = (u32) color[0] | ((u32) color[1] << 8) | ((u32) color[2] << 16);
+        alpha[value] = (u32) opacity << 24;
+    }
+    while ((1U << log2UploadByteWidth) < (uploadWidth * 4U)) {
+        log2UploadByteWidth++;
+    }
+    for (y = 0; y < uploadHeight; y++) {
+        u32 sourceY = psp_gfx_gu_texture_mirror_source_coord(y, request->height, request->mirrorT);
+
+        for (x = 0; x < uploadWidth; x++) {
+            u32 sourceX = psp_gfx_gu_texture_mirror_source_coord(x, request->width, request->mirrorS);
+            u8 packed = ((const u8*) request->pixels)[sourceY * request->width + sourceX];
+            u32 outputOffset = psp_gfx_gu_texture_swizzle_offset((y * uploadWidth + x) * 4U,
+                                                                  log2UploadByteWidth);
+
+            ((u32*) output)[outputOffset >> 2] = rgb[packed >> 4] | alpha[packed & 0xFU];
+        }
+    }
+}
+
 static void psp_gfx_gu_texture_decode(const PspGfxTextureRequest* request, u32 uploadWidth, u32 uploadHeight,
                                       int psm,
                                       int softenAlpha, u8* output) {
@@ -846,6 +887,10 @@ static void psp_gfx_gu_texture_decode(const PspGfxTextureRequest* request, u32 u
     u32 y;
     u32 outputBytesPerPixel = PSP_GFX_GU_TEXTURE_BYTES_PER_PIXEL;
 
+    if (request->format == PSP_GFX_TEXTURE_IA8) {
+        psp_gfx_gu_texture_decode_ia8(request, uploadWidth, uploadHeight, output);
+        return;
+    }
     outputBytesPerPixel = (psm == GU_PSM_5551) ? 2U : 4U;
     u32 uploadByteWidth = uploadWidth * outputBytesPerPixel;
     u32 log2UploadByteWidth = 0;
@@ -920,20 +965,6 @@ static void psp_gfx_gu_texture_decode(const PspGfxTextureRequest* request, u32 u
                     psp_gfx_gu_texture_apply_env_blend(request, outputPixel[0], outputPixel);
                 } else if (request->premultiply) {
                     psp_gfx_gu_texture_premultiply(outputPixel);
-                }
-            } else if (request->format == PSP_GFX_TEXTURE_IA8) {
-                u8 packed = ((const u8*) request->pixels)[sourceIndex];
-                u8 intensity = psp_gfx_color_transfer_u8((u8) ((packed >> 4) * 17U));
-
-                outputPixel[3] = (packed & 0xFU) * 17U;
-                if (request->softCoverage) {
-                    outputPixel[3] = psp_gfx_gu_texture_soft_coverage_alpha(outputPixel[3]);
-                }
-                outputPixel[0] = intensity;
-                outputPixel[1] = intensity;
-                outputPixel[2] = intensity;
-                if (request->envBlend) {
-                    psp_gfx_gu_texture_apply_env_blend(request, intensity, outputPixel);
                 }
             } else {
                 u16 packed = psp_gfx_gu_texture_read_u16(request->pixels, sourceIndex);
