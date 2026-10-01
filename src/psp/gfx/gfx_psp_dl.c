@@ -6137,6 +6137,75 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
         const Gfx* cmd = pc++;
         u8 opcode = psp_gfx_dl_opcode(cmd);
 
+        // Consume adjacent triangles without repeating state command dispatch
+        while ((opcode == PSP_GFX_OP_F3D_TRI1) || (opcode == PSP_GFX_OP_F3D_TRI2)) {
+#if PROFILE_HW_COUNTERS
+            ctx->commandSources[ctx->commandSource].commands++;
+            ctx->commandSources[ctx->commandSource].triangleCommands++;
+#endif
+            ctx->stats.commandCount++;
+            PspProfiler_CountOpcode(opcode);
+
+            if (opcode == PSP_GFX_OP_F3D_TRI1) {
+#if PROFILE_HW_COUNTERS
+                if (ctx->waterTile != 0) {
+                    ctx->waterInputTriangles++;
+                }
+#endif
+                u32 w1 = cmd->words.w1;
+                u8 a = psp_gfx_dl_decode_tri_index((w1 >> 16) & 0xFF);
+                u8 b = psp_gfx_dl_decode_tri_index((w1 >> 8) & 0xFF);
+                u8 c = psp_gfx_dl_decode_tri_index(w1 & 0xFF);
+                PspProfiler_CountTriangleCommand(1, 1, 0);
+                PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_TRIANGLE);
+                PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TRIANGLE);
+#if PSP_RENDERER_DIAGNOSTICS
+                psp_gfx_dl_trace_triangle(ctx, cmd, depth, a, b, c);
+#endif
+                psp_gfx_dl_emit_tri(ctx, a, b, c);
+                PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TRIANGLE);
+                PspHwCounterProfile_InnerScopeEnd(PSP_HW_SCOPE_TRIANGLE);
+            } else {
+#if PROFILE_HW_COUNTERS
+                if (ctx->waterTile != 0) {
+                    ctx->waterInputTriangles += 2;
+                }
+#endif
+                u32 w0 = cmd->words.w0;
+                u32 w1 = cmd->words.w1;
+                u8 a0 = psp_gfx_dl_decode_tri_index((w0 >> 16) & 0xFF);
+                u8 b0 = psp_gfx_dl_decode_tri_index((w0 >> 8) & 0xFF);
+                u8 c0 = psp_gfx_dl_decode_tri_index(w0 & 0xFF);
+                u8 a1 = psp_gfx_dl_decode_tri_index((w1 >> 16) & 0xFF);
+                u8 b1 = psp_gfx_dl_decode_tri_index((w1 >> 8) & 0xFF);
+                u8 c1 = psp_gfx_dl_decode_tri_index(w1 & 0xFF);
+
+                PspProfiler_CountTriangleCommand(2, 0, 1);
+                PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_TRIANGLE);
+                PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TRIANGLE);
+#if PSP_RENDERER_DIAGNOSTICS
+                psp_gfx_dl_trace_triangle(ctx, cmd, depth, a0, b0, c0);
+                psp_gfx_dl_trace_triangle(ctx, cmd, depth, a1, b1, c1);
+#endif
+#if PROFILE_TRIVIAL_REJECTS
+                PspProfiler_CountTri2OutcomeMatrix(psp_gfx_dl_classify_triangle_outcome(ctx, a0, b0, c0),
+                                                   psp_gfx_dl_classify_triangle_outcome(ctx, a1, b1, c1));
+#endif
+                if (!psp_gfx_dl_try_emit_tri2_direct_pair(ctx, a0, b0, c0, a1, b1, c1)) {
+                    psp_gfx_dl_emit_tri(ctx, a0, b0, c0);
+                    psp_gfx_dl_emit_tri(ctx, a1, b1, c1);
+                }
+                PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TRIANGLE);
+                PspHwCounterProfile_InnerScopeEnd(PSP_HW_SCOPE_TRIANGLE);
+            }
+
+            if (ctx->stats.commandCount >= PSP_GFX_DL_MAX_COMMANDS) {
+                goto command_limit;
+            }
+            cmd = pc++;
+            opcode = psp_gfx_dl_opcode(cmd);
+        }
+
         if ((opcode == G_NOOP) && PSP_RENDERER_DL_MARKER_MATCH(cmd->words.w1)) {
             if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_STARFIELD) {
     psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
@@ -6312,8 +6381,6 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
         ctx->commandSources[ctx->commandSource].commands++;
         if (opcode == PSP_GFX_OP_F3D_VTX) {
             ctx->commandSources[ctx->commandSource].vertexCommands++;
-        } else if ((opcode == PSP_GFX_OP_F3D_TRI1) || (opcode == PSP_GFX_OP_F3D_TRI2)) {
-            ctx->commandSources[ctx->commandSource].triangleCommands++;
         } else if (opcode == PSP_GFX_OP_F3D_DL) {
             ctx->commandSources[ctx->commandSource].displayListCalls++;
         }
@@ -6563,68 +6630,12 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
             continue;
         }
 
-        if (opcode == PSP_GFX_OP_F3D_TRI1) {
-#if PROFILE_HW_COUNTERS
-            if (ctx->waterTile != 0) {
-                ctx->waterInputTriangles++;
-            }
-#endif
-            u32 w1 = cmd->words.w1;
-            u8 a = psp_gfx_dl_decode_tri_index((w1 >> 16) & 0xFF);
-            u8 b = psp_gfx_dl_decode_tri_index((w1 >> 8) & 0xFF);
-            u8 c = psp_gfx_dl_decode_tri_index(w1 & 0xFF);
-            PspProfiler_CountTriangleCommand(1, 1, 0);
-            PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_TRIANGLE);
-            PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TRIANGLE);
-#if PSP_RENDERER_DIAGNOSTICS
-            psp_gfx_dl_trace_triangle(ctx, cmd, depth, a, b, c);
-#endif
-            psp_gfx_dl_emit_tri(ctx, a, b, c);
-            PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TRIANGLE);
-            PspHwCounterProfile_InnerScopeEnd(PSP_HW_SCOPE_TRIANGLE);
-            continue;
-        }
-
-        if (opcode == PSP_GFX_OP_F3D_TRI2) {
-#if PROFILE_HW_COUNTERS
-            if (ctx->waterTile != 0) {
-                ctx->waterInputTriangles += 2;
-            }
-#endif
-            u32 w0 = cmd->words.w0;
-            u32 w1 = cmd->words.w1;
-            u8 a0 = psp_gfx_dl_decode_tri_index((w0 >> 16) & 0xFF);
-            u8 b0 = psp_gfx_dl_decode_tri_index((w0 >> 8) & 0xFF);
-            u8 c0 = psp_gfx_dl_decode_tri_index(w0 & 0xFF);
-            u8 a1 = psp_gfx_dl_decode_tri_index((w1 >> 16) & 0xFF);
-            u8 b1 = psp_gfx_dl_decode_tri_index((w1 >> 8) & 0xFF);
-            u8 c1 = psp_gfx_dl_decode_tri_index(w1 & 0xFF);
-
-            PspProfiler_CountTriangleCommand(2, 0, 1);
-            PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_TRIANGLE);
-            PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_TRIANGLE);
-#if PSP_RENDERER_DIAGNOSTICS
-            psp_gfx_dl_trace_triangle(ctx, cmd, depth, a0, b0, c0);
-            psp_gfx_dl_trace_triangle(ctx, cmd, depth, a1, b1, c1);
-#endif
-#if PROFILE_TRIVIAL_REJECTS
-            PspProfiler_CountTri2OutcomeMatrix(psp_gfx_dl_classify_triangle_outcome(ctx, a0, b0, c0),
-                                               psp_gfx_dl_classify_triangle_outcome(ctx, a1, b1, c1));
-#endif
-            if (!psp_gfx_dl_try_emit_tri2_direct_pair(ctx, a0, b0, c0, a1, b1, c1)) {
-                psp_gfx_dl_emit_tri(ctx, a0, b0, c0);
-                psp_gfx_dl_emit_tri(ctx, a1, b1, c1);
-            }
-            PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_TRIANGLE);
-            PspHwCounterProfile_InnerScopeEnd(PSP_HW_SCOPE_TRIANGLE);
-            continue;
-        }
-
         if (!psp_gfx_dl_is_noop_state(opcode)) {
             psp_gfx_dl_count_unsupported(ctx, opcode);
         }
     }
 
+command_limit:
     ctx->stats.commandLimitHit++;
     return 0;
 }
