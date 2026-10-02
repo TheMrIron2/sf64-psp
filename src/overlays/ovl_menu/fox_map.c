@@ -1694,6 +1694,9 @@ void Map_Planet_Draw(PlanetId);
 static void Map_PlanetBase_Draw(PlanetId planetId);
 static void Map_PlanetForeground_Draw(PlanetId planetId);
 static void Map_PlanetSharedLayers_Draw(void);
+// Keep matrix draw sites stable between painter and batched passes
+static void Map_PlanetCloudHalf_Draw(PlanetId planetId, Gfx* geometry) __attribute__((noinline, noclone));
+static void Map_PlanetShadowHalf_Draw(PlanetId planetId, Gfx* geometry) __attribute__((noinline, noclone));
 static bool Map_PlanetLayersCanBatch(void);
 s32 Map_CheckPlanetMedal(PlanetId planetId);
 void Map_PlanetAnim2(PlanetId planetId);
@@ -5189,9 +5192,6 @@ static void Map_PlanetCloudHalf_Draw(PlanetId planetId, Gfx* geometry) {
     Matrix_SetGfxMtx(&gMasterDisp);
     gSPDisplayList(gMasterDisp++, geometry);
     Matrix_Pop(&gGfxMatrix);
-#ifdef TARGET_PSP
-    PspFrameInterpolation_SetMatrixIdentity(NULL);
-#endif
 }
 
 static void Map_PlanetShadowHalf_Draw(PlanetId planetId, Gfx* geometry) {
@@ -5210,9 +5210,6 @@ static void Map_PlanetShadowHalf_Draw(PlanetId planetId, Gfx* geometry) {
     Matrix_SetGfxMtx(&gMasterDisp);
     gSPDisplayList(gMasterDisp++, geometry);
     Matrix_Pop(&gGfxMatrix);
-#ifdef TARGET_PSP
-    PspFrameInterpolation_SetMatrixIdentity(NULL);
-#endif
 }
 
 static void Map_PlanetSharedLayers_Draw(void) {
@@ -5262,6 +5259,9 @@ static void Map_PlanetSharedLayers_Draw(void) {
             }
         }
     }
+#ifdef TARGET_PSP
+    PspFrameInterpolation_SetMatrixIdentity(NULL);
+#endif
 }
 
 s32 Map_CheckPlanetMedal(PlanetId planetId) {
@@ -5493,50 +5493,20 @@ static void Map_SolarPair_Draw(PlanetId planetId) {
 }
 
 void Map_PlanetCloud_Draw(PlanetId planetId) {
-    s32 r;
-    s32 g;
-    s32 b;
-
-    r = g = b = 255;
-    if (planetId == PLANET_MACBETH) {
-        r = g = b = 64;
-    }
-
     RCP_SetupDL(&gMasterDisp, SETUPDL_64);
-
-    gDPSetPrimColor(gMasterDisp++, 0, 0, r, g, b, sPlanets[planetId].alpha);
-
-    Matrix_Push(&gGfxMatrix);
-    Matrix_Copy(gGfxMatrix, &D_menu_801CDE20[planetId]);
-    Matrix_SetGfxMtx(&gMasterDisp);
-
-    gSPDisplayList(gMasterDisp++, gMapPlanetCloudFullDL);
-
-    Matrix_Pop(&gGfxMatrix);
+    gSPDisplayList(gMasterDisp++, sMapPlanetCloudTopSetupDL);
+    Map_PlanetCloudHalf_Draw(planetId, sMapPlanetCloudTopGeometryDL);
+    gSPDisplayList(gMasterDisp++, sMapPlanetCloudBottomSetupDL);
+    Map_PlanetCloudHalf_Draw(planetId, sMapPlanetCloudBottomGeometryDL);
 }
 
 void Map_PlanetShadow_Draw(PlanetId planetId) {
-    RCP_SetupDL(&gMasterDisp, SETUPDL_64);
-
-    gDPSetPrimColor(gMasterDisp++, 0, 0, 255, 255, 255, sPlanets[planetId].alpha);
-
-    Matrix_Push(&gGfxMatrix);
-
-    Matrix_Copy(gGfxMatrix, &D_menu_801CDE20[planetId]);
-
-    if ((planetId == PLANET_TITANIA) || (planetId == PLANET_MACBETH) || (planetId == PLANET_ZONESS)) {
-        Matrix_RotateY(gGfxMatrix, M_DTOR * 180.0f, MTXF_APPLY);
-    }
-
-    Matrix_RotateZ(gGfxMatrix, M_DTOR * sPlanets[planetId].orbit.tilt, MTXF_APPLY);
-    Matrix_Scale(gGfxMatrix, 1.6f, 1.6f, 1.6f, MTXF_APPLY);
-
-    Matrix_SetGfxMtx(&gMasterDisp);
-
     Map_PlanetShadowTextures_Init();
-    gSPDisplayList(gMasterDisp++, sMapPlanetShadowDL);
-
-    Matrix_Pop(&gGfxMatrix);
+    RCP_SetupDL(&gMasterDisp, SETUPDL_64);
+    gSPDisplayList(gMasterDisp++, sMapPlanetShadowTopSetupDL);
+    Map_PlanetShadowHalf_Draw(planetId, sMapPlanetShadowTopGeometryDL);
+    gSPDisplayList(gMasterDisp++, sMapPlanetShadowBottomSetupDL);
+    Map_PlanetShadowHalf_Draw(planetId, sMapPlanetShadowBottomGeometryDL);
 }
 
 void Map_Titania_DrawRings1(PlanetId planetId) {
