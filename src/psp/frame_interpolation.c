@@ -322,7 +322,8 @@ SPTask* PspFrameInterpolation_PreparePresentation(SPTask* task, u32 presentation
     }
 
     presentation->requested = 1;
-    targetVi = presentationVi - presentationVIs;
+    // Keep every presentation between the two available simulation samples
+    targetVi = presentationVi - (current->simulationVIs - 1);
     if (targetVi == current->simulationVi) {
         presentation->exact = 1;
         return NULL;

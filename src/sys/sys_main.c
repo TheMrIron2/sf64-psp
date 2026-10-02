@@ -325,47 +325,14 @@ void Timer_ThreadEntry(void* arg0) {
 }
 
 #ifdef TARGET_PSP
-#define PSP_AQUAS_SIMULATION_VI_INTERVAL 3
-#define PSP_AQUAS_PRESENTATION_VI_INTERVAL 2
-#define PSP_30FPS_SIMULATION_VI_INTERVAL 2
-#define PSP_60FPS_PRESENTATION_VI_INTERVAL 1
 #define PSP_MAX_SIMULATION_TICKS_PER_WAKE 2
 
-static s32 Graphics_Is60FpsScene(void) {
-    if (gVIsPerFrame != PSP_30FPS_SIMULATION_VI_INTERVAL) {
-        return false;
-    }
-    if ((gGameState == GSTATE_TITLE) && (gDrawMode == DRAW_TITLE)) {
-        return true;
-    }
-    if ((gGameState == GSTATE_MENU) && (gDrawMode == DRAW_OPTION)) {
-        return true;
-    }
-    if ((gGameState != GSTATE_PLAY) || (gDrawMode != DRAW_PLAY) || (gPlayState == PLAY_PAUSE)) {
-        return false;
-    }
-    return (gCurrentLevel == LEVEL_TRAINING) || (gCurrentLevel == LEVEL_CORNERIA);
-}
-
 static u8 Graphics_GetPresentationVIs(void) {
-    u8 simulationVIs = MIN(MAX(gVIsPerFrame, 1), 4);
-
-    if ((gGameState == GSTATE_PLAY) && (gCurrentLevel == LEVEL_AQUAS) &&
-        (simulationVIs == PSP_AQUAS_SIMULATION_VI_INTERVAL)) {
-        return PSP_AQUAS_PRESENTATION_VI_INTERVAL;
-    }
-    if (Graphics_Is60FpsScene() && (simulationVIs == PSP_30FPS_SIMULATION_VI_INTERVAL)) {
-        return PSP_60FPS_PRESENTATION_VI_INTERVAL;
-    }
-    return simulationVIs;
+    return PspFrameScheduler_GetPresentationVIs();
 }
 
 static s32 Graphics_InterpolationEligible(void) {
-    if (Graphics_Is60FpsScene()) {
-        return true;
-    }
-    return (gGameState == GSTATE_PLAY) && (gDrawMode == DRAW_PLAY) && (gPlayState != PLAY_PAUSE) &&
-           (gCurrentLevel == LEVEL_AQUAS) && (gVIsPerFrame == PSP_AQUAS_SIMULATION_VI_INTERVAL);
+    return gVIsPerFrame > Graphics_GetPresentationVIs();
 }
 
 static void Graphics_FinalizeDisplayList(void) {

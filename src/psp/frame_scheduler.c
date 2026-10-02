@@ -1,5 +1,15 @@
 #include "src/psp/frame_scheduler.h"
 
+static u8 sPresentationVIs = 1;
+
+u8 PspFrameScheduler_GetPresentationVIs(void) {
+    return sPresentationVIs;
+}
+
+void PspFrameScheduler_TogglePresentationRate(void) {
+    sPresentationVIs = 3 - sPresentationVIs;
+}
+
 static u8 psp_frame_scheduler_clamp_vis(u8 vis) {
     if (vis == 0) {
         return 1;

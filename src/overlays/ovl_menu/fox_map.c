@@ -17,6 +17,7 @@
 #include "assets/ast_font_3d.h"
 #ifdef TARGET_PSP
 #include "src/psp/display.h"
+#include "src/psp/frame_interpolation.h"
 #include "src/psp/renderer.h"
 #endif
 
@@ -4955,6 +4956,9 @@ void Map_Planet_Draw(PlanetId planetId) {
         mask = 0xFFFFFFFF;
     }
 
+#ifdef TARGET_PSP
+    PspFrameInterpolation_SetMatrixIdentity(&sPlanets[planetId]);
+#endif
     planetStatus = Map_CheckPlanetMedal(planetId);
 
     Map_PlanetAnim2(planetId);
@@ -5019,6 +5023,9 @@ void Map_Planet_Draw(PlanetId planetId) {
         }
     }
     Matrix_Pop(&gGfxMatrix);
+#ifdef TARGET_PSP
+    PspFrameInterpolation_SetMatrixIdentity(NULL);
+#endif
 }
 
 static bool Map_PlanetDrawEnabled(PlanetId planetId) {
@@ -5040,6 +5047,9 @@ static void Map_PlanetBase_Draw(PlanetId planetId) {
         return;
     }
 
+#ifdef TARGET_PSP
+    PspFrameInterpolation_SetMatrixIdentity(&sPlanets[planetId]);
+#endif
     planetStatus = Map_CheckPlanetMedal(planetId);
     Map_PlanetAnim2(planetId);
     Map_PlanetCleared2_Draw(planetId);
@@ -5064,6 +5074,9 @@ static void Map_PlanetBase_Draw(PlanetId planetId) {
         }
     }
     Matrix_Pop(&gGfxMatrix);
+#ifdef TARGET_PSP
+    PspFrameInterpolation_SetMatrixIdentity(NULL);
+#endif
 }
 
 static void Map_PlanetForeground_Draw(PlanetId planetId) {
@@ -5073,6 +5086,9 @@ static void Map_PlanetForeground_Draw(PlanetId planetId) {
         return;
     }
 
+#ifdef TARGET_PSP
+    PspFrameInterpolation_SetMatrixIdentity(&sPlanets[planetId]);
+#endif
     planetStatus = Map_CheckPlanetMedal(planetId);
     Matrix_Push(&gGfxMatrix);
 
@@ -5100,6 +5116,9 @@ static void Map_PlanetForeground_Draw(PlanetId planetId) {
     }
 
     Matrix_Pop(&gGfxMatrix);
+#ifdef TARGET_PSP
+    PspFrameInterpolation_SetMatrixIdentity(NULL);
+#endif
 }
 
 static bool Map_PlanetCloudEnabled(PlanetId planetId) {
@@ -5157,6 +5176,9 @@ static bool Map_PlanetLayersCanBatch(void) {
 static void Map_PlanetCloudHalf_Draw(PlanetId planetId, Gfx* geometry) {
     s32 color = 255;
 
+#ifdef TARGET_PSP
+    PspFrameInterpolation_SetMatrixIdentity(&sPlanets[planetId]);
+#endif
     if (planetId == PLANET_MACBETH) {
         color = 64;
     }
@@ -5167,9 +5189,15 @@ static void Map_PlanetCloudHalf_Draw(PlanetId planetId, Gfx* geometry) {
     Matrix_SetGfxMtx(&gMasterDisp);
     gSPDisplayList(gMasterDisp++, geometry);
     Matrix_Pop(&gGfxMatrix);
+#ifdef TARGET_PSP
+    PspFrameInterpolation_SetMatrixIdentity(NULL);
+#endif
 }
 
 static void Map_PlanetShadowHalf_Draw(PlanetId planetId, Gfx* geometry) {
+#ifdef TARGET_PSP
+    PspFrameInterpolation_SetMatrixIdentity(&sPlanets[planetId]);
+#endif
     gDPSetPrimColor(gMasterDisp++, 0, 0, 255, 255, 255, sPlanets[planetId].alpha);
 
     Matrix_Push(&gGfxMatrix);
@@ -5182,6 +5210,9 @@ static void Map_PlanetShadowHalf_Draw(PlanetId planetId, Gfx* geometry) {
     Matrix_SetGfxMtx(&gMasterDisp);
     gSPDisplayList(gMasterDisp++, geometry);
     Matrix_Pop(&gGfxMatrix);
+#ifdef TARGET_PSP
+    PspFrameInterpolation_SetMatrixIdentity(NULL);
+#endif
 }
 
 static void Map_PlanetSharedLayers_Draw(void) {

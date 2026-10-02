@@ -5,6 +5,7 @@
 #include "src/psp/gfx/gfx_psp_device.h"
 #include "src/psp/display.h"
 #include "src/psp/frame_interpolation.h"
+#include "src/psp/frame_scheduler.h"
 #include "src/psp/hw_counter_profile.h"
 #include "src/psp/platform.h"
 #include "src/psp/profiler.h"
@@ -69,13 +70,14 @@ static void psp_renderer_draw_perf_overlay(void) {
     pspDebugScreenSetXY(0, 0);
 
     pspDebugScreenPrintf(
-        "FPS %lu.%lu  SIM %lu.%lu  GFX %lu.%lums   ",
+        "FPS %lu.%lu  SIM %lu.%lu  GFX %lu.%lums  CAP %u   ",
         (unsigned long) (sPerfFpsTenths / 10),
         (unsigned long) (sPerfFpsTenths % 10),
         (unsigned long) (sPerfSimulationTenths / 10),
         (unsigned long) (sPerfSimulationTenths % 10),
         (unsigned long) (sPerfGfxMsTenths / 10),
-        (unsigned long) (sPerfGfxMsTenths % 10)
+        (unsigned long) (sPerfGfxMsTenths % 10),
+        (unsigned int) (60 / PspFrameScheduler_GetPresentationVIs())
     );
 }
 
