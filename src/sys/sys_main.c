@@ -472,7 +472,7 @@ static void Graphics_RunPspScheduler(SPTask* reusableTask, FrameBuffer* reusable
             }
 
             inFlightDependency =
-                PspFrameInterpolation_PreparePresentation(task, currentVi, scheduler.presentationVIs, renderOnly);
+                PspFrameInterpolation_PreparePresentation(task, currentVi, scheduler.presentationVIs);
             if (Graphics_SubmitTask(task) == 0) {
                 taskInFlight = true;
                 inFlightTask = task;
@@ -544,7 +544,7 @@ void Graphics_ThreadEntry(void* arg0) {
     PSP_TRACE("gfx first task");
 #ifdef TARGET_PSP
     Graphics_PrepareTask();
-    PspFrameInterpolation_PreparePresentation(gGfxTask, initialVi, Graphics_GetPresentationVIs(), false);
+    PspFrameInterpolation_PreparePresentation(gGfxTask, initialVi, Graphics_GetPresentationVIs());
     Graphics_RunPspScheduler(gGfxTask, gFrameBuffer, Graphics_SubmitTask(gGfxTask) == 0);
 #else
     Graphics_SetTask();

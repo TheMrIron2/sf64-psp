@@ -1865,7 +1865,8 @@ static void psp_profiler_write_phase_files(u32 slot) {
                  sTimingPhysicalVIs, sTimingSimulationTicks, sTimingPresentationAttempts,
                  sTimingSuccessfulPresentations, sTimingRenderOnlyPresentations, sTimingRepeatedPresentations,
                  sTimingMissedSimulationDeadlines, sTimingMissedPresentationDeadlines,
-                 sTimingMissedPresentationDeadlines, (unsigned long) sTimingSimulationVIs,
+                 sTimingMissedPresentationDeadlines + sCaptureFrames - sTimingSuccessfulPresentations,
+                 (unsigned long) sTimingSimulationVIs,
                  (unsigned long) sTimingPresentationVIs, simulationRate, attemptRate, presentedRate,
                  usPerSimulation, usPerPresentation);
         psp_profiler_write_all(fd, line);
@@ -2553,7 +2554,7 @@ void PspProfiler_RenderPhaseEnd(PspProfilePhase phase, u64 startUs) {
     psp_profiler_unlock(lockState);
 }
 
-void PspProfiler_OnGfxTaskComplete(void) {
+void PspProfiler_OnGfxTaskComplete(s32 presented) {
     int lockState;
     u32 frames;
 #if PROFILE_FRAME_TRACE
@@ -2568,7 +2569,7 @@ void PspProfiler_OnGfxTaskComplete(void) {
 #endif
     lockState = psp_profiler_lock();
     sCaptureFrames++;
-    sTimingSuccessfulPresentations++;
+    sTimingSuccessfulPresentations += presented != 0;
     frames = sCaptureFrames;
 #if PROFILE_FRAME_TRACE
     psp_profiler_capture_frame_record_locked(now, frames - 1);

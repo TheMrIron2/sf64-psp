@@ -35,3 +35,4 @@ torch.hash.yml
 AGENTS.md
 .DS_Store
 docs/codex/*
+/tests

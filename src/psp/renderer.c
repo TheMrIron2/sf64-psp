@@ -2008,7 +2008,7 @@ void PspRenderer_Init(void) {
     PspPlatform_LogLine("[psp] renderer: init");
 }
 
-void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
+int PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
     const Gfx* dl;
 
     if (!sRendererReady) {
@@ -2016,7 +2016,7 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
     }
 
     if (task == NULL) {
-        return;
+        return 0;
     }
 
     dl = (const Gfx*) task->task.t.data_ptr;
@@ -2034,4 +2034,5 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
 
     sRenderer.census.frameCount++;
     psp_renderer_log_census(taskIndex);
+    return 1;
 }

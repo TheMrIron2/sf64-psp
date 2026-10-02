@@ -1,5 +1,8 @@
 #include "prevent_bss_reordering.h"
 #include "global.h"
+#ifdef TARGET_PSP
+#include "src/psp/frame_interpolation.h"
+#endif
 #include "fox_map.h"
 #include "assets/ast_corneria.h"
 #include "assets/ast_training.h"
@@ -291,6 +294,9 @@ void Scenery360_Initialize(Scenery360* scenery360) {
     s32 i;
     u8* ptr = (u8*) scenery360;
 
+#ifdef TARGET_PSP
+    PspFrameInterpolation_ForgetIdentity(&scenery360->obj);
+#endif
     for (i = 0; i < sizeof(Scenery360); i++, ptr++) {
         *ptr = 0;
     }

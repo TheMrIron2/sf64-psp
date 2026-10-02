@@ -81,7 +81,7 @@
     gImmp1((pkt), PSP_RENDERER_DL_OP_INVALIDATE_RGBA16, (texture))
 
 void PspRenderer_Init(void);
-void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex);
+int PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex);
 void PspRenderer_RecordSimulationTicks(u32 ticks);
 
 int PspRenderer_HistoryHudCacheReady(void);

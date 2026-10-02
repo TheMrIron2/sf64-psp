@@ -169,7 +169,7 @@ void PspProfiler_PhaseBegin(PspProfilePhase phase);
 void PspProfiler_PhaseEnd(PspProfilePhase phase);
 u64 PspProfiler_RenderPhaseBegin(void);
 void PspProfiler_RenderPhaseEnd(PspProfilePhase phase, u64 startUs);
-void PspProfiler_OnGfxTaskComplete(void);
+void PspProfiler_OnGfxTaskComplete(s32 presented);
 void PspProfiler_RecordTimingEvent(u32 elapsedVIs, u32 simulationTick, u32 presentationAttempt,
                                    u32 renderOnlyPresentation, u32 missedSimulationDeadlines,
                                    u32 missedPresentationDeadlines, u32 simulationVIs, u32 presentationVIs);
@@ -243,7 +243,7 @@ void PspProfiler_CountTrivialRejectRenderState(PspProfileTrivialRejectRenderStat
 #define PspProfiler_PhaseEnd(phase) ((void) 0)
 #define PspProfiler_RenderPhaseBegin() 0
 #define PspProfiler_RenderPhaseEnd(phase, startUs) ((void) (startUs))
-#define PspProfiler_OnGfxTaskComplete() ((void) 0)
+#define PspProfiler_OnGfxTaskComplete(presented) ((void) (presented))
 #define PspProfiler_RecordTimingEvent(elapsedVIs, simulationTick, presentationAttempt, renderOnlyPresentation, \
                                       missedSimulationDeadlines, missedPresentationDeadlines, simulationVIs, \
                                       presentationVIs) ((void) 0)

@@ -1941,6 +1941,7 @@ void PspPlatform_PollInput(OSContPad* pads) {
 }
 
 void PspPlatform_RunGfxTask(SPTask* task) {
+    s32 presented;
 #if PSP_LOG_ENABLED
     s32 result;
 #endif
@@ -1948,9 +1949,9 @@ void PspPlatform_RunGfxTask(SPTask* task) {
     sGfxTaskCount++;
 
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_GFX_TASK);
-    PspRenderer_RenderGfxTask(task, sGfxTaskCount);
+    presented = PspRenderer_RenderGfxTask(task, sGfxTaskCount);
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_GFX_TASK);
-    PspProfiler_OnGfxTaskComplete();
+    PspProfiler_OnGfxTaskComplete(presented);
 
 #if PSP_LOG_ENABLED
     if ((sGfxTaskCount <= 4) || ((sGfxTaskCount % 30) == 0)) {

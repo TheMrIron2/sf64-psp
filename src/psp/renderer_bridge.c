@@ -154,8 +154,9 @@ void PspRenderer_Init(void) {
     PspGfxDevice_Present();
 }
 
-void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
+int PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
     const Gfx* dl;
+    int presented;
 
     #if PROFILE_HW_COUNTERS
         u32 hwCommands = 0;
@@ -173,12 +174,13 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
         }
 
         if (!PspGfxDevice_IsReady()) {
-            return;
+            PspFrameInterpolation_FinishPresentation(task);
+            return 0;
         }
 
         if (!PspFrameInterpolation_ShouldPresent(task)) {
             PspFrameInterpolation_FinishPresentation(task);
-            return;
+            return 0;
         }
 
     #if PSP_FPS_OVERLAY
@@ -213,7 +215,7 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
 
         PspHwCounterProfile_ScopeBegin(PSP_HW_SCOPE_PRESENT);
         PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PRESENT_SWAP);
-        PspGfxDevice_Present();
+        presented = PspGfxDevice_Present();
         PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PRESENT_SWAP);
         PspHwCounterProfile_ScopeEnd(PSP_HW_SCOPE_PRESENT);
         PspProfiler_ComponentTaskEnd();
@@ -223,15 +225,16 @@ void PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
     #endif
 
     #if PSP_FPS_OVERLAY
-        psp_renderer_perf_frame_complete(
-            (u64) (renderEnd - renderStart)
-        );
+        if (presented) {
+            psp_renderer_perf_frame_complete((u64) (renderEnd - renderStart));
+        }
 
         psp_renderer_draw_perf_overlay();
     #endif
 
         PspProfiler_DrawStatus();
         PspHwCounterProfile_DrawStatus();
+        return presented;
 }
 
 int PspRenderer_HistoryHudCacheReady(void) {

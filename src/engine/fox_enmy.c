@@ -1,4 +1,7 @@
 #include "global.h"
+#ifdef TARGET_PSP
+#include "src/psp/frame_interpolation.h"
+#endif
 #include "assets/ast_corneria.h"
 #include "assets/ast_sector_x.h"
 #include "assets/ast_sector_y.h"
@@ -185,6 +188,9 @@ void Scenery_Initialize(Scenery* this) {
     s32 i;
     u8* ptr = (u8*) this;
 
+#ifdef TARGET_PSP
+    PspFrameInterpolation_ForgetIdentity(&this->obj);
+#endif
     for (i = 0; i < sizeof(Scenery); i++, ptr++) {
         *ptr = 0;
     }
@@ -194,6 +200,9 @@ void Sprite_Initialize(Sprite* this) {
     s32 i;
     u8* ptr = (u8*) this;
 
+#ifdef TARGET_PSP
+    PspFrameInterpolation_ForgetIdentity(&this->obj);
+#endif
     for (i = 0; i < sizeof(Sprite); i++, ptr++) {
         *ptr = 0;
     }
@@ -203,6 +212,9 @@ void Actor_Initialize(Actor* this) {
     s32 i;
     u8* ptr = (u8*) this;
 
+#ifdef TARGET_PSP
+    PspFrameInterpolation_ForgetIdentity(&this->obj);
+#endif
     for (i = 0; i < sizeof(Actor); i++, ptr++) {
         *ptr = 0;
     }
@@ -213,6 +225,9 @@ void Boss_Initialize(Boss* this) {
     s32 i;
     u8* ptr = (u8*) this;
 
+#ifdef TARGET_PSP
+    PspFrameInterpolation_ForgetIdentity(&this->obj);
+#endif
     for (i = 0; i < sizeof(Boss); i++, ptr++) {
         *ptr = 0;
     }
@@ -223,6 +238,9 @@ void Item_Initialize(Item* this) {
     s32 i;
     u8* ptr = (u8*) this;
 
+#ifdef TARGET_PSP
+    PspFrameInterpolation_ForgetIdentity(&this->obj);
+#endif
     for (i = 0; i < sizeof(Item); i++, ptr++) {
         *ptr = 0;
     }
@@ -232,6 +250,9 @@ void Effect_Initialize(Effect* this) {
     s32 i;
     u8* ptr = (u8*) this;
 
+#ifdef TARGET_PSP
+    PspFrameInterpolation_ForgetIdentity(&this->obj);
+#endif
     for (i = 0; i < sizeof(Effect); i++, ptr++) {
         *ptr = 0;
     }

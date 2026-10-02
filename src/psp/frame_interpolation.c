@@ -4,6 +4,7 @@
 #include "src/psp/renderer_starfield.h"
 
 #define PSP_FRAME_INTERPOLATION_MATRIX_CAPACITY 0x480
+#define PSP_FRAME_INTERPOLATION_BUCKETS 256
 
 typedef struct {
     u32 requested;
@@ -13,7 +14,6 @@ typedef struct {
     u32 missingHistory;
     u32 topologyMismatch;
     u32 matricesInterpolated;
-    u32 renderOnly;
     u32 repeatFallback;
     u32 repeated;
     f32 alpha;
@@ -22,6 +22,9 @@ typedef struct {
 typedef struct {
     u32 simulationVi;
     u32 generation;
+    s32 gameState;
+    s32 drawMode;
+    s32 level;
     u16 worldEnd;
     u16 worldCount;
     u8 simulationVIs;
@@ -29,6 +32,7 @@ typedef struct {
     u8 eligible;
     u8 flags[PSP_FRAME_INTERPOLATION_MATRIX_CAPACITY];
     u8 world[PSP_FRAME_INTERPOLATION_MATRIX_CAPACITY];
+    u8 view[PSP_FRAME_INTERPOLATION_MATRIX_CAPACITY];
     u8 wrapAxis[PSP_FRAME_INTERPOLATION_MATRIX_CAPACITY];
     f32 wrapPeriod[PSP_FRAME_INTERPOLATION_MATRIX_CAPACITY];
     const void* drawSite[PSP_FRAME_INTERPOLATION_MATRIX_CAPACITY];
@@ -36,7 +40,14 @@ typedef struct {
     PspFrameInterpolationPresentation presentation;
 } PspFrameInterpolationPool;
 
+typedef struct {
+    s16 nextGroup;
+    s16 nextMatrix;
+    s16 remaining;
+} PspFrameInterpolationMatch;
+
 static PspFrameInterpolationPool sPools[2];
+static s16 sPreviousMatrix[PSP_FRAME_INTERPOLATION_MATRIX_CAPACITY];
 static u32 sGeneration;
 static s32 sRecordingPool = -1;
 static s32 sPresentationPool = -1;
@@ -74,7 +85,6 @@ static void psp_frame_interpolation_clear_presentation(PspFrameInterpolationPres
     presentation->missingHistory = 0;
     presentation->topologyMismatch = 0;
     presentation->matricesInterpolated = 0;
-    presentation->renderOnly = 0;
     presentation->repeatFallback = 0;
     presentation->repeated = 0;
     presentation->alpha = 1.0f;
@@ -133,6 +143,22 @@ void PspFrameInterpolation_SetMatrixIdentity(const void* identity) {
     sMatrixIdentity = identity;
 }
 
+void PspFrameInterpolation_ForgetIdentity(const void* identity) {
+    PspFrameInterpolationPool* previous;
+    u32 i;
+
+    if (sRecordingPool < 0) {
+        return;
+    }
+    previous = &sPools[sRecordingPool ^ 1];
+    // The scheduler protects both history pools while an interpolated task is in flight
+    for (i = 0; previous->valid && (i < previous->worldEnd); i++) {
+        if (previous->identity[i] == identity) {
+            previous->world[i] = false;
+        }
+    }
+}
+
 void PspFrameInterpolation_SetMatrixWrap(PspFrameInterpolationWrapAxis axis, f32 distance, f32 scale) {
     if ((axis <= PSP_FRAME_INTERPOLATION_WRAP_NONE) || (axis > PSP_FRAME_INTERPOLATION_WRAP_Z) ||
         (distance == 0.0f) || (scale == 0.0f)) {
@@ -161,6 +187,7 @@ void PspFrameInterpolation_RecordMatrix(const Mtx* matrix, u32 flags, const void
     world = sWorldScope && ((flags & G_MTX_PROJECTION) == 0);
     state->flags[index] = (u8) flags;
     state->world[index] = world;
+    state->view[index] = (gPlayerNum << 1) | (gReflectY < 0);
     state->drawSite[index] = drawSite;
     state->identity[index] = world ? sMatrixIdentity : NULL;
     state->wrapAxis[index] = world ? (u8) sWrapAxis : PSP_FRAME_INTERPOLATION_WRAP_NONE;
@@ -175,6 +202,9 @@ void PspFrameInterpolation_EndSimulationFrame(SPTask* task, s32 eligible) {
     s32 pool = psp_frame_interpolation_pool_for_task(task);
 
     if ((pool >= 0) && (pool == sRecordingPool)) {
+        sPools[pool].gameState = gGameState;
+        sPools[pool].drawMode = gDrawMode;
+        sPools[pool].level = gCurrentLevel;
         sPools[pool].valid = true;
         sPools[pool].eligible = (eligible != 0) && (sPools[pool].worldCount != 0);
     }
@@ -185,29 +215,90 @@ void PspFrameInterpolation_EndSimulationFrame(SPTask* task, s32 eligible) {
     sWrapPeriod = 0.0f;
 }
 
-static s32 psp_frame_interpolation_topology_matches(const PspFrameInterpolationPool* current,
-                                                    const PspFrameInterpolationPool* previous) {
-    u32 i;
-
-    if ((current->worldEnd != previous->worldEnd) || (current->worldCount != previous->worldCount)) {
-        return false;
-    }
-    /* A call site can submit many objects from a pool. The instance identity
-     * prevents equal-sized draw streams from pairing different objects. */
-    for (i = 0; i < current->worldEnd; i++) {
-        if ((current->flags[i] != previous->flags[i]) || (current->world[i] != previous->world[i]) ||
-            (current->world[i] && ((current->drawSite[i] != previous->drawSite[i]) ||
-                                   (current->identity[i] != previous->identity[i]) ||
-                                   (current->wrapAxis[i] != previous->wrapAxis[i]) ||
-                                   (current->wrapPeriod[i] != previous->wrapPeriod[i])))) {
-            return false;
-        }
-    }
-    return true;
+static u32 psp_frame_interpolation_bucket(const PspFrameInterpolationPool* state, u32 index) {
+    return (((uintptr_t) state->identity[index] >> 4) ^ ((uintptr_t) state->drawSite[index] >> 2) ^
+            state->view[index]) & (PSP_FRAME_INTERPOLATION_BUCKETS - 1);
 }
 
-SPTask* PspFrameInterpolation_PreparePresentation(SPTask* task, u32 presentationVi, u8 presentationVIs,
-                                                  s32 renderOnly) {
+static s32 psp_frame_interpolation_find_group(const PspFrameInterpolationPool* current, u32 index,
+                                             const PspFrameInterpolationPool* previous,
+                                             const PspFrameInterpolationMatch* matches, s32 group) {
+    while (group >= 0) {
+        if ((current->identity[index] == previous->identity[group]) &&
+            (current->drawSite[index] == previous->drawSite[group]) &&
+            (current->view[index] == previous->view[group])) {
+            break;
+        }
+        group = matches[group].nextGroup;
+    }
+    return group;
+}
+
+static void psp_frame_interpolation_match_matrices(PspFrameInterpolationPool* current,
+                                                  const PspFrameInterpolationPool* previous) {
+    PspFrameInterpolationMatch matches[PSP_FRAME_INTERPOLATION_MATRIX_CAPACITY];
+    s16 buckets[PSP_FRAME_INTERPOLATION_BUCKETS];
+    s32 i;
+    s32 group;
+    s32 old;
+    u32 bucket;
+
+    for (i = 0; i < PSP_FRAME_INTERPOLATION_BUCKETS; i++) {
+        buckets[i] = -1;
+    }
+    // Build ordered matrix chains for each object and draw site within a view
+    for (i = previous->worldEnd - 1; i >= 0; i--) {
+        if (!previous->world[i]) {
+            continue;
+        }
+        bucket = psp_frame_interpolation_bucket(previous, i);
+        group = psp_frame_interpolation_find_group(previous, i, previous, matches, buckets[bucket]);
+        if (group < 0) {
+            group = i;
+            matches[group].nextGroup = buckets[bucket];
+            matches[group].remaining = -1;
+            buckets[bucket] = group;
+        }
+        matches[i].nextMatrix = matches[group].remaining;
+        matches[group].remaining = i;
+    }
+    for (i = 0; i < current->worldEnd; i++) {
+        sPreviousMatrix[i] = -1;
+        if (!current->world[i]) {
+            continue;
+        }
+        bucket = psp_frame_interpolation_bucket(current, i);
+        group = psp_frame_interpolation_find_group(current, i, previous, matches, buckets[bucket]);
+        if (group < 0) {
+            current->presentation.topologyMismatch = 1;
+            continue;
+        }
+        old = matches[group].remaining;
+        if ((old < 0) || (current->flags[i] != previous->flags[old]) ||
+            (current->wrapAxis[i] != previous->wrapAxis[old]) ||
+            (current->wrapPeriod[i] != previous->wrapPeriod[old])) {
+            matches[group].remaining = -2;
+            current->presentation.topologyMismatch = 1;
+            continue;
+        }
+        sPreviousMatrix[i] = old;
+        matches[group].remaining = matches[old].nextMatrix;
+    }
+    // A changed repeat count makes limb or repeated draw correspondence ambiguous
+    for (i = 0; i < current->worldEnd; i++) {
+        if (sPreviousMatrix[i] < 0) {
+            continue;
+        }
+        bucket = psp_frame_interpolation_bucket(current, i);
+        group = psp_frame_interpolation_find_group(current, i, previous, matches, buckets[bucket]);
+        if (matches[group].remaining != -1) {
+            sPreviousMatrix[i] = -1;
+            current->presentation.topologyMismatch = 1;
+        }
+    }
+}
+
+SPTask* PspFrameInterpolation_PreparePresentation(SPTask* task, u32 presentationVi, u8 presentationVIs) {
     PspFrameInterpolationPool* current;
     PspFrameInterpolationPool* previous;
     PspFrameInterpolationPresentation* presentation;
@@ -226,7 +317,6 @@ SPTask* PspFrameInterpolation_PreparePresentation(SPTask* task, u32 presentation
     previous = &sPools[pool ^ 1];
     presentation = &current->presentation;
     psp_frame_interpolation_clear_presentation(presentation);
-    presentation->renderOnly = renderOnly != 0;
     if (!current->valid || !current->eligible || (presentationVIs >= current->simulationVIs)) {
         return NULL;
     }
@@ -238,7 +328,9 @@ SPTask* PspFrameInterpolation_PreparePresentation(SPTask* task, u32 presentation
         return NULL;
     }
     presentation->repeatFallback = presentationVIs == 1;
-    if (!previous->valid || !previous->eligible || (current->generation != (previous->generation + 1))) {
+    if (!previous->valid || !previous->eligible || (current->generation != (previous->generation + 1)) ||
+        (current->gameState != previous->gameState) || (current->drawMode != previous->drawMode) ||
+        (current->level != previous->level)) {
         presentation->fallback = 1;
         presentation->missingHistory = 1;
         return NULL;
@@ -250,11 +342,7 @@ SPTask* PspFrameInterpolation_PreparePresentation(SPTask* task, u32 presentation
         presentation->missingHistory = 1;
         return NULL;
     }
-    if (!psp_frame_interpolation_topology_matches(current, previous)) {
-        presentation->fallback = 1;
-        presentation->topologyMismatch = 1;
-        return NULL;
-    }
+    psp_frame_interpolation_match_matrices(current, previous);
     presentation->interpolated = 1;
     presentation->alpha = (f32) offset / (f32) span;
     sPresentationPool = pool;
@@ -310,12 +398,12 @@ s32 PspFrameInterpolation_ResolveMatrix(const Mtx* currentMatrix, u32 flags, Mat
     current = &sPools[pool];
     presentation = &current->presentation;
     if (!presentation->interpolated || (index >= current->worldEnd) || !current->world[index] ||
-        (current->flags[index] != (u8) flags)) {
+        (current->flags[index] != (u8) flags) || (sPreviousMatrix[index] < 0)) {
         return false;
     }
 
     currentValue = (const Matrix*) currentMatrix;
-    previousValue = (const Matrix*) &gGfxPools[pool ^ 1].mtx[index];
+    previousValue = (const Matrix*) &gGfxPools[pool ^ 1].mtx[sPreviousMatrix[index]];
     if (current->wrapAxis[index] != PSP_FRAME_INTERPOLATION_WRAP_NONE) {
         /* A wrapped coordinate has equivalent transforms one period in either
          * direction. Interpolate from the copy closest to the previous frame
@@ -373,8 +461,7 @@ void PspFrameInterpolation_FinishPresentation(SPTask* task) {
                                     presentation->topologyMismatch,
                                     presentation->requested ? state->worldCount : 0,
                                     presentation->matricesInterpolated,
-                                    presentation->repeated ||
-                                        (presentation->renderOnly && !presentation->interpolated));
+                                    presentation->repeated);
     (void) state;
     (void) presentation;
 }
