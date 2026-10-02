@@ -223,7 +223,17 @@ static void Graphics_PrepareTask(void) {
 }
 
 static s32 Graphics_SubmitTask(SPTask* task) {
+#if defined(TARGET_PSP) && PSP_GFX_BACKEND_GU
+    s32 result = osSendMesg(&gTaskMesgQueue, task, OS_MESG_NOBLOCK);
+
+    if (result == 0) {
+        // Wake the renderer without waiting for another VI
+        osSendMesg(&gMainThreadMesgQueue, (OSMesg) EVENT_MESG_TASK_READY, OS_MESG_NOBLOCK);
+    }
+    return result;
+#else
     return osSendMesg(&gTaskMesgQueue, task, OS_MESG_NOBLOCK);
+#endif
 }
 
 void Graphics_SetTask(void) {
@@ -822,6 +832,11 @@ void Main_ThreadEntry(void* arg0) {
         mesg = (u32) osMesg;
 
         switch (mesg) {
+#if defined(TARGET_PSP) && PSP_GFX_BACKEND_GU
+            case EVENT_MESG_TASK_READY:
+                Main_GetNewTasks();
+                break;
+#endif
             case EVENT_MESG_VI:
             #ifdef TARGET_PSP
                 PspPlatform_AcknowledgeViEvent();

@@ -202,6 +202,9 @@ extern OSThread gAudioThread; //8013B1F0
 #define EVENT_MESG_DP 2
 #define EVENT_MESG_VI 3
 #define EVENT_MESG_PRENMI 4
+#ifdef TARGET_PSP
+#define EVENT_MESG_TASK_READY 5
+#endif
 
 typedef enum {
     /* 0 */ THREAD_ID_SYSTEM,

@@ -127,6 +127,7 @@ int PspGfxGuDevice_Init(void) {
         return 0;
     }
     sGuInitialized = 1;
+    guSwapBuffersBehaviour(PSP_DISPLAY_SETBUF_IMMEDIATE);
 
     if (sceGuStart(GU_DIRECT, sGuList) < 0) {
         psp_gfx_gu_device_log_failure("[gu] setup list start failed");
