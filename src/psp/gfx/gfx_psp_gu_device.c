@@ -30,7 +30,6 @@ static unsigned int sDisplayBufferOffset;
 static unsigned int sDepthBufferOffset;
 static void* sTextureEdramBase;
 static unsigned int sTextureEdramBytes;
-static unsigned int sPresentedBufferOffset;
 static int sGuInitialized;
 static int sReady;
 static int sFrameActive;
@@ -46,7 +45,6 @@ static void psp_gfx_gu_device_reset_state(void) {
     sDepthBufferOffset = 0;
     sTextureEdramBase = NULL;
     sTextureEdramBytes = 0;
-    sPresentedBufferOffset = 0;
     sGuInitialized = 0;
     sReady = 0;
     sFrameActive = 0;
@@ -119,7 +117,6 @@ int PspGfxGuDevice_Init(void) {
     sTextureEdramBase = (void*) (((uintptr_t) sceGeEdramGetAddr() + PSP_GU_REQUIRED_VRAM) |
                                  PSP_GU_UNCACHED_ALIAS);
     sTextureEdramBytes = (vramSize - PSP_GU_REQUIRED_VRAM) & ~(PSP_GU_EDRAM_ALIGNMENT - 1U);
-    sPresentedBufferOffset = sDisplayBufferOffset;
 
     if (sceGuInit() < 0) {
         psp_gfx_gu_device_log_failure("[gu] sceGuInit failed");
@@ -257,7 +254,6 @@ int PspGfxGuDevice_Present(void) {
         return 0;
     }
 
-    sPresentedBufferOffset = sDrawBufferOffset;
     sDrawBufferOffset = (unsigned int) sceGuSwapBuffers();
     sFrameSubmitted = 0;
     return 1;
@@ -278,8 +274,8 @@ void PspGfxGuDevice_Shutdown(void) {
     psp_gfx_gu_device_reset_state();
 }
 
-void* PspGfxGuDevice_GetPresentedFrameBuffer(int* stride, int* pixelFormat) {
-    if (!sReady) {
+void* PspGfxGuDevice_GetOverlayFrameBuffer(int* stride, int* pixelFormat) {
+    if (!sReady || sFrameActive || !sFrameSubmitted) {
         return (void*) 0;
     }
 
@@ -290,7 +286,7 @@ void* PspGfxGuDevice_GetPresentedFrameBuffer(int* stride, int* pixelFormat) {
         *pixelFormat = GU_PSM_5650;
     }
 
-    return (void*) ((uintptr_t) sceGeEdramGetAddr() + (uintptr_t) sPresentedBufferOffset);
+    return (void*) ((uintptr_t) sceGeEdramGetAddr() + (uintptr_t) sDrawBufferOffset);
 }
 
 int PspGfxGuDevice_GetTextureEdramArena(void** base, u32* bytes) {

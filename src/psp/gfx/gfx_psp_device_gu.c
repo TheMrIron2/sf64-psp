@@ -44,6 +44,6 @@ void PspGfxDevice_Shutdown(void) {
     PspGfxGuTexture_Shutdown();
 }
 
-void* PspGfxDevice_GetPresentedFrameBuffer(int* stride, int* pixelFormat) {
-    return PspGfxGuDevice_GetPresentedFrameBuffer(stride, pixelFormat);
+void* PspGfxDevice_GetOverlayFrameBuffer(int* stride, int* pixelFormat) {
+    return PspGfxGuDevice_GetOverlayFrameBuffer(stride, pixelFormat);
 }

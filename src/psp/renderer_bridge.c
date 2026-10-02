@@ -37,23 +37,18 @@ static int sPerfReady;
 
 #endif
 
-#if PSP_FPS_OVERLAY
-
-static void psp_renderer_draw_perf_overlay(void) {
+static void psp_renderer_draw_overlays(void) {
+#if PSP_FPS_OVERLAY || PROFILE_GPROF || PROFILE_PHASES || PROFILE_HW_COUNTERS
     void* framebuffer;
     int bufferWidth;
     int pixelFormat;
     uintptr_t uncachedAddress;
 
-    if (!sPerfReady) {
-        return;
-    }
-
     framebuffer = NULL;
     bufferWidth = 0;
     pixelFormat = 0;
 
-    framebuffer = PspGfxDevice_GetPresentedFrameBuffer(&bufferWidth, &pixelFormat);
+    framebuffer = PspGfxDevice_GetOverlayFrameBuffer(&bufferWidth, &pixelFormat);
 
     if ((framebuffer == NULL) || (bufferWidth != 512)) {
         return;
@@ -67,19 +62,27 @@ static void psp_renderer_draw_perf_overlay(void) {
     pspDebugScreenSetBackColor(0x00000000);
     pspDebugScreenSetTextColor(0xFFFFFFFF);
     pspDebugScreenEnableBackColor(1);
-    pspDebugScreenSetXY(0, 0);
-
-    pspDebugScreenPrintf(
-        "FPS %lu.%lu  SIM %lu.%lu  GFX %lu.%lums  CAP %u   ",
-        (unsigned long) (sPerfFpsTenths / 10),
-        (unsigned long) (sPerfFpsTenths % 10),
-        (unsigned long) (sPerfSimulationTenths / 10),
-        (unsigned long) (sPerfSimulationTenths % 10),
-        (unsigned long) (sPerfGfxMsTenths / 10),
-        (unsigned long) (sPerfGfxMsTenths % 10),
-        (unsigned int) (60 / PspFrameScheduler_GetPresentationVIs())
-    );
+#if PSP_FPS_OVERLAY
+    if (sPerfReady) {
+        pspDebugScreenSetXY(0, 0);
+        pspDebugScreenPrintf(
+            "FPS %lu.%lu  SIM %lu.%lu  GFX %lu.%lums  CAP %u   ",
+            (unsigned long) (sPerfFpsTenths / 10),
+            (unsigned long) (sPerfFpsTenths % 10),
+            (unsigned long) (sPerfSimulationTenths / 10),
+            (unsigned long) (sPerfSimulationTenths % 10),
+            (unsigned long) (sPerfGfxMsTenths / 10),
+            (unsigned long) (sPerfGfxMsTenths % 10),
+            (unsigned int) (60 / PspFrameScheduler_GetPresentationVIs())
+        );
+    }
+#endif
+    PspProfiler_DrawStatus();
+    PspHwCounterProfile_DrawStatus();
+#endif
 }
+
+#if PSP_FPS_OVERLAY
 
 static void psp_renderer_perf_frame_complete(u64 renderUs) {
     SceInt64 now;
@@ -215,6 +218,9 @@ int PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
         renderEnd = sceKernelGetSystemTimeWide();
     #endif
 
+#if PSP_GFX_BACKEND_GU
+        psp_renderer_draw_overlays();
+#endif
         PspHwCounterProfile_ScopeBegin(PSP_HW_SCOPE_PRESENT);
         PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PRESENT_SWAP);
         presented = PspGfxDevice_Present();
@@ -230,12 +236,11 @@ int PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
         if (presented) {
             psp_renderer_perf_frame_complete((u64) (renderEnd - renderStart));
         }
-
-        psp_renderer_draw_perf_overlay();
     #endif
 
-        PspProfiler_DrawStatus();
-        PspHwCounterProfile_DrawStatus();
+#if PSP_GFX_BACKEND_PSPGL
+        psp_renderer_draw_overlays();
+#endif
         return presented;
 }
 
