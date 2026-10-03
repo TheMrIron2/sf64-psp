@@ -571,6 +571,7 @@ static void* psp_gfx_gu_alloc_vertices(u32 vertexCount, u32 vertexSize) {
         return NULL;
     }
 
+    // GU returns uncached inline storage
     vertices = sceGuGetMemory((int) bytes);
     if (vertices == NULL) {
         return NULL;
@@ -813,7 +814,6 @@ void PspGfxBackend_DrawTriangles(const PspGfxVertex* vertices, u32 vertexCount, 
     }
 
     bytes = vertexCount * vertexSize;
-    sceKernelDcacheWritebackRange(guVertices, bytes);
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD);
 
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_SUBMIT);
@@ -871,7 +871,6 @@ void PspGfxBackend_DrawReservedTriangles(const PspGfxVertexReservation* reservat
                                          const PspGfxDrawState* state) {
     PspGfxGuReservation* guReservation;
     u32 i;
-    u32 bytes;
 
     if (!sPspGfxGuReservationFrameActive || (reservation == NULL) || (state == NULL) ||
         (reservation->vertices == NULL) ||
@@ -904,8 +903,6 @@ void PspGfxBackend_DrawReservedTriangles(const PspGfxVertexReservation* reservat
     }
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_STATE_SETUP);
 
-    bytes = vertexCount * sizeof(PspGfxVertex);
-    sceKernelDcacheWritebackRange(guReservation->vertices, bytes);
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_SUBMIT);
     sceGuDrawArray(GU_TRIANGLES, GU_TEXTURE_32BITF | GU_COLOR_8888 | GU_VERTEX_32BITF | GU_TRANSFORM_3D,
                    vertexCount, 0, guReservation->vertices);
@@ -973,7 +970,6 @@ void PspGfxBackend_DrawFogTriangles(const PspGfxFogVertex* vertices, u32 vertexC
         guVertices[i].z = vertices[i].z;
     }
     bytes = vertexCount * sizeof(PspGfxFogVertex);
-    sceKernelDcacheWritebackRange(guVertices, bytes);
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD);
 
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_SUBMIT);
@@ -1041,7 +1037,6 @@ void PspGfxBackend_DrawSprites(const PspGfxVertex* vertices, u32 vertexCount, co
     }
 
     bytes = vertexCount * vertexSize;
-    sceKernelDcacheWritebackRange(guVertices, bytes);
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD);
 
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_SUBMIT);
@@ -1120,7 +1115,6 @@ void PspGfxBackend_DrawSolidRect(float ulx, float uly, float lrx, float lry, u32
     for (i = 0; i < 6; i++) {
         vertices[i] = source[i];
     }
-    sceKernelDcacheWritebackRange(vertices, 6 * sizeof(PspGfxGuColorVertex));
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PSPGL_VERTEX_STREAM_UPLOAD);
 
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PSPGL_SUBMIT);
