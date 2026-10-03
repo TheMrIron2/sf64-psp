@@ -6000,8 +6000,8 @@ static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int premultiply) {
         request.envBlend = psp_gfx_dl_baked_env_blend_texture_enabled(ctx);
         if (request.envBlend) {
             request.premultiply = 0;
-            request.primitiveColor = psp_gfx_dl_primitive_color(ctx);
-            request.environmentColor = psp_gfx_dl_environment_color(ctx);
+            request.primitiveColor = psp_gfx_dl_primitive_color(ctx) & 0x00FFFFFFU;
+            request.environmentColor = psp_gfx_dl_environment_color(ctx) & 0x00FFFFFFU;
         }
         cache = PSP_HW_TEXTURE_CACHE_RGBA32;
     } else if ((ctx->textureFormat == G_IM_FMT_IA) && (ctx->textureSize == G_IM_SIZ_8b)) {
@@ -6009,8 +6009,8 @@ static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int premultiply) {
         request.envBlend = psp_gfx_dl_baked_env_blend_texture_enabled(ctx);
         request.softCoverage = !request.envBlend && psp_gfx_dl_soft_coverage_texture_enabled(ctx);
         if (request.envBlend) {
-            request.primitiveColor = psp_gfx_dl_primitive_color(ctx);
-            request.environmentColor = psp_gfx_dl_environment_color(ctx);
+            request.primitiveColor = psp_gfx_dl_primitive_color(ctx) & 0x00FFFFFFU;
+            request.environmentColor = psp_gfx_dl_environment_color(ctx) & 0x00FFFFFFU;
         }
         cache = PSP_HW_TEXTURE_CACHE_CONVERTED;
     } else if ((ctx->textureFormat == G_IM_FMT_IA) && (ctx->textureSize == G_IM_SIZ_16b)) {
