@@ -1688,6 +1688,7 @@ bool Map_LevelPlayedStatus_Check(PlanetId planet);
 s32 Map_GetPathId(PlanetId start, PlanetId end);
 void Map_PlayLevel(void);
 void Map_PositionPlanets(void);
+static void Map_ProjectPlanets(void);
 void Map_PlanetOrderZpos(void);
 void Map_Fade_Update(void);
 void Map_Planet_Draw(PlanetId);
@@ -1727,6 +1728,9 @@ void Map_MeteoMeteors_Draw(void);
 void Map_Area6Ships_Draw(void);
 void Map_Wipe_Draw(void);
 void Map_TitleCards_Draw(void);
+#if MODS_LEVEL_SELECT == 1
+void Map_LevelSelect_Draw(void);
+#endif
 void Map_801A9A8C(void);
 void Map_801A9DE8(void);
 void Map_PathLineBox_Draw(s32);
@@ -2349,8 +2353,6 @@ void Map_Update(void) {
     Map_AssetTrace_Check("map-update-entry");
     Map_PositionPlanets();
     Map_AssetTrace_Check("after-position-planets");
-    Map_PlanetOrderZpos();
-    Map_AssetTrace_Check("after-planet-order");
     Map_Fade_Update();
     Map_AssetTrace_Check("after-fade-update");
 
@@ -2418,6 +2420,10 @@ void Map_Draw(void) {
                   sMapCamUpY, sMapCamUpZ, MTXF_APPLY);
     Matrix_Translate(gGfxMatrix, D_menu_801CEA58, D_menu_801CEA5C, D_menu_801CEA60, MTXF_APPLY);
     Matrix_SetGfxMtx(&gMasterDisp);
+
+    Map_ProjectPlanets();
+    Map_PlanetOrderZpos();
+    Map_AssetTrace_Check("after-planet-order");
 
     if (D_menu_801CD974 && (sMapState != MAP_PROLOGUE)) {
         for (i = 0; i < 24; i++) {
@@ -2511,6 +2517,9 @@ void Map_Draw(void) {
         Map_LylatCard_Draw();
     }
 
+#if MODS_LEVEL_SELECT == 1
+    Map_LevelSelect_Draw();
+#endif
 #ifdef TARGET_PSP
     PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER(gMasterDisp++);
 #endif
@@ -4882,8 +4891,6 @@ void Map_PositionPlanets(void) {
 
         Map_CamMatrixRot();
 
-        Matrix_SetGfxMtx(&gMasterDisp);
-
         Matrix_Copy(&D_menu_801CDA60[planetId], gGfxMatrix);
 
         Matrix_MultVec3f(gGfxMatrix, &src, &dest);
@@ -4893,19 +4900,15 @@ void Map_PositionPlanets(void) {
         sPlanets[planetId].pos.z = dest.z;
 
         Matrix_Pop(&gGfxMatrix);
+    }
+}
 
-        Matrix_Push(&gGfxMatrix);
+static void Map_ProjectPlanets(void) {
+    PlanetId planetId;
 
-        Matrix_LookAt(gGfxMatrix, sMapCamEyeX, sMapCamEyeY, sMapCamEyeZ, sMapCamAtX, sMapCamAtY, sMapCamAtZ, sMapCamUpX,
-                      sMapCamUpY, sMapCamUpZ, MTXF_APPLY);
-        Matrix_Translate(gGfxMatrix, D_menu_801CEA58, D_menu_801CEA5C, D_menu_801CEA60, MTXF_APPLY);
-        Matrix_Mult(gGfxMatrix, &D_menu_801CDA60[planetId], MTXF_APPLY);
-
-        Matrix_SetGfxMtx(&gMasterDisp);
-
-        Matrix_MultVec3f(gGfxMatrix, &src, &sPlanetPositions[planetId]);
-
-        Matrix_Pop(&gGfxMatrix);
+    // Use the drawing camera for painter order and overlap checks
+    for (planetId = 0; planetId < PLANET_MAX; planetId++) {
+        Matrix_MultVec3f(gGfxMatrix, &sPlanets[planetId].pos, &sPlanetPositions[planetId]);
     }
 }
 

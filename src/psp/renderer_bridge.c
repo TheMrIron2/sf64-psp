@@ -29,10 +29,14 @@ static u32 sPerfWindowFrames;
 static volatile u32 sPerfSimulationTicks;
 static u32 sPerfWindowSimulationTicks;
 static u64 sPerfRenderAccumUs;
+static u32 sPerfRenderPeakUs;
+static u32 sPerfWindowSkipped;
 
 static u32 sPerfFpsTenths;
 static u32 sPerfSimulationTenths;
 static u32 sPerfGfxMsTenths;
+static u32 sPerfGfxPeakTenths;
+static u32 sPerfSkipped;
 static int sPerfReady;
 
 #endif
@@ -66,14 +70,17 @@ static void psp_renderer_draw_overlays(void) {
     if (sPerfReady) {
         pspDebugScreenSetXY(0, 0);
         pspDebugScreenPrintf(
-            "FPS %lu.%lu  SIM %lu.%lu  GFX %lu.%lums  CAP %u   ",
+            "FPS %lu.%lu  SIM %lu.%lu  GFX %lu.%lu/%lu.%lums  CAP %u SKIP %lu   ",
             (unsigned long) (sPerfFpsTenths / 10),
             (unsigned long) (sPerfFpsTenths % 10),
             (unsigned long) (sPerfSimulationTenths / 10),
             (unsigned long) (sPerfSimulationTenths % 10),
             (unsigned long) (sPerfGfxMsTenths / 10),
             (unsigned long) (sPerfGfxMsTenths % 10),
-            (unsigned int) (60 / PspFrameScheduler_GetPresentationVIs())
+            (unsigned long) (sPerfGfxPeakTenths / 10),
+            (unsigned long) (sPerfGfxPeakTenths % 10),
+            (unsigned int) (60 / PspFrameScheduler_GetPresentationVIs()),
+            (unsigned long) sPerfSkipped
         );
     }
 #endif
@@ -96,11 +103,15 @@ static void psp_renderer_perf_frame_complete(u64 renderUs) {
     if (sPerfWindowStart == 0) {
         sPerfWindowStart = now;
         sPerfWindowSimulationTicks = sPerfSimulationTicks;
+        sPerfWindowSkipped = 0;
         return;
     }
 
     sPerfWindowFrames++;
     sPerfRenderAccumUs += renderUs;
+    if (renderUs > sPerfRenderPeakUs) {
+        sPerfRenderPeakUs = (u32) renderUs;
+    }
 
     elapsed = (u64) (now - sPerfWindowStart);
 
@@ -122,11 +133,15 @@ static void psp_renderer_perf_frame_complete(u64 renderUs) {
     sPerfGfxMsTenths =
         (u32) ((sPerfRenderAccumUs + (renderDenominator / 2ULL)) /
                renderDenominator);
+    sPerfGfxPeakTenths = (sPerfRenderPeakUs + 50) / 100;
+    sPerfSkipped = sPerfWindowSkipped;
 
     sPerfWindowStart = now;
     sPerfWindowFrames = 0;
     sPerfWindowSimulationTicks = simulationTicks;
     sPerfRenderAccumUs = 0;
+    sPerfRenderPeakUs = 0;
+    sPerfWindowSkipped = 0;
     sPerfReady = 1;
 }
 
@@ -184,6 +199,9 @@ int PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
         }
 
         if (!PspFrameInterpolation_ShouldPresent(task)) {
+#if PSP_FPS_OVERLAY
+            sPerfWindowSkipped++;
+#endif
             PspFrameInterpolation_FinishPresentation(task);
             return 0;
         }

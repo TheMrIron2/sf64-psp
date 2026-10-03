@@ -20,74 +20,72 @@ static PlanetId sPlanetArray[][3] = {
     { PLANET_VENOM, PLANET_VENOM, SAVE_SLOT_VENOM_2 },
 };
 
+static s32 sLevelSelectMission;
+static s32 sLevelSelectDifficulty;
+static s32 sLevelSelectStartOption;
+
 void Map_LevelSelect(void) {
     enum {
         LEVELSELECT_START_NORMAL,
         LEVELSELECT_START_TUNNEL,
         LEVELSELECT_START_ANDROSS,
     };
-    static s32 mission = 0;
-    static s32 difficulty = 0;
-    static char* sLevelSelectPlanetNames[] = {
-        "METEO",  "AREA 6",   "BOLSE",   "SECTOR Z", "SECTOR X", "SECTOR Y", "KATINA", "MACBETH",
-        "ZONESS", "CORNERIA", "TITANIA", "AQUAS",    "FORTUNA",  "VENOM 1",  "SOLAR",  "VENOM 2",
-    };
-    static s32 startOption = 0;
-    static char* sVenom2StartNames[] = { "NORMAL", "TUNNEL", "ANDROSS" };
-
     // static f32 zStart = 0.0f;
     // f32 zInc;
     s32 nextPlanetId;
     OSContPad* contPress = &gControllerPress[gMainController];
 
     if (contPress->button & L_JPAD) {
-        mission--;
-        if (mission < 0) {
-            mission = 6;
+        sLevelSelectMission--;
+        if (sLevelSelectMission < 0) {
+            sLevelSelectMission = 6;
         }
     } else if (contPress->button & R_JPAD) {
-        mission++;
-        if (mission > 6) {
-            mission = 0;
+        sLevelSelectMission++;
+        if (sLevelSelectMission > 6) {
+            sLevelSelectMission = 0;
         }
-    } else if ((contPress->button & U_JPAD) && (mission != 0)) {
-        difficulty++;
-        if (difficulty > 2) {
-            difficulty = 0;
+    } else if ((contPress->button & U_JPAD) && (sLevelSelectMission != 0)) {
+        sLevelSelectDifficulty++;
+        if (sLevelSelectDifficulty > 2) {
+            sLevelSelectDifficulty = 0;
         }
-        if ((difficulty == 1) && ((mission == 1) || (mission == 5) || (mission == 6))) {
-            difficulty = 2;
+        if ((sLevelSelectDifficulty == 1) &&
+            ((sLevelSelectMission == 1) || (sLevelSelectMission == 5) || (sLevelSelectMission == 6))) {
+            sLevelSelectDifficulty = 2;
         }
-    } else if ((contPress->button & D_JPAD) && (mission != 0)) {
-        difficulty--;
-        if ((difficulty != 2) && ((mission == 1) || (mission == 5) || (mission == 6))) {
-            difficulty--;
+    } else if ((contPress->button & D_JPAD) && (sLevelSelectMission != 0)) {
+        sLevelSelectDifficulty--;
+        if ((sLevelSelectDifficulty != 2) &&
+            ((sLevelSelectMission == 1) || (sLevelSelectMission == 5) || (sLevelSelectMission == 6))) {
+            sLevelSelectDifficulty--;
         }
-        if (difficulty < 0) {
-            difficulty = 2;
+        if (sLevelSelectDifficulty < 0) {
+            sLevelSelectDifficulty = 2;
         }
     }
 
-    nextPlanetId =
-        (sPlanetArray[mission][difficulty] == SAVE_SLOT_VENOM_2) ? PLANET_VENOM : sPlanetArray[mission][difficulty];
+    nextPlanetId = (sPlanetArray[sLevelSelectMission][sLevelSelectDifficulty] == SAVE_SLOT_VENOM_2)
+                       ? PLANET_VENOM
+                       : sPlanetArray[sLevelSelectMission][sLevelSelectDifficulty];
     if (sCurrentPlanetId != nextPlanetId) {
         sCurrentPlanetId = nextPlanetId;
-        startOption = 0;
+        sLevelSelectStartOption = 0;
         Map_CurrentLevel_Setup();
         Map_PositionCursor();
     }
-    if ((sPlanetArray[mission][difficulty] != SAVE_SLOT_VENOM_2) &&
-        (startOption > LEVELSELECT_START_TUNNEL)) {
-        startOption = LEVELSELECT_START_NORMAL;
+    if ((sPlanetArray[sLevelSelectMission][sLevelSelectDifficulty] != SAVE_SLOT_VENOM_2) &&
+        (sLevelSelectStartOption > LEVELSELECT_START_TUNNEL)) {
+        sLevelSelectStartOption = LEVELSELECT_START_NORMAL;
     }
     if (contPress->button & (L_TRIG | Z_TRIG)) {
-        if (sPlanetArray[mission][difficulty] == SAVE_SLOT_VENOM_2) {
-            startOption++;
-            if (startOption > LEVELSELECT_START_ANDROSS) {
-                startOption = LEVELSELECT_START_NORMAL;
+        if (sPlanetArray[sLevelSelectMission][sLevelSelectDifficulty] == SAVE_SLOT_VENOM_2) {
+            sLevelSelectStartOption++;
+            if (sLevelSelectStartOption > LEVELSELECT_START_ANDROSS) {
+                sLevelSelectStartOption = LEVELSELECT_START_NORMAL;
             }
         } else {
-            startOption ^= 1;
+            sLevelSelectStartOption ^= 1;
         }
     }
 
@@ -110,17 +108,48 @@ void Map_LevelSelect(void) {
     //     zStart = 500000.0f;
     // }
 
-    /* Draw */
+    // Bypass briefing
+    if ((sMapState == 2) && (sMapSubState > 0)) {
+        if (sCurrentPlanetId == PLANET_VENOM) {
+            if (sLevelSelectStartOption) {
+                gCurrentLevel = LEVEL_VENOM_ANDROSS;
+            } else if (sPlanetArray[sLevelSelectMission][sLevelSelectDifficulty] == SAVE_SLOT_VENOM_2) {
+                gCurrentLevel = LEVEL_VENOM_2;
+            }
+        } else if ((sCurrentPlanetId == PLANET_AREA_6) && sLevelSelectStartOption) {
+            gCurrentLevel = LEVEL_UNK_4;
+        }
+        Map_LevelStart_AudioSpecSetup(gCurrentLevel);
+        sLevelStartState = 0;
+        D_menu_801CD968 = 0;
+        Map_PlayLevel();
+        if ((sLevelSelectStartOption == LEVELSELECT_START_TUNNEL) &&
+            ((gCurrentLevel == LEVEL_METEO) || (gCurrentLevel == LEVEL_SECTOR_X) ||
+             (sPlanetArray[sLevelSelectMission][sLevelSelectDifficulty] == SAVE_SLOT_VENOM_2))) {
+            gLevelPhase = 1;
+        }
+        // gSavedPathProgress = gPathProgress = zStart;
+    }
+}
+
+void Map_LevelSelect_Draw(void) {
+    static char* sLevelSelectPlanetNames[] = {
+        "METEO",  "AREA 6",   "BOLSE",   "SECTOR Z", "SECTOR X", "SECTOR Y", "KATINA", "MACBETH",
+        "ZONESS", "CORNERIA", "TITANIA", "AQUAS",    "FORTUNA",  "VENOM 1",  "SOLAR",  "VENOM 2",
+    };
+    static char* sVenom2StartNames[] = { "NORMAL", "TUNNEL", "ANDROSS" };
+
     if ((sCurrentPlanetId >= 0) && (sCurrentPlanetId < PLANET_MAX)) {
         RCP_SetupDL(&gMasterDisp, SETUPDL_83);
         gDPSetPrimColor(gMasterDisp++, 0, 0, 255, 255, 0, 255);
 
         Graphics_DisplaySmallText(20, 200, 1.0f, 1.0f, "PLANET:");
-        Graphics_DisplaySmallText(80, 200, 1.0f, 1.0f, sLevelSelectPlanetNames[sPlanetArray[mission][difficulty]]);
+        Graphics_DisplaySmallText(80, 200, 1.0f, 1.0f,
+                                  sLevelSelectPlanetNames[sPlanetArray[sLevelSelectMission][sLevelSelectDifficulty]]);
 
-        if (sPlanetArray[mission][difficulty] == SAVE_SLOT_VENOM_2) {
-            Graphics_DisplaySmallText(80, 210, 1.0f, 1.0f, sVenom2StartNames[startOption]);
-        } else if (startOption) {
+        if (sPlanetArray[sLevelSelectMission][sLevelSelectDifficulty] == SAVE_SLOT_VENOM_2) {
+            Graphics_DisplaySmallText(80, 210, 1.0f, 1.0f, sVenom2StartNames[sLevelSelectStartOption]);
+        } else if (sLevelSelectStartOption) {
             if ((sCurrentPlanetId == PLANET_SECTOR_X) || (sCurrentPlanetId == PLANET_METEO)) {
                 Graphics_DisplaySmallText(80, 210, 1.0f, 1.0f, "WARP ZONE");
             } else if (sCurrentPlanetId == PLANET_VENOM) {
@@ -129,28 +158,5 @@ void Map_LevelSelect(void) {
                 Graphics_DisplaySmallText(80, 210, 1.0f, 1.0f, "BETA SB");
             }
         }
-    }
-
-    // Bypass briefing
-    if ((sMapState == 2) && (sMapSubState > 0)) {
-        if (sCurrentPlanetId == PLANET_VENOM) {
-            if (startOption) {
-                gCurrentLevel = LEVEL_VENOM_ANDROSS;
-            } else if (sPlanetArray[mission][difficulty] == SAVE_SLOT_VENOM_2) {
-                gCurrentLevel = LEVEL_VENOM_2;
-            }
-        } else if ((sCurrentPlanetId == PLANET_AREA_6) && startOption) {
-            gCurrentLevel = LEVEL_UNK_4;
-        }
-        Map_LevelStart_AudioSpecSetup(gCurrentLevel);
-        sLevelStartState = 0;
-        D_menu_801CD968 = 0;
-        Map_PlayLevel();
-        if ((startOption == LEVELSELECT_START_TUNNEL) &&
-            ((gCurrentLevel == LEVEL_METEO) || (gCurrentLevel == LEVEL_SECTOR_X) ||
-             (sPlanetArray[mission][difficulty] == SAVE_SLOT_VENOM_2))) {
-            gLevelPhase = 1;
-        }
-        // gSavedPathProgress = gPathProgress = zStart;
     }
 }

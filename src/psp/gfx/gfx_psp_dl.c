@@ -5979,7 +5979,6 @@ static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int premultiply) {
     mirrorS = ((ctx->textureCms & G_TX_MIRROR) != 0) && (ctx->textureMaskS != G_TX_NOMASK);
     mirrorT = ((ctx->textureCmt & G_TX_MIRROR) != 0) && (ctx->textureMaskT != G_TX_NOMASK);
     request.pixels = ctx->textureImage;
-    request.palette = ctx->texturePalette;
     request.width = ctx->textureWidth;
     request.height = ctx->textureHeight;
     request.premultiply = premultiply;
@@ -5987,6 +5986,7 @@ static int psp_gfx_dl_prepare_texture(PspGfxDlContext* ctx, int premultiply) {
     request.mirrorT = mirrorT;
     if ((ctx->textureFormat == G_IM_FMT_CI) && (ctx->textureSize == G_IM_SIZ_8b)) {
         request.format = PSP_GFX_TEXTURE_CI8;
+        request.palette = ctx->texturePalette;
         cache = PSP_HW_TEXTURE_CACHE_CI8;
     } else if ((ctx->textureFormat == G_IM_FMT_CI) && (ctx->textureSize == G_IM_SIZ_4b)) {
         request.format = PSP_GFX_TEXTURE_CI4;
