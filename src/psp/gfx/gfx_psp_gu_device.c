@@ -9,6 +9,7 @@
 #include <pspdisplay.h>
 #include <pspge.h>
 #include <pspgu.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #define PSP_GU_SCREEN_WIDTH 480
@@ -34,6 +35,41 @@ static int sGuInitialized;
 static int sReady;
 static int sFrameActive;
 static int sFrameSubmitted;
+
+// PSPSDK allocation path by Jesper Svennevid under PSPSDK-LICENSE
+typedef struct {
+    unsigned int* start;
+    unsigned int* current;
+    int parent_context;
+} PspGfxGuSdkDisplayList;
+
+typedef char PspGfxGuSdkListSizeCheck[(sizeof(PspGfxGuSdkDisplayList) == 12) ? 1 : -1];
+typedef char PspGfxGuSdkListCursorCheck[(offsetof(PspGfxGuSdkDisplayList, current) == 4) ? 1 : -1];
+typedef char PspGfxGuSdkListParentCheck[(offsetof(PspGfxGuSdkDisplayList, parent_context) == 8) ? 1 : -1];
+
+extern PspGfxGuSdkDisplayList* gu_list;
+
+// Draw and finish publish the list after inline data is ready
+void* sceGuGetMemory(int size) {
+    unsigned int* orig_ptr;
+    unsigned int* new_ptr;
+    int lo;
+    int hi;
+
+    size += 3;
+    size += ((unsigned int) (size >> 31)) >> 30;
+    size = (size >> 2) << 2;
+
+    orig_ptr = gu_list->current;
+    new_ptr = (unsigned int*) ((uintptr_t) orig_ptr + size + 8);
+    lo = (8 << 24) | ((uintptr_t) new_ptr & 0xFFFFFF);
+    hi = (16 << 24) | (((uintptr_t) new_ptr >> 8) & 0xF0000);
+    orig_ptr[0] = hi;
+    orig_ptr[1] = lo;
+    gu_list->current = new_ptr;
+
+    return orig_ptr + 2;
+}
 
 static void psp_gfx_gu_device_log_failure(const char* line) {
     PspPlatform_LogLine(line);
