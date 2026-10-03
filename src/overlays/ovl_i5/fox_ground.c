@@ -3,6 +3,7 @@
 #include "prevent_bss_reordering.h"
 #ifdef TARGET_PSP
 #include "src/psp/display.h"
+#include "src/psp/frame_interpolation.h"
 #include "src/psp/renderer.h"
 #endif
 
@@ -61,14 +62,22 @@ Vtx D_i5_801BE748[27][16][2];
 s32 D_i5_801C1D48[28][16];
 f32 D_i5_801C2448[28];
 f32 D_i5_801C24B8[28];
+#ifdef TARGET_PSP
+Gfx D_i5_801C2528[27][35];
+static Vtx sGroundSideEdges[27][4];
+static bool sGroundWidescreen;
+#else
 Gfx D_i5_801C2528[27][65];
+#endif
 Gfx* D_i5_801C5C00;
 s32 D_i5_801C5C04;
 s32 D_i5_801C5C08;
 s32 D_i5_801C5C0C;
 f32 D_i5_801C5C10;
 s32 D_i5_801C5C14;
+#ifndef TARGET_PSP
 Mtx D_i5_801C5C18[27];
+#endif
 Vec3f D_i5_801C62D8;
 UnkStruct_801C62E8 D_i5_801C62E8[20];
 Vec3fa D_i5_801C65B8[3][15][4];
@@ -296,8 +305,6 @@ void Ground_801B5110(f32 x, f32 y, f32 z) {
 }
 
 void Ground_801B5244(s32 arg0, s32 arg1) {
-    s32 var_s5;
-    s32 var_s6;
     s32 sp6C;
     s32 ia2;
     s32 iv1;
@@ -307,6 +314,8 @@ void Ground_801B5244(s32 arg0, s32 arg1) {
     Vtx* v1;
 #ifdef TARGET_PSP
     bool regularWideGrid = PspDisplay_IsWidescreen();
+
+    sGroundWidescreen = regularWideGrid;
 #endif
 
     for (sp6C = 0; sp6C < 27; sp6C++) {
@@ -355,17 +364,22 @@ void Ground_801B5244(s32 arg0, s32 arg1) {
     for (sp6C = 0; sp6C < 27; sp6C++) {
         D_i5_801C5C00 = D_i5_801C2528[sp60];
 
-        for (ia2 = 0, var_s6 = 15; var_s6 < 30; ia2++, var_s6 += 15) {
-            var_s5 = (var_s6 < 15) ? 15 : 14;
-            gSPVertex(D_i5_801C5C00++, &D_i5_801BE748[sp60][ia2 * 15][0], (var_s5 + 2) * 2, 0);
-            for (iv1 = 0; iv1 <= var_s5; iv1++) {
-                gSP1Triangle(D_i5_801C5C00++, (iv1 << 1), (iv1 << 1) + 1, (iv1 << 1) + 3, 0);
-                gSP1Triangle(D_i5_801C5C00++, (iv1 << 1), (iv1 << 1) + 3, (iv1 << 1) + 2, 0);
-            }
+        gSPVertex(D_i5_801C5C00++, &D_i5_801BE748[sp60][0][0], 32, 0);
+        for (iv1 = 0; iv1 < 15; iv1++) {
+            gSP1Triangle(D_i5_801C5C00++, (iv1 << 1), (iv1 << 1) + 1, (iv1 << 1) + 3, 0);
+            gSP1Triangle(D_i5_801C5C00++, (iv1 << 1), (iv1 << 1) + 3, (iv1 << 1) + 2, 0);
         }
+#ifdef TARGET_PSP
+        if (regularWideGrid) {
+            gSPVertex(D_i5_801C5C00++, sGroundSideEdges[sp60], 4, 32);
+            gSP2Triangles(D_i5_801C5C00++, 32, 33, 1, 0, 32, 1, 0, 0);
+            gSP2Triangles(D_i5_801C5C00++, 30, 31, 35, 0, 30, 35, 34, 0);
+        }
+#else
         Matrix_Translate(gGfxMatrix, 0.0f, 0.0f, D_i5_801C24B8[sp5C] * -220.0f, MTXF_NEW);
         Matrix_ToMtx(&D_i5_801C5C18[sp60]);
         gSPMatrix(D_i5_801C5C00++, &D_i5_801C5C18[sp60], G_MTX_NOPUSH | G_MTX_MUL | G_MTX_MODELVIEW);
+#endif
         gSPEndDisplayList(D_i5_801C5C00++);
         sp5C = (sp5C + 1) % 28;
         sp60 = (sp60 + 1) % 27;
@@ -384,6 +398,9 @@ void Ground_801B58AC(Gfx** dList, f32 arg1) {
 #endif
 
 #ifdef TARGET_PSP
+    if (regularWideGrid != sGroundWidescreen) {
+        Ground_801B5244(D_i5_801C5C04, D_i5_801C5C08);
+    }
     if (regularWideGrid) {
         PSP_RENDERER_DL_VIEWPORT_FULL_MARKER((*dList)++);
     }
@@ -400,6 +417,7 @@ void Ground_801B58AC(Gfx** dList, f32 arg1) {
         gDPLoadTileTexture((*dList)++, aTiGroundTex1, G_IM_FMT_RGBA, G_IM_SIZ_16b, 32, 32);
         gSPMatrix((*dList)++, &gIdentityMtx, G_MTX_PUSH | G_MTX_MUL | G_MTX_MODELVIEW);
 #ifdef TARGET_PSP
+        PspFrameInterpolation_SetMatrixWrap(PSP_FRAME_INTERPOLATION_WRAP_Z, 220.0f * D_i5_801BE744, 1.0f);
         if (regularWideGrid) {
             gSPMatrix((*dList)++, &gIdentityMtx, G_MTX_PUSH | G_MTX_MUL | G_MTX_MODELVIEW);
         }
@@ -421,6 +439,9 @@ void Ground_801B58AC(Gfx** dList, f32 arg1) {
         }
 #endif
         gSPPopMatrix((*dList)++, G_MTX_MODELVIEW);
+#ifdef TARGET_PSP
+        PspFrameInterpolation_SetMatrixWrap(PSP_FRAME_INTERPOLATION_WRAP_NONE, 0.0f, 1.0f);
+#endif
         Ground_801B4AA8(NULL, &spC4);
     }
 
@@ -433,6 +454,9 @@ void Ground_801B58AC(Gfx** dList, f32 arg1) {
             }
             D_i5_801C2448[temp_hi] = D_i5_801BE740;
             D_i5_801C24B8[temp_hi] = D_i5_801BE744;
+#ifdef TARGET_PSP
+            PspFrameInterpolation_ForgetIdentity(D_i5_801BE748[D_i5_801C5C04]);
+#endif
             Ground_801B4AA8(D_i5_801C1D48[temp_hi], &spC4);
             for (i = 0; i < 16; i++) {
                 temp_v0 = &D_i5_801BE748[D_i5_801C5C04][i][0];
@@ -468,8 +492,10 @@ void Ground_801B58AC(Gfx** dList, f32 arg1) {
                     D_i5_801C24B8[(D_i5_801C5C08 + 29) % 28] * -220.0f;
                 D_i5_801BE748[(D_i5_801C5C04 + 27) % 27][i][1].v.ob[2] = 0;
 
+#ifndef TARGET_PSP
                 Matrix_Translate(gGfxMatrix, 0.0f, 0.0f, D_i5_801C24B8[D_i5_801C5C08] * -220.0f, MTXF_NEW);
                 Matrix_ToMtx(&D_i5_801C5C18[D_i5_801C5C04]);
+#endif
             }
             Ground_801B5FE0(D_i5_801C5C08, D_i5_801C5C04, 1);
         }
@@ -498,6 +524,21 @@ void Ground_801B58AC(Gfx** dList, f32 arg1) {
     }
 #endif
 }
+
+#ifdef TARGET_PSP
+static void Ground_UpdateSideEdges(s32 row) {
+    s32 i;
+    Vtx* edge;
+
+    for (i = 0; i < 4; i++) {
+        edge = &sGroundSideEdges[row][i];
+        *edge = D_i5_801BE748[row][(i < 2) ? 0 : 15][i & 1];
+        edge->v.ob[0] += (i < 2) ? -3300 : 3300;
+        // Keep one texture period per 220 units
+        edge->v.tc[0] += (i < 2) ? -15360 : 15360;
+    }
+}
+#endif
 
 void Ground_801B5FE0(s32 arg0, s32 arg1, s32 arg2) {
     f32 spF4;
@@ -601,6 +642,11 @@ void Ground_801B5FE0(s32 arg0, s32 arg1, s32 arg2) {
                 }
             }
 
+#ifdef TARGET_PSP
+            if (sGroundWidescreen) {
+                Ground_UpdateSideEdges(sp90);
+            }
+#endif
             sp90 = (sp90 + 1) % 27;
 
             for (i1 = 0; i1 < 15; i1++) {
@@ -613,23 +659,38 @@ void Ground_801B5FE0(s32 arg0, s32 arg1, s32 arg2) {
     }
 }
 
+#ifdef TARGET_PSP
+static void Ground_DrawTerrainRows(Gfx** dlist, s32 firstRow) {
+    s32 i;
+    s32 row = (firstRow + 25) % 27;
+    f32 z = D_i5_801C62D8.z + D_i5_801C5C10;
+
+    for (i = 0; i < 26; i++) {
+        Matrix_Translate(gGfxMatrix, D_i5_801C62D8.x, D_i5_801C62D8.y, z, MTXF_NEW);
+        PspFrameInterpolation_SetMatrixIdentity(D_i5_801BE748[row]);
+        Matrix_SetGfxMtxFlags(dlist, G_MTX_PUSH | G_MTX_MUL | G_MTX_MODELVIEW);
+        gSPDisplayList((*dlist)++, D_i5_801C2528[row]);
+        gSPPopMatrix((*dlist)++, G_MTX_MODELVIEW);
+        z += D_i5_801BE748[row][0][0].v.ob[2];
+        row = (row + 26) % 27;
+    }
+    PspFrameInterpolation_SetMatrixIdentity(NULL);
+}
+#endif
+
 void Ground_801B68A8(Gfx** dlist, s32 arg1, s32 arg2) {
+#ifndef TARGET_PSP
     s32 i;
     s32 j;
     s32 var;
-#ifdef TARGET_PSP
-    s32 tile;
-    bool widescreen = PspDisplay_IsWidescreen();
 #endif
 
     gDPSetupTile((*dlist)++, G_IM_FMT_RGBA, G_IM_SIZ_16b, 32, 32, 0, 0, G_TX_MIRROR | G_TX_WRAP,
                  G_TX_MIRROR | G_TX_WRAP, 5, 5, G_TX_NOLOD, G_TX_NOLOD);
     gDPLoadTileTexture((*dlist)++, aTiGroundTex1, G_IM_FMT_RGBA, G_IM_SIZ_16b, 32, 32);
 #ifdef TARGET_PSP
-    if (widescreen) {
-        gSPMatrix((*dlist)++, &gIdentityMtx, G_MTX_PUSH | G_MTX_MUL | G_MTX_MODELVIEW);
-    }
-#endif
+    Ground_DrawTerrainRows(dlist, arg1);
+#else
     Matrix_Translate(gGfxMatrix, D_i5_801C62D8.x, D_i5_801C62D8.y, D_i5_801C62D8.z + D_i5_801C5C10, MTXF_NEW);
     Matrix_SetGfxMtxFlags(dlist, G_MTX_NOPUSH | G_MTX_MUL | G_MTX_MODELVIEW);
 
@@ -638,31 +699,6 @@ void Ground_801B68A8(Gfx** dlist, s32 arg1, s32 arg2) {
     for (i = 26; i >= var; i--) {
         gSPDisplayList((*dlist)++, &D_i5_801C2528[j]);
         j = (j + 26) % 27;
-    }
-#ifdef TARGET_PSP
-    if (widescreen) {
-        gSPPopMatrix((*dlist)++, G_MTX_MODELVIEW);
-        gSPClearGeometryMode((*dlist)++, G_CULL_BACK);
-        for (tile = -2; tile <= 2; tile++) {
-            if (tile == 0) {
-                continue;
-            }
-            gSPMatrix((*dlist)++, &gIdentityMtx, G_MTX_PUSH | G_MTX_MUL | G_MTX_MODELVIEW);
-            Matrix_Translate(gGfxMatrix,
-                             D_i5_801C62D8.x + (tile * 3300.0f) - (((tile % 2) != 0) ? 220.0f : 0.0f),
-                             D_i5_801C62D8.y, D_i5_801C62D8.z + D_i5_801C5C10, MTXF_NEW);
-            if ((tile % 2) != 0) {
-                Matrix_Scale(gGfxMatrix, -1.0f, 1.0f, 1.0f, MTXF_APPLY);
-            }
-            Matrix_SetGfxMtxFlags(dlist, G_MTX_NOPUSH | G_MTX_MUL | G_MTX_MODELVIEW);
-            j = (arg1 + 25) % 27;
-            for (i = 26; i >= var; i--) {
-                gSPDisplayList((*dlist)++, &D_i5_801C2528[j]);
-                j = (j + 26) % 27;
-            }
-            gSPPopMatrix((*dlist)++, G_MTX_MODELVIEW);
-        }
-        gSPSetGeometryMode((*dlist)++, G_CULL_BACK);
     }
 #endif
 }
