@@ -590,11 +590,13 @@ $(PSP_SFO):
 	$(call print,Generating PSP SFO:,$(PSP_TITLE),$@)
 	$(V)$(MKSFOEX) -d MEMSIZE=1 '$(PSP_TITLE)' $@
 
-$(PSP_ELF): $(O_FILES) $(PSPGL_BUILD_DEPS)
+.DELETE_ON_ERROR:
+$(PSP_ELF): $(O_FILES) $(PSPGL_BUILD_DEPS) src/psp/gfx/native_asset_compile.py src/psp/gfx/native_assets.json
 	@mkdir -p $(dir $@)
 	$(call print,Linking PSP ELF:,$<,$@)
 	$(V)$(CC) $(O_FILES) $(LDFLAGS) $(PSP_LIBS) -o $@
 	$(V)$(PSP_FIXUP_IMPORTS) $@
+	$(PYTHON) src/psp/gfx/native_asset_compile.py --build-dir $(BUILD_DIR) --verify-elf $@
 
 $(PSP_MAP): $(PSP_ELF)
 	@test -f $@
@@ -640,10 +642,15 @@ $(BUILD_DIR)/src/psp/gfx/gfx_psp_gu_texture.o: src/psp/texture_attribution.h
 $(BUILD_DIR)/src/engine/fox_bg.o: src/psp/command_source.h src/psp/zoness_water_rebatch.h src/psp/zoness_water_cull.h
 $(BUILD_DIR)/src/psp/gfx/gfx_psp_dl.o: src/psp/hw_counter_profile.h src/psp/zoness_water_cull.h
 CFLAGS += -I$(BUILD_DIR)
-$(BUILD_DIR)/native_fighter.inc.c: $(BUILD_DIR)/src/assets/ast_enmy_planet/ast_enmy_planet.o src/psp/gfx/native_fighter_compile.py
-	$(PYTHON) src/psp/gfx/native_fighter_compile.py $< $@
+NATIVE_ASSET_MANIFEST := src/psp/gfx/native_assets.json
+NATIVE_ASSET_SOURCES := $(shell $(PYTHON) src/psp/gfx/native_asset_compile.py --sources)
+NATIVE_ASSET_OBJECTS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(NATIVE_ASSET_SOURCES))
+NATIVE_ASSET_HEADERS := $(addprefix include/assets/,$(notdir $(NATIVE_ASSET_SOURCES:.c=.h)))
+$(BUILD_DIR)/native_assets.inc.c: $(NATIVE_ASSET_OBJECTS) $(NATIVE_ASSET_HEADERS) src/psp/gfx/native_asset_compile.py $(NATIVE_ASSET_MANIFEST)
+	$(PYTHON) src/psp/gfx/native_asset_compile.py --build-dir $(BUILD_DIR) --report $(BUILD_DIR)/native_assets.json $@
 
-$(BUILD_DIR)/src/psp/gfx/gfx_psp_dl.o: $(BUILD_DIR)/native_fighter.inc.c src/psp/gfx/gfx_psp_native_fighter.inc.c
+$(BUILD_DIR)/src/psp/gfx/gfx_psp_dl.o: $(BUILD_DIR)/native_assets.inc.c src/psp/gfx/gfx_psp_native_assets.inc.c
+$(BUILD_DIR)/src/psp/gfx/gfx_psp_dl.o $(BUILD_DIR)/src/psp/input.o $(BUILD_DIR)/src/psp/renderer_bridge.o: src/psp/gfx/gfx_psp_dl.h
 $(BUILD_DIR)/src/psp/input.o: src/psp/hw_counter_profile.h
 
 $(BUILD_DIR)/%.o: %.S Makefile src/psp/sources.mk $(COMPILE_FLAGS_STAMP)

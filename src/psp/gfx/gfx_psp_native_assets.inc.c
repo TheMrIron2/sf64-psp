@@ -36,7 +36,36 @@ static void psp_gfx_dl_native_tri2(PspGfxDlContext* ctx, u8 a0, u8 b0, u8 c0,
     PspHwCounterProfile_InnerScopeEnd(PSP_HW_SCOPE_TRIANGLE);
 }
 
-#include "native_fighter.inc.c"
+static int psp_gfx_dl_native_asset_eligible(const PspGfxDlContext* ctx, u32 depth, u32 commands) {
+#if PSP_RENDERER_DIAGNOSTICS
+    if (ctx->traceActive) {
+        return 0;
+    }
+#endif
+    return (commands <= PSP_GFX_DL_MAX_COMMANDS) && (depth < PSP_GFX_DL_MAX_DEPTH) &&
+           (ctx->stats.commandCount <= PSP_GFX_DL_MAX_COMMANDS - commands);
+}
+
+static __attribute__((noinline)) void psp_gfx_dl_native_asset_run(PspGfxDlContext* ctx, u32 depth,
+                                                               u32 commands, u32 vertexCommands,
+                                                               u32 triangleCommands,
+                                                               void (*draw)(PspGfxDlContext*)) {
+    if (depth > ctx->stats.maxDepthReached) {
+        ctx->stats.maxDepthReached = depth;
+    }
+    ctx->stats.commandCount += commands;
+#if PROFILE_HW_COUNTERS
+    ctx->commandSources[ctx->commandSource].commands += commands;
+    ctx->commandSources[ctx->commandSource].vertexCommands += vertexCommands;
+    ctx->commandSources[ctx->commandSource].triangleCommands += triangleCommands;
+#else
+    (void) vertexCommands;
+    (void) triangleCommands;
+#endif
+    draw(ctx);
+}
+
+#include "native_assets.inc.c"
 
 static int psp_gfx_dl_native_fighter_eligible(const PspGfxDlContext* ctx, u32 depth) {
 #if PSP_RENDERER_DIAGNOSTICS
@@ -44,7 +73,7 @@ static int psp_gfx_dl_native_fighter_eligible(const PspGfxDlContext* ctx, u32 de
         return 0;
     }
 #endif
-    return (depth < PSP_GFX_DL_MAX_DEPTH) &&
+    return (PSP_NATIVE_FIGHTER_COMMANDS <= PSP_GFX_DL_MAX_COMMANDS) && (depth < PSP_GFX_DL_MAX_DEPTH) &&
            (ctx->stats.commandCount <= PSP_GFX_DL_MAX_COMMANDS - PSP_NATIVE_FIGHTER_COMMANDS);
 }
 
@@ -55,8 +84,8 @@ static void psp_gfx_dl_native_fighter_run(PspGfxDlContext* ctx, u32 depth) {
     ctx->stats.commandCount += PSP_NATIVE_FIGHTER_COMMANDS;
 #if PROFILE_HW_COUNTERS
     ctx->commandSources[ctx->commandSource].commands += PSP_NATIVE_FIGHTER_COMMANDS;
-    ctx->commandSources[ctx->commandSource].vertexCommands += 6;
-    ctx->commandSources[ctx->commandSource].triangleCommands += 13;
+    ctx->commandSources[ctx->commandSource].vertexCommands += PSP_NATIVE_FIGHTER_VERTEX_COMMANDS;
+    ctx->commandSources[ctx->commandSource].triangleCommands += PSP_NATIVE_FIGHTER_TRIANGLE_COMMANDS;
 #endif
     psp_gfx_dl_native_fighter(ctx);
 }

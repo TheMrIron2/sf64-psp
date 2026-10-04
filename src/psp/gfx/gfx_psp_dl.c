@@ -6142,7 +6142,7 @@ static void psp_gfx_dl_handle_set_tile_size(PspGfxDlContext* ctx, const Gfx* gfx
     }
 }
 
-#include "src/psp/gfx/gfx_psp_native_fighter.inc.c"
+#include "src/psp/gfx/gfx_psp_native_assets.inc.c"
 
 static void psp_gfx_dl_set_hud_anchor(const Gfx* param) {
     PspGfxBackend_SetHudAnchor((s16) (param->words.w1 >> 16), (s16) param->words.w1);
@@ -6494,7 +6494,7 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
 #endif
             if ((child == aVenomFighter1DL) && psp_gfx_dl_native_fighter_eligible(ctx, depth + 1)) {
                 psp_gfx_dl_native_fighter_run(ctx, depth + 1);
-            } else {
+            } else if (!psp_gfx_dl_native_asset_dispatch(ctx, child, depth + 1)) {
                 psp_gfx_dl_run_internal(ctx, child, depth + 1);
             }
 #if PROFILE_HW_COUNTERS
