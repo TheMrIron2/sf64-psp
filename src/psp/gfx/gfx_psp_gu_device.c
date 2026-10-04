@@ -48,6 +48,36 @@ typedef char PspGfxGuSdkListCursorCheck[(offsetof(PspGfxGuSdkDisplayList, curren
 typedef char PspGfxGuSdkListParentCheck[(offsetof(PspGfxGuSdkDisplayList, parent_context) == 8) ? 1 : -1];
 
 extern PspGfxGuSdkDisplayList* gu_list;
+extern int gu_curr_context;
+extern int gu_object_stack_depth;
+extern int ge_list_executed[2];
+
+static u32 sDrawsUntilPublication = 1;
+
+static inline void psp_gfx_gu_draw_command(u32 command, u32 argument) {
+    *gu_list->current++ = (command << 24) | (argument & 0xFFFFFFU);
+}
+
+// Publish the first draw immediately then every eight draws
+void sceGuDrawArray(int prim, int vtype, int count, const void* indices, const void* vertices) {
+    if (vtype) {
+        psp_gfx_gu_draw_command(0x12, vtype);
+    }
+    if (indices) {
+        psp_gfx_gu_draw_command(0x10, ((uintptr_t) indices >> 8) & 0xF0000U);
+        psp_gfx_gu_draw_command(0x02, (uintptr_t) indices);
+    }
+    if (vertices) {
+        psp_gfx_gu_draw_command(0x10, ((uintptr_t) vertices >> 8) & 0xF0000U);
+        psp_gfx_gu_draw_command(0x01, (uintptr_t) vertices);
+    }
+    psp_gfx_gu_draw_command(0x04, ((u32) prim << 16) | (u32) count);
+
+    if ((gu_curr_context == GU_DIRECT) && !gu_object_stack_depth && (--sDrawsUntilPublication == 0)) {
+        sceGeListUpdateStallAddr(ge_list_executed[0], gu_list->current);
+        sDrawsUntilPublication = 8;
+    }
+}
 
 // Draw and finish publish the list after inline data is ready
 void* sceGuGetMemory(int size) {
@@ -225,6 +255,7 @@ int PspGfxGuDevice_BeginFrame(void) {
         return 0;
     }
 
+    sDrawsUntilPublication = 1;
     if (sceGuStart(GU_DIRECT, sGuList) < 0) {
         psp_gfx_gu_device_log_failure("[gu] frame list start failed");
         return 0;
