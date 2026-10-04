@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile a reviewed PSP asset manifest into ordered native drawing calls"""
+"""Inventory PSP asset objects or compile reviewed assets into native drawing calls"""
 
 import argparse
 import collections
@@ -75,6 +75,19 @@ def read_symbols(path, types=(1,)):
 
 def read_asset(path, asset):
     data, sections, symbols, symbol_section = read_symbols(path)
+    return decode_asset(data, sections, symbols, symbol_section, asset)
+
+
+def decode_asset(data, sections, symbols, symbol_section, asset):
+    words, relocations = decode_references(data, sections, symbols, symbol_section, asset)
+    for _, value, extent, target_section in relocations.values():
+        if (not 0 < target_section < len(sections) or sections[target_section][1] != 1
+                or not extent or value + extent > sections[target_section][5]):
+            raise ValueError('pointer source must be defined in this object')
+    return words, relocations, hashlib.sha256(data).hexdigest()
+
+
+def decode_references(data, sections, symbols, symbol_section, asset):
     matches = [s for s in symbols if s[0] == asset]
     if len(matches) != 1:
         raise ValueError('asset symbol must resolve once')
@@ -100,13 +113,8 @@ def read_asset(path, asset):
                 command = (address - start) // 8
                 if command in relocations or info >> 8 >= len(symbols):
                     raise ValueError('invalid pointer relocation')
-                target = symbols[info >> 8]
-                _, value, extent, target_section = target
-                if (not 0 < target_section < len(sections) or sections[target_section][1] != 1
-                        or not extent or value + extent > sections[target_section][5]):
-                    raise ValueError('pointer source must be defined in this object')
-                relocations[command] = target
-    return words, relocations, hashlib.sha256(data).hexdigest()
+                relocations[command] = symbols[info >> 8]
+    return words, relocations
 
 
 def compile_asset(words, relocations):
@@ -183,15 +191,7 @@ def compile_asset(words, relocations):
     return '\n'.join(histogram + lines), events
 
 
-def generate(path, asset):
-    if asset not in ASSETS:
-        raise ValueError('asset is not allowlisted')
-    header, suffix = ASSETS[asset]
-    words, relocations, fingerprint = read_asset(path, asset)
-    body, events = compile_asset(words, relocations)
-    prefix = 'PSP_NATIVE_' + suffix.upper()
-    vertex_commands = sum(e[0] == 'load' for e in events)
-    triangle_commands = sum(e[0] in ('tri1', 'tri2') for e in events)
+def asset_interface(header, asset, words, relocations):
     declarations = dict((name, kind) for kind, name in re.findall(
         r'extern (Gfx|Vtx|u8|u16|u32|u64) (\w+)\[[^\]]*\];',
         (Path(__file__).resolve().parents[3] / 'include' / header).read_text()))
@@ -201,7 +201,19 @@ def generate(path, asset):
     if declarations[asset] != 'Gfx' or any(words[i][0] >> 24 == 4 and declarations[r[0]] != 'Vtx'
                                           for i, r in relocations.items()):
         raise ValueError('unexpected display list or vertex interface type')
-    interface = '\n'.join(f'extern {declarations[name]} {name}[];' for name in sorted(references))
+    return '\n'.join(f'extern {declarations[name]} {name}[];' for name in sorted(references))
+
+
+def generate(path, asset):
+    if asset not in ASSETS:
+        raise ValueError('asset is not allowlisted')
+    header, suffix = ASSETS[asset]
+    words, relocations, fingerprint = read_asset(path, asset)
+    body, events = compile_asset(words, relocations)
+    prefix = 'PSP_NATIVE_' + suffix.upper()
+    vertex_commands = sum(e[0] == 'load' for e in events)
+    triangle_commands = sum(e[0] in ('tri1', 'tri2') for e in events)
+    interface = asset_interface(header, asset, words, relocations)
     return f'''// Generated from the PSP asset object by native_asset_compile.py
 // Object SHA256 {fingerprint}
 {interface}
@@ -316,6 +328,184 @@ def verify_elf(build, elf):
     print(f'AOT linked order verified for {len(ASSETS)} leaves')
 
 
+def symbol_record(source, sections, symbol, kind=None):
+    name, value, size, index = symbol
+    if not 0 < index < len(sections) or not size:
+        return None
+    section = sections[index]
+    if section[1] not in (1, 8) or value + size > section[5]:
+        return None
+    return {'name': name, 'source': source, 'kind': kind, 'bytes': size,
+            'storage': 'data' if section[1] == 1 else 'zero_fill',
+            'writable': bool(section[2] & 1)}
+
+
+def reference_index(snapshots):
+    interfaces = {}
+    for source, (data, sections, symbols, symbol_section, interface) in snapshots.items():
+        for kind, name in re.findall(r'extern (Gfx|Vtx|u8|u16|u32|u64) (\w+)\[[^\]]*\];', interface):
+            if name in interfaces and interfaces[name] != kind:
+                raise ValueError('conflicting asset interface types for ' + name)
+            interfaces[name] = kind
+    definitions = collections.defaultdict(list)
+    for source, (data, sections, symbols, symbol_section, interface) in snapshots.items():
+        for symbol in symbols:
+            if symbol[0] in interfaces:
+                node = symbol_record(source, sections, symbol, interfaces[symbol[0]])
+                if node:
+                    definitions[symbol[0]].append(node)
+    references = []
+    errors = []
+    for source, (data, sections, symbols, symbol_section, interface) in snapshots.items():
+        for asset in re.findall(r'extern Gfx (\w+)\[[^\]]*\];', interface):
+            try:
+                words, relocations = decode_references(data, sections, symbols, symbol_section, asset)
+            except ValueError as error:
+                errors.append({'name': asset, 'source': source, 'reason': str(error)})
+                continue
+            pointer_commands = {i for i, (w0, _) in enumerate(words) if w0 >> 24 in (4, 6, 0xfd)}
+            for command in sorted(pointer_commands | relocations.keys()):
+                w0, w1 = words[command]
+                opcode = w0 >> 24
+                row = {'asset': asset, 'source': source, 'command': command,
+                       'opcode': f'{opcode:02x}', 'addend': w1,
+                       'role': {4: 'vertices', 6: 'display_list', 0xfd: 'texture'}.get(opcode, 'other')}
+                if command not in relocations:
+                    row.update(target=None, resolution='unrelocated')
+                else:
+                    symbol = relocations[command]
+                    row['target'] = symbol[0]
+                    local = symbol_record(source, sections, symbol, interfaces.get(symbol[0]))
+                    if local:
+                        row.update(resolution='local', definition=local)
+                    elif symbol[3] == 0 and symbol[0] in definitions:
+                        targets = definitions[symbol[0]]
+                        if len(targets) == 1:
+                            row.update(resolution='cross_object', definition=targets[0])
+                        else:
+                            row.update(resolution='ambiguous', definitions=targets)
+                    else:
+                        row['resolution'] = 'unresolved'
+                if 'definition' in row:
+                    row['within_extent'] = w1 < row['definition']['bytes']
+                    if opcode == 4:
+                        count = (w0 >> 10) & 63
+                        row['within_extent'] = bool(count and w1 % 16 == 0 and
+                                                    w1 + count * 16 <= row['definition']['bytes'])
+                    elif opcode == 6:
+                        row['within_extent'] = w1 % 8 == 0 and w1 + 8 <= row['definition']['bytes']
+                references.append(row)
+    nodes = [node for name in sorted(definitions) for node in definitions[name]]
+    resolutions = collections.Counter(row['resolution'] for row in references)
+    return {'summary': {'defined_arrays': len(nodes), 'pointer_references': len(references),
+                        'resolutions': dict(sorted(resolutions.items())), 'decode_errors': len(errors),
+                        'writable_command_arrays': sum(n['kind'] == 'Gfx' and n['writable'] for n in nodes)},
+            'definitions': nodes, 'references': references, 'errors': errors}
+
+
+def command_users(build, command_names):
+    root = Path(__file__).resolve().parents[3]
+    users = collections.defaultdict(collections.Counter)
+    sites = collections.defaultdict(list)
+    objects = []
+    for path in sorted((Path(build) / 'src').rglob('*.o')):
+        data, sections, symbols, symbol_section = read_symbols(path)
+        relative = path.relative_to(build)
+        source = next((str(relative.with_suffix(ext)) for ext in ('.c', '.S', '.s')
+                       if (root / relative.with_suffix(ext)).is_file()), str(relative))
+        objects.append({'object': str(relative), 'source': source,
+                        'object_sha256': hashlib.sha256(data).hexdigest()})
+        for rel in sections:
+            if rel[1] != 9:
+                continue
+            if (rel[6] != symbol_section or rel[9] != 8 or rel[5] % 8 or
+                    not 0 < rel[7] < len(sections)):
+                raise ValueError('unexpected relocation table in ' + str(path))
+            section = rel[7]
+            if not sections[section][2] & 2:
+                continue
+            owners = [(name, start, size) for name, start, size, index in symbols
+                      if name and size and index == section]
+            for offset in range(rel[4], rel[4] + rel[5], rel[9]):
+                address, info = struct.unpack_from('<II', data, offset)
+                if info >> 8 >= len(symbols) or address >= sections[section][5]:
+                    raise ValueError('invalid relocation in ' + str(path))
+                target = symbols[info >> 8][0]
+                if target not in command_names:
+                    continue
+                matches = [name for name, start, size in owners if start <= address < start + size]
+                owner = matches[0] if len(matches) == 1 else None
+                role = 'code' if sections[section][2] & 4 else 'data'
+                key = (target, source, owner, role)
+                users[key][f'{info & 255:02x}'] += 1
+                sites[key].append({'section': section, 'offset': address, 'type': f'{info & 255:02x}'})
+    rows = [{'asset': asset, 'source': source, 'owner': owner, 'role': role,
+             'relocations': dict(sorted(counts.items())), 'sites': sites[(asset, source, owner, role)]}
+            for (asset, source, owner, role), counts in users.items()]
+    return {'scope': 'named relocations in built project source objects with indirect aliases unverified',
+            'summary': {'objects': len(objects), 'users': len(rows), 'referenced_commands': len({r['asset'] for r in rows}),
+                        'unowned_users': sum(r['owner'] is None for r in rows)},
+            'objects': objects, 'users': rows}
+
+
+def inventory(build):
+    root = Path(__file__).resolve().parents[3]
+    objects = []
+    assets = []
+    names = set()
+    snapshots = {}
+    for source in sorted((root / 'src/assets').glob('*/*.c')):
+        if source.stem != source.parent.name:
+            continue
+        relative = source.relative_to(root)
+        header = 'assets/' + source.stem + '.h'
+        header_path = root / 'include' / header
+        path = Path(build) / relative.with_suffix('.o')
+        data, sections, symbols, symbol_section = read_symbols(path)
+        interface = header_path.read_text()
+        snapshots[str(relative)] = (data, sections, symbols, symbol_section, interface)
+        exported = re.findall(r'extern Gfx (\w+)\[[^\]]*\];', interface)
+        if len(set(exported)) != len(exported) or names.intersection(exported):
+            raise ValueError('duplicate display list interface in ' + str(relative))
+        names.update(exported)
+        objects.append({'source': str(relative), 'header': header, 'display_lists': len(exported),
+                        'object_sha256': hashlib.sha256(data).hexdigest(),
+                        'header_sha256': hashlib.sha256(header_path.read_bytes()).hexdigest()})
+        for name in exported:
+            row = {'name': name, 'source': str(relative), 'enabled': name in ASSETS,
+                   'status': 'blocked'}
+            stage = 'decode'
+            try:
+                words, relocations, _ = decode_asset(data, sections, symbols, symbol_section, name)
+                row['commands'] = len(words)
+                row['ops'] = dict(sorted(collections.Counter(f'{w0 >> 24:02x}' for w0, _ in words).items()))
+                stage = 'commands'
+                _, events = compile_asset(words, relocations)
+                stage = 'interface'
+                asset_interface(header, name, words, relocations)
+                row.update(status='supported', vtx=sum(e[0] == 'load' for e in events),
+                           loaded=sum(e[3] for e in events if e[0] == 'load'),
+                           triangles=sum(2 if e[0] == 'tri2' else 1 for e in events
+                                         if e[0] in ('tri1', 'tri2')),
+                           references=sorted({r[0] for r in relocations.values()}))
+            except ValueError as error:
+                row.update(stage=stage, reason=str(error))
+            assets.append(row)
+    if set(ASSETS) - names or any(row['enabled'] and row['status'] != 'supported' for row in assets):
+        raise ValueError('enabled asset failed corpus inventory')
+    blockers = collections.Counter(row['stage'] + ': ' + row['reason'] for row in assets
+                                   if row['status'] == 'blocked')
+    supported = sum(row['status'] == 'supported' for row in assets)
+    return {'version': 1, 'build_dir': str(build),
+            'scope': 'exported US display lists',
+            'support_contract': 'current leaf compiler only with command immutability unverified',
+            'summary': {'objects': len(objects), 'display_lists': len(assets),
+                        'supported': supported, 'blocked': len(assets) - supported,
+                        'enabled': len(ASSETS), 'blockers': dict(sorted(blockers.items()))},
+            'objects': objects, 'assets': assets, 'reference_index': reference_index(snapshots),
+            'command_users': command_users(build, names)}
+
+
 def write_output(path, text):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -326,12 +516,19 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--asset', choices=ASSETS)
     parser.add_argument('--sources', action='store_true')
+    parser.add_argument('--inventory', action='store_true')
     parser.add_argument('--build-dir')
     parser.add_argument('--verify-elf')
     parser.add_argument('--report')
     parser.add_argument('paths', nargs='*')
     args = parser.parse_args()
-    if args.sources and not (args.paths or args.asset or args.build_dir or args.verify_elf or args.report):
+    if args.inventory and args.build_dir and len(args.paths) == 1 and not (args.asset or args.sources or args.verify_elf or args.report):
+        result = inventory(args.build_dir)
+        write_output(args.paths[0], json.dumps(result, indent=2) + '\n')
+        print(json.dumps(result['summary'], sort_keys=True))
+    elif args.inventory:
+        parser.error('choose --inventory --build-dir BUILD OUTPUT')
+    elif args.sources and not (args.paths or args.asset or args.build_dir or args.verify_elf or args.report):
         print(' '.join(g['source'] for g in MANIFEST['objects']))
     elif args.verify_elf and args.build_dir and not (args.paths or args.asset or args.sources or args.report):
         verify_elf(args.build_dir, args.verify_elf)
@@ -343,7 +540,7 @@ def main():
         if args.report:
             write_output(args.report, json.dumps(report, indent=2) + '\n')
     else:
-        parser.error('choose --sources, --asset OBJECT OUTPUT, or --build-dir BUILD OUTPUT')
+        parser.error('choose --sources, --asset OBJECT OUTPUT, or [--inventory] --build-dir BUILD OUTPUT')
 
 
 if __name__ == '__main__':
