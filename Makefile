@@ -639,6 +639,11 @@ $(BUILD_DIR)/src/psp/hw_counter_profile.o: src/psp/hw_counter_profile.h src/psp/
 $(BUILD_DIR)/src/psp/gfx/gfx_psp_gu_texture.o: src/psp/texture_attribution.h
 $(BUILD_DIR)/src/engine/fox_bg.o: src/psp/command_source.h src/psp/zoness_water_rebatch.h src/psp/zoness_water_cull.h
 $(BUILD_DIR)/src/psp/gfx/gfx_psp_dl.o: src/psp/hw_counter_profile.h src/psp/zoness_water_cull.h
+CFLAGS += -I$(BUILD_DIR)
+$(BUILD_DIR)/native_fighter.inc.c: $(BUILD_DIR)/src/assets/ast_enmy_planet/ast_enmy_planet.o src/psp/gfx/native_fighter_compile.py
+	$(PYTHON) src/psp/gfx/native_fighter_compile.py $< $@
+
+$(BUILD_DIR)/src/psp/gfx/gfx_psp_dl.o: $(BUILD_DIR)/native_fighter.inc.c src/psp/gfx/gfx_psp_native_fighter.inc.c
 $(BUILD_DIR)/src/psp/input.o: src/psp/hw_counter_profile.h
 
 $(BUILD_DIR)/%.o: %.S Makefile src/psp/sources.mk $(COMPILE_FLAGS_STAMP)
