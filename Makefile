@@ -700,6 +700,18 @@ NATIVE_ASSET_HEADERS := $(addprefix include/assets/,$(notdir $(NATIVE_ASSET_SOUR
 $(BUILD_DIR)/native_assets.inc.c: $(NATIVE_ASSET_OBJECTS) $(NATIVE_ASSET_HEADERS) src/psp/gfx/native_asset_compile.py $(NATIVE_ASSET_MANIFEST) $(NATIVE_COVERAGE_POLICY) $(NATIVE_SELECTION_STAMP)
 	$(PYTHON) src/psp/gfx/native_asset_compile.py $(NATIVE_COVERAGE_ARGS) --build-dir $(BUILD_DIR) --report $(BUILD_DIR)/native_assets.json $@
 
+ifeq ($(PSP_GFX_BACKEND),gu)
+RETAINED_ASSET_SOURCES := $(shell $(PYTHON) src/psp/gfx/native_asset_compile.py --retained-sources)
+RETAINED_ASSET_OBJECTS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(RETAINED_ASSET_SOURCES))
+RETAINED_ASSET_HEADERS := $(addprefix include/assets/,$(notdir $(RETAINED_ASSET_SOURCES:.c=.h)))
+RETAINED_RUNTIME_SOURCES := $(shell rg --files src/engine src/overlays src/psp -g '*.c' -g '*.h' -g '*.S' -g '*.s')
+$(BUILD_DIR)/retained_assets.h $(BUILD_DIR)/retained_assets.inc.c &: $(RETAINED_ASSET_OBJECTS) $(RETAINED_ASSET_HEADERS) $(RETAINED_RUNTIME_SOURCES) src/psp/gfx/native_asset_compile.py $(NATIVE_ASSET_MANIFEST) include/PR/gbi.h
+	$(PYTHON) src/psp/gfx/native_asset_compile.py --retained --build-dir $(BUILD_DIR)
+
+$(BUILD_DIR)/src/psp/gfx/gfx_psp_dl.o $(BUILD_DIR)/src/psp/gfx/gfx_psp_retained_sources.o: $(BUILD_DIR)/retained_assets.h
+$(BUILD_DIR)/src/psp/gfx/gfx_psp_retained_sources.o: $(BUILD_DIR)/retained_assets.inc.c
+endif
+
 $(BUILD_DIR)/src/psp/gfx/gfx_psp_dl.o: $(BUILD_DIR)/native_assets.inc.c src/psp/gfx/gfx_psp_native_assets.inc.c
 $(BUILD_DIR)/src/psp/gfx/gfx_psp_dl.o: src/psp/gfx/gfx_psp_retained_mesh.inc.c lib/n64psp/include/n64psp/native_mesh.h
 $(BUILD_DIR)/src/psp/gfx/gfx_psp_dl.o $(BUILD_DIR)/src/psp/gfx/gfx_psp_retained_sources.o: src/psp/gfx/gfx_psp_retained_sources.h

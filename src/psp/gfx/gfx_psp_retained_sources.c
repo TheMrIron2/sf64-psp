@@ -1,24 +1,7 @@
 #include "gfx_psp_retained_sources.h"
 #include <malloc.h>
 
-extern Gfx aVenomFighter1DL[];
-extern Gfx ast_title_seg6_gfx_2C4B0[];
-extern Gfx ast_title_seg6_gfx_20070[];
-extern Gfx aAwBodyDL[];
-extern Gfx aAwFoxHeadDL[];
-extern Gfx ast_title_seg6_gfx_24710[];
-extern Gfx ast_title_seg6_gfx_27130[];
-
-// Qualified leaves avoid at least 32 position loads and restore at most one third
-const PspGfxDlRetainedSource sRetainedSources[PSP_RETAINED_CACHE_SLOTS] = {
-    { aVenomFighter1DL, 59 },
-    { ast_title_seg6_gfx_2C4B0, 160 },
-    { ast_title_seg6_gfx_20070, 151 },
-    { aAwBodyDL, 161 },
-    { aAwFoxHeadDL, 187 },
-    { ast_title_seg6_gfx_24710, 137 },
-    { ast_title_seg6_gfx_27130, 151 },
-};
+#include "retained_assets.inc.c"
 
 static u32 sRetainedAllocatedBytes;
 

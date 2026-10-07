@@ -3,7 +3,7 @@
 
 #include "gfx_psp_dl.h"
 
-#define PSP_RETAINED_CACHE_SLOTS 7
+#include "retained_assets.h"
 #define PSP_RETAINED_CACHE_BYTES (3 * 1024 * 1024)
 
 typedef struct {

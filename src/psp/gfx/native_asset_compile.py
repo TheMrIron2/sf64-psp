@@ -881,8 +881,182 @@ def write_output(path, text):
     path.write_text(text, newline='\n')
 
 
+def retained_cost(words, relocations):
+    compile_asset(words, relocations)
+    slots = {}
+    loaded = indices = actions = 0
+    spans = []
+    span = None
+    vertices = set()
+    for command, (w0, w1) in enumerate(words):
+        op = w0 >> 24
+        if op == 4:
+            count, first = (w0 >> 10) & 63, (w0 >> 17) & 127
+            for i in range(count):
+                slots[first + i] = loaded + i
+            loaded += count
+            actions += 1
+            span = None
+            vertices.add(relocations[command][0])
+        elif op in (0xfd, 0xf5, 0xf2):
+            if op == 0xfd or not ((w1 >> 24) & 7):
+                actions += 1
+                span = None
+        elif op in (0xbf, 0xb1):
+            versions = [slots[(word >> shift & 255) // 2]
+                        for word in ([w0, w1] if op == 0xb1 else [w1]) for shift in (16, 8, 0)]
+            if span is None:
+                span = [min(versions), max(versions)]
+                spans.append(span)
+                actions += 1
+            else:
+                span[0], span[1] = min(span[0], min(versions)), max(span[1], max(versions))
+            indices += len(versions)
+    widths = [last - first + 1 for first, last in spans]
+    if (len(words) > 512 or loaded > 1024 or indices > 3072 or actions > 512 or
+            not widths or max(widths) > 64 or sum(widths) > 3072):
+        raise ValueError('retained mesh exceeds fixed representation')
+    return dict(commands=len(words), loaded=loaded, final=len(slots), avoided=loaded-len(slots),
+                triangles=indices//3, spans=len(spans), streamed_vertices=sum(widths),
+                vertex_symbols=sorted(vertices))
+
+
+def retained_eligible(cost):
+    return cost['avoided'] >= 32 and cost['loaded'] >= 3*cost['final']
+
+
+def retained_runtime_users(names):
+    if not names:
+        return {}
+    users = collections.defaultdict(list)
+    expression = re.compile(r'\b(?:' + '|'.join(re.escape(n) for n in sorted(names)) + r')\b')
+    for directory in ('src/engine', 'src/overlays', 'src/psp'):
+        for path in sorted(Path(directory).rglob('*')):
+            if path.suffix not in ('.c', '.h', '.S', '.s'):
+                continue
+            text = path.read_text()
+            if not expression.search(text):
+                continue
+            text = re.sub(r'/\*.*?\*/|//[^\n]*|"(?:\\.|[^"\\])*"', ' ', text, flags=re.S)
+            for name in set(expression.findall(text)):
+                users[name].append(str(path))
+    return users
+
+
+def retained_payloads(build, row):
+    obj = Path(build) / Path(row['source']).with_suffix('.o')
+    words, relocations, _ = read_asset(obj, row['name'])
+    data, sections, _, _ = read_symbols(obj)
+    cost = retained_cost(words, relocations)
+    hashes = {}
+    for command, symbol in relocations.items():
+        if words[command][0] >> 24 != 4:
+            continue
+        name, value, size, section = symbol
+        hashes[name] = hashlib.sha256(data[sections[section][4]+value:sections[section][4]+value+size]).hexdigest()
+    return cost, hashes
+
+
+def retained_census(build, policy_path):
+    inventory = json.loads(Path(policy_path).read_text())
+    decisions = {r['name']: r for r in inventory['mutation_audit']['decisions']}
+    owners = collections.defaultdict(set)
+    for ref in inventory['reference_index']['references']:
+        if ref['role'] == 'vertices' and ref.get('target'):
+            owners[ref['target']].add(ref['asset'])
+    fingerprints = {r['source']: r['sha256'] for r in inventory['mutation_audit']['files']}
+    fingerprints.update({'include/' + r['header']: r['header_sha256'] for r in inventory['objects']})
+    result = []
+    names = set()
+    for asset in inventory['assets']:
+        decision = decisions[asset['name']]
+        if asset['status'] != 'supported' or decision['status'] != 'direct_reads_only':
+            continue
+        row = dict(name=asset['name'], source=asset['source'])
+        try:
+            cost, hashes = retained_payloads(build, row)
+        except ValueError:
+            continue
+        if not retained_eligible(cost):
+            continue
+        shared = {owner for vertex in cost['vertex_symbols'] for owner in owners[vertex]}
+        if any(decisions[owner]['status'] != 'direct_reads_only' for owner in shared):
+            continue
+        relevant = {asset['source'], 'include/PR/gbi.h',
+                    'include/assets/' + Path(asset['source']).stem + '.h'}
+        relevant |= {use['source'] for use in inventory['mutation_audit']['uses']
+                     if use['name'] in shared and not use['source'].startswith('src/psp/gfx/')}
+        proof = {}
+        for source in sorted(relevant):
+            digest = hashlib.sha256(Path(source).read_bytes()).hexdigest()
+            if digest != fingerprints.get(source):
+                raise ValueError('stale retained census evidence for ' + source)
+            proof[source] = digest
+        row.update(cost=cost, vertex_sha256=hashes, source_sha256=proof, qualification='direct_reads_only')
+        result.append(row)
+        names.update(hashes)
+    users = retained_runtime_users(names)
+    accepted, blocked = [], []
+    for row in result:
+        hits = {name: users[name] for name in row['vertex_sha256'] if users.get(name)}
+        if hits:
+            blocked.append(dict(name=row['name'], reason='runtime vertex references', uses=hits))
+        else:
+            accepted.append(row)
+    accepted.sort(key=lambda row: (-row['cost']['avoided'], row['name']))
+    return dict(version=1, scope='saved supported direct-read command evidence only',
+                candidates=accepted, blocked=blocked, alias_audit_expanded=False)
+
+
+def generate_retained(build):
+    config = ACCEPTED_MANIFEST.get('retained', {})
+    if config.get('version') != 1 or not config.get('assets'):
+        raise ValueError('expected retained qualification in shared asset manifest')
+    rows = []
+    vertex_names = set()
+    seen = set()
+    for row in config['assets']:
+        if row['name'] in seen:
+            raise ValueError('duplicate retained source')
+        seen.add(row['name'])
+        validate_manifest({'version': 1, 'objects': [dict(source=row['source'],
+            header='assets/'+Path(row['source']).stem+'.h', assets=[row['name']])]})
+        if row['qualification'] not in ('hardware_validated', 'direct_reads_only'):
+            raise ValueError('unqualified retained source')
+        required = {row['source'], 'include/PR/gbi.h', 'include/assets/'+Path(row['source']).stem+'.h'}
+        if not required <= row['source_sha256'].keys():
+            raise ValueError('incomplete retained source evidence')
+        for source, expected in row['source_sha256'].items():
+            if hashlib.sha256(Path(source).read_bytes()).hexdigest() != expected:
+                raise ValueError('stale retained source evidence for ' + source)
+        cost, hashes = retained_payloads(build, row)
+        if hashes != row['vertex_sha256']:
+            raise ValueError('retained vertex payload changed for ' + row['name'])
+        if not retained_eligible(cost):
+            raise ValueError('retained source no longer meets cost rule ' + row['name'])
+        rows.append(dict(row, cost=cost))
+        vertex_names.update(hashes)
+    users = retained_runtime_users(vertex_names)
+    if users:
+        raise ValueError('retained vertices have runtime references: ' + ', '.join(sorted(users)))
+    if len(rows)*38064 > 3*1024*1024:
+        raise ValueError('retained selection exceeds cache byte ceiling')
+    header = '#ifndef PSP_RETAINED_ASSETS_H\n#define PSP_RETAINED_ASSETS_H\n\n'
+    header += '#define PSP_RETAINED_CACHE_SLOTS '+str(len(rows))+'\n\n#endif\n'
+    source = ''.join('extern Gfx '+row['name']+'[];\n' for row in rows)
+    source += '\nconst PspGfxDlRetainedSource sRetainedSources[PSP_RETAINED_CACHE_SLOTS] = {\n'
+    source += ''.join('    { '+row['name']+', '+str(row['cost']['commands'])+' },\n' for row in rows)+'};\n'
+    write_output(Path(build)/'retained_assets.h', header)
+    write_output(Path(build)/'retained_assets.inc.c', source)
+    write_output(Path(build)/'retained_assets.json', json.dumps(rows, indent=2)+'\n')
+    print('Generated retained registry for '+str(len(rows))+' qualified leaves')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--retained', action='store_true')
+    parser.add_argument('--retained-sources', action='store_true')
+    parser.add_argument('--retained-census', action='store_true')
     parser.add_argument('--asset')
     parser.add_argument('--coverage-policy')
     parser.add_argument('--candidate', action='append', help='compile only these qualified additions without A/B controls')
@@ -893,6 +1067,19 @@ def main():
     parser.add_argument('--report')
     parser.add_argument('paths', nargs='*')
     args = parser.parse_args()
+    if args.retained_census:
+        if not args.coverage_policy or not args.build_dir or len(args.paths) != 1:
+            parser.error('retained census requires saved coverage-policy, build-dir and output')
+        write_output(args.paths[0], json.dumps(retained_census(args.build_dir, args.coverage_policy), indent=2)+'\n')
+        return
+    if args.retained_sources:
+        print(' '.join(sorted({r['source'] for r in ACCEPTED_MANIFEST['retained']['assets']})))
+        return
+    if args.retained:
+        if not args.build_dir:
+            parser.error('retained generation requires build-dir')
+        generate_retained(args.build_dir)
+        return
     if args.candidate and not args.coverage_policy:
         parser.error('--candidate requires --coverage-policy')
     if args.coverage_policy:
