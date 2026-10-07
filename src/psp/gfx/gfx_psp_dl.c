@@ -6143,6 +6143,7 @@ static void psp_gfx_dl_handle_set_tile_size(PspGfxDlContext* ctx, const Gfx* gfx
 }
 
 #include "src/psp/gfx/gfx_psp_native_assets.inc.c"
+#include "src/psp/gfx/gfx_psp_retained_mesh.inc.c"
 
 static void psp_gfx_dl_set_hud_anchor(const Gfx* param) {
     PspGfxBackend_SetHudAnchor((s16) (param->words.w1 >> 16), (s16) param->words.w1);
@@ -6492,9 +6493,13 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
                 ctx->waterDlDepth = 1;
             }
 #endif
+#if PSP_GFX_BACKEND_GU
+            if (psp_gfx_dl_retained_dispatch(ctx, child, depth + 1)) {
+            } else
+#endif
             if ((child == aVenomFighter1DL) && psp_gfx_dl_native_fighter_eligible(ctx, depth + 1)) {
                 psp_gfx_dl_native_fighter_run(ctx, depth + 1);
-            } else if (!psp_gfx_dl_native_asset_dispatch(ctx, child, depth + 1)) {
+            } else if (!psp_gfx_dl_native_leaf_dispatch(ctx, child, depth + 1)) {
                 psp_gfx_dl_run_internal(ctx, child, depth + 1);
             }
 #if PROFILE_HW_COUNTERS
@@ -7014,6 +7019,9 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
     char line[768];
 #endif
 
+#if PSP_NATIVE_COVERAGE_AB
+    psp_gfx_dl_native_coverage_begin();
+#endif
     PspGfxColor_Init();
     psp_gfx_dl_reset_context(ctx);
     ctx->taskIndex = taskIndex;

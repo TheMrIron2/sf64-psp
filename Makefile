@@ -54,6 +54,31 @@ PSP_AUDIO ?= 0
 PSP_AUDIO_PROFILE ?= 0
 PSP_VME ?= 0
 PSP_FPS_OVERLAY ?= 1
+PSP_NATIVE_COVERAGE_AB ?= 0
+NATIVE_COVERAGE_POLICY ?=
+NATIVE_CANDIDATES ?=
+ifeq ($(PSP_NATIVE_COVERAGE_AB),1)
+ifeq ($(strip $(NATIVE_COVERAGE_POLICY)),)
+$(error PSP_NATIVE_COVERAGE_AB=1 requires NATIVE_COVERAGE_POLICY)
+endif
+else ifneq ($(PSP_NATIVE_COVERAGE_AB),0)
+$(error PSP_NATIVE_COVERAGE_AB must be 0 or 1)
+endif
+ifneq ($(strip $(NATIVE_CANDIDATES)),)
+ifeq ($(strip $(NATIVE_COVERAGE_POLICY)),)
+$(error NATIVE_CANDIDATES requires NATIVE_COVERAGE_POLICY)
+endif
+ifneq ($(PSP_NATIVE_COVERAGE_AB),0)
+$(error NATIVE_CANDIDATES requires PSP_NATIVE_COVERAGE_AB=0)
+endif
+endif
+ifneq ($(strip $(NATIVE_COVERAGE_POLICY)),)
+ifneq ($(strip $(NATIVE_CANDIDATES)$(filter 1,$(PSP_NATIVE_COVERAGE_AB))),)
+NATIVE_COVERAGE_ARGS := --coverage-policy $(NATIVE_COVERAGE_POLICY) $(foreach asset,$(NATIVE_CANDIDATES),--candidate $(asset))
+else
+$(error NATIVE_COVERAGE_POLICY requires NATIVE_CANDIDATES or PSP_NATIVE_COVERAGE_AB=1)
+endif
+endif
 COLOR ?= 1
 VERBOSE ?= 0
 N_THREADS ?= $(shell nproc 2>/dev/null || echo 1)
@@ -282,6 +307,7 @@ CFLAGS += -ffunction-sections -fdata-sections
 CFLAGS += -fno-exceptions -fno-unwind-tables
 CFLAGS += -fno-asynchronous-unwind-tables -fno-ident
 CFLAGS += -DPSP_FPS_OVERLAY=$(PSP_FPS_OVERLAY)
+CFLAGS += -DPSP_NATIVE_COVERAGE_AB=$(PSP_NATIVE_COVERAGE_AB)
 CFLAGS += -DPSP_AUDIO=$(PSP_AUDIO)
 CFLAGS += -DPSP_AUDIO_PROFILE=$(PSP_AUDIO_PROFILE)
 CFLAGS += -DPSP_AUDIO_VME=$(PSP_AUDIO_VME)
@@ -390,8 +416,19 @@ CFLAGS += -pg -g -fno-omit-frame-pointer -fno-optimize-sibling-calls
 LDFLAGS += -pg -g
 endif
 
+PSP_LINK_SCRIPT := $(PSPSDK)/lib/linkfile.prx
+PSP_LAYOUT_DEPS :=
+ifeq ($(PSP_GFX_BACKEND)$(PSP_FULL),gu1)
+ifeq ($(filter 1,$(PROFILE_PSP) $(PROFILE_PHASES) $(PROFILE_HW_COUNTERS) $(PROFILE_POOL_LOOKUP) $(PSP_TRACE) $(PSP_RENDERER_DIAGNOSTICS)),)
+PSP_LAYOUT_PLAN := src/psp/gfx/gfx_psp_layout.json
+PSP_LAYOUT_TOOL := $(N64PSP_DIR)/scripts/link_layout.py
+PSP_LINK_SCRIPT := $(BUILD_DIR)/gfx-layout.prx.ld
+PSP_LAYOUT_DEPS := $(PSP_LINK_SCRIPT) $(PSP_LAYOUT_PLAN) $(PSP_LAYOUT_TOOL)
+endif
+endif
+
 LDFLAGS += -specs=$(PSPSDK)/lib/prxspecs \
-           -Wl,-q,-T$(PSPSDK)/lib/linkfile.prx \
+           -Wl,-q,-T$(PSP_LINK_SCRIPT) \
            $(PSPSDK)/lib/prxexports.o
 ifeq ($(PSP_AUDIO),1)
 LDFLAGS += -Wl,-u,sf64PspMeKcallImport
@@ -591,12 +628,20 @@ $(PSP_SFO):
 	$(V)$(MKSFOEX) -d MEMSIZE=1 '$(PSP_TITLE)' $@
 
 .DELETE_ON_ERROR:
-$(PSP_ELF): $(O_FILES) $(PSPGL_BUILD_DEPS) src/psp/gfx/native_asset_compile.py src/psp/gfx/native_assets.json
+ifneq ($(PSP_LAYOUT_DEPS),)
+$(PSP_LINK_SCRIPT): $(PSP_LAYOUT_PLAN) $(PSP_LAYOUT_TOOL) $(PSPSDK)/lib/linkfile.prx Makefile
+	$(PYTHON) $(PSP_LAYOUT_TOOL) --plan $(PSP_LAYOUT_PLAN) --template $(PSPSDK)/lib/linkfile.prx --output $@ --build-dir $(BUILD_DIR) --library-dir $(N64PSP_DIR)/$(N64PSP_BUILD_PSP)
+endif
+
+$(PSP_ELF): $(O_FILES) $(PSPGL_BUILD_DEPS) $(PSP_LAYOUT_DEPS) src/psp/gfx/native_asset_compile.py src/psp/gfx/native_assets.json
 	@mkdir -p $(dir $@)
 	$(call print,Linking PSP ELF:,$<,$@)
 	$(V)$(CC) $(O_FILES) $(LDFLAGS) $(PSP_LIBS) -o $@
 	$(V)$(PSP_FIXUP_IMPORTS) $@
-	$(PYTHON) src/psp/gfx/native_asset_compile.py --build-dir $(BUILD_DIR) --verify-elf $@
+ifneq ($(PSP_LAYOUT_DEPS),)
+	$(PYTHON) $(PSP_LAYOUT_TOOL) --plan $(PSP_LAYOUT_PLAN) --verify-elf $@
+endif
+	$(PYTHON) src/psp/gfx/native_asset_compile.py $(NATIVE_COVERAGE_ARGS) --build-dir $(BUILD_DIR) --verify-elf $@
 
 $(PSP_MAP): $(PSP_ELF)
 	@test -f $@
@@ -643,13 +688,20 @@ $(BUILD_DIR)/src/engine/fox_bg.o: src/psp/command_source.h src/psp/zoness_water_
 $(BUILD_DIR)/src/psp/gfx/gfx_psp_dl.o: src/psp/hw_counter_profile.h src/psp/zoness_water_cull.h
 CFLAGS += -I$(BUILD_DIR)
 NATIVE_ASSET_MANIFEST := src/psp/gfx/native_assets.json
-NATIVE_ASSET_SOURCES := $(shell $(PYTHON) src/psp/gfx/native_asset_compile.py --sources)
+NATIVE_SELECTION_STAMP := $(BUILD_DIR)/native-selection.stamp
+$(NATIVE_SELECTION_STAMP): FORCE
+	@mkdir -p $(dir $@)
+	@printf '%s\n' '$(NATIVE_COVERAGE_ARGS)' > $@.tmp
+	@if ! cmp -s $@.tmp $@; then mv $@.tmp $@; else rm -f $@.tmp; fi
+
+NATIVE_ASSET_SOURCES := $(shell $(PYTHON) src/psp/gfx/native_asset_compile.py $(NATIVE_COVERAGE_ARGS) --sources)
 NATIVE_ASSET_OBJECTS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(NATIVE_ASSET_SOURCES))
 NATIVE_ASSET_HEADERS := $(addprefix include/assets/,$(notdir $(NATIVE_ASSET_SOURCES:.c=.h)))
-$(BUILD_DIR)/native_assets.inc.c: $(NATIVE_ASSET_OBJECTS) $(NATIVE_ASSET_HEADERS) src/psp/gfx/native_asset_compile.py $(NATIVE_ASSET_MANIFEST)
-	$(PYTHON) src/psp/gfx/native_asset_compile.py --build-dir $(BUILD_DIR) --report $(BUILD_DIR)/native_assets.json $@
+$(BUILD_DIR)/native_assets.inc.c: $(NATIVE_ASSET_OBJECTS) $(NATIVE_ASSET_HEADERS) src/psp/gfx/native_asset_compile.py $(NATIVE_ASSET_MANIFEST) $(NATIVE_COVERAGE_POLICY) $(NATIVE_SELECTION_STAMP)
+	$(PYTHON) src/psp/gfx/native_asset_compile.py $(NATIVE_COVERAGE_ARGS) --build-dir $(BUILD_DIR) --report $(BUILD_DIR)/native_assets.json $@
 
 $(BUILD_DIR)/src/psp/gfx/gfx_psp_dl.o: $(BUILD_DIR)/native_assets.inc.c src/psp/gfx/gfx_psp_native_assets.inc.c
+$(BUILD_DIR)/src/psp/gfx/gfx_psp_dl.o: src/psp/gfx/gfx_psp_retained_mesh.inc.c lib/n64psp/include/n64psp/native_mesh.h
 $(BUILD_DIR)/src/psp/gfx/gfx_psp_dl.o $(BUILD_DIR)/src/psp/input.o $(BUILD_DIR)/src/psp/renderer_bridge.o: src/psp/gfx/gfx_psp_dl.h
 $(BUILD_DIR)/src/psp/input.o: src/psp/hw_counter_profile.h
 

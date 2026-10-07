@@ -65,7 +65,53 @@ static __attribute__((noinline)) void psp_gfx_dl_native_asset_run(PspGfxDlContex
     draw(ctx);
 }
 
+#if PSP_NATIVE_COVERAGE_AB
+static u32 sNativeCoverageRequested;
+static PspGfxDlNativeCoverageStats sNativeCoverageStats;
+
+static int psp_gfx_dl_native_coverage_run(PspGfxDlContext* ctx, u32 depth,
+                                         u32 commands, u32 vertexCommands, u32 triangleCommands,
+                                         void (*draw)(PspGfxDlContext*)) {
+    sNativeCoverageStats.calls++;
+    sNativeCoverageStats.commands += commands;
+    if (sNativeCoverageStats.mode == 1) {
+        return 0;
+    }
+    psp_gfx_dl_native_asset_run(ctx, depth, commands, vertexCommands, triangleCommands, draw);
+    return 1;
+}
+#endif
+
 #include "native_assets.inc.c"
+
+#if PSP_NATIVE_COVERAGE_AB
+
+void PspGfxDl_ToggleNativeCoverage(void) {
+    sNativeCoverageRequested++;
+    if (sNativeCoverageRequested == 3) {
+        sNativeCoverageRequested = 0;
+    }
+}
+
+void PspGfxDl_GetNativeCoverageStats(PspGfxDlNativeCoverageStats* stats) {
+    *stats = sNativeCoverageStats;
+}
+
+static void psp_gfx_dl_native_coverage_begin(void) {
+    sNativeCoverageStats.mode = sNativeCoverageRequested;
+    sNativeCoverageStats.calls = 0;
+    sNativeCoverageStats.commands = 0;
+}
+
+static int psp_gfx_dl_native_leaf_dispatch(PspGfxDlContext* ctx, const Gfx* child, u32 depth) {
+    if (!sNativeCoverageStats.mode) {
+        return psp_gfx_dl_native_asset_dispatch(ctx, child, depth);
+    }
+    return psp_gfx_dl_native_coverage_dispatch(ctx, child, depth);
+}
+#else
+#define psp_gfx_dl_native_leaf_dispatch psp_gfx_dl_native_asset_dispatch
+#endif
 
 static int psp_gfx_dl_native_fighter_eligible(const PspGfxDlContext* ctx, u32 depth) {
 #if PSP_RENDERER_DIAGNOSTICS

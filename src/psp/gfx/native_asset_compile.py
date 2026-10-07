@@ -2,18 +2,24 @@
 """Inventory PSP asset objects or compile reviewed assets into native drawing calls"""
 
 import argparse
+import bisect
 import collections
 import hashlib
 import json
 from pathlib import Path
 import re
+import shlex
 import struct
+import subprocess
 
 MANIFEST_PATH = Path(__file__).with_name('native_assets.json')
 
 
 def load_manifest(path):
-    manifest = json.loads(Path(path).read_text())
+    return validate_manifest(json.loads(Path(path).read_text()))
+
+
+def validate_manifest(manifest):
     if (not isinstance(manifest, dict) or manifest.get('version') != 1 or
             not isinstance(manifest.get('objects'), list) or not manifest['objects']):
         raise ValueError('expected a version 1 asset manifest')
@@ -39,6 +45,75 @@ def load_manifest(path):
 
 
 MANIFEST, ASSETS = load_manifest(MANIFEST_PATH)
+ACCEPTED_MANIFEST, ACCEPTED_ASSETS = MANIFEST, ASSETS.copy()
+BASE_MANIFEST, BASE_ASSETS = MANIFEST, ASSETS.copy()
+COVERAGE_MANIFEST = {'version': 1, 'objects': []}
+COVERAGE_ASSETS = set()
+
+
+def select_coverage(path, names=None):
+    global MANIFEST, ASSETS, BASE_MANIFEST, BASE_ASSETS, COVERAGE_MANIFEST, COVERAGE_ASSETS
+    inventory = json.loads(Path(path).read_text())
+    policy = inventory.get('selection_policy', {})
+    if inventory.get('version') != 1 or policy.get('version') != 1:
+        raise ValueError('expected a version 1 corpus selection policy')
+    rows = policy.get('assets', [])
+    policy_names = [r['name'] for r in rows]
+    if len(policy_names) != len(set(policy_names)):
+        raise ValueError('duplicate selection policy name')
+    accepted = {r['name'] for r in rows if r['status'] == 'accepted'}
+    if accepted != ACCEPTED_ASSETS.keys():
+        raise ValueError('selection policy does not match the accepted baseline')
+    candidates = [r for r in rows if r['status'] == 'validation_candidate']
+    if names is not None:
+        requested = set(names)
+        if not requested or len(requested) != len(names):
+            raise ValueError('expected unique candidate names')
+        if not requested <= {r['name'] for r in candidates}:
+            raise ValueError('selection contains an unqualified candidate')
+        candidates = [r for r in candidates if r['name'] in requested]
+    supported = {r['name']: r for r in inventory['assets']}
+    if set(policy_names) != supported.keys():
+        raise ValueError('selection policy does not cover the saved corpus')
+    decisions = {r['name']: r for r in inventory['mutation_audit']['decisions']}
+    objects = {r['source']: r for r in inventory['objects']}
+    groups = collections.defaultdict(list)
+    for row in candidates:
+        name, source = row['name'], row['source']
+        asset, decision = supported[name], decisions[name]
+        if (name in accepted or row['audit_status'] != 'direct_reads_only' or
+                asset['status'] != 'supported' or asset['source'] != source or
+                asset['enabled'] or decision['status'] != 'direct_reads_only' or
+                not decision['supported'] or decision['enabled'] or not decision['source_uses'] or
+                decision['writer_uses'] or decision['alias_uses'] or decision['uncovered_sources']):
+            raise ValueError('candidate lacks supported direct-read evidence ' + name)
+        groups[source].append(name)
+    extra = {'version': 1, 'objects': [dict(source=source, header=objects[source]['header'], assets=names)
+                                      for source, names in sorted(groups.items())]}
+    validate_manifest(extra)
+    relevant = set(groups) | {'include/' + objects[source]['header'] for source in groups}
+    candidate_names = {r['name'] for r in candidates}
+    relevant |= {u['source'] for u in inventory['mutation_audit']['uses'] if u['name'] in
+                 candidate_names and not u['source'].startswith('src/psp/gfx/')}
+    relevant.add('include/PR/gbi.h')
+    fingerprints = {r['source']: r['sha256'] for r in inventory['mutation_audit']['files']}
+    fingerprints.update({'include/' + r['header']: r['header_sha256'] for r in inventory['objects']})
+    for source in relevant:
+        if hashlib.sha256(Path(source).read_bytes()).hexdigest() != fingerprints.get(source):
+            raise ValueError('stale coverage evidence for ' + source)
+    union = {g['source']: dict(g, assets=list(g['assets'])) for g in ACCEPTED_MANIFEST['objects']}
+    for group in extra['objects']:
+        if group['source'] in union:
+            union[group['source']]['assets'].extend(group['assets'])
+        else:
+            union[group['source']] = group
+    MANIFEST = {'version': 1, 'objects': list(union.values())}
+    ASSETS = dict(ACCEPTED_ASSETS)
+    ASSETS.update({n: (g['header'], 'asset_' + n) for g in extra['objects'] for n in g['assets']})
+    BASE_MANIFEST = ACCEPTED_MANIFEST if names is None else MANIFEST
+    BASE_ASSETS = dict(ACCEPTED_ASSETS if names is None else ASSETS)
+    COVERAGE_MANIFEST = extra if names is None else {'version': 1, 'objects': []}
+    COVERAGE_ASSETS = candidate_names if names is None else set()
 
 
 def read_symbols(path, types=(1,)):
@@ -238,7 +313,7 @@ def ordered_assets(path, names):
     return sorted(names, key=definitions.__getitem__)
 
 
-def generate_tree(names, indent=4):
+def generate_tree(names, indent=4, coverage_ab=True):
     if not names:
         return ''
     middle = len(names) // 2
@@ -248,25 +323,77 @@ def generate_tree(names, indent=4):
     padding = ' ' * indent
     lines = [f'{padding}if (child == {asset}) {{',
              f'{padding}    if (!psp_gfx_dl_native_asset_eligible(ctx, depth, {prefix}_COMMANDS)) {{',
-             f'{padding}        return 0;', f'{padding}    }}',
-             f'{padding}    psp_gfx_dl_native_asset_run(ctx, depth, {prefix}_COMMANDS,',
-             f'{padding}                                {prefix}_VERTEX_COMMANDS, {prefix}_TRIANGLE_COMMANDS,',
-             f'{padding}                                psp_gfx_dl_native_{suffix});',
-             f'{padding}    return 1;', f'{padding}}}']
+             f'{padding}        return 0;', f'{padding}    }}']
+    if coverage_ab and asset in COVERAGE_ASSETS:
+        lines.extend([f'{padding}    return psp_gfx_dl_native_coverage_run(ctx, depth, {prefix}_COMMANDS,',
+                      f'{padding}                                  {prefix}_VERTEX_COMMANDS, {prefix}_TRIANGLE_COMMANDS,',
+                      f'{padding}                                  psp_gfx_dl_native_{suffix});'])
+    else:
+        lines.extend([f'{padding}    psp_gfx_dl_native_asset_run(ctx, depth, {prefix}_COMMANDS,',
+                      f'{padding}                                {prefix}_VERTEX_COMMANDS, {prefix}_TRIANGLE_COMMANDS,',
+                      f'{padding}                                psp_gfx_dl_native_{suffix});',
+                      f'{padding}    return 1;'])
+    lines.append(f'{padding}}}')
     if len(names) > 1:
         lines.append(f'{padding}if ((uintptr_t) child < (uintptr_t) {asset}) {{')
-        lines.append(generate_tree(names[:middle], indent + 4))
+        lines.append(generate_tree(names[:middle], indent + 4, coverage_ab))
         lines.append(f'{padding}}} else {{')
-        lines.append(generate_tree(names[middle + 1:], indent + 4))
+        lines.append(generate_tree(names[middle + 1:], indent + 4, coverage_ab))
         lines.append(f'{padding}}}')
     return '\n'.join(lines)
 
 
-def generate_all(build):
+def asset_object_order():
+    source = (Path(__file__).resolve().parents[3] / 'src/psp/sources.mk').read_text()
+    names = re.findall(r'^\s+(src/assets/[A-Za-z_0-9]+/[A-Za-z_0-9]+\.c)\s*', source, re.M)
+    if not names or len(names) != len(set(names)):
+        raise ValueError('expected unique asset sources in PSP link order')
+    return {name: index for index, name in enumerate(names)}
+
+
+def ordered_groups(manifest):
+    order = asset_object_order()
+    if any(group['source'] not in order for group in manifest['objects']):
+        raise ValueError('selected asset object is missing from PSP link order')
+    return sorted(manifest['objects'], key=lambda group: order[group['source']])
+
+
+def generate_object_tree(groups, indent=4):
+    padding = ' ' * indent
+    if not groups:
+        return padding + 'return 0;'
+    middle = len(groups) // 2
+    suffix, first, last = groups[middle]
+    return '\n'.join([
+        f'{padding}if ((uintptr_t) child < (uintptr_t) {first}) {{',
+        generate_object_tree(groups[:middle], indent + 4),
+        f'{padding}}} else if ((uintptr_t) child > (uintptr_t) {last}) {{',
+        generate_object_tree(groups[middle + 1:], indent + 4),
+        f'{padding}}} else {{',
+        f'{padding}    return psp_gfx_dl_native_{suffix}_dispatch(ctx, child, depth);',
+        f'{padding}}}'])
+
+
+def generate_group(build, manifest, namespace, lookup_manifest=None, coverage_ab=True):
     output = []
     groups = []
     report = []
-    for group in MANIFEST['objects']:
+    selected_groups = ordered_groups(manifest) if namespace else manifest['objects']
+    def append_object_dispatch(group):
+        path = Path(build) / Path(group['source']).with_suffix('.o')
+        names = ordered_assets(path, group['assets'])
+        names = [name for name in names if name != 'aVenomFighter1DL']
+        if not names:
+            return
+        suffix = namespace + Path(group['source']).stem
+        output.append(f'''static int psp_gfx_dl_native_{suffix}_dispatch(PspGfxDlContext* ctx, const Gfx* child, u32 depth) {{
+''' + generate_tree(names, coverage_ab=coverage_ab) + '''
+    return 0;
+}
+''')
+        groups.append((suffix, names[0], names[-1]))
+
+    for group in selected_groups:
         path = Path(build) / Path(group['source']).with_suffix('.o')
         names = ordered_assets(path, group['assets'])
         for name in names:
@@ -278,22 +405,24 @@ def generate_all(build):
                            'loaded': sum(e[3] for e in events if e[0] == 'load'),
                            'triangles': sum(2 if e[0] == 'tri2' else 1 for e in events
                                             if e[0] in ('tri1', 'tri2'))})
-        names = [name for name in names if name != 'aVenomFighter1DL']
-        if not names:
-            continue
-        suffix = Path(group['source']).stem
-        output.append(f'''static int psp_gfx_dl_native_{suffix}_dispatch(PspGfxDlContext* ctx, const Gfx* child, u32 depth) {{
-''' + generate_tree(names) + '''
-    return 0;
-}
-''')
-        groups.append((suffix, names[0], names[-1]))
+        if lookup_manifest is None:
+            append_object_dispatch(group)
+    if lookup_manifest is not None:
+        for group in ordered_groups(lookup_manifest):
+            append_object_dispatch(group)
     branches = []
     for suffix, first, last in groups:
         branches.append(f'''    if ((uintptr_t) child >= (uintptr_t) {first} && (uintptr_t) child <= (uintptr_t) {last}) {{
         return psp_gfx_dl_native_{suffix}_dispatch(ctx, child, depth);
     }}''')
-    output.append('''static int psp_gfx_dl_native_asset_dispatch(PspGfxDlContext* ctx, const Gfx* child, u32 depth) {
+    dispatch = '\n'.join(branches) + '\n    return 0;'
+    if namespace:
+        dispatch = f'''    if ((uintptr_t) child < (uintptr_t) {groups[0][1]} ||
+        (uintptr_t) child > (uintptr_t) {groups[-1][2]}) {{
+        return 0;
+    }}
+''' + generate_object_tree(groups)
+    output.append('''static int psp_gfx_dl_native_''' + (namespace.rstrip('_') or 'asset') + '''_dispatch(PspGfxDlContext* ctx, const Gfx* child, u32 depth) {
 #if PSP_RENDERER_DIAGNOSTICS
     if (ctx->traceActive) {
         return 0;
@@ -302,11 +431,21 @@ def generate_all(build):
     if (depth >= PSP_GFX_DL_MAX_DEPTH) {
         return 0;
     }
-''' + '\n'.join(branches) + '''
-    return 0;
+''' + dispatch + '''
 }
 ''')
     return '\n'.join(output), report
+
+
+def generate_all(build, coverage_ab=True):
+    if COVERAGE_ASSETS and not coverage_ab:
+        return generate_group(build, MANIFEST, 'asset_', coverage_ab=False)
+    output, report = generate_group(build, BASE_MANIFEST, '')
+    if COVERAGE_ASSETS:
+        extra, rows = generate_group(build, COVERAGE_MANIFEST, 'coverage_', MANIFEST)
+        output += '\n#if PSP_NATIVE_COVERAGE_AB\n' + extra + '\n#endif\n'
+        report.extend(dict(row, coverage_candidate=True) for row in rows)
+    return output, report
 
 
 def verify_elf(build, elf):
@@ -325,6 +464,13 @@ def verify_elf(build, elf):
     intervals.sort()
     if any(first[1] > second[0] for first, second in zip(intervals, intervals[1:])):
         raise ValueError('linked asset object ranges overlap')
+    if COVERAGE_ASSETS:
+        ranges = []
+        for group in ordered_groups(MANIFEST):
+            names = ordered_assets(Path(build) / Path(group['source']).with_suffix('.o'), group['assets'])
+            ranges.append((linked[names[0]][0], linked[names[-1]][0] + linked[names[-1]][1]))
+        if any(first[1] > second[0] for first, second in zip(ranges, ranges[1:])):
+            raise ValueError('linked selected object order differs from PSP source order')
     print(f'AOT linked order verified for {len(ASSETS)} leaves')
 
 
@@ -448,6 +594,226 @@ def command_users(build, command_names):
             'objects': objects, 'users': rows}
 
 
+def source_uses(text, names, writer_arguments):
+    pattern = re.compile(r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|'
+                         r'[A-Za-z_]\w*|\d[\w.]*|->|<<=|>>=|\+\+|--|[=!<>+*/%&|^-]=|[^\s]', re.S)
+    lines = [m.start() for m in re.finditer('\n', text)]
+    tokens = [(m.group(), m.start()) for m in pattern.finditer(text)
+              if not m.group().startswith(('//', '/*', '"', "'"))]
+    words = [token[0] for token in tokens]
+    stack = []
+    groups = {}
+    matches = []
+    for i, word in enumerate(words):
+        if word in ('(', '[', '{'):
+            group = {'open': i, 'delimiter': word, 'commas': []}
+            if word == '(' and i and re.fullmatch(r'[A-Za-z_]\w*', words[i - 1]):
+                group['name'] = words[i - 1]
+            stack.append(group)
+            groups[i] = group
+        elif word in (')', ']', '}'):
+            if not stack or stack[-1]['delimiter'] != {')': '(', ']': '[', '}': '{'}[word]:
+                raise ValueError('unbalanced source delimiters')
+            stack.pop()['close'] = i
+        elif word == ',' and stack:
+            stack[-1]['commas'].append(i)
+        if word in names:
+            matches.append((i, tuple(stack)))
+    if stack:
+        raise ValueError('unbalanced source delimiters')
+    reads = {'gSPDisplayList': 1, 'gSPBranchList': 1, 'gsSPDisplayList': 0, 'gsSPBranchList': 0}
+    controls = {'if', 'for', 'while', 'switch'}
+    result = []
+    for i, ancestors in matches:
+        row = {'name': words[i], 'line': bisect.bisect_right(lines, tokens[i][1]) + 1,
+               'kind': 'unknown'}
+        if i and words[i - 1] == 'Gfx' and i + 1 < len(words) and words[i + 1] == '[':
+            end = groups.get(i + 1, {}).get('close', len(words))
+            after = words[end + 1:end + 3]
+            if after == ['=', '{']:
+                row['kind'] = 'definition'
+            elif after and after[0] == ';':
+                row['kind'] = 'declaration'
+        if row['kind'] == 'unknown':
+            cursor = i + 1
+            while cursor < len(words):
+                if words[cursor] == '[' and cursor in groups:
+                    cursor = groups[cursor]['close'] + 1
+                elif words[cursor] in ('.', '->') and cursor + 1 < len(words):
+                    cursor += 2
+                else:
+                    break
+            if cursor < len(words) and words[cursor] in ('=', '+=', '-=', '*=', '/=', '%=',
+                                                         '&=', '|=', '^=', '<<=', '>>=', '++', '--'):
+                row['kind'] = 'writer'
+                row['operation'] = words[cursor]
+            elif i and words[i - 1] in ('++', '--'):
+                row.update(kind='writer', operation=words[i - 1])
+        if row['kind'] == 'unknown':
+            calls = [g for g in ancestors if g.get('name') and g['name'] not in controls]
+            if calls:
+                group = calls[-1]
+                boundaries = [group['open']] + group['commas'] + [group['close']]
+                argument = next(n for n in range(len(boundaries) - 1)
+                                if boundaries[n] < i < boundaries[n + 1])
+                call = group['name']
+                row.update(call=call, argument=argument)
+                value = words[boundaries[argument] + 1:boundaries[argument + 1]]
+                while len(value) >= 3 and value[0] == '(' and value[-1] == ')':
+                    value = value[1:-1]
+                if writer_arguments.get(call) == argument:
+                    row['kind'] = 'writer_argument'
+                elif call == 'sizeof':
+                    row['kind'] = 'size_read'
+                elif reads.get(call) == argument and value == [words[i]]:
+                    row['kind'] = 'display_list_read'
+                else:
+                    row['kind'] = 'call_alias'
+            elif any(g['delimiter'] == '{' and g['open'] and words[g['open'] - 1] == '='
+                     for g in ancestors):
+                row['kind'] = 'initializer_alias'
+            elif ((i and words[i - 1] in ('==', '!=')) or
+                  (i + 1 < len(words) and words[i + 1] in ('==', '!='))):
+                row['kind'] = 'identity_read'
+        result.append(row)
+    return result
+
+
+def active_source(path, build):
+    flags_path = Path(build) / 'compile-flags.stamp'
+    flags = shlex.split(flags_path.read_text())
+    result = subprocess.run(['psp-gcc', *flags, '-E', '-fdirectives-only', str(path)],
+                            capture_output=True, text=True)
+    if result.returncode:
+        raise ValueError('source preprocessing failed: ' + result.stderr.strip())
+    output = ['\n'] * len(path.read_text().splitlines())
+    target = path.resolve()
+    current = None
+    number = 1
+    for line in result.stdout.splitlines(keepends=True):
+        marker = re.match(r'^#\s+(\d+)\s+"([^"]+)"', line)
+        if marker:
+            number = int(marker[1])
+            current = Path(marker[2]).resolve()
+        else:
+            if current == target and 0 < number <= len(output):
+                output[number - 1] = line
+            number += 1
+    return ''.join(output)
+
+
+def binding_observer(user):
+    if user['source'] != 'src/psp/gfx/gfx_psp_dl.c' or user['role'] != 'code' or not user['owner']:
+        return False
+    owner = user['owner'].split('.')[0]
+    return (owner == 'psp_gfx_dl_run_internal' or
+            owner.startswith('psp_gfx_dl_native_') and owner.endswith('_dispatch'))
+
+
+def mutation_audit(build, assets, users):
+    root = Path(__file__).resolve().parents[3]
+    names = {a['name'] for a in assets}
+    writers = {'memcpy': 0, 'memmove': 0, 'memset': 0, 'bcopy': 1, 'bzero': 0}
+    gbi_path = root / 'include/PR/gbi.h'
+    gbi = gbi_path.read_text()
+    for name in re.findall(r'#\s*define\s+(\w+)\s*\(\s*pkt\s*[,)]', gbi):
+        writers[name] = 0
+    paths = {root / obj['source'] for obj in users['objects'] if (root / obj['source']).is_file()}
+    paths.update(p for p in (root / 'include').rglob('*.h') if p.name != 'mods.h')
+    pending = list(sorted(paths))
+    records = []
+    errors = []
+    files = []
+    expressions = re.compile(r'\b(?:' + '|'.join(sorted(names)) + r')\b')
+    while pending:
+        path = pending.pop()
+        text = path.read_text()
+        source = str(path.relative_to(root))
+        files.append({'source': source, 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()})
+        for include in re.findall(r'^\s*#\s*include\s+"([^"\n]+\.inc\.c)"', text, re.M):
+            options = (root / include, path.parent / include)
+            child = next((p.resolve() for p in options if p.is_file()), None)
+            if child and child.is_relative_to(root) and child not in paths:
+                paths.add(child)
+                pending.append(child)
+        if not expressions.search(text):
+            continue
+        try:
+            try:
+                uses = source_uses(text, names, writers)
+            except ValueError:
+                uses = source_uses(active_source(path, build), names, writers)
+                files[-1]['active_branches'] = True
+            records.extend(dict(row, source=source) for row in uses)
+        except ValueError as error:
+            errors.append({'source': source, 'reason': str(error),
+                           'names': sorted(set(expressions.findall(text)))})
+    by_name = collections.defaultdict(list)
+    address_users = collections.defaultdict(list)
+    for row in records:
+        by_name[row['name']].append(row)
+    for row in users['users']:
+        address_users[row['asset']].append(row)
+    errors_by_source = {e['source'] for e in errors}
+    error_names = {name for e in errors for name in e['names']}
+    decisions = []
+    for asset in assets:
+        name = asset['name']
+        uses = by_name[name]
+        observers = [u for u in address_users[name] if binding_observer(u)]
+        addresses = [u for u in address_users[name] if not binding_observer(u)]
+        writer_uses = [u for u in uses if u['kind'] in ('writer', 'writer_argument')]
+        aliases = [u for u in uses if u['kind'] in ('unknown', 'call_alias', 'initializer_alias')]
+        covered_sources = {u['source'] for u in uses if u['kind'] not in ('definition', 'declaration')}
+        uncovered = sorted({u['source'] for u in addresses} - covered_sources)
+        if writer_uses:
+            status = 'writer_review'
+        elif (aliases or uncovered or any(u['role'] == 'data' for u in addresses) or
+              name in error_names or any(u['source'] in errors_by_source for u in addresses)):
+            status = 'alias_review'
+        elif not addresses:
+            status = 'no_named_users'
+        else:
+            status = 'direct_reads_only'
+        decisions.append({'name': name, 'supported': asset['status'] == 'supported',
+                          'enabled': asset['enabled'], 'status': status,
+                          'source_uses': len(uses), 'writer_uses': len(writer_uses),
+                          'alias_uses': len(aliases), 'uncovered_sources': uncovered,
+                          'binding_observers': len(observers)})
+    return {'scope': 'direct source uses with indirect aliases and macro bodies requiring review',
+            'gbi_sha256': hashlib.sha256(gbi_path.read_bytes()).hexdigest(),
+            'compile_flags_sha256': hashlib.sha256((Path(build) / 'compile-flags.stamp').read_bytes()).hexdigest(),
+            'summary': dict(sorted(collections.Counter(d['status'] for d in decisions).items())),
+            'files': sorted(files, key=lambda f: f['source']), 'uses': records,
+            'decisions': decisions, 'errors': errors}
+
+
+def selection_policy(assets, audit):
+    decisions = {d['name']: d for d in audit['decisions']}
+    rows = []
+    for asset in assets:
+        decision = decisions[asset['name']]
+        if asset['enabled']:
+            if decision['writer_uses']:
+                raise ValueError('writer evidence conflicts with an enabled asset: ' + asset['name'])
+            status = 'accepted'
+        elif asset['status'] != 'supported':
+            status = 'unsupported'
+        elif decision['status'] == 'writer_review':
+            status = 'writer_review'
+        elif decision['status'] == 'direct_reads_only':
+            status = 'validation_candidate'
+        else:
+            status = decision['status']
+        rows.append({'name': asset['name'], 'source': asset['source'], 'status': status,
+                     'commands': asset.get('commands'), 'audit_status': decision['status']})
+    return {'version': 1, 'scope': 'selection proposal only with no automatic emission',
+            'candidate_requirements': ['review indirect write paths', 'differential validation',
+                                       'emitted text budget', 'PSP acceptance'],
+            'summary': dict(sorted(collections.Counter(r['status'] for r in rows).items())),
+            'assets': rows}
+
+
 def inventory(build):
     root = Path(__file__).resolve().parents[3]
     objects = []
@@ -496,6 +862,8 @@ def inventory(build):
     blockers = collections.Counter(row['stage'] + ': ' + row['reason'] for row in assets
                                    if row['status'] == 'blocked')
     supported = sum(row['status'] == 'supported' for row in assets)
+    users = command_users(build, names)
+    audit = mutation_audit(build, assets, users)
     return {'version': 1, 'build_dir': str(build),
             'scope': 'exported US display lists',
             'support_contract': 'current leaf compiler only with command immutability unverified',
@@ -503,7 +871,8 @@ def inventory(build):
                         'supported': supported, 'blocked': len(assets) - supported,
                         'enabled': len(ASSETS), 'blockers': dict(sorted(blockers.items()))},
             'objects': objects, 'assets': assets, 'reference_index': reference_index(snapshots),
-            'command_users': command_users(build, names)}
+            'command_users': users, 'mutation_audit': audit,
+            'selection_policy': selection_policy(assets, audit)}
 
 
 def write_output(path, text):
@@ -514,7 +883,9 @@ def write_output(path, text):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--asset', choices=ASSETS)
+    parser.add_argument('--asset')
+    parser.add_argument('--coverage-policy')
+    parser.add_argument('--candidate', action='append', help='compile only these qualified additions without A/B controls')
     parser.add_argument('--sources', action='store_true')
     parser.add_argument('--inventory', action='store_true')
     parser.add_argument('--build-dir')
@@ -522,6 +893,12 @@ def main():
     parser.add_argument('--report')
     parser.add_argument('paths', nargs='*')
     args = parser.parse_args()
+    if args.candidate and not args.coverage_policy:
+        parser.error('--candidate requires --coverage-policy')
+    if args.coverage_policy:
+        if args.inventory:
+            parser.error('coverage selection consumes saved evidence without a new audit')
+        select_coverage(args.coverage_policy, args.candidate)
     if args.inventory and args.build_dir and len(args.paths) == 1 and not (args.asset or args.sources or args.verify_elf or args.report):
         result = inventory(args.build_dir)
         write_output(args.paths[0], json.dumps(result, indent=2) + '\n')

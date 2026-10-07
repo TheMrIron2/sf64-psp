@@ -172,6 +172,12 @@ void PspGfxBackend_SetScissor(float ulx, float uly, float lrx, float lry);
 void PspGfxBackend_ClearScissor(void);
 
 void PspGfxBackend_DrawTriangles(const PspGfxVertex* vertices, u32 vertexCount, const PspGfxDrawState* state);
+#if PSP_GFX_BACKEND_GU
+PspGfxVertex* PspGfxBackend_AllocateMeshVertices(u32 count, u32 draws);
+void PspGfxBackend_DrawMesh(const PspGfxVertex* vertices, const u16* indices, u32 count,
+                          const PspGfxDrawState* state, const float* modelview, int cullFront, int cullBack);
+void PspGfxBackend_SealMeshIndices(const u16* indices, u32 count);
+#endif
 int PspGfxBackend_ReserveVertices(u32 vertexCapacity, PspGfxVertexReservation* reservation);
 void PspGfxBackend_DrawReservedTriangles(const PspGfxVertexReservation* reservation, u32 vertexCount,
                                          const PspGfxDrawState* state);

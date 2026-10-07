@@ -42,7 +42,7 @@ static int sPerfReady;
 #endif
 
 static void psp_renderer_draw_overlays(void) {
-#if PSP_FPS_OVERLAY || PROFILE_GPROF || PROFILE_PHASES || PROFILE_HW_COUNTERS
+#if PSP_FPS_OVERLAY || PROFILE_GPROF || PROFILE_PHASES || PROFILE_HW_COUNTERS || PSP_NATIVE_COVERAGE_AB
     void* framebuffer;
     int bufferWidth;
     int pixelFormat;
@@ -82,6 +82,17 @@ static void psp_renderer_draw_overlays(void) {
             (unsigned int) (60 / PspFrameScheduler_GetPresentationVIs()),
             (unsigned long) sPerfSkipped
         );
+    }
+#endif
+#if PSP_NATIVE_COVERAGE_AB
+    {
+        PspGfxDlNativeCoverageStats stats;
+
+        PspGfxDl_GetNativeCoverageStats(&stats);
+        pspDebugScreenSetXY(0, 3);
+        pspDebugScreenPrintf("AC%lu F%lu %s%lu       ", (unsigned long) stats.mode,
+                             (unsigned long) stats.calls, stats.mode == 1 ? "MC" : "BY",
+                             (unsigned long) stats.commands);
     }
 #endif
     PspProfiler_DrawStatus();

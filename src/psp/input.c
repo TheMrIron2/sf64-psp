@@ -117,6 +117,12 @@ int PspInput_Poll(OSContPad* pads) {
         int uiScalePressed = ((pad.Buttons & uiScaleCombo) == uiScaleCombo) &&
                              ((previousButtons & uiScaleCombo) != uiScaleCombo);
 
+#if PSP_NATIVE_COVERAGE_AB
+        const u32 coverageCombo = PSP_CTRL_SELECT | PSP_CTRL_DOWN;
+        int coveragePressed = ((pad.Buttons & coverageCombo) == coverageCombo) &&
+                              ((previousButtons & coverageCombo) != coverageCombo);
+#endif
+
         previousButtons = pad.Buttons;
         if ((pad.Buttons & displayCombo) == displayCombo) {
             if (displayPressed) {
@@ -133,6 +139,13 @@ int PspInput_Poll(OSContPad* pads) {
                 PspFrameScheduler_TogglePresentationRate();
             }
             pad.Buttons &= ~rateCombo;
+#if PSP_NATIVE_COVERAGE_AB
+        } else if ((pad.Buttons & coverageCombo) == coverageCombo) {
+            if (coveragePressed) {
+                PspGfxDl_ToggleNativeCoverage();
+            }
+            pad.Buttons &= ~coverageCombo;
+#endif
         } else if (PspGfxDl_TracePollControls(pad.Buttons)) {
             pad.Buttons &= ~(PSP_CTRL_SELECT | PSP_CTRL_TRIANGLE);
         } else if (PspHwCounterProfile_PollControls(pad.Buttons)) {

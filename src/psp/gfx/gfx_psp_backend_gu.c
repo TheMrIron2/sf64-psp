@@ -455,7 +455,7 @@ static void psp_gfx_gu_prepare_native_fog(const PspGfxDrawState* state) {
     sPspGfxGuState.fogValid = 1;
 }
 
-static void psp_gfx_gu_set_matrices(const PspGfxDrawState* state) {
+static void psp_gfx_gu_set_matrices(const PspGfxDrawState* state, const float* modelview) {
     int identity = state->pretransformed || (state->projectionMatrix == NULL);
 
     if (!sPspGfxGuState.matrixValid || (sPspGfxGuState.projectionIdentity != identity) ||
@@ -467,14 +467,18 @@ static void psp_gfx_gu_set_matrices(const PspGfxDrawState* state) {
             sceGuSetMatrix(GU_PROJECTION, (const ScePspFMatrix4*) state->projectionMatrix);
         }
     }
-    if (!sPspGfxGuState.matrixValid || !sPspGfxGuState.viewModelIdentity) {
+    if (!sPspGfxGuState.matrixValid) {
         sceGuSetMatrix(GU_VIEW, &sPspGfxGuIdentityMatrix);
+    }
+    if (modelview != NULL) {
+        sceGuSetMatrix(GU_MODEL, (const ScePspFMatrix4*) modelview);
+    } else if (!sPspGfxGuState.matrixValid || !sPspGfxGuState.viewModelIdentity) {
         sceGuSetMatrix(GU_MODEL, &sPspGfxGuIdentityMatrix);
     }
     sPspGfxGuState.projectionIdentity = identity;
     sPspGfxGuState.projectionMatrix = state->projectionMatrix;
     sPspGfxGuState.projectionSerial = state->projectionSerial;
-    sPspGfxGuState.viewModelIdentity = 1;
+    sPspGfxGuState.viewModelIdentity = modelview == NULL;
     sPspGfxGuState.matrixValid = 1;
 }
 
@@ -653,7 +657,7 @@ static void psp_gfx_gu_prepare_alpha_blend(const PspGfxDrawState* state, int tex
     }
 }
 
-static int psp_gfx_gu_prepare_colored_draw(const PspGfxDrawState* state) {
+static int psp_gfx_gu_prepare_colored_draw_with_model(const PspGfxDrawState* state, const float* modelview) {
     int textured;
 
     if ((state == NULL) || !psp_gfx_gu_select_viewport(state->viewport)) {
@@ -665,7 +669,7 @@ static int psp_gfx_gu_prepare_colored_draw(const PspGfxDrawState* state) {
         return 0;
     }
 
-    psp_gfx_gu_set_matrices(state);
+    psp_gfx_gu_set_matrices(state, modelview);
     psp_gfx_gu_set_capability(GU_DEPTH_TEST, state->depthTest, &sPspGfxGuState.depthTestEnabled);
     if (state->depthTest && (!sPspGfxGuState.depthFunctionValid ||
                              (sPspGfxGuState.depthFunction != PSP_GFX_GU_DEPTH_FUNC))) {
@@ -681,7 +685,7 @@ static int psp_gfx_gu_prepare_colored_draw(const PspGfxDrawState* state) {
     psp_gfx_gu_prepare_alpha_blend(state, textured);
     psp_gfx_gu_prepare_native_fog(state);
     psp_gfx_gu_set_capability(GU_LIGHTING, 0, &sPspGfxGuState.lightingEnabled);
-    psp_gfx_gu_set_capability(GU_CULL_FACE, 0, &sPspGfxGuState.cullEnabled);
+    if (modelview == NULL) psp_gfx_gu_set_capability(GU_CULL_FACE, 0, &sPspGfxGuState.cullEnabled);
     psp_gfx_gu_set_capability(GU_CLIP_PLANES, 1, &sPspGfxGuState.clipPlanesEnabled);
     if (!sPspGfxGuState.valid || (sPspGfxGuState.shadeModel != GU_SMOOTH)) {
         sceGuShadeModel(GU_SMOOTH);
@@ -689,6 +693,10 @@ static int psp_gfx_gu_prepare_colored_draw(const PspGfxDrawState* state) {
     }
     sPspGfxGuState.valid = 1;
     return 1;
+}
+
+static int psp_gfx_gu_prepare_colored_draw(const PspGfxDrawState* state) {
+    return psp_gfx_gu_prepare_colored_draw_with_model(state, NULL);
 }
 
 u32 PspGfxBackend_TextureDebugId(PspGfxTextureHandle handle) {
@@ -822,6 +830,36 @@ void PspGfxBackend_DrawTriangles(const PspGfxVertex* vertices, u32 vertexCount, 
     PspProfiler_CountDrawCall(vertexCount);
     psp_gfx_gu_count_vertex_copy(bytes);
 }
+
+#if PSP_GFX_BACKEND_GU
+PspGfxVertex* PspGfxBackend_AllocateMeshVertices(u32 count, u32 draws) {
+    int used = sceGuCheckList();
+    u32 available;
+    if (!sPspGfxGuReservationFrameActive || used < 0 || (u32) used > PSP_GFX_GU_LIST_BYTES) return NULL;
+    available = PSP_GFX_GU_LIST_BYTES - (u32) used;
+    if (count > available / sizeof(PspGfxVertex)) return NULL;
+    available -= count * sizeof(PspGfxVertex);
+    if (available < PSP_GFX_GU_LIST_DRAW_RESERVE || draws > (available - PSP_GFX_GU_LIST_DRAW_RESERVE) / 1024U) return NULL;
+    return (PspGfxVertex*) psp_gfx_gu_alloc_vertices(count, sizeof(PspGfxVertex));
+}
+
+void PspGfxBackend_SealMeshIndices(const u16* indices, u32 count) {
+    sceKernelDcacheWritebackRange(indices, count * sizeof(u16));
+}
+
+void PspGfxBackend_DrawMesh(const PspGfxVertex* vertices, const u16* indices, u32 count,
+                          const PspGfxDrawState* state, const float* modelview, int cullFront, int cullBack) {
+    if (!vertices || !indices || !count || count % 3 || !modelview || !state || (cullFront && cullBack)) return;
+    if (sPspGfxGuReplayCapturing) psp_gfx_gu_replay_capture_failed();
+    if (!psp_gfx_gu_prepare_colored_draw_with_model(state, modelview)) return;
+    psp_gfx_gu_set_capability(GU_CULL_FACE, cullFront || cullBack, &sPspGfxGuState.cullEnabled);
+    if (cullFront || cullBack) sceGuFrontFace(cullBack ? GU_CCW : GU_CW);
+    sceGuDrawArray(GU_TRIANGLES, GU_TEXTURE_32BITF | GU_COLOR_8888 | GU_VERTEX_32BITF |
+                   GU_INDEX_16BIT | GU_TRANSFORM_3D, count, indices, vertices);
+    PspProfiler_CountDrawCall(count);
+    psp_gfx_gu_count_reserved_vertex_draw(count);
+}
+#endif
 
 int PspGfxBackend_ReserveVertices(u32 vertexCapacity, PspGfxVertexReservation* reservation) {
     PspGfxGuReservation* guReservation = NULL;

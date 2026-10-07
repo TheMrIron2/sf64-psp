@@ -75,6 +75,18 @@ typedef struct {
 
 int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats);
 
+
+#if PSP_NATIVE_COVERAGE_AB
+typedef struct {
+    u32 mode;
+    u32 calls;
+    u32 commands;
+} PspGfxDlNativeCoverageStats;
+
+void PspGfxDl_ToggleNativeCoverage(void);
+void PspGfxDl_GetNativeCoverageStats(PspGfxDlNativeCoverageStats* stats);
+#endif
+
 #if PSP_RENDERER_DIAGNOSTICS
 int PspGfxDl_TracePollControls(u32 rawButtons);
 #else
