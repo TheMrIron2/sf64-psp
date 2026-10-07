@@ -702,6 +702,7 @@ $(BUILD_DIR)/native_assets.inc.c: $(NATIVE_ASSET_OBJECTS) $(NATIVE_ASSET_HEADERS
 
 $(BUILD_DIR)/src/psp/gfx/gfx_psp_dl.o: $(BUILD_DIR)/native_assets.inc.c src/psp/gfx/gfx_psp_native_assets.inc.c
 $(BUILD_DIR)/src/psp/gfx/gfx_psp_dl.o: src/psp/gfx/gfx_psp_retained_mesh.inc.c lib/n64psp/include/n64psp/native_mesh.h
+$(BUILD_DIR)/src/psp/gfx/gfx_psp_dl.o $(BUILD_DIR)/src/psp/gfx/gfx_psp_retained_sources.o: src/psp/gfx/gfx_psp_retained_sources.h
 $(BUILD_DIR)/src/psp/gfx/gfx_psp_dl.o $(BUILD_DIR)/src/psp/input.o $(BUILD_DIR)/src/psp/renderer_bridge.o: src/psp/gfx/gfx_psp_dl.h
 $(BUILD_DIR)/src/psp/input.o: src/psp/hw_counter_profile.h
 

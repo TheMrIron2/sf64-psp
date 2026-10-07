@@ -1,11 +1,7 @@
 #if PSP_GFX_BACKEND_GU
 #include <n64psp/native_mesh.h>
-#include <malloc.h>
 
-extern Gfx aVenomFighter1DL[];
-extern Gfx ast_title_seg6_gfx_2C4B0[];
-
-#define PSP_RETAINED_CACHE_SLOTS 2
+#include "gfx_psp_retained_sources.h"
 
 typedef struct {
     n64psp_mesh mesh;
@@ -19,7 +15,7 @@ static PspGfxDlRetainedCache* sRetainedCaches[PSP_RETAINED_CACHE_SLOTS];
 static int sRetainedBuilt[PSP_RETAINED_CACHE_SLOTS];
 static const void* psp_gfx_dl_retained_resolve(void* user, uint32_t raw, size_t bytes, int* immutable) {
     (void) user;
-    if (!psp_gfx_dl_is_native_ptr(raw) || (raw & 15) || !bytes || bytes > 64 * sizeof(Vtx)) return NULL;
+    if (!psp_gfx_dl_is_native_ptr(raw) || (raw & 7) || !bytes || bytes > 64 * sizeof(Vtx)) return NULL;
     // The selected leaf and its vertex ranges are qualified from the frozen asset object
     *immutable = 1;
     return (const void*) (uintptr_t) raw;
@@ -30,7 +26,7 @@ static int psp_gfx_dl_retained_build(const Gfx* child, u32 commandsCount, u32 sl
     n64psp_mesh_command commands[N64PSP_MESH_COMMAND_LIMIT];
 
     sRetainedBuilt[slot] = -1;
-    sRetainedCache = memalign(16, sizeof(*sRetainedCache));
+    sRetainedCache = PspGfxRetainedSource_Allocate(sizeof(*sRetainedCache));
     if (!sRetainedCache) return 0;
     sRetainedCaches[slot] = sRetainedCache;
     sRetainedCache->streamVertices = 0;
@@ -243,15 +239,8 @@ static void psp_gfx_dl_retained_draw(PspGfxDlContext* ctx, PspGfxVertex* stream)
 static int psp_gfx_dl_retained_dispatch(PspGfxDlContext* ctx, const Gfx* child, u32 depth) {
     PspGfxVertex* stream;
     u32 commandsCount, slot;
-    if (child == aVenomFighter1DL) {
-        commandsCount = 59;
-        slot = 0;
-    } else if (child == ast_title_seg6_gfx_2C4B0) {
-        commandsCount = 160;
-        slot = 1;
-    } else {
-        return 0;
-    }
+    slot = PspGfxRetainedSource_Find(child, &commandsCount);
+    if (slot == PSP_RETAINED_CACHE_SLOTS) return 0;
     if (depth >= PSP_GFX_DL_MAX_DEPTH || ctx->stats.commandCount > PSP_GFX_DL_MAX_COMMANDS - commandsCount ||
         !ctx->hasProjection || (ctx->geometryMode & G_TEXTURE_GEN) || psp_gfx_dl_depth_bias_enabled(ctx) ||
         ((ctx->geometryMode & G_CULL_BOTH) == G_CULL_BOTH) ||
