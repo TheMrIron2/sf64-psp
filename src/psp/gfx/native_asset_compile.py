@@ -471,6 +471,12 @@ def verify_elf(build, elf):
             ranges.append((linked[names[0]][0], linked[names[-1]][0] + linked[names[-1]][1]))
         if any(first[1] > second[0] for first, second in zip(ranges, ranges[1:])):
             raise ValueError('linked selected object order differs from PSP source order')
+    registry = Path(build)/'retained_assets.json'
+    if registry.exists():
+        retained = json.loads(registry.read_text())
+        addresses = [linked[row['name']][0] for row in retained]
+        if addresses != sorted(set(addresses)):
+            raise ValueError('retained binary-search order differs from linked addresses')
     print(f'AOT linked order verified for {len(ASSETS)} leaves')
 
 
@@ -884,7 +890,8 @@ def write_output(path, text):
 def retained_cost(words, relocations):
     compile_asset(words, relocations)
     slots = {}
-    loaded = indices = actions = 0
+    loaded = indices = actions = source_actions = load_spans = 0
+    source_span = False
     spans = []
     span = None
     vertices = set()
@@ -895,34 +902,42 @@ def retained_cost(words, relocations):
             for i in range(count):
                 slots[first + i] = loaded + i
             loaded += count
-            actions += 1
-            span = None
+            source_actions += 1
+            source_span = False
             vertices.add(relocations[command][0])
         elif op in (0xfd, 0xf5, 0xf2):
             if op == 0xfd or not ((w1 >> 24) & 7):
                 actions += 1
+                source_actions += 1
+                source_span = False
                 span = None
         elif op in (0xbf, 0xb1):
+            if not source_span:
+                load_spans += 1
+                source_actions += 1
+                source_span = True
             versions = [slots[(word >> shift & 255) // 2]
                         for word in ([w0, w1] if op == 0xb1 else [w1]) for shift in (16, 8, 0)]
             if span is None:
-                span = [min(versions), max(versions)]
+                span = set(versions)
                 spans.append(span)
                 actions += 1
             else:
-                span[0], span[1] = min(span[0], min(versions)), max(span[1], max(versions))
+                span.update(versions)
             indices += len(versions)
-    widths = [last - first + 1 for first, last in spans]
-    if (len(words) > 512 or loaded > 1024 or indices > 3072 or actions > 512 or
-            not widths or max(widths) > 64 or sum(widths) > 3072):
+    widths = [len(versions) for versions in spans]
+    referenced = set().union(*spans) if spans else set()
+    stored = sum(widths) + len(set(slots.values()) - referenced)
+    if (len(words) > 512 or loaded > 1024 or indices > 3072 or source_actions > 512 or
+            not widths or max(widths) > 1024 or sum(widths) > 3072):
         raise ValueError('retained mesh exceeds fixed representation')
     return dict(commands=len(words), loaded=loaded, final=len(slots), avoided=loaded-len(slots),
-                triangles=indices//3, spans=len(spans), streamed_vertices=sum(widths),
+                triangles=indices//3, spans=len(spans), load_spans=load_spans, actions=actions,
+                streamed_vertices=sum(widths), lighting_batches=sum((width+63)//64 for width in widths),
+                stored_vertices=stored, packet_bytes=192+stored*16+((indices*2+15)//16)*16+actions*16,
+                written_slots=[sum(1 << slot for slot in slots if slot < 32),
+                               sum(1 << (slot-32) for slot in slots if slot >= 32)],
                 vertex_symbols=sorted(vertices))
-
-
-def retained_eligible(cost):
-    return cost['avoided'] >= 32 and cost['loaded'] >= 3*cost['final']
 
 
 def retained_runtime_users(names):
@@ -968,19 +983,18 @@ def retained_census(build, policy_path):
     fingerprints.update({'include/' + r['header']: r['header_sha256'] for r in inventory['objects']})
     result = []
     names = set()
+    safe_commands = set(ACCEPTED_ASSETS) | {name for name, row in decisions.items() if row['status'] == 'direct_reads_only'}
     for asset in inventory['assets']:
         decision = decisions[asset['name']]
-        if asset['status'] != 'supported' or decision['status'] != 'direct_reads_only':
+        if asset['status'] != 'supported' or asset['name'] not in safe_commands:
             continue
         row = dict(name=asset['name'], source=asset['source'])
         try:
             cost, hashes = retained_payloads(build, row)
         except ValueError:
             continue
-        if not retained_eligible(cost):
-            continue
         shared = {owner for vertex in cost['vertex_symbols'] for owner in owners[vertex]}
-        if any(decisions[owner]['status'] != 'direct_reads_only' for owner in shared):
+        if any(owner not in safe_commands for owner in shared):
             continue
         relevant = {asset['source'], 'include/PR/gbi.h',
                     'include/assets/' + Path(asset['source']).stem + '.h'}
@@ -992,7 +1006,7 @@ def retained_census(build, policy_path):
             if digest != fingerprints.get(source):
                 raise ValueError('stale retained census evidence for ' + source)
             proof[source] = digest
-        row.update(cost=cost, vertex_sha256=hashes, source_sha256=proof, qualification='direct_reads_only')
+        row.update(cost=cost, vertex_sha256=hashes, source_sha256=proof, qualification='accepted_commands' if asset['name'] in ACCEPTED_ASSETS else 'direct_reads_only')
         result.append(row)
         names.update(hashes)
     users = retained_runtime_users(names)
@@ -1004,8 +1018,29 @@ def retained_census(build, policy_path):
         else:
             accepted.append(row)
     accepted.sort(key=lambda row: (-row['cost']['avoided'], row['name']))
-    return dict(version=1, scope='saved supported direct-read command evidence only',
+    return dict(version=1, scope='accepted AOT commands and saved direct-read evidence with vertex checks',
                 candidates=accepted, blocked=blocked, alias_audit_expanded=False)
+
+
+def rank_retained_frequency(rows, captures):
+    measured = collections.defaultdict(list)
+    for capture in captures:
+        if capture['scene'] == 'Title':
+            continue
+        calls = collections.Counter()
+        for asset in capture['asset_rows']:
+            calls[asset['name']] += asset['calls_per_frame']
+        for name, count in calls.items():
+            measured[name].append(dict(scene=capture['scene'], calls_per_frame=count,
+                                       capture=capture['capture']))
+    ranked = []
+    for row in rows:
+        samples = measured.get(row['name'], [])
+        calls = max((sample['calls_per_frame'] for sample in samples), default=0)
+        ranked.append(dict(name=row['name'], calls_per_frame=calls,
+                           avoided_per_frame=row['cost']['avoided']*calls,
+                           measurements=samples))
+    return sorted(ranked, key=lambda row: (-row['avoided_per_frame'], row['name']))
 
 
 def generate_retained(build):
@@ -1021,31 +1056,72 @@ def generate_retained(build):
         seen.add(row['name'])
         validate_manifest({'version': 1, 'objects': [dict(source=row['source'],
             header='assets/'+Path(row['source']).stem+'.h', assets=[row['name']])]})
-        if row['qualification'] not in ('hardware_validated', 'direct_reads_only'):
+        if row['qualification'] not in ('hardware_validated', 'direct_reads_only', 'reviewed_render_table', 'accepted_commands'):
             raise ValueError('unqualified retained source')
+        if row['qualification'] == 'accepted_commands' and row['name'] not in ACCEPTED_ASSETS:
+            raise ValueError('retained command is outside accepted AOT coverage')
         required = {row['source'], 'include/PR/gbi.h', 'include/assets/'+Path(row['source']).stem+'.h'}
         if not required <= row['source_sha256'].keys():
             raise ValueError('incomplete retained source evidence')
         for source, expected in row['source_sha256'].items():
             if hashlib.sha256(Path(source).read_bytes()).hexdigest() != expected:
                 raise ValueError('stale retained source evidence for ' + source)
+        if row['qualification'] == 'reviewed_render_table':
+            alias = row.get('alias_review', {})
+            symbol = alias.get('symbol', '')
+            if not re.fullmatch(r'[A-Za-z_]\w*', symbol):
+                raise ValueError('missing render-table review')
+            consumers = retained_runtime_users({symbol}).get(symbol, [])
+            if set(consumers) != set(alias.get('consumers', [])) or not consumers:
+                raise ValueError('render-table consumers changed')
+            if not set(consumers) <= row['source_sha256'].keys():
+                raise ValueError('render-table consumers lack fingerprints')
         cost, hashes = retained_payloads(build, row)
         if hashes != row['vertex_sha256']:
             raise ValueError('retained vertex payload changed for ' + row['name'])
-        if not retained_eligible(cost):
-            raise ValueError('retained source no longer meets cost rule ' + row['name'])
         rows.append(dict(row, cost=cost))
         vertex_names.update(hashes)
     users = retained_runtime_users(vertex_names)
     if users:
         raise ValueError('retained vertices have runtime references: ' + ', '.join(sorted(users)))
-    if len(rows)*38064 > 3*1024*1024:
+    if sum(row['cost']['packet_bytes'] for row in rows) > 3*1024*1024:
         raise ValueError('retained selection exceeds cache byte ceiling')
+    order = asset_object_order()
+    definitions = {}
+    for source in {row['source'] for row in rows}:
+        _, _, symbols, _ = read_symbols(Path(build)/Path(source).with_suffix('.o'))
+        definitions.update({name:(order[source], section, value) for name,value,size,section in symbols if name and size})
+    rows.sort(key=lambda row: definitions[row['name']])
     header = '#ifndef PSP_RETAINED_ASSETS_H\n#define PSP_RETAINED_ASSETS_H\n\n'
-    header += '#define PSP_RETAINED_CACHE_SLOTS '+str(len(rows))+'\n\n#endif\n'
+    header += '#define PSP_RETAINED_CACHE_SLOTS '+str(len(rows))+'\n'
+    header += '#define PSP_RETAINED_PACKET_BYTES '+str(sum(r['cost']['packet_bytes'] for r in rows))+'\n\n#endif\n'
     source = ''.join('extern Gfx '+row['name']+'[];\n' for row in rows)
     source += '\nconst PspGfxDlRetainedSource sRetainedSources[PSP_RETAINED_CACHE_SLOTS] = {\n'
-    source += ''.join('    { '+row['name']+', '+str(row['cost']['commands'])+' },\n' for row in rows)+'};\n'
+    source += ''.join('    { '+row['name']+', '+str(row['cost']['commands'])+', '+str(int(row.get('baseline',False)))+' },\n' for row in rows)+'};\n'
+    source += '\nconst PspGfxDlRetainedWrites sRetainedWrites[PSP_RETAINED_CACHE_SLOTS] = {\n'
+    source += ''.join('    { { 0x%08x, 0x%08x }, %d },\n' % (*row['cost']['written_slots'], row['cost']['final']) for row in rows)+'};\n'
+    contract = config.get('caller_contract', {})
+    expected_users = set(contract.get('setup_users', []))
+    users = {source for source in retained_runtime_users({'gRcpSetupDLs'}).get('gRcpSetupDLs', [])
+             if not source.startswith('src/psp/gfx/')}
+    if not expected_users or users != expected_users:
+        raise ValueError('setup table consumers changed')
+    proof = contract.get('setup_source_sha256', {})
+    if set(proof) != expected_users:
+        raise ValueError('setup contract lacks source fingerprints')
+    for consumer, expected in proof.items():
+        if hashlib.sha256(Path(consumer).read_bytes()).hexdigest() != expected:
+            raise ValueError('setup contract source changed')
+    obj = Path(build)/'src/engine/fox_rcp.o'
+    data, sections, symbols, _ = read_symbols(obj)
+    table = next(row for row in symbols if row[0] == 'gRcpSetupDLs')
+    _, start, size, section = table
+    if not size or size % 72: raise ValueError('unexpected setup table extent')
+    words = [struct.unpack_from('<II',data,sections[section][4]+start+i) for i in range(0,size,8)]
+    state_ops = {0,1,3,0xb3,0xb4,0xb6,0xb7,0xb9,0xba,0xbb,0xbc,0xbd,0xe4,0xe5} | set(range(0xe6,0x100)) - {0xf1}
+    if any(w0>>24 not in state_ops for i,(w0,w1) in enumerate(words) if i%9!=8) or any(w0!=0xb8000000 or w1 for i,(w0,w1) in enumerate(words) if i%9==8):
+        raise ValueError('setup table now consumes vertices or changes control flow')
+    header = header.replace('\n#endif\n','#define PSP_RETAINED_SETUP_ROWS '+str(size//72)+'\n\n#endif\n')
     write_output(Path(build)/'retained_assets.h', header)
     write_output(Path(build)/'retained_assets.inc.c', source)
     write_output(Path(build)/'retained_assets.json', json.dumps(rows, indent=2)+'\n')
@@ -1057,6 +1133,7 @@ def main():
     parser.add_argument('--retained', action='store_true')
     parser.add_argument('--retained-sources', action='store_true')
     parser.add_argument('--retained-census', action='store_true')
+    parser.add_argument('--retained-frequency', help='rank qualified candidates using a saved gameplay census')
     parser.add_argument('--asset')
     parser.add_argument('--coverage-policy')
     parser.add_argument('--candidate', action='append', help='compile only these qualified additions without A/B controls')
@@ -1070,7 +1147,14 @@ def main():
     if args.retained_census:
         if not args.coverage_policy or not args.build_dir or len(args.paths) != 1:
             parser.error('retained census requires saved coverage-policy, build-dir and output')
-        write_output(args.paths[0], json.dumps(retained_census(args.build_dir, args.coverage_policy), indent=2)+'\n')
+        result = retained_census(args.build_dir, args.coverage_policy)
+        if args.retained_frequency:
+            pool = {row['name']: row for row in result['candidates']}
+            for row in ACCEPTED_MANIFEST.get('retained', {}).get('assets', []):
+                cost, _ = retained_payloads(args.build_dir, row)
+                pool[row['name']] = dict(row, cost=cost)
+            result['frequency_ranking'] = rank_retained_frequency(pool.values(), json.loads(Path(args.retained_frequency).read_text()))
+        write_output(args.paths[0], json.dumps(result, indent=2)+'\n')
         return
     if args.retained_sources:
         print(' '.join(sorted({r['source'] for r in ACCEPTED_MANIFEST['retained']['assets']})))

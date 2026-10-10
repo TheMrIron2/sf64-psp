@@ -75,6 +75,13 @@ typedef struct {
 
 int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats);
 
+#if PSP_GFX_BACKEND_GU
+typedef struct {
+    u32 mode, hits, fallbacks, spans, vertices, restored, skipped;
+} PspGfxDlRetainedStats;
+void PspGfxDl_ToggleRetainedCoverage(void);
+void PspGfxDl_GetRetainedStats(PspGfxDlRetainedStats* stats);
+#endif
 
 #if PSP_NATIVE_COVERAGE_AB
 typedef struct {

@@ -705,7 +705,7 @@ RETAINED_ASSET_SOURCES := $(shell $(PYTHON) src/psp/gfx/native_asset_compile.py 
 RETAINED_ASSET_OBJECTS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(RETAINED_ASSET_SOURCES))
 RETAINED_ASSET_HEADERS := $(addprefix include/assets/,$(notdir $(RETAINED_ASSET_SOURCES:.c=.h)))
 RETAINED_RUNTIME_SOURCES := $(shell rg --files src/engine src/overlays src/psp -g '*.c' -g '*.h' -g '*.S' -g '*.s')
-$(BUILD_DIR)/retained_assets.h $(BUILD_DIR)/retained_assets.inc.c &: $(RETAINED_ASSET_OBJECTS) $(RETAINED_ASSET_HEADERS) $(RETAINED_RUNTIME_SOURCES) src/psp/gfx/native_asset_compile.py $(NATIVE_ASSET_MANIFEST) include/PR/gbi.h
+$(BUILD_DIR)/retained_assets.h $(BUILD_DIR)/retained_assets.inc.c &: $(RETAINED_ASSET_OBJECTS) $(RETAINED_ASSET_HEADERS) $(RETAINED_RUNTIME_SOURCES) $(BUILD_DIR)/src/engine/fox_rcp.o src/engine/fox_rcp_setup.c src/psp/gfx/native_asset_compile.py $(NATIVE_ASSET_MANIFEST) include/PR/gbi.h
 	$(PYTHON) src/psp/gfx/native_asset_compile.py --retained --build-dir $(BUILD_DIR)
 
 $(BUILD_DIR)/src/psp/gfx/gfx_psp_dl.o $(BUILD_DIR)/src/psp/gfx/gfx_psp_retained_sources.o: $(BUILD_DIR)/retained_assets.h
@@ -714,6 +714,7 @@ endif
 
 $(BUILD_DIR)/src/psp/gfx/gfx_psp_dl.o: $(BUILD_DIR)/native_assets.inc.c src/psp/gfx/gfx_psp_native_assets.inc.c
 $(BUILD_DIR)/src/psp/gfx/gfx_psp_dl.o: src/psp/gfx/gfx_psp_retained_mesh.inc.c lib/n64psp/include/n64psp/native_mesh.h
+$(BUILD_DIR)/src/psp/gfx/gfx_psp_dl.o $(BUILD_DIR)/src/psp/gfx/gfx_psp_seams.o: src/psp/gfx/gfx_psp_seams.h
 $(BUILD_DIR)/src/psp/gfx/gfx_psp_dl.o $(BUILD_DIR)/src/psp/gfx/gfx_psp_retained_sources.o: src/psp/gfx/gfx_psp_retained_sources.h
 $(BUILD_DIR)/src/psp/gfx/gfx_psp_dl.o $(BUILD_DIR)/src/psp/input.o $(BUILD_DIR)/src/psp/renderer_bridge.o: src/psp/gfx/gfx_psp_dl.h
 $(BUILD_DIR)/src/psp/input.o: src/psp/hw_counter_profile.h
@@ -743,3 +744,5 @@ resolve-queue-trace:
 -include $(DEP_FILES)
 
 .PHONY: tools-init toolchain torch init decompress extract assets clean-generated resolve-queue-trace psp-profile-gprof psp-profile-phases psp-profile-combined psp-profile-builds psp-profile-artifacts psp-profile-report psp-profile-hw-counters FORCE
+
+$(BUILD_DIR)/src/psp/gfx/gfx_psp_dl.o $(BUILD_DIR)/src/psp/gfx/gfx_psp_retained_sources.o $(BUILD_DIR)/src/psp/gfx/gfx_psp_mesh_diagnostic.o $(BUILD_DIR)/src/psp/gfx/gfx_psp_gu_device.o $(BUILD_DIR)/src/psp/input.o $(BUILD_DIR)/src/psp/renderer_bridge.o: src/psp/gfx/gfx_psp_mesh_diagnostic.h

@@ -1,3 +1,6 @@
+#if PSP_GFX_BACKEND_GU
+#include "gfx/gfx_psp_mesh_diagnostic.h"
+#endif
 #include <pspctrl.h>
 
 #include "src/psp/gfx/gfx_psp_dl.h"
@@ -117,7 +120,7 @@ int PspInput_Poll(OSContPad* pads) {
         int uiScalePressed = ((pad.Buttons & uiScaleCombo) == uiScaleCombo) &&
                              ((previousButtons & uiScaleCombo) != uiScaleCombo);
 
-#if PSP_NATIVE_COVERAGE_AB
+#if PSP_GFX_BACKEND_GU || PSP_NATIVE_COVERAGE_AB
         const u32 coverageCombo = PSP_CTRL_SELECT | PSP_CTRL_DOWN;
         int coveragePressed = ((pad.Buttons & coverageCombo) == coverageCombo) &&
                               ((previousButtons & coverageCombo) != coverageCombo);
@@ -139,12 +142,20 @@ int PspInput_Poll(OSContPad* pads) {
                 PspFrameScheduler_TogglePresentationRate();
             }
             pad.Buttons &= ~rateCombo;
-#if PSP_NATIVE_COVERAGE_AB
+#if PSP_GFX_BACKEND_GU || PSP_NATIVE_COVERAGE_AB
         } else if ((pad.Buttons & coverageCombo) == coverageCombo) {
             if (coveragePressed) {
+#if PSP_GFX_BACKEND_GU
+                PspGfxDl_ToggleRetainedCoverage();
+#else
                 PspGfxDl_ToggleNativeCoverage();
+#endif
             }
             pad.Buttons &= ~coverageCombo;
+#endif
+#if PSP_GFX_BACKEND_GU
+        } else if (PspMeshDiagnostic_PollControls(pad.Buttons)) {
+            pad.Buttons &= ~(PSP_CTRL_SELECT | PSP_CTRL_UP | PSP_CTRL_LTRIGGER);
 #endif
         } else if (PspGfxDl_TracePollControls(pad.Buttons)) {
             pad.Buttons &= ~(PSP_CTRL_SELECT | PSP_CTRL_TRIANGLE);

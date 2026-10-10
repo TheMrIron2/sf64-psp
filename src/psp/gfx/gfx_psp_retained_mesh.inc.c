@@ -2,70 +2,9 @@
 #include <n64psp/native_mesh.h>
 
 #include "gfx_psp_retained_sources.h"
-
-typedef struct {
-    n64psp_mesh mesh;
-    u16 indices[N64PSP_MESH_INDEX_LIMIT] __attribute__((aligned(16)));
-    float bounds[2][3];
-    u32 streamVertices;
-} PspGfxDlRetainedCache;
+#include "gfx_psp_mesh_diagnostic.h"
 
 static PspGfxDlRetainedCache* sRetainedCache;
-static PspGfxDlRetainedCache* sRetainedCaches[PSP_RETAINED_CACHE_SLOTS];
-static int sRetainedBuilt[PSP_RETAINED_CACHE_SLOTS];
-static const void* psp_gfx_dl_retained_resolve(void* user, uint32_t raw, size_t bytes, int* immutable) {
-    (void) user;
-    if (!psp_gfx_dl_is_native_ptr(raw) || (raw & 7) || !bytes || bytes > 64 * sizeof(Vtx)) return NULL;
-    // The selected leaf and its vertex ranges are qualified from the frozen asset object
-    *immutable = 1;
-    return (const void*) (uintptr_t) raw;
-}
-
-static int psp_gfx_dl_retained_build(const Gfx* child, u32 commandsCount, u32 slot) {
-    u32 i;
-    n64psp_mesh_command commands[N64PSP_MESH_COMMAND_LIMIT];
-
-    sRetainedBuilt[slot] = -1;
-    sRetainedCache = PspGfxRetainedSource_Allocate(sizeof(*sRetainedCache));
-    if (!sRetainedCache) return 0;
-    sRetainedCaches[slot] = sRetainedCache;
-    sRetainedCache->streamVertices = 0;
-    for (i = 0; i < commandsCount; i++) {
-        commands[i].w0 = child[i].words.w0;
-        commands[i].w1 = child[i].words.w1;
-    }
-    if (!n64psp_mesh_build(&sRetainedCache->mesh, commands, commandsCount, 1, psp_gfx_dl_retained_resolve, NULL)) return 0;
-    for (i = 0; i < sRetainedCache->mesh.vertex_count; i++) {
-        u32 axis;
-        for (axis = 0; axis < 3; axis++) {
-            float value = sRetainedCache->mesh.vertices[i].position[axis];
-            if (!i || value < sRetainedCache->bounds[0][axis]) sRetainedCache->bounds[0][axis] = value;
-            if (!i || value > sRetainedCache->bounds[1][axis]) sRetainedCache->bounds[1][axis] = value;
-        }
-    }
-    for (i = 0; i < sRetainedCache->mesh.action_count; i++) {
-        n64psp_mesh_action* action = &sRetainedCache->mesh.actions[i];
-        if (action->kind == N64PSP_MESH_SPAN) {
-            u32 j, first = UINT16_MAX, last = 0;
-            for (j = 0; j < action->count; j++) {
-                u32 version = sRetainedCache->mesh.indices[action->first + j];
-                if (version < first) first = version;
-                if (version > last) last = version;
-            }
-            action->w0 = first;
-            action->w1 = last - first + 1;
-            if (action->w1 > 64 || sRetainedCache->streamVertices + action->w1 > N64PSP_MESH_INDEX_LIMIT) return 0;
-            action->reserved = sRetainedCache->streamVertices;
-            sRetainedCache->streamVertices += action->w1;
-            for (j = 0; j < action->count; j++) {
-                sRetainedCache->indices[action->first + j] = sRetainedCache->mesh.indices[action->first + j] - first;
-            }
-        }
-    }
-    PspGfxBackend_SealMeshIndices(sRetainedCache->indices, sRetainedCache->mesh.index_count);
-    sRetainedBuilt[slot] = 1;
-    return 1;
-}
 
 static int psp_gfx_dl_retained_inside(PspGfxDlContext* ctx) {
     u32 corner;
@@ -116,7 +55,6 @@ static int psp_gfx_dl_retained_materials(const PspGfxDlContext* ctx) {
                 case 0xf5:
                     fmt = (w0 >> 21) & 7;
                     size = (w0 >> 19) & 3;
-                    if ((w1 & 15) || ((w1 >> 10) & 15)) return 0;
                     request.mirrorS = ((w1 >> 8) & G_TX_MIRROR) && ((w1 >> 4) & 15);
                     request.mirrorT = ((w1 >> 18) & G_TX_MIRROR) && ((w1 >> 14) & 15);
                     break;
@@ -126,8 +64,17 @@ static int psp_gfx_dl_retained_materials(const PspGfxDlContext* ctx) {
                     break;
             }
         } else if (action->kind == N64PSP_MESH_SPAN && ctx->textureEnabled) {
-            request.format = PSP_GFX_TEXTURE_RGBA16;
-            if (fmt != G_IM_FMT_RGBA || size != G_IM_SIZ_16b || !PspGfxBackend_TextureSupported(&request)) return 0;
+            request.palette = NULL;
+            if (fmt == G_IM_FMT_RGBA && size == G_IM_SIZ_16b) request.format = PSP_GFX_TEXTURE_RGBA16;
+            else if (fmt == G_IM_FMT_RGBA && size == G_IM_SIZ_32b) request.format = PSP_GFX_TEXTURE_RGBA32;
+            else if (fmt == G_IM_FMT_IA && size == G_IM_SIZ_8b) request.format = PSP_GFX_TEXTURE_IA8;
+            else if (fmt == G_IM_FMT_IA && size == G_IM_SIZ_16b) request.format = PSP_GFX_TEXTURE_IA16;
+            else if (fmt == G_IM_FMT_CI && (size == G_IM_SIZ_4b || size == G_IM_SIZ_8b)) {
+                if (!ctx->texturePalette) return 0;
+                request.palette = ctx->texturePalette;
+                request.format = size == G_IM_SIZ_4b ? PSP_GFX_TEXTURE_CI4 : PSP_GFX_TEXTURE_CI8;
+            } else return 0;
+            if (!PspGfxBackend_TextureSupported(&request)) return 0;
         }
     }
     return 1;
@@ -145,24 +92,77 @@ static void psp_gfx_dl_retained_final_slots(PspGfxDlContext* ctx) {
         psp_gfx_dl_load_vertices(ctx, vertices, count, first);
         finalCount += count;
     }
+    sRetainedStats.restored += finalCount;
 #if PSP_GFX_DL_HOT_STATS || PROFILE_HW_COUNTERS
-    ctx->stats.vertexCount += sRetainedCache->mesh.vertex_count - finalCount;
+    ctx->stats.vertexCount += sRetainedCache->mesh.loaded_count - finalCount;
 #endif
 }
 
-static void psp_gfx_dl_retained_draw(PspGfxDlContext* ctx, PspGfxVertex* stream) {
-    u32 i;
+static __attribute__((noinline)) void psp_gfx_dl_retained_discard_slots(PspGfxDlContext* ctx) {
+    u32 slot;
+    for (slot = 0; slot < 64; slot++) {
+        if (sRetainedCache->mesh.final_slots[slot] == N64PSP_MESH_EMPTY) continue;
+        psp_gfx_dl_set_vertex_projection(ctx, &ctx->vertices[slot], PSP_GFX_DL_NO_PROJECTION_SNAPSHOT);
+        ctx->vertices[slot].state.raw = 0;
+    }
+#if PSP_GFX_DL_HOT_STATS || PROFILE_HW_COUNTERS
+    ctx->stats.vertexCount += sRetainedCache->mesh.loaded_count;
+#endif
+}
+
+static __attribute__((noinline)) void psp_gfx_dl_retained_vertices(PspGfxDlContext* ctx,
+    PspGfxVertex* vertices, const n64psp_mesh_vertex* source, u32 count) {
+    u32 j;
+    for (j = 0; j < count; j++) {
+        sPspGfxDlLightingNormals[j] = *(const n64psp_snorm8x4*) source[j].color;
+    }
+    if (ctx->geometryMode & G_LIGHTING) {
+        n64psp_directional_light_snorm8_batch(sPspGfxDlLightingOutput, &ctx->alignedMatrices.modelview,
+            sPspGfxDlLightingNormals,
+            ctx->groupedLightCount ? sPspGfxDlGroupedLightingLights : sPspGfxDlLightingLights,
+            &sPspGfxDlLightingAmbient, ctx->groupedLightCount ? ctx->groupedLightCount : ctx->lightCount,
+            count);
+    }
+    for (j = 0; j < count; j++) {
+        const n64psp_mesh_vertex* vertex = &source[j];
+        u32 r, g, b, a = vertex->color[3];
+        if (ctx->geometryMode & G_LIGHTING) {
+            r = psp_gfx_dl_remap_lighting(sPspGfxDlLightingOutput[j].x);
+            g = psp_gfx_dl_remap_lighting(sPspGfxDlLightingOutput[j].y);
+            b = psp_gfx_dl_remap_lighting(sPspGfxDlLightingOutput[j].z);
+        } else {
+            r = psp_gfx_color_transfer_u8(vertex->color[0]);
+            g = psp_gfx_color_transfer_u8(vertex->color[1]);
+            b = psp_gfx_color_transfer_u8(vertex->color[2]);
+        }
+        if (ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_SHADE_DECAL_ALPHA) a = 255;
+        vertices[j].color = psp_gfx_dl_pack_rgba_u8(r, g, b, a, ctx->effectiveMaterial.classification.premultiplied);
+        vertices[j].x = vertex->position[0];
+        vertices[j].y = vertex->position[1];
+        vertices[j].z = vertex->position[2];
+        vertices[j].u = vertex->uv[0] * ctx->textureUvMulS + ctx->textureUvAddS;
+        vertices[j].v = vertex->uv[1] * ctx->textureUvMulT + ctx->textureUvAddT;
+    }
+}
+
+static void psp_gfx_dl_retained_draw(PspGfxDlContext* ctx, PspGfxVertex* stream, int discard) {
+    u32 i, phaseStart, drawStart = PspMeshDiagnostic_Start();
     PspGfxDlFogProjection fogProjection;
     float fogColor[4], fogStart, fogEnd;
     int requestedFog = (ctx->otherModeL >> 30) == G_BL_CLR_FOG;
     psp_gfx_dl_get_fog_projection(ctx->fogProjection, &fogProjection);
     psp_gfx_dl_resolve_fog_values(ctx, requestedFog, &fogProjection, fogColor, &fogStart, &fogEnd);
+    phaseStart = PspMeshDiagnostic_Start();
     psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_OTHER);
+    PspMeshDiagnostic_End(MESH_DIAG_DRAIN, phaseStart);
+    phaseStart = PspMeshDiagnostic_Start();
     psp_gfx_dl_prepare_effective_lights(ctx);
+    PspMeshDiagnostic_End(MESH_DIAG_LIGHTS, phaseStart);
     for (i = 0; i < sRetainedCache->mesh.action_count; i++) {
         const n64psp_mesh_action* action = &sRetainedCache->mesh.actions[i];
         if (action->kind == N64PSP_MESH_MATERIAL) {
             Gfx command;
+            phaseStart = PspMeshDiagnostic_Start();
             command.words.w0 = action->w0;
             command.words.w1 = action->w1;
             switch (action->w0 >> 24) {
@@ -170,43 +170,25 @@ static void psp_gfx_dl_retained_draw(PspGfxDlContext* ctx, PspGfxVertex* stream)
                 case 0xf5: psp_gfx_dl_handle_set_tile(ctx, &command); break;
                 case 0xf2: psp_gfx_dl_handle_set_tile_size(ctx, &command); break;
             }
+            PspMeshDiagnostic_End(MESH_DIAG_DRAW_STATE, phaseStart);
         } else if (action->kind == N64PSP_MESH_SPAN) {
             PspGfxDrawState state = { 0 };
             PspGfxVertex* vertices = stream + action->reserved;
             u32 j;
+            phaseStart = PspMeshDiagnostic_Start();
             psp_gfx_dl_resolve_effective_material_state(ctx);
             psp_gfx_dl_resolve_effective_depth_state(ctx);
             psp_gfx_dl_update_texture_uv_coefficients(ctx);
-            for (j = 0; j < action->w1; j++) {
-                sPspGfxDlLightingNormals[j] = *(const n64psp_snorm8x4*) sRetainedCache->mesh.vertices[action->w0 + j].color;
+            PspMeshDiagnostic_End(MESH_DIAG_DRAW_STATE, phaseStart);
+            phaseStart = PspMeshDiagnostic_Start();
+            for (j = 0; j < action->w1; j += 64) {
+                u32 count = action->w1 - j;
+                if (count > 64) count = 64;
+                psp_gfx_dl_retained_vertices(ctx, vertices + j,
+                    sRetainedCache->mesh.vertices + action->w0 + j, count);
             }
-            if (ctx->geometryMode & G_LIGHTING) {
-                n64psp_directional_light_snorm8_batch(sPspGfxDlLightingOutput, &ctx->alignedMatrices.modelview,
-                    sPspGfxDlLightingNormals,
-                    ctx->groupedLightCount ? sPspGfxDlGroupedLightingLights : sPspGfxDlLightingLights,
-                    &sPspGfxDlLightingAmbient, ctx->groupedLightCount ? ctx->groupedLightCount : ctx->lightCount,
-                    action->w1);
-            }
-            for (j = 0; j < action->w1; j++) {
-                const n64psp_mesh_vertex* source = &sRetainedCache->mesh.vertices[action->w0 + j];
-                u32 r, g, b, a = source->color[3];
-                if (ctx->geometryMode & G_LIGHTING) {
-                    r = psp_gfx_dl_remap_lighting(sPspGfxDlLightingOutput[j].x);
-                    g = psp_gfx_dl_remap_lighting(sPspGfxDlLightingOutput[j].y);
-                    b = psp_gfx_dl_remap_lighting(sPspGfxDlLightingOutput[j].z);
-                } else {
-                    r = psp_gfx_color_transfer_u8(source->color[0]);
-                    g = psp_gfx_color_transfer_u8(source->color[1]);
-                    b = psp_gfx_color_transfer_u8(source->color[2]);
-                }
-                if (ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_SHADE_DECAL_ALPHA) a = 255;
-                vertices[j].color = psp_gfx_dl_pack_rgba_u8(r, g, b, a, ctx->effectiveMaterial.classification.premultiplied);
-                vertices[j].x = source->position[0];
-                vertices[j].y = source->position[1];
-                vertices[j].z = source->position[2];
-                vertices[j].u = source->uv[0] * ctx->textureUvMulS + ctx->textureUvAddS;
-                vertices[j].v = source->uv[1] * ctx->textureUvMulT + ctx->textureUvAddT;
-            }
+            PspMeshDiagnostic_End(MESH_DIAG_VERTICES, phaseStart);
+            phaseStart = PspMeshDiagnostic_Start();
             state.texture = ctx->effectiveMaterial.texture;
             state.textureEnv = ctx->effectiveMaterial.classification.textureEnv;
             state.textureEnvColor = ctx->effectiveMaterial.textureEnvColor;
@@ -225,48 +207,108 @@ static void psp_gfx_dl_retained_draw(PspGfxDlContext* ctx, PspGfxVertex* stream)
             state.projectionMatrix = &ctx->projection[0][0];
             state.projectionSerial = ctx->projectionSerial;
             state.viewport = psp_gfx_dl_resolve_viewport(ctx, NULL, 0, state.projectionMatrix);
-            PspGfxBackend_DrawMesh(vertices, sRetainedCache->indices + action->first, action->count, &state,
+            PspMeshDiagnostic_End(MESH_DIAG_DRAW_STATE, phaseStart);
+            phaseStart = PspMeshDiagnostic_Start();
+            PspGfxBackend_DrawMesh(vertices, sRetainedCache->mesh.indices + action->first, action->count, &state,
                 &ctx->alignedMatrices.modelview.m[0][0], (ctx->geometryMode & G_CULL_FRONT) != 0,
                 (ctx->geometryMode & G_CULL_BACK) != 0);
+            PspMeshDiagnostic_End(MESH_DIAG_SUBMIT, phaseStart);
         }
     }
-    psp_gfx_dl_retained_final_slots(ctx);
+    phaseStart = PspMeshDiagnostic_Start();
+    if (discard) psp_gfx_dl_retained_discard_slots(ctx);
+    else psp_gfx_dl_retained_final_slots(ctx);
+    PspMeshDiagnostic_End(discard ? MESH_DIAG_DISCARD : MESH_DIAG_RESTORE, phaseStart);
     psp_gfx_dl_mark_effective_material_dirty(ctx);
     ctx->effectiveDepth.dirty = 1;
     ctx->effectiveFog.dirty = 1;
+    PspMeshDiagnostic_End(MESH_DIAG_DRAW, drawStart);
 }
 
-static int psp_gfx_dl_retained_dispatch(PspGfxDlContext* ctx, const Gfx* child, u32 depth) {
+static __attribute__((noinline)) int psp_gfx_dl_retained_dispatch(PspGfxDlContext* ctx, const Gfx* child, u32 depth) {
     PspGfxVertex* stream;
-    u32 commandsCount, slot;
+    u32 commandsCount, slot, phaseStart, admissionStart;
+    int discard, admitted;
+    if (!sRetainedStats.mode) return 0;
+    admissionStart = phaseStart = PspMeshDiagnostic_Start();
     slot = PspGfxRetainedSource_Find(child, &commandsCount);
-    if (slot == PSP_RETAINED_CACHE_SLOTS) return 0;
+    PspMeshDiagnostic_End(MESH_DIAG_LOOKUP, phaseStart);
+    if (slot == PSP_RETAINED_CACHE_SLOTS) {
+        if (sMeshDiagnosticEnabled) sMeshDiagnostic.unregistered++;
+        return 0;
+    }
+    if (sRetainedStats.mode == 1 && !sRetainedSources[slot].baseline) {
+        if (sMeshDiagnosticEnabled) sMeshDiagnostic.excluded++;
+        return 0;
+    }
+    phaseStart = PspMeshDiagnostic_Start();
+    sRetainedStats.fallbacks++;
     if (depth >= PSP_GFX_DL_MAX_DEPTH || ctx->stats.commandCount > PSP_GFX_DL_MAX_COMMANDS - commandsCount ||
         !ctx->hasProjection || (ctx->geometryMode & G_TEXTURE_GEN) || psp_gfx_dl_depth_bias_enabled(ctx) ||
+        !((ctx->geometryMode & G_ZBUFFER) || (ctx->otherModeL & Z_UPD)) ||
         ((ctx->geometryMode & G_CULL_BOTH) == G_CULL_BOTH) ||
         (ctx->combineMode != PSP_GFX_DL_COMBINE_MODULATE_SHADE_DECAL_ALPHA &&
          ctx->combineMode != PSP_GFX_DL_COMBINE_MODULATE_SHADE_ALPHA && ctx->combineMode != PSP_GFX_DL_COMBINE_SHADE)) {
+        PspMeshDiagnostic_End(MESH_DIAG_STATE, phaseStart);
+        PspMeshDiagnostic_Reject(MESH_REJECT_STATE, admissionStart);
         return 0;
     }
 #if PSP_ORIGINAL_FOG
     if ((ctx->geometryMode & G_FOG) || ((ctx->otherModeL >> 30) == G_BL_CLR_FOG)) {
+        PspMeshDiagnostic_End(MESH_DIAG_STATE, phaseStart);
+        PspMeshDiagnostic_Reject(MESH_REJECT_FOG, admissionStart);
         return 0;
     }
 #endif
 #if PSP_RENDERER_DIAGNOSTICS
-    if (ctx->traceActive) { return 0; }
-#endif
-    if (!sRetainedBuilt[slot] && !psp_gfx_dl_retained_build(child, commandsCount, slot)) { return 0; }
-    if (sRetainedBuilt[slot] < 0) { return 0; }
-    sRetainedCache = sRetainedCaches[slot];
-    psp_gfx_dl_prepare_batch_matrices(ctx);
-    if (!psp_gfx_dl_retained_inside(ctx) || !psp_gfx_dl_retained_materials(ctx)) {
+    if (ctx->traceActive) {
+        PspMeshDiagnostic_End(MESH_DIAG_STATE, phaseStart);
+        PspMeshDiagnostic_Reject(MESH_REJECT_TRACE, admissionStart);
         return 0;
     }
-    stream = PspGfxBackend_AllocateMeshVertices(sRetainedCache->streamVertices, sRetainedCache->mesh.span_count);
-    if (!stream) { return 0; }
-    psp_gfx_dl_retained_draw(ctx, stream);
+#endif
+    sRetainedCache = PspGfxRetainedSource_Get(slot);
+    PspMeshDiagnostic_End(MESH_DIAG_STATE, phaseStart);
+    if (!sRetainedCache) {
+        PspMeshDiagnostic_Reject(MESH_REJECT_CACHE, admissionStart); return 0;
+    }
+    phaseStart = PspMeshDiagnostic_Start();
+    psp_gfx_dl_prepare_batch_matrices(ctx);
+    admitted = psp_gfx_dl_retained_inside(ctx);
+    PspMeshDiagnostic_End(MESH_DIAG_BOUNDS, phaseStart);
+    if (!admitted) {
+        PspMeshDiagnostic_Reject(MESH_REJECT_BOUNDS, admissionStart); return 0;
+    }
+    phaseStart = PspMeshDiagnostic_Start();
+    admitted = psp_gfx_dl_retained_materials(ctx);
+    PspMeshDiagnostic_End(MESH_DIAG_MATERIALS, phaseStart);
+    if (!admitted) {
+        PspMeshDiagnostic_Reject(MESH_REJECT_MATERIALS, admissionStart); return 0;
+    }
+    phaseStart = PspMeshDiagnostic_Start();
+    stream = PspGfxBackend_AllocateMeshVertices(sRetainedCache->mesh.stream_count, sRetainedCache->mesh.span_count);
+    PspMeshDiagnostic_End(MESH_DIAG_ALLOCATE, phaseStart);
+    if (!stream) {
+        PspMeshDiagnostic_Reject(MESH_REJECT_ALLOCATE, admissionStart); return 0;
+    }
+    PspMeshDiagnostic_End(MESH_DIAG_ADMIT, admissionStart);
     ctx->stats.commandCount += sRetainedCache->mesh.command_count;
+    phaseStart = PspMeshDiagnostic_Start();
+    discard = sRetainedStats.mode == 3 && PspGfxRetainedSource_OutputsDead(slot, depth,
+        PSP_GFX_DL_MAX_COMMANDS - ctx->stats.commandCount);
+    if (sRetainedStats.mode == 3) {
+        PspMeshDiagnostic_End(MESH_DIAG_PROOF, phaseStart);
+        if (sMeshDiagnosticEnabled) {
+            if (discard) sMeshDiagnostic.proofDead++;
+            else sMeshDiagnostic.proofLive++;
+        }
+    }
+    if (discard) sRetainedStats.skipped += sRetainedWrites[slot].count;
+    psp_gfx_dl_retained_draw(ctx, stream, discard);
+    sRetainedStats.fallbacks--;
+    sRetainedStats.hits++;
+    sRetainedStats.spans += sRetainedCache->mesh.span_count;
+    sRetainedStats.vertices += sRetainedCache->mesh.stream_count;
     if (depth > ctx->stats.maxDepthReached) ctx->stats.maxDepthReached = depth;
 #if PSP_GFX_DL_HOT_STATS
     ctx->stats.triangleCount += sRetainedCache->mesh.index_count / 3;

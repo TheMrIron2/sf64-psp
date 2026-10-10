@@ -1,3 +1,4 @@
+#include "gfx_psp_mesh_diagnostic.h"
 #include <n64psp/display.h>
 
 #include "src/psp/gfx/gfx_psp_gu_device.h"
@@ -304,7 +305,7 @@ int PspGfxGuDevice_Submit(void) {
         return 0;
     }
 
-    syncResult = sceGuSync(GU_SYNC_FINISH, GU_SYNC_WHAT_DONE);
+    syncResult = PspMeshDiagnostic_Sync();
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_FINISH_SYNC);
     if (syncResult < 0) {
         psp_gfx_gu_device_log_failure("[gu] frame list sync failed");

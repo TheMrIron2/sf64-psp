@@ -6,6 +6,10 @@
 #include "sf64thread.h"
 #include "src/psp/gfx/gfx_psp_backend.h"
 #include "src/psp/gfx/gfx_psp_color.h"
+#include "src/psp/gfx/gfx_psp_seams.h"
+#if PSP_GFX_BACKEND_GU
+#include "src/psp/gfx/gfx_psp_mesh_diagnostic.h"
+#endif
 #include "src/psp/display.h"
 #include "src/psp/hw_counter_profile.h"
 #include "src/psp/platform.h"
@@ -2318,62 +2322,10 @@ static void psp_gfx_dl_handle_movemem(PspGfxDlContext* ctx, const Gfx* gfx) {
     }
 }
 
-/*
- * Backdrop seam weld. The sky panorama (Background_DrawBackdrop) draws the
- * same backdrop DL twice, at x-translations differing by exactly one
- * panorama period; the two instances' abutting edge vertices are
- * mathematically equal but reach the GE through different float expressions
- * (edge = +x*m00 + t1 vs -x*m00 + t2), which differ by ~1 ulp (~1/16 px on
- * screen). The N64 RSP quantizes all screen coordinates to s13.2
- * quarter-pixels, welding such edges shut; the PSP GE rasterizes full
- * floats and leaves a one-pixel unpainted column at the seam (the Corneria
- * intro's vertical streak: background fill color showing through the sky).
- * Weld: in small, flat (constant view-z), non-pretransformed batches --
- * the backdrop wrap pair's signature -- snap any vertex within ~1/8 px
- * screen tolerance of an earlier vertex onto that vertex. UVs are left
- * alone (each strip keeps sampling its own edge texel).
- */
+// Weld nearby seams only in flat background batches without depth
 static void psp_gfx_dl_weld_flat_batch_seams(PspGfxDlContext* ctx) {
-    float minZ;
-    float maxZ;
-    float eps;
-    u32 i;
-    u32 j;
-
-    if (ctx->batchPretransformed || (ctx->batchCount < 12) || (ctx->batchCount > 48)) {
-        return;
-    }
-    minZ = maxZ = PSP_GFX_DL_BATCH[0].z;
-    for (i = 1; i < ctx->batchCount; i++) {
-        float z = PSP_GFX_DL_BATCH[i].z;
-
-        if (z < minZ) {
-            minZ = z;
-        }
-        if (z > maxZ) {
-            maxZ = z;
-        }
-    }
-    /* Flat and in front of the eye only (view z < 0, constant across batch). */
-    if ((maxZ >= 0.0f) || ((maxZ - minZ) > (0.001f * -minZ))) {
-        return;
-    }
-    /* ~1/8 pixel at this depth: dx_view = (1/8)/240 ndc * |z| / P00(=1.811). */
-    eps = 3.0e-4f * -minZ;
-    for (i = 1; i < ctx->batchCount; i++) {
-        PspGfxVertex* b = &PSP_GFX_DL_BATCH[i];
-
-        for (j = 0; j < i; j++) {
-            const PspGfxVertex* a = &PSP_GFX_DL_BATCH[j];
-            float dx = b->x - a->x;
-            float dy = b->y - a->y;
-
-            if (((dx != 0.0f) || (dy != 0.0f)) && (dx < eps) && (dx > -eps) && (dy < eps) && (dy > -eps)) {
-                b->x = a->x;
-                b->y = a->y;
-                break;
-            }
-        }
+    if (!ctx->batchPretransformed && !(ctx->batchDepthTest | ctx->batchDepthWrite)) {
+        PspGfx_WeldFlatVertices(PSP_GFX_DL_BATCH, ctx->batchCount);
     }
 }
 
@@ -6494,14 +6446,23 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
             }
 #endif
 #if PSP_GFX_BACKEND_GU
-            if (psp_gfx_dl_retained_dispatch(ctx, child, depth + 1)) {
-            } else
+            if (sRetainedStats.mode == 3) {
+                sRetainedContinuations[depth] = noPush ? NULL : (const n64psp_mesh_command*) pc;
+                sRetainedCallerLevels |= 1u << depth;
+            }
+            if (!psp_gfx_dl_retained_dispatch(ctx, child, depth + 1)) {
+                u32 fallbackStart = PspMeshDiagnostic_Start();
 #endif
             if ((child == aVenomFighter1DL) && psp_gfx_dl_native_fighter_eligible(ctx, depth + 1)) {
                 psp_gfx_dl_native_fighter_run(ctx, depth + 1);
             } else if (!psp_gfx_dl_native_leaf_dispatch(ctx, child, depth + 1)) {
                 psp_gfx_dl_run_internal(ctx, child, depth + 1);
             }
+#if PSP_GFX_BACKEND_GU
+                PspMeshDiagnostic_End(MESH_DIAG_FALLBACK, fallbackStart);
+            }
+            if (sRetainedStats.mode == 3) sRetainedCallerLevels &= ~(1u << depth);
+#endif
 #if PROFILE_HW_COUNTERS
             if (waterStartUs != 0 && waterTile <= PSP_WATER_TILE_COUNT) {
                 ctx->waterDlDepth = 0;
@@ -7023,6 +6984,9 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
     psp_gfx_dl_native_coverage_begin();
 #endif
     PspGfxColor_Init();
+#if PSP_GFX_BACKEND_GU
+    PspGfxRetainedSource_Prepare();
+#endif
     psp_gfx_dl_reset_context(ctx);
     ctx->taskIndex = taskIndex;
 #if PSP_RENDERER_DIAGNOSTICS
@@ -7266,6 +7230,14 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
     }
 #endif
 
+#if PSP_GFX_BACKEND_GU
+    sMeshDiagnostic.commands = ctx->stats.commandCount;
+#if PSP_GFX_DL_HOT_STATS || PROFILE_HW_COUNTERS
+    sMeshDiagnostic.loaded = ctx->stats.vertexCount;
+    sMeshDiagnostic.submitted = ctx->stats.drawVertexCount;
+    sMeshDiagnostic.workStats = 1;
+#endif
+#endif
     return ctx->stats.commandCount > 0;
 }
 

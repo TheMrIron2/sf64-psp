@@ -470,10 +470,8 @@ static void psp_gfx_gu_set_matrices(const PspGfxDrawState* state, const float* m
     if (!sPspGfxGuState.matrixValid) {
         sceGuSetMatrix(GU_VIEW, &sPspGfxGuIdentityMatrix);
     }
-    if (modelview != NULL) {
-        sceGuSetMatrix(GU_MODEL, (const ScePspFMatrix4*) modelview);
-    } else if (!sPspGfxGuState.matrixValid || !sPspGfxGuState.viewModelIdentity) {
-        sceGuSetMatrix(GU_MODEL, &sPspGfxGuIdentityMatrix);
+    if (!sPspGfxGuState.matrixValid || (sPspGfxGuState.viewModelIdentity != (modelview == NULL))) {
+        sceGuSetMatrix(GU_MODEL, modelview != NULL ? (const ScePspFMatrix4*) modelview : &sPspGfxGuIdentityMatrix);
     }
     sPspGfxGuState.projectionIdentity = identity;
     sPspGfxGuState.projectionMatrix = state->projectionMatrix;
@@ -840,6 +838,7 @@ PspGfxVertex* PspGfxBackend_AllocateMeshVertices(u32 count, u32 draws) {
     if (count > available / sizeof(PspGfxVertex)) return NULL;
     available -= count * sizeof(PspGfxVertex);
     if (available < PSP_GFX_GU_LIST_DRAW_RESERVE || draws > (available - PSP_GFX_GU_LIST_DRAW_RESERVE) / 1024U) return NULL;
+    sPspGfxGuState.viewModelIdentity = -1;
     return (PspGfxVertex*) psp_gfx_gu_alloc_vertices(count, sizeof(PspGfxVertex));
 }
 
