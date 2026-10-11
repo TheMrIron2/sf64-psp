@@ -10,7 +10,6 @@
 typedef struct {
     const Gfx* commands;
     u32 count;
-    u32 baseline;
 } PspGfxDlRetainedSource;
 
 typedef struct {
@@ -24,6 +23,13 @@ typedef char PspGfxDlRetainedPrefixCheck[
 extern PspGfxDlRetainedStats sRetainedStats;
 void PspGfxRetainedSource_Prepare(void);
 PspGfxDlRetainedCache* PspGfxRetainedSource_Get(u32 slot);
+
+typedef struct {
+    u16 count;
+    u8 support, palette;
+    n64psp_mesh_span spans[];
+} PspGfxRetainedProgram;
+extern PspGfxRetainedProgram* sRetainedPrograms[PSP_RETAINED_CACHE_SLOTS];
 
 extern const PspGfxDlRetainedSource sRetainedSources[PSP_RETAINED_CACHE_SLOTS];
 typedef struct { u32 slots[2], count; } PspGfxDlRetainedWrites;

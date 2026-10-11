@@ -1,5 +1,4 @@
 #include "gfx_psp_retained_sources.h"
-#include "gfx_psp_mesh_diagnostic.h"
 #include <malloc.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -32,13 +31,9 @@ u32 PspGfxRetainedSource_Find(const Gfx* commands, u32* count) {
 }
 
 static PspGfxDlRetainedCache* sRetainedCaches[PSP_RETAINED_CACHE_SLOTS];
+PspGfxRetainedProgram* sRetainedPrograms[PSP_RETAINED_CACHE_SLOTS];
 static int sRetainedBuilt[PSP_RETAINED_CACHE_SLOTS];
-static volatile u32 sRetainedRequested = 3;
-PspGfxDlRetainedStats sRetainedStats = { 3, 0, 0, 0, 0, 0, 0 };
-
-void PspGfxDl_ToggleRetainedCoverage(void) {
-    sRetainedRequested = (sRetainedRequested + 1) % 4;
-}
+PspGfxDlRetainedStats sRetainedStats;
 
 void PspGfxDl_GetRetainedStats(PspGfxDlRetainedStats* stats) {
     *stats = sRetainedStats;
@@ -46,9 +41,62 @@ void PspGfxDl_GetRetainedStats(PspGfxDlRetainedStats* stats) {
 static const void* psp_gfx_dl_retained_resolve(void* user, uint32_t raw, size_t bytes, int* immutable) {
     (void) user;
     if (!PSP_IS_NATIVE_PTR(raw) || (raw & 7) || !bytes || bytes > 64 * sizeof(Vtx)) return NULL;
-    // The selected leaf and its vertex ranges are qualified from the frozen asset object
+    // The qualified leaf and its vertex ranges are qualified from the frozen asset object
     *immutable = 1;
     return (const void*) (uintptr_t) raw;
+}
+
+static void psp_gfx_retained_program_support(PspGfxRetainedProgram* program) {
+    PspGfxTextureRequest request = {0};
+    u32 i, known = 0, format = 0, size = 0;
+    int supported = 1, complete = 1;
+    program->palette = 0;
+    for (i = 0; i < program->count; i++) {
+        const n64psp_mesh_span* span = &program->spans[i];
+        const n64psp_mesh_material* material = &span->material;
+        if (material->flags & N64PSP_MESH_IMAGE) {
+            request.pixels = (const void*) (uintptr_t) material->image;
+            if (!PSP_IS_NATIVE_PTR(material->image)) complete = 0;
+        }
+        if (material->flags & (N64PSP_MESH_IMAGE | N64PSP_MESH_TILE)) {
+            format = material->format;
+            size = material->size;
+        }
+        if (material->flags & N64PSP_MESH_TILE) {
+            request.mirrorS = (material->cms & G_TX_MIRROR) && material->mask_s;
+            request.mirrorT = (material->cmt & G_TX_MIRROR) && material->mask_t;
+        }
+        if (material->flags & N64PSP_MESH_SIZE) {
+            request.width = material->width;
+            request.height = material->height;
+        }
+        known |= material->flags;
+        if (!span->count) continue;
+        if ((known & 7) != 7) { complete = 0; continue; }
+        request.palette = NULL;
+        if (format == G_IM_FMT_RGBA && size == G_IM_SIZ_16b) request.format = PSP_GFX_TEXTURE_RGBA16;
+        else if (format == G_IM_FMT_RGBA && size == G_IM_SIZ_32b) request.format = PSP_GFX_TEXTURE_RGBA32;
+        else if (format == G_IM_FMT_IA && size == G_IM_SIZ_8b) request.format = PSP_GFX_TEXTURE_IA8;
+        else if (format == G_IM_FMT_IA && size == G_IM_SIZ_16b) request.format = PSP_GFX_TEXTURE_IA16;
+        else if (format == G_IM_FMT_CI && (size == G_IM_SIZ_4b || size == G_IM_SIZ_8b)) {
+            program->palette = 1;
+            request.palette = request.pixels;
+            request.format = size == G_IM_SIZ_4b ? PSP_GFX_TEXTURE_CI4 : PSP_GFX_TEXTURE_CI8;
+        } else { supported = 0; continue; }
+        if (!PspGfxBackend_TextureSupported(&request)) supported = 0;
+    }
+    program->support = complete ? (supported ? 1 : 2) : 0;
+}
+
+static void psp_gfx_retained_program_build(u32 slot, const n64psp_mesh_packet* mesh) {
+    u32 count = mesh->span_count + 1;
+    u32 bytes = sizeof(PspGfxRetainedProgram) + count * sizeof(n64psp_mesh_span);
+    PspGfxRetainedProgram* program = PspGfxRetainedSource_Allocate(bytes);
+    if (!program) return;
+    program->count = n64psp_mesh_compile_spans(mesh, program->spans, count);
+    if (!program->count) return;
+    psp_gfx_retained_program_support(program);
+    sRetainedPrograms[slot] = program;
 }
 
 static int psp_gfx_dl_retained_build(const Gfx* child, u32 commandsCount, u32 slot) {
@@ -87,6 +135,7 @@ static int psp_gfx_dl_retained_build(const Gfx* child, u32 commandsCount, u32 sl
         }
     }
     PspGfxBackend_SealMeshIndices(cache->mesh.indices, cache->mesh.index_count);
+    psp_gfx_retained_program_build(slot, &cache->mesh);
     sRetainedBuilt[slot] = 1;
     return 1;
 }
@@ -104,7 +153,7 @@ void PspGfxRetainedSource_Prepare(void) {
         prepared = 1;
     }
     sRetainedCallerLevels = 0;
-    sRetainedStats = (PspGfxDlRetainedStats) { sRetainedRequested, 0, 0, 0, 0, 0, 0 };
+    sRetainedStats = (PspGfxDlRetainedStats) { 0 };
 }
 
 PspGfxDlRetainedCache* PspGfxRetainedSource_Get(u32 slot) {
@@ -121,12 +170,10 @@ static int psp_gfx_retained_effect(void* user, const n64psp_mesh_command* comman
                                     n64psp_mesh_vertex_effect* effect) {
     u32 op = command->w0 >> 24;
     (void) user;
-    if (sMeshDiagnosticEnabled) sMeshDiagnostic.proofEffects++;
     if (op == 6) {
         u32 count, slot;
         uintptr_t address = command->w1, setup = (uintptr_t) gRcpSetupDLs;
         *effect = (n64psp_mesh_vertex_effect) { {0,0}, {0,0}, 0 };
-        if (sMeshDiagnosticEnabled) sMeshDiagnostic.proofLookups++;
         slot = PspGfxRetainedSource_Find((const Gfx*) address, &count);
         if (slot != PSP_RETAINED_CACHE_SLOTS) {
             effect->writes[0] = sRetainedWrites[slot].slots[0];
@@ -139,11 +186,9 @@ static int psp_gfx_retained_effect(void* user, const n64psp_mesh_command* comman
             effect->commands = 9;
             return 1;
         }
-        if (sMeshDiagnosticEnabled) sMeshDiagnostic.proofUnknown++;
         return 0;
     }
     if (op == 4 && (!PSP_IS_NATIVE_PTR(command->w1) || (command->w1 & 7))) {
-        if (sMeshDiagnosticEnabled) sMeshDiagnostic.proofUnknown++;
         return 0;
     }
     if (op == PSP_RENDERER_DL_OP_MTXF || op == PSP_RENDERER_DL_OP_INVALIDATE_RGBA16 ||
@@ -153,11 +198,9 @@ static int psp_gfx_retained_effect(void* user, const n64psp_mesh_command* comman
     }
     {
         int known = n64psp_mesh_command_effect(command, effect);
-        if (!known && sMeshDiagnosticEnabled) sMeshDiagnostic.proofUnknown++;
         return known;
     }
 }
-
 int PspGfxRetainedSource_OutputsDead(u32 slot, u32 depth, u32 budget) {
     u32 required;
     if (!depth || depth > 32 || slot >= PSP_RETAINED_CACHE_SLOTS) return 0;

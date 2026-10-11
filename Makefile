@@ -744,5 +744,3 @@ resolve-queue-trace:
 -include $(DEP_FILES)
 
 .PHONY: tools-init toolchain torch init decompress extract assets clean-generated resolve-queue-trace psp-profile-gprof psp-profile-phases psp-profile-combined psp-profile-builds psp-profile-artifacts psp-profile-report psp-profile-hw-counters FORCE
-
-$(BUILD_DIR)/src/psp/gfx/gfx_psp_dl.o $(BUILD_DIR)/src/psp/gfx/gfx_psp_retained_sources.o $(BUILD_DIR)/src/psp/gfx/gfx_psp_mesh_diagnostic.o $(BUILD_DIR)/src/psp/gfx/gfx_psp_gu_device.o $(BUILD_DIR)/src/psp/input.o $(BUILD_DIR)/src/psp/renderer_bridge.o: src/psp/gfx/gfx_psp_mesh_diagnostic.h

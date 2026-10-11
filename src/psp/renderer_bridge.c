@@ -1,6 +1,3 @@
-#if PSP_GFX_BACKEND_GU
-#include "gfx/gfx_psp_mesh_diagnostic.h"
-#endif
 #include "PR/ultratypes.h"
 #include "sf64thread.h"
 #include "src/psp/gfx/gfx_psp_backend.h"
@@ -90,17 +87,19 @@ static void psp_renderer_draw_overlays(void) {
 #if PSP_GFX_BACKEND_GU
     {
         PspGfxDlRetainedStats stats;
-        uint32_t enabled, remaining, status;
         PspGfxDl_GetRetainedStats(&stats);
-        PspMeshDiagnostic_Status(&enabled, &remaining, &status);
         pspDebugScreenSetXY(0, 3);
-        pspDebugScreenPrintf("RC%lu H%lu F%lu D%lu V%lu R%lu S%lu       ", (unsigned long) stats.mode,
+        pspDebugScreenPrintf("NM H%lu F%lu D%lu V%lu R%lu S%lu       ",
             (unsigned long) stats.hits, (unsigned long) stats.fallbacks,
             (unsigned long) stats.spans, (unsigned long) stats.vertices,
             (unsigned long) stats.restored, (unsigned long) stats.skipped);
         pspDebugScreenSetXY(0, 4);
-        pspDebugScreenPrintf("RD%lu CAP%lu STATUS%lu          ", (unsigned long) enabled,
-            (unsigned long) remaining, (unsigned long) status);
+        pspDebugScreenPrintf("T%lu L%lu E%lu/%lu/%lu/%lu/%lu/%lu/%lu       ",
+            (unsigned long) stats.triangles, (unsigned long) stats.loaded,
+            (unsigned long) stats.rejects[0], (unsigned long) stats.rejects[1],
+            (unsigned long) stats.rejects[2], (unsigned long) stats.rejects[3],
+            (unsigned long) stats.rejects[4], (unsigned long) stats.rejects[5],
+            (unsigned long) stats.rejects[6]);
     }
 #elif PSP_NATIVE_COVERAGE_AB
     {
@@ -243,9 +242,6 @@ int PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
         PspHwCounterProfile_ScopeBegin(PSP_HW_SCOPE_TASK);
         PspHwCounterProfile_ScopeBegin(PSP_HW_SCOPE_FRONTEND);
         PspProfiler_ComponentTaskBegin();
-#if PSP_GFX_BACKEND_GU
-        PspMeshDiagnostic_BeginTask();
-#endif
         PspGfxDevice_BeginFrame();
 
         if ((task != NULL) && (task->task.t.data_ptr != NULL)) {
@@ -260,13 +256,7 @@ int PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
 
         PspHwCounterProfile_ScopeEnd(PSP_HW_SCOPE_FRONTEND);
         PspHwCounterProfile_ScopeBegin(PSP_HW_SCOPE_FLUSH);
-#if PSP_GFX_BACKEND_GU
-        PspMeshDiagnostic_SubmitStart();
-#endif
         PspGfxDevice_Submit();
-#if PSP_GFX_BACKEND_GU
-        PspMeshDiagnostic_SubmitEnd();
-#endif
         PspHwCounterProfile_ScopeEnd(PSP_HW_SCOPE_FLUSH);
         PspHwCounterProfile_ScopeEnd(PSP_HW_SCOPE_TASK);
 
@@ -296,9 +286,6 @@ int PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
 
 #if PSP_GFX_BACKEND_PSPGL
         psp_renderer_draw_overlays();
-#endif
-#if PSP_GFX_BACKEND_GU
-        PspMeshDiagnostic_EndTask(presented);
 #endif
         return presented;
 }

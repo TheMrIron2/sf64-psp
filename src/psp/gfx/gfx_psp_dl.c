@@ -7,9 +7,6 @@
 #include "src/psp/gfx/gfx_psp_backend.h"
 #include "src/psp/gfx/gfx_psp_color.h"
 #include "src/psp/gfx/gfx_psp_seams.h"
-#if PSP_GFX_BACKEND_GU
-#include "src/psp/gfx/gfx_psp_mesh_diagnostic.h"
-#endif
 #include "src/psp/display.h"
 #include "src/psp/hw_counter_profile.h"
 #include "src/psp/platform.h"
@@ -6446,12 +6443,9 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
             }
 #endif
 #if PSP_GFX_BACKEND_GU
-            if (sRetainedStats.mode == 3) {
-                sRetainedContinuations[depth] = noPush ? NULL : (const n64psp_mesh_command*) pc;
-                sRetainedCallerLevels |= 1u << depth;
-            }
+            sRetainedContinuations[depth] = noPush ? NULL : (const n64psp_mesh_command*) pc;
+            sRetainedCallerLevels |= 1u << depth;
             if (!psp_gfx_dl_retained_dispatch(ctx, child, depth + 1)) {
-                u32 fallbackStart = PspMeshDiagnostic_Start();
 #endif
             if ((child == aVenomFighter1DL) && psp_gfx_dl_native_fighter_eligible(ctx, depth + 1)) {
                 psp_gfx_dl_native_fighter_run(ctx, depth + 1);
@@ -6459,9 +6453,8 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
                 psp_gfx_dl_run_internal(ctx, child, depth + 1);
             }
 #if PSP_GFX_BACKEND_GU
-                PspMeshDiagnostic_End(MESH_DIAG_FALLBACK, fallbackStart);
             }
-            if (sRetainedStats.mode == 3) sRetainedCallerLevels &= ~(1u << depth);
+            sRetainedCallerLevels &= ~(1u << depth);
 #endif
 #if PROFILE_HW_COUNTERS
             if (waterStartUs != 0 && waterTile <= PSP_WATER_TILE_COUNT) {
@@ -7230,14 +7223,6 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
     }
 #endif
 
-#if PSP_GFX_BACKEND_GU
-    sMeshDiagnostic.commands = ctx->stats.commandCount;
-#if PSP_GFX_DL_HOT_STATS || PROFILE_HW_COUNTERS
-    sMeshDiagnostic.loaded = ctx->stats.vertexCount;
-    sMeshDiagnostic.submitted = ctx->stats.drawVertexCount;
-    sMeshDiagnostic.workStats = 1;
-#endif
-#endif
     return ctx->stats.commandCount > 0;
 }
 

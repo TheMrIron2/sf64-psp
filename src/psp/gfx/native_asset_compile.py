@@ -1097,7 +1097,7 @@ def generate_retained(build):
     header += '#define PSP_RETAINED_PACKET_BYTES '+str(sum(r['cost']['packet_bytes'] for r in rows))+'\n\n#endif\n'
     source = ''.join('extern Gfx '+row['name']+'[];\n' for row in rows)
     source += '\nconst PspGfxDlRetainedSource sRetainedSources[PSP_RETAINED_CACHE_SLOTS] = {\n'
-    source += ''.join('    { '+row['name']+', '+str(row['cost']['commands'])+', '+str(int(row.get('baseline',False)))+' },\n' for row in rows)+'};\n'
+    source += ''.join('    { '+row['name']+', '+str(row['cost']['commands'])+' },\n' for row in rows)+'};\n'
     source += '\nconst PspGfxDlRetainedWrites sRetainedWrites[PSP_RETAINED_CACHE_SLOTS] = {\n'
     source += ''.join('    { { 0x%08x, 0x%08x }, %d },\n' % (*row['cost']['written_slots'], row['cost']['final']) for row in rows)+'};\n'
     contract = config.get('caller_contract', {})

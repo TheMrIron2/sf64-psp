@@ -316,8 +316,7 @@
             "ast_great_fox_seg14_vtx_CB8",
             "ast_great_fox_seg14_vtx_EA8"
           ]
-        },
-        "baseline": true
+        }
       },
       {
         "name": "aGreatFoxDamagedDL",
@@ -410,8 +409,7 @@
             "ast_great_fox_seg14_vtx_7220",
             "ast_great_fox_seg14_vtx_7400"
           ]
-        },
-        "baseline": true
+        }
       },
       {
         "name": "aMeCrusherDL",
@@ -487,8 +485,7 @@
             "ast_meteo_seg6_vtx_4558",
             "ast_meteo_seg6_vtx_4638"
           ]
-        },
-        "baseline": true
+        }
       },
       {
         "name": "aBoBaseDL",
@@ -550,8 +547,7 @@
             "ast_bolse_seg6_vtx_44C8",
             "ast_bolse_seg6_vtx_46A8"
           ]
-        },
-        "baseline": true
+        }
       },
       {
         "name": "aMaRobotDL",
@@ -565,8 +561,7 @@
           "src/assets/ast_macbeth/ast_macbeth.c": "7db9f175352b07321ebb1443f67cebb23776e0c61bf1be3f87e2d95e773d8d72",
           "src/overlays/ovl_i5/fox_ma.c": "e4b6bbdf72d43b0bd688d035bb98fd2adc3f74728bad9c50c9c937611b93055c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aAwPeppyHeadDL",
@@ -595,8 +590,7 @@
           "src/assets/ast_arwing/ast_arwing.c": "6bc95a44c16c01f86ee0970b4e88984e6a8c4bb4690d9cdf97143e6e39d63ac6",
           "src/engine/fox_display.c": "c965e86c1a7d5fb4e49f86a3b2d3e4fb5cab2ca3a4a73f96ba7e7208f8bca25b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aMeMeteoTunnelDL",
@@ -621,8 +615,7 @@
           "src/assets/ast_meteo/ast_meteo.c": "4741a78fef6343c39a5e89d5229201d486a911e962863b69d12eb67f73dc5079",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aAwFoxHeadDL",
@@ -647,8 +640,7 @@
           "include/assets/ast_arwing.h": "efc8bddf863da4ef64d993f73aa53818531299ff2d2729ce802fab6cc903e0c2",
           "include/PR/gbi.h": "e4f3b010bdcfa92e7220b8194aa524ff10ba43679f82219559017d02f9d1fd8c"
         },
-        "qualification": "hardware_validated",
-        "baseline": true
+        "qualification": "hardware_validated"
       },
       {
         "name": "aAwSlippyHeadDL",
@@ -676,8 +668,7 @@
           "src/engine/fox_display.c": "c965e86c1a7d5fb4e49f86a3b2d3e4fb5cab2ca3a4a73f96ba7e7208f8bca25b",
           "src/overlays/ovl_ending/fox_end2.c": "fe4758d1f87015a836610cdf3c8003506ef01580a4450925d3df475d38fc2ab1"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAwFalcoHeadDL",
@@ -703,8 +694,7 @@
           "src/assets/ast_arwing/ast_arwing.c": "6bc95a44c16c01f86ee0970b4e88984e6a8c4bb4690d9cdf97143e6e39d63ac6",
           "src/engine/fox_display.c": "c965e86c1a7d5fb4e49f86a3b2d3e4fb5cab2ca3a4a73f96ba7e7208f8bca25b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aLandmasterModelDL",
@@ -736,8 +726,7 @@
           "src/assets/ast_landmaster/ast_landmaster.c": "8886a6b3ae4d431724876092c1f8ff4f8eb38a7b69d40b8304d7ae2e61b851f3",
           "src/engine/fox_display.c": "c965e86c1a7d5fb4e49f86a3b2d3e4fb5cab2ca3a4a73f96ba7e7208f8bca25b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "ast_title_seg6_gfx_20070",
@@ -760,8 +749,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "include/PR/gbi.h": "e4f3b010bdcfa92e7220b8194aa524ff10ba43679f82219559017d02f9d1fd8c"
         },
-        "qualification": "hardware_validated",
-        "baseline": true
+        "qualification": "hardware_validated"
       },
       {
         "name": "ast_title_seg6_gfx_2C4B0",
@@ -784,8 +772,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "include/PR/gbi.h": "e4f3b010bdcfa92e7220b8194aa524ff10ba43679f82219559017d02f9d1fd8c"
         },
-        "qualification": "hardware_validated",
-        "baseline": true
+        "qualification": "hardware_validated"
       },
       {
         "name": "ast_title_seg6_gfx_27130",
@@ -809,8 +796,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "include/PR/gbi.h": "e4f3b010bdcfa92e7220b8194aa524ff10ba43679f82219559017d02f9d1fd8c"
         },
-        "qualification": "hardware_validated",
-        "baseline": true
+        "qualification": "hardware_validated"
       },
       {
         "name": "aStarWolfUpgradedShipDL",
@@ -835,8 +821,7 @@
           "src/assets/ast_star_wolf/ast_star_wolf.c": "489ce86b9c39eecb39a073b9526ec6b4c7a9fe184daab7fc89fe59fecc3bdc70",
           "src/engine/fox_360.c": "598792706bdf4dea8cb098c9230f7b30fa24e48e3c9448557d5ead178ff9e7c1"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aStarWolfStandardShipDL",
@@ -859,8 +844,7 @@
           "src/assets/ast_star_wolf/ast_star_wolf.c": "489ce86b9c39eecb39a073b9526ec6b4c7a9fe184daab7fc89fe59fecc3bdc70",
           "src/engine/fox_360.c": "598792706bdf4dea8cb098c9230f7b30fa24e48e3c9448557d5ead178ff9e7c1"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "ast_title_seg6_gfx_24710",
@@ -882,8 +866,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "include/PR/gbi.h": "e4f3b010bdcfa92e7220b8194aa524ff10ba43679f82219559017d02f9d1fd8c"
         },
-        "qualification": "hardware_validated",
-        "baseline": true
+        "qualification": "hardware_validated"
       },
       {
         "name": "aAwBodyDL",
@@ -912,8 +895,7 @@
           "include/assets/ast_arwing.h": "efc8bddf863da4ef64d993f73aa53818531299ff2d2729ce802fab6cc903e0c2",
           "include/PR/gbi.h": "e4f3b010bdcfa92e7220b8194aa524ff10ba43679f82219559017d02f9d1fd8c"
         },
-        "qualification": "hardware_validated",
-        "baseline": true
+        "qualification": "hardware_validated"
       },
       {
         "name": "D_ZO_6006360",
@@ -937,8 +919,7 @@
           "src/assets/ast_zoness/ast_zoness.c": "122f7fb6153db8e7d645e7cc51b81d6ceb7baab98f95b8bfdc952b50a8bf9b6b",
           "src/overlays/ovl_i3/fox_zo.c": "f12de6de3052fa7ed6240b887658cebe894a3a567247f7774a80bd3be00c512b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aEndBuilding2DL",
@@ -958,8 +939,7 @@
           "src/assets/ast_ending/ast_ending.c": "3ec9171284d817d7b0fb5131744af6b96326c8f1cc6f21564b50ccd4f64f7643",
           "src/overlays/ovl_ending/fox_end1.c": "27f4cba2bd5455071b3ee7047d09688598c73d843b8158fac5b34a005eae46a6"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aEffectBossExplosionDL",
@@ -978,8 +958,7 @@
           "src/assets/ast_common/ast_common.c": "fea7def6e284f8cfc25800b4a8a0a21c5eb9100fbbb6b311a6ce8ea248a923e9",
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aBoSatelliteLightsDL",
@@ -998,8 +977,7 @@
           "src/assets/ast_bolse/ast_bolse.c": "25607e7ad87c5efab2bdca845532a7b7a8ff05e1dd409939f07d8f32897ff731",
           "src/engine/fox_demo.c": "8289a297713c4b104396edc2bee320344156edb31c091379a00d2ddaff2e31e0"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aSpaceArwingOnRailsDL",
@@ -1022,8 +1000,7 @@
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b",
           "src/engine/fox_enmy2.c": "25c45e81da1f5e18c35c718bd66e060597d7e747b1380359ba1917998d8e31b0"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aBoBaseShieldDL",
@@ -1041,8 +1018,7 @@
           "src/assets/ast_bolse/ast_bolse.c": "25607e7ad87c5efab2bdca845532a7b7a8ff05e1dd409939f07d8f32897ff731",
           "src/overlays/ovl_i4/fox_bo.c": "499eb0b78723cb683319a8c54fd33707aa00889e05998026aa7c3ab9f5647f0d"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aPlanetArwingAllRangeDL",
@@ -1067,8 +1043,7 @@
           "src/engine/fox_enmy2.c": "25c45e81da1f5e18c35c718bd66e060597d7e747b1380359ba1917998d8e31b0",
           "src/overlays/ovl_i5/fox_ti.c": "89d0a0d0690e1f527fa7070e27d9bf94930546e1e37812f862bd42fe866debb1"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aSpaceArwingAllRangeDL",
@@ -1090,8 +1065,7 @@
           "src/assets/ast_enmy_space/ast_enmy_space.c": "90a5ca380f1f23a6112be19520e951e6fa2a09bfad34f815d95239e4e87cb1c2",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aBlueMarineBodyDL",
@@ -1113,8 +1087,7 @@
           "src/assets/ast_blue_marine/ast_blue_marine.c": "3438f4df62873d3c5e5403fb9ea9ca3e2e2fff996e0fc2bba6890a9dce4d89ea",
           "src/overlays/ovl_i3/fox_aq.c": "d88adbbba9a2d0b38c50cfaa74a16bcaf59c06ffb777d99276cd658af3736634"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aA6UmbraStationDL",
@@ -1132,8 +1105,7 @@
           "src/assets/ast_area_6/ast_area_6.c": "03997573d7cab00b25511bdba70b979a65e6f17fc3741c5e59294167bf179dec",
           "src/engine/fox_enmy2.c": "25c45e81da1f5e18c35c718bd66e060597d7e747b1380359ba1917998d8e31b0"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aBillShipDL",
@@ -1151,8 +1123,7 @@
           "src/overlays/ovl_ending/fox_end1.c": "27f4cba2bd5455071b3ee7047d09688598c73d843b8158fac5b34a005eae46a6",
           "src/overlays/ovl_ending/fox_end2.c": "fe4758d1f87015a836610cdf3c8003506ef01580a4450925d3df475d38fc2ab1"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aMeCrusherShieldDL",
@@ -1171,8 +1142,7 @@
           "src/assets/ast_meteo/ast_meteo.c": "4741a78fef6343c39a5e89d5229201d486a911e962863b69d12eb67f73dc5079",
           "src/overlays/ovl_i2/fox_me.c": "bb37fefe00c3296d2844153a387c3904249c8b0c8b0dee724b43e803b90f85f7"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aVsLandmasterModelDL",
@@ -1194,8 +1164,7 @@
           "src/assets/ast_versus/ast_versus.c": "e9968da85e990b39a1d9a8aa6e62af965cd9e5fe6c2d2a0b090d44db805f4d9b",
           "src/engine/fox_display.c": "c965e86c1a7d5fb4e49f86a3b2d3e4fb5cab2ca3a4a73f96ba7e7208f8bca25b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aKattShipDL",
@@ -1218,8 +1187,7 @@
           "src/engine/fox_enmy2.c": "25c45e81da1f5e18c35c718bd66e060597d7e747b1380359ba1917998d8e31b0",
           "src/overlays/ovl_ending/fox_end2.c": "fe4758d1f87015a836610cdf3c8003506ef01580a4450925d3df475d38fc2ab1"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "D_versus_300EE80",
@@ -1240,8 +1208,7 @@
           "src/assets/ast_versus/ast_versus.c": "e9968da85e990b39a1d9a8aa6e62af965cd9e5fe6c2d2a0b090d44db805f4d9b",
           "src/engine/fox_display.c": "c965e86c1a7d5fb4e49f86a3b2d3e4fb5cab2ca3a4a73f96ba7e7208f8bca25b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "D_versus_3010A90",
@@ -1264,8 +1231,7 @@
           "src/assets/ast_versus/ast_versus.c": "e9968da85e990b39a1d9a8aa6e62af965cd9e5fe6c2d2a0b090d44db805f4d9b",
           "src/engine/fox_display.c": "c965e86c1a7d5fb4e49f86a3b2d3e4fb5cab2ca3a4a73f96ba7e7208f8bca25b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "D_versus_3011470",
@@ -1288,8 +1254,7 @@
           "src/assets/ast_versus/ast_versus.c": "e9968da85e990b39a1d9a8aa6e62af965cd9e5fe6c2d2a0b090d44db805f4d9b",
           "src/engine/fox_display.c": "c965e86c1a7d5fb4e49f86a3b2d3e4fb5cab2ca3a4a73f96ba7e7208f8bca25b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aBlueMarineItemBombDL",
@@ -1310,8 +1275,7 @@
           "src/assets/ast_blue_marine/ast_blue_marine.c": "3438f4df62873d3c5e5403fb9ea9ca3e2e2fff996e0fc2bba6890a9dce4d89ea",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aVe1PillarDL",
@@ -1328,8 +1292,7 @@
           "src/assets/ast_ve1_boss/ast_ve1_boss.c": "c0b08988d9e1496e696abdb6405184faae586512fe21808b814beb7afd143bc0",
           "src/engine/fox_enmy2.c": "25c45e81da1f5e18c35c718bd66e060597d7e747b1380359ba1917998d8e31b0"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aMeMolarRockDL",
@@ -1346,8 +1309,7 @@
           "src/assets/ast_meteo/ast_meteo.c": "4741a78fef6343c39a5e89d5229201d486a911e962863b69d12eb67f73dc5079",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "D_versus_300D550",
@@ -1370,8 +1332,7 @@
           "src/assets/ast_versus/ast_versus.c": "e9968da85e990b39a1d9a8aa6e62af965cd9e5fe6c2d2a0b090d44db805f4d9b",
           "src/engine/fox_display.c": "c965e86c1a7d5fb4e49f86a3b2d3e4fb5cab2ca3a4a73f96ba7e7208f8bca25b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aVenomTankDL",
@@ -1392,8 +1353,7 @@
             "src/engine/fox_enmy2.c"
           ]
         },
-        "hardware_accepted": true,
-        "baseline": true
+        "hardware_accepted": true
       },
       {
         "name": "aKaCornerianFighterDL",
@@ -1414,8 +1374,7 @@
           "src/engine/fox_demo.c": "8289a297713c4b104396edc2bee320344156edb31c091379a00d2ddaff2e31e0",
           "src/overlays/ovl_i4/fox_ka.c": "d64ba75f7dd0188c436265147ce8597dc02d636e0694d372ee490c55824ebd83"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aGrangaFighter1DL",
@@ -1441,8 +1400,7 @@
             "src/engine/fox_enmy2.c"
           ]
         },
-        "hardware_accepted": true,
-        "baseline": true
+        "hardware_accepted": true
       },
       {
         "name": "aMeFlipBot1DL",
@@ -1461,8 +1419,7 @@
           "src/assets/ast_meteo/ast_meteo.c": "4741a78fef6343c39a5e89d5229201d486a911e962863b69d12eb67f73dc5079",
           "src/engine/fox_enmy2.c": "25c45e81da1f5e18c35c718bd66e060597d7e747b1380359ba1917998d8e31b0"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aBombExplosionDL",
@@ -1478,8 +1435,7 @@
           "src/assets/ast_common/ast_common.c": "fea7def6e284f8cfc25800b4a8a0a21c5eb9100fbbb6b311a6ce8ea248a923e9",
           "src/engine/fox_beam.c": "f036f317a5cdd568b63785ae97ac5cca9748a5af7730f5b8ca3a538f6bd2fa1c"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aMissileSeekDL",
@@ -1496,8 +1452,7 @@
           "src/assets/ast_common/ast_common.c": "fea7def6e284f8cfc25800b4a8a0a21c5eb9100fbbb6b311a6ce8ea248a923e9",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aTitleGreatFoxDeckDL",
@@ -1520,8 +1475,7 @@
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b",
           "src/overlays/ovl_menu/fox_title.c": "e9558b02f40f5711de219d7754613a10244cece5bd19ef17e3680772abfb4a95"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "ast_title_seg6_gfx_22440",
@@ -1538,8 +1492,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aA6GorgonTentacleClawDL",
@@ -1556,8 +1509,7 @@
           "src/assets/ast_area_6/ast_area_6.c": "03997573d7cab00b25511bdba70b979a65e6f17fc3741c5e59294167bf179dec",
           "src/overlays/ovl_i3/fox_a6.c": "cc6787acbfc07b8c7b163cb305862c1c8ec3dcbd1509b30545deafcb7d7ee1db"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aAqCoralDebris5DL",
@@ -1573,8 +1525,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aShieldDL",
@@ -1590,8 +1541,7 @@
           "src/assets/ast_common/ast_common.c": "fea7def6e284f8cfc25800b4a8a0a21c5eb9100fbbb6b311a6ce8ea248a923e9",
           "src/engine/fox_360.c": "598792706bdf4dea8cb098c9230f7b30fa24e48e3c9448557d5ead178ff9e7c1"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aCoRadarDL",
@@ -1608,8 +1558,7 @@
           "src/assets/ast_corneria/ast_corneria.c": "acfc2699b00d068d3cd29eba3329f52f18c69fffda3a95cb5a2acd890d121b1d",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aBlueMarinePropellerDL",
@@ -1626,8 +1575,7 @@
           "src/assets/ast_blue_marine/ast_blue_marine.c": "3438f4df62873d3c5e5403fb9ea9ca3e2e2fff996e0fc2bba6890a9dce4d89ea",
           "src/overlays/ovl_i3/fox_aq.c": "d88adbbba9a2d0b38c50cfaa74a16bcaf59c06ffb777d99276cd658af3736634"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aVenomFighter1DL",
@@ -1645,8 +1593,7 @@
           "include/assets/ast_enmy_planet.h": "929f55eacc785620c52198bcf7ee3c65035921b8360ef045b69c2d0d91b7df8c",
           "include/PR/gbi.h": "e4f3b010bdcfa92e7220b8194aa524ff10ba43679f82219559017d02f9d1fd8c"
         },
-        "qualification": "hardware_validated",
-        "baseline": true
+        "qualification": "hardware_validated"
       },
       {
         "name": "aLandmasterCanonDL",
@@ -1664,8 +1611,7 @@
           "src/assets/ast_landmaster/ast_landmaster.c": "8886a6b3ae4d431724876092c1f8ff4f8eb38a7b69d40b8304d7ae2e61b851f3",
           "src/engine/fox_display.c": "c965e86c1a7d5fb4e49f86a3b2d3e4fb5cab2ca3a4a73f96ba7e7208f8bca25b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aAqCoralDebris4DL",
@@ -1681,8 +1627,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAqCoralDebris2DL",
@@ -1698,8 +1643,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAqCoralDebris3DL",
@@ -1715,8 +1659,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAwRightWingDL",
@@ -1733,8 +1676,7 @@
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b",
           "src/overlays/ovl_i6/fox_andross.c": "6acc4d52a5b7fde3477abac2645e2738c2712f3bcb6864847ed78bcbcedd3c9f"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aFoGroundDL",
@@ -1750,8 +1692,7 @@
           "src/assets/ast_fortuna/ast_fortuna.c": "c62f0bdda7a84a7826841f25b25e4c1b0f130abcf39b9020005654520691e85c",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aVsCorneriaGroundDL",
@@ -1768,8 +1709,7 @@
           "src/assets/ast_versus/ast_versus.c": "e9968da85e990b39a1d9a8aa6e62af965cd9e5fe6c2d2a0b090d44db805f4d9b",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aAqCoralDebris1DL",
@@ -1785,8 +1725,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_44770",
@@ -1805,8 +1744,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAwCockpitViewDL",
@@ -1827,8 +1765,7 @@
           "src/assets/ast_arwing/ast_arwing.c": "6bc95a44c16c01f86ee0970b4e88984e6a8c4bb4690d9cdf97143e6e39d63ac6",
           "src/engine/fox_display.c": "c965e86c1a7d5fb4e49f86a3b2d3e4fb5cab2ca3a4a73f96ba7e7208f8bca25b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aFoInvaderIDL",
@@ -1842,8 +1779,7 @@
           "src/assets/ast_fortuna/ast_fortuna.c": "c62f0bdda7a84a7826841f25b25e4c1b0f130abcf39b9020005654520691e85c",
           "src/engine/fox_360.c": "598792706bdf4dea8cb098c9230f7b30fa24e48e3c9448557d5ead178ff9e7c1"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aVenomFighter2DL",
@@ -1862,8 +1798,7 @@
           "src/assets/ast_enmy_planet/ast_enmy_planet.c": "5b8392ff2fe00417f79ec1b8c482618799cef7d74da46fd807bf4044b9455430",
           "src/engine/fox_enmy2.c": "25c45e81da1f5e18c35c718bd66e060597d7e747b1380359ba1917998d8e31b0"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aA6NinjinMissileDL",
@@ -1879,8 +1814,7 @@
           "src/assets/ast_area_6/ast_area_6.c": "03997573d7cab00b25511bdba70b979a65e6f17fc3741c5e59294167bf179dec",
           "src/engine/fox_enmy2.c": "25c45e81da1f5e18c35c718bd66e060597d7e747b1380359ba1917998d8e31b0"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aAwLeftWingDL",
@@ -1896,8 +1830,7 @@
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b",
           "src/overlays/ovl_i6/fox_andross.c": "6acc4d52a5b7fde3477abac2645e2738c2712f3bcb6864847ed78bcbcedd3c9f"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aTitleGreatFoxDeckLauncherDL",
@@ -1914,8 +1847,7 @@
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b",
           "src/overlays/ovl_menu/fox_title.c": "e9558b02f40f5711de219d7754613a10244cece5bd19ef17e3680772abfb4a95"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aAndHandWeakPointDL",
@@ -1931,8 +1863,7 @@
           "src/assets/ast_andross/ast_andross.c": "628ca97cd2c65668baf53a7c8a315ed946611cba4951e4f9be67d2aff6c93ad8",
           "src/overlays/ovl_i6/fox_andross.c": "6acc4d52a5b7fde3477abac2645e2738c2712f3bcb6864847ed78bcbcedd3c9f"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aVe1HallwayObstacleDL",
@@ -1946,8 +1877,7 @@
           "include/assets/ast_venom_1.h": "51a05e88b5e04db5249444b54710dd4a6341b1cbbc87b2df01cd16195e5f32fc",
           "src/assets/ast_venom_1/ast_venom_1.c": "86ff0c8a130d5e2b05aa59233899ad4a820918029915a655743814194e3d172c"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aBoFighterDL",
@@ -1965,8 +1895,7 @@
           "src/engine/fox_360.c": "598792706bdf4dea8cb098c9230f7b30fa24e48e3c9448557d5ead178ff9e7c1",
           "src/engine/fox_demo.c": "8289a297713c4b104396edc2bee320344156edb31c091379a00d2ddaff2e31e0"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "ast_title_seg6_gfx_21700",
@@ -1983,8 +1912,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "CoMoleMissileDL",
@@ -2000,8 +1928,7 @@
           "src/assets/ast_corneria/ast_corneria.c": "acfc2699b00d068d3cd29eba3329f52f18c69fffda3a95cb5a2acd890d121b1d",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aA6BackdropDL",
@@ -2022,8 +1949,7 @@
           "src/assets/ast_area_6/ast_area_6.c": "03997573d7cab00b25511bdba70b979a65e6f17fc3741c5e59294167bf179dec",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aBoSatelliteDL",
@@ -2040,8 +1966,7 @@
           "src/assets/ast_bolse/ast_bolse.c": "25607e7ad87c5efab2bdca845532a7b7a8ff05e1dd409939f07d8f32897ff731",
           "src/engine/fox_demo.c": "8289a297713c4b104396edc2bee320344156edb31c091379a00d2ddaff2e31e0"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aEndCorneriaDL",
@@ -2062,8 +1987,7 @@
           "src/assets/ast_ending/ast_ending.c": "3ec9171284d817d7b0fb5131744af6b96326c8f1cc6f21564b50ccd4f64f7643",
           "src/overlays/ovl_ending/fox_end2.c": "fe4758d1f87015a836610cdf3c8003506ef01580a4450925d3df475d38fc2ab1"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aMapPlanetShadowDL",
@@ -2084,8 +2008,7 @@
           "src/assets/ast_map/ast_map.c": "1e137036025176b60b34ff2a3041e377b5c5fdf2108e41d9a279eecb8d510493",
           "src/overlays/ovl_menu/fox_option.c": "9eadc300e25ca7521f949290927939b9e2dffaf9e00b7c9f74d4601e49eb46da"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aMeBackdropDL",
@@ -2106,8 +2029,7 @@
           "src/assets/ast_meteo/ast_meteo.c": "4741a78fef6343c39a5e89d5229201d486a911e962863b69d12eb67f73dc5079",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aTi1DelphorHeadDL",
@@ -2125,8 +2047,7 @@
           "src/assets/ast_7_ti_1/ast_7_ti_1.c": "2f54a3fd81dd21b5f85908cdf6a887442bdaf0500a4785068bb2627623faa118",
           "src/overlays/ovl_i5/fox_ti.c": "89d0a0d0690e1f527fa7070e27d9bf94930546e1e37812f862bd42fe866debb1"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aTitlePlanetCorneriaDL",
@@ -2147,8 +2068,7 @@
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b",
           "src/overlays/ovl_menu/fox_title.c": "e9558b02f40f5711de219d7754613a10244cece5bd19ef17e3680772abfb4a95"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "ast_title_seg6_gfx_267B0",
@@ -2165,8 +2085,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aMeLaserCannon1DL",
@@ -2182,8 +2101,7 @@
           "src/assets/ast_meteo/ast_meteo.c": "4741a78fef6343c39a5e89d5229201d486a911e962863b69d12eb67f73dc5079",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aA6GorgonCoreShieldDL",
@@ -2198,8 +2116,7 @@
           "src/assets/ast_area_6/ast_area_6.c": "03997573d7cab00b25511bdba70b979a65e6f17fc3741c5e59294167bf179dec",
           "src/overlays/ovl_i3/fox_a6.c": "cc6787acbfc07b8c7b163cb305862c1c8ec3dcbd1509b30545deafcb7d7ee1db"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aZoRadarBuoyDL",
@@ -2214,8 +2131,7 @@
           "src/assets/ast_zoness/ast_zoness.c": "122f7fb6153db8e7d645e7cc51b81d6ceb7baab98f95b8bfdc952b50a8bf9b6b",
           "src/overlays/ovl_i3/fox_zo.c": "f12de6de3052fa7ed6240b887658cebe894a3a567247f7774a80bd3be00c512b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aTi1BoulderDL",
@@ -2230,8 +2146,7 @@
           "src/assets/ast_7_ti_1/ast_7_ti_1.c": "2f54a3fd81dd21b5f85908cdf6a887442bdaf0500a4785068bb2627623faa118",
           "src/overlays/ovl_i5/fox_ti.c": "89d0a0d0690e1f527fa7070e27d9bf94930546e1e37812f862bd42fe866debb1"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "ast_title_seg6_gfx_2B420",
@@ -2247,8 +2162,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aTi1FekudaDL",
@@ -2264,8 +2178,7 @@
           "src/assets/ast_7_ti_1/ast_7_ti_1.c": "2f54a3fd81dd21b5f85908cdf6a887442bdaf0500a4785068bb2627623faa118",
           "src/overlays/ovl_i5/fox_ti.c": "89d0a0d0690e1f527fa7070e27d9bf94930546e1e37812f862bd42fe866debb1"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aAqBlueMarineTorpedoDL",
@@ -2286,8 +2199,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_beam.c": "f036f317a5cdd568b63785ae97ac5cca9748a5af7730f5b8ca3a538f6bd2fa1c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aA6RocketDL",
@@ -2304,8 +2216,7 @@
           "src/assets/ast_area_6/ast_area_6.c": "03997573d7cab00b25511bdba70b979a65e6f17fc3741c5e59294167bf179dec",
           "src/engine/fox_enmy2.c": "25c45e81da1f5e18c35c718bd66e060597d7e747b1380359ba1917998d8e31b0"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aAndLaserEmitterDL",
@@ -2321,8 +2232,7 @@
           "src/assets/ast_venom_2/ast_venom_2.c": "5426638d085a83eeaf1ccf9b79c1b42dfe3c1180df1000f5ba9264b7c04fdb7c",
           "src/overlays/ovl_i6/fox_andross.c": "6acc4d52a5b7fde3477abac2645e2738c2712f3bcb6864847ed78bcbcedd3c9f"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "ast_title_seg6_gfx_1E430",
@@ -2337,8 +2247,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_428E0",
@@ -2354,8 +2263,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aKaEnemyDL",
@@ -2374,8 +2282,7 @@
           "src/engine/fox_demo.c": "8289a297713c4b104396edc2bee320344156edb31c091379a00d2ddaff2e31e0",
           "src/overlays/ovl_i4/fox_ka.c": "d64ba75f7dd0188c436265147ce8597dc02d636e0694d372ee490c55824ebd83"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "D_VE1_90234D0",
@@ -2391,8 +2298,7 @@
           "src/assets/ast_ve1_boss/ast_ve1_boss.c": "c0b08988d9e1496e696abdb6405184faae586512fe21808b814beb7afd143bc0",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "D_ZO_601C590",
@@ -2409,8 +2315,7 @@
           "src/assets/ast_zoness/ast_zoness.c": "122f7fb6153db8e7d645e7cc51b81d6ceb7baab98f95b8bfdc952b50a8bf9b6b",
           "src/overlays/ovl_i3/fox_zo.c": "f12de6de3052fa7ed6240b887658cebe894a3a567247f7774a80bd3be00c512b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aAqGaroaDebris7DL",
@@ -2425,8 +2330,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aBoGroundDL",
@@ -2441,8 +2345,7 @@
           "src/assets/ast_bolse/ast_bolse.c": "25607e7ad87c5efab2bdca845532a7b7a8ff05e1dd409939f07d8f32897ff731",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aSyShogunPlatformDL",
@@ -2458,8 +2361,7 @@
           "src/assets/ast_sector_y/ast_sector_y.c": "47a1895a473e6361597538bb647da2cafc27b155c92ae7f2e85cab823df67daf",
           "src/engine/fox_demo.c": "8289a297713c4b104396edc2bee320344156edb31c091379a00d2ddaff2e31e0"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "ast_title_seg6_gfx_1E720",
@@ -2474,8 +2376,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_408C0",
@@ -2490,8 +2391,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aA6GorgonTentacleLimbDL",
@@ -2506,8 +2406,7 @@
           "src/assets/ast_area_6/ast_area_6.c": "03997573d7cab00b25511bdba70b979a65e6f17fc3741c5e59294167bf179dec",
           "src/overlays/ovl_i3/fox_a6.c": "cc6787acbfc07b8c7b163cb305862c1c8ec3dcbd1509b30545deafcb7d7ee1db"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aAqGaroaDebris2DL",
@@ -2522,8 +2421,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAqGaroaDebris5DL",
@@ -2538,8 +2436,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAqRockDL",
@@ -2554,8 +2451,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_demo.c": "8289a297713c4b104396edc2bee320344156edb31c091379a00d2ddaff2e31e0"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAwLaserGun1DL",
@@ -2571,8 +2467,7 @@
           "src/assets/ast_arwing/ast_arwing.c": "6bc95a44c16c01f86ee0970b4e88984e6a8c4bb4690d9cdf97143e6e39d63ac6",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAwLaserGun2L",
@@ -2587,8 +2482,7 @@
           "include/assets/ast_arwing.h": "efc8bddf863da4ef64d993f73aa53818531299ff2d2729ce802fab6cc903e0c2",
           "src/assets/ast_arwing/ast_arwing.c": "6bc95a44c16c01f86ee0970b4e88984e6a8c4bb4690d9cdf97143e6e39d63ac6"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aCoBuildingOnFireDL",
@@ -2603,8 +2497,7 @@
           "src/assets/ast_corneria/ast_corneria.c": "acfc2699b00d068d3cd29eba3329f52f18c69fffda3a95cb5a2acd890d121b1d",
           "src/overlays/ovl_i1/fox_co.c": "86680168d51c6e78ab71cf8cb0e720500442cd0d3a089185c5359bef548637ae"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aMeRockGull3DL",
@@ -2619,8 +2512,7 @@
           "src/assets/ast_meteo/ast_meteo.c": "4741a78fef6343c39a5e89d5229201d486a911e962863b69d12eb67f73dc5079",
           "src/engine/fox_enmy2.c": "25c45e81da1f5e18c35c718bd66e060597d7e747b1380359ba1917998d8e31b0"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aWzSxEnemy1DL",
@@ -2636,8 +2528,7 @@
           "src/assets/ast_warp_zone/ast_warp_zone.c": "c2347ee70330a5fc2f64b5191fbd28cb7564218d15823a93d19422d25fa64480",
           "src/engine/fox_enmy2.c": "25c45e81da1f5e18c35c718bd66e060597d7e747b1380359ba1917998d8e31b0"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "D_VE1_900D180",
@@ -2653,8 +2544,7 @@
           "src/assets/ast_ve1_boss/ast_ve1_boss.c": "c0b08988d9e1496e696abdb6405184faae586512fe21808b814beb7afd143bc0",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "D_VE1_9023290",
@@ -2669,8 +2559,7 @@
           "src/assets/ast_ve1_boss/ast_ve1_boss.c": "c0b08988d9e1496e696abdb6405184faae586512fe21808b814beb7afd143bc0",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aAqSpindlyFishDebris14DL",
@@ -2685,8 +2574,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAqSpindlyFishDebris1DL",
@@ -2701,8 +2589,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAqSpindlyFishDebris2DL",
@@ -2717,8 +2604,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAqSpindlyFishDebris3DL",
@@ -2733,8 +2619,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aCoIBeamDL",
@@ -2749,8 +2634,7 @@
           "src/assets/ast_corneria/ast_corneria.c": "acfc2699b00d068d3cd29eba3329f52f18c69fffda3a95cb5a2acd890d121b1d",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "ast_title_seg6_gfx_2B8C0",
@@ -2765,8 +2649,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAqSpindlyFishDebris15DL",
@@ -2782,8 +2665,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aTi1DelphorDL",
@@ -2799,8 +2681,7 @@
           "src/assets/ast_7_ti_1/ast_7_ti_1.c": "2f54a3fd81dd21b5f85908cdf6a887442bdaf0500a4785068bb2627623faa118",
           "src/overlays/ovl_i5/fox_ti.c": "89d0a0d0690e1f527fa7070e27d9bf94930546e1e37812f862bd42fe866debb1"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aAqGaroaDebris8DL",
@@ -2816,8 +2697,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAqShellDL",
@@ -2832,8 +2712,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_enmy2.c": "25c45e81da1f5e18c35c718bd66e060597d7e747b1380359ba1917998d8e31b0"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aKaEnemyLowPolyDL",
@@ -2849,8 +2728,7 @@
           "src/engine/fox_360.c": "598792706bdf4dea8cb098c9230f7b30fa24e48e3c9448557d5ead178ff9e7c1",
           "src/overlays/ovl_i4/fox_ka.c": "d64ba75f7dd0188c436265147ce8597dc02d636e0694d372ee490c55824ebd83"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aActorSuppliesDL",
@@ -2867,8 +2745,7 @@
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b",
           "src/engine/fox_enmy.c": "4ec3ee4138a4c242c578ed69c5f8ca341268475a9d057f36b7b6086c6a5bac66"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aAqGaroaDebris1DL",
@@ -2883,8 +2760,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAqGaroaDebris3DL",
@@ -2899,8 +2775,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAqGaroaDebris4DL",
@@ -2915,8 +2790,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAqGaroaDebris6DL",
@@ -2931,8 +2805,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aCoBuilding9DL",
@@ -2948,8 +2821,7 @@
           "src/assets/ast_corneria/ast_corneria.c": "acfc2699b00d068d3cd29eba3329f52f18c69fffda3a95cb5a2acd890d121b1d",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aKaFLBaseDestroyedDL",
@@ -2964,8 +2836,7 @@
           "src/assets/ast_katina/ast_katina.c": "5eb68e1793ed53bf074d52b46f48442859b799e389a8f58da3c9f004cbe0f6ad",
           "src/overlays/ovl_i4/fox_ka.c": "d64ba75f7dd0188c436265147ce8597dc02d636e0694d372ee490c55824ebd83"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aKaSaucererLaserDL",
@@ -2980,8 +2851,7 @@
           "src/assets/ast_katina/ast_katina.c": "5eb68e1793ed53bf074d52b46f48442859b799e389a8f58da3c9f004cbe0f6ad",
           "src/overlays/ovl_i4/fox_ka.c": "d64ba75f7dd0188c436265147ce8597dc02d636e0694d372ee490c55824ebd83"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aTitleCsPassageWayDL",
@@ -2997,8 +2867,7 @@
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b",
           "src/overlays/ovl_menu/fox_title.c": "e9558b02f40f5711de219d7754613a10244cece5bd19ef17e3680772abfb4a95"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aTitleGreatFoxDeckPlatformDL",
@@ -3014,8 +2883,7 @@
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b",
           "src/overlays/ovl_menu/fox_title.c": "e9558b02f40f5711de219d7754613a10244cece5bd19ef17e3680772abfb4a95"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "ast_title_seg6_gfx_2B0C0",
@@ -3029,8 +2897,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_2E130",
@@ -3044,8 +2911,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_37AA0",
@@ -3059,8 +2925,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_42EA0",
@@ -3074,8 +2939,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_430F0",
@@ -3089,8 +2953,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "D_VE1_9013C20",
@@ -3105,8 +2968,7 @@
           "src/assets/ast_ve1_boss/ast_ve1_boss.c": "c0b08988d9e1496e696abdb6405184faae586512fe21808b814beb7afd143bc0",
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "D_ZO_6023D50",
@@ -3121,8 +2983,7 @@
           "src/assets/ast_zoness/ast_zoness.c": "122f7fb6153db8e7d645e7cc51b81d6ceb7baab98f95b8bfdc952b50a8bf9b6b",
           "src/overlays/ovl_i3/fox_zo.c": "f12de6de3052fa7ed6240b887658cebe894a3a567247f7774a80bd3be00c512b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aVsLandmasterCanonDL",
@@ -3137,8 +2998,7 @@
           "src/assets/ast_versus/ast_versus.c": "e9968da85e990b39a1d9a8aa6e62af965cd9e5fe6c2d2a0b090d44db805f4d9b",
           "src/engine/fox_display.c": "c965e86c1a7d5fb4e49f86a3b2d3e4fb5cab2ca3a4a73f96ba7e7208f8bca25b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "ast_title_seg6_gfx_2BD60",
@@ -3152,8 +3012,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_2BF20",
@@ -3167,8 +3026,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_43460",
@@ -3182,8 +3040,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aTi1FekudaGun1DL",
@@ -3198,8 +3055,7 @@
           "src/assets/ast_7_ti_1/ast_7_ti_1.c": "2f54a3fd81dd21b5f85908cdf6a887442bdaf0500a4785068bb2627623faa118",
           "src/overlays/ovl_i5/fox_ti.c": "89d0a0d0690e1f527fa7070e27d9bf94930546e1e37812f862bd42fe866debb1"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aA6GorgonLaserDL",
@@ -3214,8 +3070,7 @@
           "src/assets/ast_area_6/ast_area_6.c": "03997573d7cab00b25511bdba70b979a65e6f17fc3741c5e59294167bf179dec",
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aBoBackdropDL",
@@ -3230,8 +3085,7 @@
           "src/assets/ast_bolse/ast_bolse.c": "25607e7ad87c5efab2bdca845532a7b7a8ff05e1dd409939f07d8f32897ff731",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aCoBuilding10DL",
@@ -3246,8 +3100,7 @@
           "src/assets/ast_corneria/ast_corneria.c": "acfc2699b00d068d3cd29eba3329f52f18c69fffda3a95cb5a2acd890d121b1d",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aEndAndrossFaceDL",
@@ -3262,8 +3115,7 @@
           "src/assets/ast_ending/ast_ending.c": "3ec9171284d817d7b0fb5131744af6b96326c8f1cc6f21564b50ccd4f64f7643",
           "src/overlays/ovl_ending/fox_end2.c": "fe4758d1f87015a836610cdf3c8003506ef01580a4450925d3df475d38fc2ab1"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aEndVenomDL",
@@ -3278,8 +3130,7 @@
           "src/assets/ast_ending/ast_ending.c": "3ec9171284d817d7b0fb5131744af6b96326c8f1cc6f21564b50ccd4f64f7643",
           "src/overlays/ovl_ending/fox_end2.c": "fe4758d1f87015a836610cdf3c8003506ef01580a4450925d3df475d38fc2ab1"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aFoCorneriaDL",
@@ -3294,8 +3145,7 @@
           "src/assets/ast_fortuna/ast_fortuna.c": "c62f0bdda7a84a7826841f25b25e4c1b0f130abcf39b9020005654520691e85c",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aMapGralPepperFaceBottomDL",
@@ -3310,8 +3160,7 @@
           "src/assets/ast_map/ast_map.c": "1e137036025176b60b34ff2a3041e377b5c5fdf2108e41d9a279eecb8d510493",
           "src/overlays/ovl_menu/fox_map.c": "b21f21826c01e0eeca6239c2ddd823b96b9aa2e8b63501a4e75a0816f980ba79"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aMeCorneriaBgDL",
@@ -3326,8 +3175,7 @@
           "src/assets/ast_meteo/ast_meteo.c": "4741a78fef6343c39a5e89d5229201d486a911e962863b69d12eb67f73dc5079",
           "src/engine/fox_demo.c": "8289a297713c4b104396edc2bee320344156edb31c091379a00d2ddaff2e31e0"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aTrBackdropDL",
@@ -3342,8 +3190,7 @@
           "src/assets/ast_training/ast_training.c": "2598f9a45d78c7b508aa0c990c330996a8cc24fcfa4f536b4f512a0404fedab6",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "ast_title_seg6_gfx_2C170",
@@ -3357,8 +3204,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "D_ZO_60181E0",
@@ -3373,8 +3219,7 @@
           "src/assets/ast_zoness/ast_zoness.c": "122f7fb6153db8e7d645e7cc51b81d6ceb7baab98f95b8bfdc952b50a8bf9b6b",
           "src/overlays/ovl_i3/fox_zo.c": "f12de6de3052fa7ed6240b887658cebe894a3a567247f7774a80bd3be00c512b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aA6SpaceMineDL",
@@ -3390,8 +3235,7 @@
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3",
           "src/engine/fox_enmy2.c": "25c45e81da1f5e18c35c718bd66e060597d7e747b1380359ba1917998d8e31b0"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aAqGaroaDebris10DL",
@@ -3406,8 +3250,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAqSpindlyFishDebris4DL",
@@ -3422,8 +3265,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAqSpindlyFishDebris5DL",
@@ -3438,8 +3280,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aMeRockGull1DL",
@@ -3454,8 +3295,7 @@
           "src/assets/ast_meteo/ast_meteo.c": "4741a78fef6343c39a5e89d5229201d486a911e962863b69d12eb67f73dc5079",
           "src/engine/fox_enmy2.c": "25c45e81da1f5e18c35c718bd66e060597d7e747b1380359ba1917998d8e31b0"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "D_MA_6012C00",
@@ -3469,8 +3309,7 @@
           "src/assets/ast_macbeth/ast_macbeth.c": "7db9f175352b07321ebb1443f67cebb23776e0c61bf1be3f87e2d95e773d8d72",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "D_MA_6013060",
@@ -3484,8 +3323,7 @@
           "src/assets/ast_macbeth/ast_macbeth.c": "7db9f175352b07321ebb1443f67cebb23776e0c61bf1be3f87e2d95e773d8d72",
           "src/overlays/ovl_i5/fox_ma.c": "e4b6bbdf72d43b0bd688d035bb98fd2adc3f74728bad9c50c9c937611b93055c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "D_MA_601A7A0",
@@ -3499,8 +3337,7 @@
           "src/assets/ast_macbeth/ast_macbeth.c": "7db9f175352b07321ebb1443f67cebb23776e0c61bf1be3f87e2d95e773d8d72",
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "D_MA_601A840",
@@ -3514,8 +3351,7 @@
           "src/assets/ast_macbeth/ast_macbeth.c": "7db9f175352b07321ebb1443f67cebb23776e0c61bf1be3f87e2d95e773d8d72",
           "src/overlays/ovl_i5/fox_ma.c": "e4b6bbdf72d43b0bd688d035bb98fd2adc3f74728bad9c50c9c937611b93055c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "D_MA_60223C0",
@@ -3529,8 +3365,7 @@
           "src/assets/ast_macbeth/ast_macbeth.c": "7db9f175352b07321ebb1443f67cebb23776e0c61bf1be3f87e2d95e773d8d72",
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "D_VE1_900DF20",
@@ -3544,8 +3379,7 @@
           "src/assets/ast_ve1_boss/ast_ve1_boss.c": "c0b08988d9e1496e696abdb6405184faae586512fe21808b814beb7afd143bc0",
           "src/overlays/ovl_i1/fox_ve1.c": "e792e97a56dcc057f46e64bcd77ee748d0803f81b8d0fa04d63f128ea26bb989"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "D_VE1_9010FD0",
@@ -3559,8 +3393,7 @@
           "src/assets/ast_ve1_boss/ast_ve1_boss.c": "c0b08988d9e1496e696abdb6405184faae586512fe21808b814beb7afd143bc0",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "D_ZO_6013330",
@@ -3574,8 +3407,7 @@
           "src/assets/ast_zoness/ast_zoness.c": "122f7fb6153db8e7d645e7cc51b81d6ceb7baab98f95b8bfdc952b50a8bf9b6b",
           "src/overlays/ovl_i3/fox_zo.c": "f12de6de3052fa7ed6240b887658cebe894a3a567247f7774a80bd3be00c512b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "D_ZO_6018660",
@@ -3589,8 +3421,7 @@
           "src/assets/ast_zoness/ast_zoness.c": "122f7fb6153db8e7d645e7cc51b81d6ceb7baab98f95b8bfdc952b50a8bf9b6b",
           "src/overlays/ovl_i3/fox_zo.c": "f12de6de3052fa7ed6240b887658cebe894a3a567247f7774a80bd3be00c512b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "D_ZO_6018AF0",
@@ -3604,8 +3435,7 @@
           "src/assets/ast_zoness/ast_zoness.c": "122f7fb6153db8e7d645e7cc51b81d6ceb7baab98f95b8bfdc952b50a8bf9b6b",
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "D_ZO_6019EB0",
@@ -3619,8 +3449,7 @@
           "src/assets/ast_zoness/ast_zoness.c": "122f7fb6153db8e7d645e7cc51b81d6ceb7baab98f95b8bfdc952b50a8bf9b6b",
           "src/overlays/ovl_i3/fox_zo.c": "f12de6de3052fa7ed6240b887658cebe894a3a567247f7774a80bd3be00c512b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "D_ZO_601BAD0",
@@ -3634,8 +3463,7 @@
           "src/assets/ast_zoness/ast_zoness.c": "122f7fb6153db8e7d645e7cc51b81d6ceb7baab98f95b8bfdc952b50a8bf9b6b",
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "D_ZO_601BCC0",
@@ -3649,8 +3477,7 @@
           "src/assets/ast_zoness/ast_zoness.c": "122f7fb6153db8e7d645e7cc51b81d6ceb7baab98f95b8bfdc952b50a8bf9b6b",
           "src/overlays/ovl_i3/fox_zo.c": "f12de6de3052fa7ed6240b887658cebe894a3a567247f7774a80bd3be00c512b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "D_ZO_6024220",
@@ -3664,8 +3491,7 @@
           "src/assets/ast_zoness/ast_zoness.c": "122f7fb6153db8e7d645e7cc51b81d6ceb7baab98f95b8bfdc952b50a8bf9b6b",
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "D_ZO_6025E60",
@@ -3679,8 +3505,7 @@
           "src/assets/ast_zoness/ast_zoness.c": "122f7fb6153db8e7d645e7cc51b81d6ceb7baab98f95b8bfdc952b50a8bf9b6b",
           "src/overlays/ovl_i3/fox_zo.c": "f12de6de3052fa7ed6240b887658cebe894a3a567247f7774a80bd3be00c512b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "D_versus_3015740",
@@ -3694,8 +3519,7 @@
           "src/assets/ast_versus/ast_versus.c": "e9968da85e990b39a1d9a8aa6e62af965cd9e5fe6c2d2a0b090d44db805f4d9b",
           "src/engine/fox_360.c": "598792706bdf4dea8cb098c9230f7b30fa24e48e3c9448557d5ead178ff9e7c1"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "D_versus_301AD60",
@@ -3709,8 +3533,7 @@
           "src/assets/ast_versus/ast_versus.c": "e9968da85e990b39a1d9a8aa6e62af965cd9e5fe6c2d2a0b090d44db805f4d9b",
           "src/engine/fox_beam.c": "f036f317a5cdd568b63785ae97ac5cca9748a5af7730f5b8ca3a538f6bd2fa1c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "D_versus_301AEF0",
@@ -3724,8 +3547,7 @@
           "src/assets/ast_versus/ast_versus.c": "e9968da85e990b39a1d9a8aa6e62af965cd9e5fe6c2d2a0b090d44db805f4d9b",
           "src/engine/fox_beam.c": "f036f317a5cdd568b63785ae97ac5cca9748a5af7730f5b8ca3a538f6bd2fa1c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "D_versus_301E570",
@@ -3739,8 +3561,7 @@
           "src/assets/ast_versus/ast_versus.c": "e9968da85e990b39a1d9a8aa6e62af965cd9e5fe6c2d2a0b090d44db805f4d9b",
           "src/engine/fox_display.c": "c965e86c1a7d5fb4e49f86a3b2d3e4fb5cab2ca3a4a73f96ba7e7208f8bca25b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "D_versus_301FD20",
@@ -3754,8 +3575,7 @@
           "src/assets/ast_versus/ast_versus.c": "e9968da85e990b39a1d9a8aa6e62af965cd9e5fe6c2d2a0b090d44db805f4d9b",
           "src/engine/fox_display.c": "c965e86c1a7d5fb4e49f86a3b2d3e4fb5cab2ca3a4a73f96ba7e7208f8bca25b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "D_versus_302D240",
@@ -3769,8 +3589,7 @@
           "src/assets/ast_versus/ast_versus.c": "e9968da85e990b39a1d9a8aa6e62af965cd9e5fe6c2d2a0b090d44db805f4d9b",
           "src/engine/fox_display.c": "c965e86c1a7d5fb4e49f86a3b2d3e4fb5cab2ca3a4a73f96ba7e7208f8bca25b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aA6GorgonCoreDL",
@@ -3784,8 +3603,7 @@
           "src/assets/ast_area_6/ast_area_6.c": "03997573d7cab00b25511bdba70b979a65e6f17fc3741c5e59294167bf179dec",
           "src/overlays/ovl_i3/fox_a6.c": "cc6787acbfc07b8c7b163cb305862c1c8ec3dcbd1509b30545deafcb7d7ee1db"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aAndBackdropDL",
@@ -3799,8 +3617,7 @@
           "src/assets/ast_andross/ast_andross.c": "628ca97cd2c65668baf53a7c8a315ed946611cba4951e4f9be67d2aff6c93ad8",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aAndBrainWasteDL",
@@ -3814,8 +3631,7 @@
           "src/assets/ast_venom_2/ast_venom_2.c": "5426638d085a83eeaf1ccf9b79c1b42dfe3c1180df1000f5ba9264b7c04fdb7c",
           "src/overlays/ovl_i6/fox_andross.c": "6acc4d52a5b7fde3477abac2645e2738c2712f3bcb6864847ed78bcbcedd3c9f"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aAqBackdropDL",
@@ -3829,8 +3645,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aAqBackdropIntroDL",
@@ -3844,8 +3659,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aAqCoralReef1DL",
@@ -3858,8 +3672,7 @@
           "include/assets/ast_aquas.h": "6c92f6ab1cb04b70992b9dae98972fb5f4c9a962a435500acbc240291b79c6fa",
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAqDebrisDL",
@@ -3873,8 +3686,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aAqGaroaDebris9DL",
@@ -3888,8 +3700,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAqGroundDL",
@@ -3903,8 +3714,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAqPearlDL",
@@ -3918,8 +3728,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/overlays/ovl_i3/fox_aq.c": "d88adbbba9a2d0b38c50cfaa74a16bcaf59c06ffb777d99276cd658af3736634"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aAqSpindlyFishDebris10DL",
@@ -3933,8 +3742,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAqSpindlyFishDebris11DL",
@@ -3948,8 +3756,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAqSpindlyFishDebris12DL",
@@ -3963,8 +3770,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAqSpindlyFishDebris13DL",
@@ -3978,8 +3784,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAqSpindlyFishDebris6DL",
@@ -3993,8 +3798,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAqSpindlyFishDebris7DL",
@@ -4008,8 +3812,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAqSpindlyFishDebris8DL",
@@ -4023,8 +3826,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAqSpindlyFishDebris9DL",
@@ -4038,8 +3840,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAqUnusedWater1DL",
@@ -4053,8 +3854,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aAqUnusedWater2DL",
@@ -4068,8 +3868,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aAqWaterSurfaceDL",
@@ -4083,8 +3882,7 @@
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aArwingShadowDL",
@@ -4099,8 +3897,7 @@
           "src/engine/fox_display.c": "c965e86c1a7d5fb4e49f86a3b2d3e4fb5cab2ca3a4a73f96ba7e7208f8bca25b",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAwBeamWaterSplashDL",
@@ -4114,8 +3911,7 @@
           "src/assets/ast_arwing/ast_arwing.c": "6bc95a44c16c01f86ee0970b4e88984e6a8c4bb4690d9cdf97143e6e39d63ac6",
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aAwCockpitGlassCsDL",
@@ -4129,8 +3925,7 @@
           "src/assets/ast_arwing/ast_arwing.c": "6bc95a44c16c01f86ee0970b4e88984e6a8c4bb4690d9cdf97143e6e39d63ac6",
           "src/engine/fox_display.c": "c965e86c1a7d5fb4e49f86a3b2d3e4fb5cab2ca3a4a73f96ba7e7208f8bca25b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAwCockpitGlassDL",
@@ -4144,8 +3939,7 @@
           "src/assets/ast_arwing/ast_arwing.c": "6bc95a44c16c01f86ee0970b4e88984e6a8c4bb4690d9cdf97143e6e39d63ac6",
           "src/engine/fox_display.c": "c965e86c1a7d5fb4e49f86a3b2d3e4fb5cab2ca3a4a73f96ba7e7208f8bca25b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAwFlap1DL",
@@ -4159,8 +3953,7 @@
           "src/assets/ast_arwing/ast_arwing.c": "6bc95a44c16c01f86ee0970b4e88984e6a8c4bb4690d9cdf97143e6e39d63ac6",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAwFlap2DL",
@@ -4173,8 +3966,7 @@
           "include/assets/ast_arwing.h": "efc8bddf863da4ef64d993f73aa53818531299ff2d2729ce802fab6cc903e0c2",
           "src/assets/ast_arwing/ast_arwing.c": "6bc95a44c16c01f86ee0970b4e88984e6a8c4bb4690d9cdf97143e6e39d63ac6"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAwFlap3DL",
@@ -4187,8 +3979,7 @@
           "include/assets/ast_arwing.h": "efc8bddf863da4ef64d993f73aa53818531299ff2d2729ce802fab6cc903e0c2",
           "src/assets/ast_arwing/ast_arwing.c": "6bc95a44c16c01f86ee0970b4e88984e6a8c4bb4690d9cdf97143e6e39d63ac6"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aAwFlap4DL",
@@ -4201,8 +3992,7 @@
           "include/assets/ast_arwing.h": "efc8bddf863da4ef64d993f73aa53818531299ff2d2729ce802fab6cc903e0c2",
           "src/assets/ast_arwing/ast_arwing.c": "6bc95a44c16c01f86ee0970b4e88984e6a8c4bb4690d9cdf97143e6e39d63ac6"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aBallDL",
@@ -4220,8 +4010,7 @@
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3",
           "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aBarrelRollDL",
@@ -4236,8 +4025,7 @@
           "src/engine/fox_360.c": "598792706bdf4dea8cb098c9230f7b30fa24e48e3c9448557d5ead178ff9e7c1",
           "src/engine/fox_display.c": "c965e86c1a7d5fb4e49f86a3b2d3e4fb5cab2ca3a4a73f96ba7e7208f8bca25b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aBlueMarineBackRudderDL",
@@ -4251,8 +4039,7 @@
           "src/assets/ast_blue_marine/ast_blue_marine.c": "3438f4df62873d3c5e5403fb9ea9ca3e2e2fff996e0fc2bba6890a9dce4d89ea",
           "src/overlays/ovl_i3/fox_aq.c": "d88adbbba9a2d0b38c50cfaa74a16bcaf59c06ffb777d99276cd658af3736634"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aBlueMarineBubbleDL",
@@ -4266,8 +4053,7 @@
           "src/assets/ast_blue_marine/ast_blue_marine.c": "3438f4df62873d3c5e5403fb9ea9ca3e2e2fff996e0fc2bba6890a9dce4d89ea",
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aBlueMarineLeftRudderDL",
@@ -4281,8 +4067,7 @@
           "src/assets/ast_blue_marine/ast_blue_marine.c": "3438f4df62873d3c5e5403fb9ea9ca3e2e2fff996e0fc2bba6890a9dce4d89ea",
           "src/overlays/ovl_i3/fox_aq.c": "d88adbbba9a2d0b38c50cfaa74a16bcaf59c06ffb777d99276cd658af3736634"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aBlueMarineRightRudderDL",
@@ -4296,8 +4081,7 @@
           "src/assets/ast_blue_marine/ast_blue_marine.c": "3438f4df62873d3c5e5403fb9ea9ca3e2e2fff996e0fc2bba6890a9dce4d89ea",
           "src/overlays/ovl_i3/fox_aq.c": "d88adbbba9a2d0b38c50cfaa74a16bcaf59c06ffb777d99276cd658af3736634"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aBlueSphereDL",
@@ -4313,8 +4097,7 @@
           "src/overlays/ovl_i2/fox_me.c": "bb37fefe00c3296d2844153a387c3904249c8b0c8b0dee724b43e803b90f85f7",
           "src/overlays/ovl_i2/fox_sx.c": "06adead0b2cb479b1a68da606a9f8310a51040a4de842b5e21e18458e806189e"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aBoGroundTileDL",
@@ -4328,8 +4111,7 @@
           "src/assets/ast_bolse/ast_bolse.c": "25607e7ad87c5efab2bdca845532a7b7a8ff05e1dd409939f07d8f32897ff731",
           "src/overlays/ovl_i4/fox_bo.c": "499eb0b78723cb683319a8c54fd33707aa00889e05998026aa7c3ab9f5647f0d"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aBoLaserShotDL",
@@ -4343,8 +4125,7 @@
           "src/assets/ast_bolse/ast_bolse.c": "25607e7ad87c5efab2bdca845532a7b7a8ff05e1dd409939f07d8f32897ff731",
           "src/overlays/ovl_i4/fox_bo.c": "499eb0b78723cb683319a8c54fd33707aa00889e05998026aa7c3ab9f5647f0d"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aBombDropDL",
@@ -4359,8 +4140,7 @@
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3",
           "src/overlays/ovl_i5/fox_ma.c": "e4b6bbdf72d43b0bd688d035bb98fd2adc3f74728bad9c50c9c937611b93055c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aBombDropFireDL",
@@ -4375,8 +4155,7 @@
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3",
           "src/overlays/ovl_i5/fox_ma.c": "e4b6bbdf72d43b0bd688d035bb98fd2adc3f74728bad9c50c9c937611b93055c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aCoBackdropDL",
@@ -4390,8 +4169,7 @@
           "src/assets/ast_corneria/ast_corneria.c": "acfc2699b00d068d3cd29eba3329f52f18c69fffda3a95cb5a2acd890d121b1d",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aCoCarrierBodyShadowDL",
@@ -4405,8 +4183,7 @@
           "src/assets/ast_corneria/ast_corneria.c": "acfc2699b00d068d3cd29eba3329f52f18c69fffda3a95cb5a2acd890d121b1d",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aCoCarrierLeftShadowDL",
@@ -4420,8 +4197,7 @@
           "src/assets/ast_corneria/ast_corneria.c": "acfc2699b00d068d3cd29eba3329f52f18c69fffda3a95cb5a2acd890d121b1d",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aCoCarrierUpperBottomShadowDL",
@@ -4435,8 +4211,7 @@
           "src/assets/ast_corneria/ast_corneria.c": "acfc2699b00d068d3cd29eba3329f52f18c69fffda3a95cb5a2acd890d121b1d",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aCoEffect375DL",
@@ -4450,8 +4225,7 @@
           "src/assets/ast_corneria/ast_corneria.c": "acfc2699b00d068d3cd29eba3329f52f18c69fffda3a95cb5a2acd890d121b1d",
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aCoGrangaPlasmaShotDL",
@@ -4465,8 +4239,7 @@
           "src/assets/ast_corneria/ast_corneria.c": "acfc2699b00d068d3cd29eba3329f52f18c69fffda3a95cb5a2acd890d121b1d",
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aCoGroundAllRangeDL",
@@ -4480,8 +4253,7 @@
           "src/assets/ast_corneria/ast_corneria.c": "acfc2699b00d068d3cd29eba3329f52f18c69fffda3a95cb5a2acd890d121b1d",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aCoGroundOnRailsDL",
@@ -4495,8 +4267,7 @@
           "src/assets/ast_corneria/ast_corneria.c": "acfc2699b00d068d3cd29eba3329f52f18c69fffda3a95cb5a2acd890d121b1d",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aCoShadow1DL",
@@ -4510,8 +4281,7 @@
           "src/assets/ast_corneria/ast_corneria.c": "acfc2699b00d068d3cd29eba3329f52f18c69fffda3a95cb5a2acd890d121b1d",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aDebris1DL",
@@ -4526,8 +4296,7 @@
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b",
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aDebris2DL",
@@ -4542,8 +4311,7 @@
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b",
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aEffectExplosionMarkDL",
@@ -4557,8 +4325,7 @@
           "src/assets/ast_common/ast_common.c": "fea7def6e284f8cfc25800b4a8a0a21c5eb9100fbbb6b311a6ce8ea248a923e9",
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aElectricArcDL",
@@ -4574,8 +4341,7 @@
           "src/overlays/ovl_i2/fox_me.c": "bb37fefe00c3296d2844153a387c3904249c8b0c8b0dee724b43e803b90f85f7",
           "src/overlays/ovl_i3/fox_a6.c": "cc6787acbfc07b8c7b163cb305862c1c8ec3dcbd1509b30545deafcb7d7ee1db"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aEndBuilding1DL",
@@ -4589,8 +4355,7 @@
           "src/assets/ast_ending/ast_ending.c": "3ec9171284d817d7b0fb5131744af6b96326c8f1cc6f21564b50ccd4f64f7643",
           "src/overlays/ovl_ending/fox_end1.c": "27f4cba2bd5455071b3ee7047d09688598c73d843b8158fac5b34a005eae46a6"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aEndCorneriaBackdropDL",
@@ -4604,8 +4369,7 @@
           "src/assets/ast_ending/ast_ending.c": "3ec9171284d817d7b0fb5131744af6b96326c8f1cc6f21564b50ccd4f64f7643",
           "src/overlays/ovl_ending/fox_end1.c": "27f4cba2bd5455071b3ee7047d09688598c73d843b8158fac5b34a005eae46a6"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aEndFloorDL",
@@ -4619,8 +4383,7 @@
           "src/assets/ast_ending/ast_ending.c": "3ec9171284d817d7b0fb5131744af6b96326c8f1cc6f21564b50ccd4f64f7643",
           "src/overlays/ovl_ending/fox_end2.c": "fe4758d1f87015a836610cdf3c8003506ef01580a4450925d3df475d38fc2ab1"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aEndShipSkywritingDL",
@@ -4634,8 +4397,7 @@
           "src/assets/ast_ending/ast_ending.c": "3ec9171284d817d7b0fb5131744af6b96326c8f1cc6f21564b50ccd4f64f7643",
           "src/overlays/ovl_ending/fox_end1.c": "27f4cba2bd5455071b3ee7047d09688598c73d843b8158fac5b34a005eae46a6"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aFoBackdropDL",
@@ -4649,8 +4411,7 @@
           "src/assets/ast_fortuna/ast_fortuna.c": "c62f0bdda7a84a7826841f25b25e4c1b0f130abcf39b9020005654520691e85c",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aFoBaseDL1",
@@ -4664,8 +4425,7 @@
           "src/assets/ast_fortuna/ast_fortuna.c": "c62f0bdda7a84a7826841f25b25e4c1b0f130abcf39b9020005654520691e85c",
           "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aFoEnemyShadowDL",
@@ -4679,8 +4439,7 @@
           "src/assets/ast_fortuna/ast_fortuna.c": "c62f0bdda7a84a7826841f25b25e4c1b0f130abcf39b9020005654520691e85c",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aGoldRingEmptySlotDL",
@@ -4694,8 +4453,7 @@
           "src/assets/ast_common/ast_common.c": "fea7def6e284f8cfc25800b4a8a0a21c5eb9100fbbb6b311a6ce8ea248a923e9",
           "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aGreatFoxLaserDL",
@@ -4709,8 +4467,7 @@
           "src/assets/ast_great_fox/ast_great_fox.c": "e5d467d6538914b71c2e1ca38dfafe311b52cfd70d8f950a685b2e288b63f0cf",
           "src/engine/fox_beam.c": "f036f317a5cdd568b63785ae97ac5cca9748a5af7730f5b8ca3a538f6bd2fa1c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aHelpAlertDL",
@@ -4724,8 +4481,7 @@
           "src/assets/ast_common/ast_common.c": "fea7def6e284f8cfc25800b4a8a0a21c5eb9100fbbb6b311a6ce8ea248a923e9",
           "src/engine/fox_display.c": "c965e86c1a7d5fb4e49f86a3b2d3e4fb5cab2ca3a4a73f96ba7e7208f8bca25b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aHitMark1DL",
@@ -4739,8 +4495,7 @@
           "src/assets/ast_common/ast_common.c": "fea7def6e284f8cfc25800b4a8a0a21c5eb9100fbbb6b311a6ce8ea248a923e9",
           "src/engine/fox_beam.c": "f036f317a5cdd568b63785ae97ac5cca9748a5af7730f5b8ca3a538f6bd2fa1c"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aHitMark2DL",
@@ -4754,8 +4509,7 @@
           "src/assets/ast_common/ast_common.c": "fea7def6e284f8cfc25800b4a8a0a21c5eb9100fbbb6b311a6ce8ea248a923e9",
           "src/engine/fox_beam.c": "f036f317a5cdd568b63785ae97ac5cca9748a5af7730f5b8ca3a538f6bd2fa1c"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aKaBackdropDL",
@@ -4769,8 +4523,7 @@
           "src/assets/ast_katina/ast_katina.c": "5eb68e1793ed53bf074d52b46f48442859b799e389a8f58da3c9f004cbe0f6ad",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aKaCornerianFighterShadowDL",
@@ -4784,8 +4537,7 @@
           "src/assets/ast_katina/ast_katina.c": "5eb68e1793ed53bf074d52b46f48442859b799e389a8f58da3c9f004cbe0f6ad",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aKaEnemyShadowDL",
@@ -4799,8 +4551,7 @@
           "src/assets/ast_katina/ast_katina.c": "5eb68e1793ed53bf074d52b46f48442859b799e389a8f58da3c9f004cbe0f6ad",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aKaGroundDL",
@@ -4814,8 +4565,7 @@
           "src/assets/ast_katina/ast_katina.c": "5eb68e1793ed53bf074d52b46f48442859b799e389a8f58da3c9f004cbe0f6ad",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aKattRadarMarkDL",
@@ -4829,8 +4579,7 @@
           "src/assets/ast_allies/ast_allies.c": "ca5468a457b607c01fa781bc411d1ae410611fcd922ba45cd28d8c323c62dd39",
           "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aLandmasterShadowDL",
@@ -4844,8 +4593,7 @@
           "src/assets/ast_landmaster/ast_landmaster.c": "8886a6b3ae4d431724876092c1f8ff4f8eb38a7b69d40b8304d7ae2e61b851f3",
           "src/engine/fox_display.c": "c965e86c1a7d5fb4e49f86a3b2d3e4fb5cab2ca3a4a73f96ba7e7208f8bca25b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aLandmasterShotDL",
@@ -4859,8 +4607,7 @@
           "src/assets/ast_landmaster/ast_landmaster.c": "8886a6b3ae4d431724876092c1f8ff4f8eb38a7b69d40b8304d7ae2e61b851f3",
           "src/engine/fox_beam.c": "f036f317a5cdd568b63785ae97ac5cca9748a5af7730f5b8ca3a538f6bd2fa1c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aLandmasterTankTracksDL",
@@ -4874,8 +4621,7 @@
           "src/assets/ast_landmaster/ast_landmaster.c": "8886a6b3ae4d431724876092c1f8ff4f8eb38a7b69d40b8304d7ae2e61b851f3",
           "src/overlays/ovl_i5/fox_ti.c": "89d0a0d0690e1f527fa7070e27d9bf94930546e1e37812f862bd42fe866debb1"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aLandmasterThrusterDL",
@@ -4889,8 +4635,7 @@
           "src/assets/ast_landmaster/ast_landmaster.c": "8886a6b3ae4d431724876092c1f8ff4f8eb38a7b69d40b8304d7ae2e61b851f3",
           "src/engine/fox_display.c": "c965e86c1a7d5fb4e49f86a3b2d3e4fb5cab2ca3a4a73f96ba7e7208f8bca25b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aLaserShotGreenDL",
@@ -4904,8 +4649,7 @@
           "src/assets/ast_common/ast_common.c": "fea7def6e284f8cfc25800b4a8a0a21c5eb9100fbbb6b311a6ce8ea248a923e9",
           "src/engine/fox_beam.c": "f036f317a5cdd568b63785ae97ac5cca9748a5af7730f5b8ca3a538f6bd2fa1c"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aLaserShotRedDL",
@@ -4921,8 +4665,7 @@
           "src/engine/fox_demo.c": "8289a297713c4b104396edc2bee320344156edb31c091379a00d2ddaff2e31e0",
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aLightningDL",
@@ -4936,8 +4679,7 @@
           "src/assets/ast_option/ast_option.c": "8f9f6b21d0736c0a25233f9d6acbc2269ac55c1d477f5cd32616b99beff49832",
           "src/overlays/ovl_menu/fox_option.c": "9eadc300e25ca7521f949290927939b9e2dffaf9e00b7c9f74d4601e49eb46da"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aMaBackdropDL",
@@ -4951,8 +4693,7 @@
           "src/assets/ast_macbeth/ast_macbeth.c": "7db9f175352b07321ebb1443f67cebb23776e0c61bf1be3f87e2d95e773d8d72",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aMaBarrierDL",
@@ -4966,8 +4707,7 @@
           "src/assets/ast_macbeth/ast_macbeth.c": "7db9f175352b07321ebb1443f67cebb23776e0c61bf1be3f87e2d95e773d8d72",
           "src/overlays/ovl_i5/fox_ma.c": "e4b6bbdf72d43b0bd688d035bb98fd2adc3f74728bad9c50c9c937611b93055c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aMaContainerBoxDestroyedDL",
@@ -4981,8 +4721,7 @@
           "src/assets/ast_macbeth/ast_macbeth.c": "7db9f175352b07321ebb1443f67cebb23776e0c61bf1be3f87e2d95e773d8d72",
           "src/overlays/ovl_i5/fox_ma.c": "e4b6bbdf72d43b0bd688d035bb98fd2adc3f74728bad9c50c9c937611b93055c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aMapPlanetClearStarDL",
@@ -4996,8 +4735,7 @@
           "src/assets/ast_map/ast_map.c": "1e137036025176b60b34ff2a3041e377b5c5fdf2108e41d9a279eecb8d510493",
           "src/overlays/ovl_menu/fox_map.c": "b21f21826c01e0eeca6239c2ddd823b96b9aa2e8b63501a4e75a0816f980ba79"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aMapTitaniaRings1DL",
@@ -5011,8 +4749,7 @@
           "src/assets/ast_map/ast_map.c": "1e137036025176b60b34ff2a3041e377b5c5fdf2108e41d9a279eecb8d510493",
           "src/overlays/ovl_menu/fox_map.c": "b21f21826c01e0eeca6239c2ddd823b96b9aa2e8b63501a4e75a0816f980ba79"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aMapTitaniaRings2DL",
@@ -5026,8 +4763,7 @@
           "src/assets/ast_map/ast_map.c": "1e137036025176b60b34ff2a3041e377b5c5fdf2108e41d9a279eecb8d510493",
           "src/overlays/ovl_menu/fox_map.c": "b21f21826c01e0eeca6239c2ddd823b96b9aa2e8b63501a4e75a0816f980ba79"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aMapTvScreenGlowDL",
@@ -5041,8 +4777,7 @@
           "src/assets/ast_map/ast_map.c": "1e137036025176b60b34ff2a3041e377b5c5fdf2108e41d9a279eecb8d510493",
           "src/overlays/ovl_menu/fox_map.c": "b21f21826c01e0eeca6239c2ddd823b96b9aa2e8b63501a4e75a0816f980ba79"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aMeCrusherCoreSegment1DL",
@@ -5056,8 +4791,7 @@
           "src/assets/ast_meteo/ast_meteo.c": "4741a78fef6343c39a5e89d5229201d486a911e962863b69d12eb67f73dc5079",
           "src/overlays/ovl_i2/fox_me.c": "bb37fefe00c3296d2844153a387c3904249c8b0c8b0dee724b43e803b90f85f7"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aMeCrusherCoreSegment2DL",
@@ -5071,8 +4805,7 @@
           "src/assets/ast_meteo/ast_meteo.c": "4741a78fef6343c39a5e89d5229201d486a911e962863b69d12eb67f73dc5079",
           "src/overlays/ovl_i2/fox_me.c": "bb37fefe00c3296d2844153a387c3904249c8b0c8b0dee724b43e803b90f85f7"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aMeCrusherRingLaserDL",
@@ -5086,8 +4819,7 @@
           "src/assets/ast_meteo/ast_meteo.c": "4741a78fef6343c39a5e89d5229201d486a911e962863b69d12eb67f73dc5079",
           "src/overlays/ovl_i2/fox_me.c": "bb37fefe00c3296d2844153a387c3904249c8b0c8b0dee724b43e803b90f85f7"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aMeCrusherShieldChargeDL",
@@ -5101,8 +4833,7 @@
           "src/assets/ast_meteo/ast_meteo.c": "4741a78fef6343c39a5e89d5229201d486a911e962863b69d12eb67f73dc5079",
           "src/overlays/ovl_i2/fox_me.c": "bb37fefe00c3296d2844153a387c3904249c8b0c8b0dee724b43e803b90f85f7"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aMeFireballDL",
@@ -5116,8 +4847,7 @@
           "src/assets/ast_meteo/ast_meteo.c": "4741a78fef6343c39a5e89d5229201d486a911e962863b69d12eb67f73dc5079",
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aMeFlipBot2DL",
@@ -5131,8 +4861,7 @@
           "src/assets/ast_meteo/ast_meteo.c": "4741a78fef6343c39a5e89d5229201d486a911e962863b69d12eb67f73dc5079",
           "src/engine/fox_enmy2.c": "25c45e81da1f5e18c35c718bd66e060597d7e747b1380359ba1917998d8e31b0"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aMeMeteoBallDL",
@@ -5146,8 +4875,7 @@
           "src/assets/ast_meteo/ast_meteo.c": "4741a78fef6343c39a5e89d5229201d486a911e962863b69d12eb67f73dc5079",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aMeMeteorShower1DL",
@@ -5161,8 +4889,7 @@
           "src/assets/ast_meteo/ast_meteo.c": "4741a78fef6343c39a5e89d5229201d486a911e962863b69d12eb67f73dc5079",
           "src/overlays/ovl_i2/fox_me.c": "bb37fefe00c3296d2844153a387c3904249c8b0c8b0dee724b43e803b90f85f7"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aMeMeteorShower2DL",
@@ -5176,8 +4903,7 @@
           "src/assets/ast_meteo/ast_meteo.c": "4741a78fef6343c39a5e89d5229201d486a911e962863b69d12eb67f73dc5079",
           "src/overlays/ovl_i2/fox_me.c": "bb37fefe00c3296d2844153a387c3904249c8b0c8b0dee724b43e803b90f85f7"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aMeMeteorShower3DL",
@@ -5191,8 +4917,7 @@
           "src/assets/ast_meteo/ast_meteo.c": "4741a78fef6343c39a5e89d5229201d486a911e962863b69d12eb67f73dc5079",
           "src/overlays/ovl_i2/fox_me.c": "bb37fefe00c3296d2844153a387c3904249c8b0c8b0dee724b43e803b90f85f7"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aMeRockGull2DL",
@@ -5206,8 +4931,7 @@
           "src/assets/ast_meteo/ast_meteo.c": "4741a78fef6343c39a5e89d5229201d486a911e962863b69d12eb67f73dc5079",
           "src/engine/fox_enmy2.c": "25c45e81da1f5e18c35c718bd66e060597d7e747b1380359ba1917998d8e31b0"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aMeSmallRockDL",
@@ -5221,8 +4945,7 @@
           "src/assets/ast_meteo/ast_meteo.c": "4741a78fef6343c39a5e89d5229201d486a911e962863b69d12eb67f73dc5079",
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aMechbethBeamDL",
@@ -5236,8 +4959,7 @@
           "src/assets/ast_macbeth/ast_macbeth.c": "7db9f175352b07321ebb1443f67cebb23776e0c61bf1be3f87e2d95e773d8d72",
           "src/overlays/ovl_i5/fox_ma.c": "e4b6bbdf72d43b0bd688d035bb98fd2adc3f74728bad9c50c9c937611b93055c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aMeteoWarpDL",
@@ -5251,8 +4973,7 @@
           "src/assets/ast_common/ast_common.c": "fea7def6e284f8cfc25800b4a8a0a21c5eb9100fbbb6b311a6ce8ea248a923e9",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aOptMenuCardDL",
@@ -5266,8 +4987,7 @@
           "src/assets/ast_option/ast_option.c": "8f9f6b21d0736c0a25233f9d6acbc2269ac55c1d477f5cd32616b99beff49832",
           "src/overlays/ovl_menu/fox_option.c": "9eadc300e25ca7521f949290927939b9e2dffaf9e00b7c9f74d4601e49eb46da"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aOrbDL",
@@ -5296,8 +5016,7 @@
           "src/overlays/ovl_i6/fox_andross.c": "6acc4d52a5b7fde3477abac2645e2738c2712f3bcb6864847ed78bcbcedd3c9f",
           "src/overlays/ovl_i6/fox_sy.c": "a3baa29dc466d11ff85ecdb5908fec62ddd67af1e7dcdda794e716debfddf7db"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aPlCircleDL",
@@ -5314,8 +5033,7 @@
           "src/overlays/ovl_i3/fox_so.c": "28a80578f6fb0a46edd63a451c2e0339c9182970f4008bee6779c6796643ce18",
           "src/overlays/ovl_i5/fox_ti.c": "89d0a0d0690e1f527fa7070e27d9bf94930546e1e37812f862bd42fe866debb1"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aPlCloudsDL",
@@ -5329,8 +5047,7 @@
           "src/assets/ast_bg_planet/ast_bg_planet.c": "d48e3b6ceebee965272bb2852a5ae1961c362aa555998e5c02bf21508e6753ad",
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aPlFireSmokeFrame10DL",
@@ -5345,8 +5062,7 @@
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3",
           "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aPlFireSmokeFrame11DL",
@@ -5361,8 +5077,7 @@
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3",
           "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aPlFireSmokeFrame12DL",
@@ -5377,8 +5092,7 @@
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3",
           "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aPlFireSmokeFrame13DL",
@@ -5392,8 +5106,7 @@
           "src/assets/ast_bg_planet/ast_bg_planet.c": "d48e3b6ceebee965272bb2852a5ae1961c362aa555998e5c02bf21508e6753ad",
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aPlFireSmokeFrame14DL",
@@ -5409,8 +5122,7 @@
           "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be",
           "src/overlays/ovl_i6/fox_andross.c": "6acc4d52a5b7fde3477abac2645e2738c2712f3bcb6864847ed78bcbcedd3c9f"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aPlFireSmokeFrame15DL",
@@ -5425,8 +5137,7 @@
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3",
           "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aPlFireSmokeFrame16DL",
@@ -5441,8 +5152,7 @@
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3",
           "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aPlFireSmokeFrame17DL",
@@ -5457,8 +5167,7 @@
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3",
           "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aPlFireSmokeFrame18DL",
@@ -5473,8 +5182,7 @@
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3",
           "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aPlFireSmokeFrame1DL",
@@ -5490,8 +5198,7 @@
           "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be",
           "src/overlays/ovl_i3/fox_so.c": "28a80578f6fb0a46edd63a451c2e0339c9182970f4008bee6779c6796643ce18"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aPlFireSmokeFrame2DL",
@@ -5507,8 +5214,7 @@
           "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be",
           "src/overlays/ovl_i3/fox_so.c": "28a80578f6fb0a46edd63a451c2e0339c9182970f4008bee6779c6796643ce18"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aPlFireSmokeFrame3DL",
@@ -5524,8 +5230,7 @@
           "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be",
           "src/overlays/ovl_i3/fox_so.c": "28a80578f6fb0a46edd63a451c2e0339c9182970f4008bee6779c6796643ce18"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aPlFireSmokeFrame4DL",
@@ -5540,8 +5245,7 @@
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3",
           "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aPlFireSmokeFrame5DL",
@@ -5556,8 +5260,7 @@
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3",
           "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aPlFireSmokeFrame6DL",
@@ -5572,8 +5275,7 @@
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3",
           "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aPlFireSmokeFrame7DL",
@@ -5588,8 +5290,7 @@
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3",
           "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aPlFireSmokeFrame8DL",
@@ -5604,8 +5305,7 @@
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3",
           "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aPlFireSmokeFrame9DL",
@@ -5620,8 +5320,7 @@
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3",
           "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aRadarLineDL",
@@ -5635,8 +5334,7 @@
           "src/assets/ast_common/ast_common.c": "fea7def6e284f8cfc25800b4a8a0a21c5eb9100fbbb6b311a6ce8ea248a923e9",
           "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aRadarMarkArwingDL",
@@ -5650,8 +5348,7 @@
           "src/assets/ast_common/ast_common.c": "fea7def6e284f8cfc25800b4a8a0a21c5eb9100fbbb6b311a6ce8ea248a923e9",
           "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aReticleDL",
@@ -5665,8 +5362,7 @@
           "src/assets/ast_common/ast_common.c": "fea7def6e284f8cfc25800b4a8a0a21c5eb9100fbbb6b311a6ce8ea248a923e9",
           "src/engine/fox_display.c": "c965e86c1a7d5fb4e49f86a3b2d3e4fb5cab2ca3a4a73f96ba7e7208f8bca25b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aSmoke1DL",
@@ -5681,8 +5377,7 @@
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3",
           "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aSmoke2DL",
@@ -5697,8 +5392,7 @@
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b",
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aSoBackdropDL",
@@ -5712,8 +5406,7 @@
           "src/assets/ast_solar/ast_solar.c": "d7322f93f533d28fb26bc08638c4b04b68ab96dda368e60d56e001f19c5263b8",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aSoFlareS3FrameDL",
@@ -5727,8 +5420,7 @@
           "src/assets/ast_solar/ast_solar.c": "d7322f93f533d28fb26bc08638c4b04b68ab96dda368e60d56e001f19c5263b8",
           "src/overlays/ovl_i3/fox_so.c": "28a80578f6fb0a46edd63a451c2e0339c9182970f4008bee6779c6796643ce18"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aSpPinkExplosionDL",
@@ -5742,8 +5434,7 @@
           "src/assets/ast_bg_space/ast_bg_space.c": "4c2d92fa847e83259cd364a6905ad0ca36f6a6a08aeaba95b9782bf3f0ab91a5",
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aStarDL",
@@ -5761,8 +5452,7 @@
           "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be",
           "src/overlays/ovl_i3/fox_a6.c": "cc6787acbfc07b8c7b163cb305862c1c8ec3dcbd1509b30545deafcb7d7ee1db"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aStarWolfRadarMarkDL",
@@ -5776,8 +5466,7 @@
           "src/assets/ast_star_wolf/ast_star_wolf.c": "489ce86b9c39eecb39a073b9526ec6b4c7a9fe184daab7fc89fe59fecc3bdc70",
           "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aStarWolfShadowDL",
@@ -5791,8 +5480,7 @@
           "src/assets/ast_star_wolf/ast_star_wolf.c": "489ce86b9c39eecb39a073b9526ec6b4c7a9fe184daab7fc89fe59fecc3bdc70",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aSxBackdropDL",
@@ -5806,8 +5494,7 @@
           "src/assets/ast_sector_x/ast_sector_x.c": "84537f763d23f3c6ec094662ba9c71a0f324b453e1d31bacfe8a795c6a178c9b",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aSxLaserDL",
@@ -5821,8 +5508,7 @@
           "src/assets/ast_sector_x/ast_sector_x.c": "84537f763d23f3c6ec094662ba9c71a0f324b453e1d31bacfe8a795c6a178c9b",
           "src/engine/fox_enmy2.c": "25c45e81da1f5e18c35c718bd66e060597d7e747b1380359ba1917998d8e31b0"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aSxLaserDestroyedDL",
@@ -5836,8 +5522,7 @@
           "src/assets/ast_sector_x/ast_sector_x.c": "84537f763d23f3c6ec094662ba9c71a0f324b453e1d31bacfe8a795c6a178c9b",
           "src/engine/fox_enmy2.c": "25c45e81da1f5e18c35c718bd66e060597d7e747b1380359ba1917998d8e31b0"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aSxSpyborbOrbDL",
@@ -5852,8 +5537,7 @@
           "src/engine/fox_effect.c": "17bf76923777615b5bc427a0380e74393ec4a7a5978f316d404052c50ec592d3",
           "src/overlays/ovl_i2/fox_sx.c": "06adead0b2cb479b1a68da606a9f8310a51040a4de842b5e21e18458e806189e"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aSxSpyborgEyeDL",
@@ -5867,8 +5551,7 @@
           "src/assets/ast_sector_x/ast_sector_x.c": "84537f763d23f3c6ec094662ba9c71a0f324b453e1d31bacfe8a795c6a178c9b",
           "src/overlays/ovl_i2/fox_sx.c": "06adead0b2cb479b1a68da606a9f8310a51040a4de842b5e21e18458e806189e"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aSxTitaniaDL",
@@ -5882,8 +5565,7 @@
           "src/assets/ast_sector_x/ast_sector_x.c": "84537f763d23f3c6ec094662ba9c71a0f324b453e1d31bacfe8a795c6a178c9b",
           "src/overlays/ovl_i2/fox_sx.c": "06adead0b2cb479b1a68da606a9f8310a51040a4de842b5e21e18458e806189e"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aSyBackdropDL",
@@ -5897,8 +5579,7 @@
           "src/assets/ast_sector_y/ast_sector_y.c": "47a1895a473e6361597538bb647da2cafc27b155c92ae7f2e85cab823df67daf",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aSyRobotLaserDL",
@@ -5913,8 +5594,7 @@
           "src/engine/fox_demo.c": "8289a297713c4b104396edc2bee320344156edb31c091379a00d2ddaff2e31e0",
           "src/overlays/ovl_i6/fox_sy.c": "a3baa29dc466d11ff85ecdb5908fec62ddd67af1e7dcdda794e716debfddf7db"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aSzBackgroundDL",
@@ -5928,8 +5608,7 @@
           "src/assets/ast_sector_z/ast_sector_z.c": "b4427ed884b2bf3552994adf69048ec631da448deed5cdb7d6499453a0e98526",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aSzMissileRadarMarkDL",
@@ -5943,8 +5622,7 @@
           "src/assets/ast_sector_z/ast_sector_z.c": "b4427ed884b2bf3552994adf69048ec631da448deed5cdb7d6499453a0e98526",
           "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aSzSpaceJunk4DL",
@@ -5958,8 +5636,7 @@
           "src/assets/ast_sector_z/ast_sector_z.c": "b4427ed884b2bf3552994adf69048ec631da448deed5cdb7d6499453a0e98526",
           "src/overlays/ovl_i4/fox_sz.c": "6ee0ffc4ad9169e69aa51e21523697567afa4be3080bbf9902eaac4f11c5b926"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aTi1DelphorHeadCoverDL",
@@ -5973,8 +5650,7 @@
           "src/assets/ast_7_ti_1/ast_7_ti_1.c": "2f54a3fd81dd21b5f85908cdf6a887442bdaf0500a4785068bb2627623faa118",
           "src/overlays/ovl_i5/fox_ti.c": "89d0a0d0690e1f527fa7070e27d9bf94930546e1e37812f862bd42fe866debb1"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aTi1FekudaGun2DL",
@@ -5988,8 +5664,7 @@
           "src/assets/ast_7_ti_1/ast_7_ti_1.c": "2f54a3fd81dd21b5f85908cdf6a887442bdaf0500a4785068bb2627623faa118",
           "src/overlays/ovl_i5/fox_ti.c": "89d0a0d0690e1f527fa7070e27d9bf94930546e1e37812f862bd42fe866debb1"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aTiBackdropDL",
@@ -6003,8 +5678,7 @@
           "src/assets/ast_titania/ast_titania.c": "4ae86c79087ee03fa7a497043f967ddd8259ba5def36d38e29b3911cbeb0a9cc",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aTiGorasLaserChargeDL",
@@ -6018,8 +5692,7 @@
           "src/assets/ast_7_ti_2/ast_7_ti_2.c": "b382551aefca1491b5f7d3d7974f2126fc693cd66ca663be7874ee05c0128662",
           "src/overlays/ovl_i5/fox_ti.c": "89d0a0d0690e1f527fa7070e27d9bf94930546e1e37812f862bd42fe866debb1"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aTiGorasLaserDL",
@@ -6033,8 +5706,7 @@
           "src/assets/ast_8_ti/ast_8_ti.c": "f776a39894b4d4b297388dcd8f06de4a5844821645b5e291c7d2bd18c58b4580",
           "src/overlays/ovl_i5/fox_ti.c": "89d0a0d0690e1f527fa7070e27d9bf94930546e1e37812f862bd42fe866debb1"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aTitleArwingShadowDL",
@@ -6048,8 +5720,7 @@
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b",
           "src/overlays/ovl_menu/fox_title.c": "e9558b02f40f5711de219d7754613a10244cece5bd19ef17e3680772abfb4a95"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aTitleTeamShadowDL",
@@ -6064,8 +5735,7 @@
           "src/overlays/ovl_ending/fox_end1.c": "27f4cba2bd5455071b3ee7047d09688598c73d843b8158fac5b34a005eae46a6",
           "src/overlays/ovl_menu/fox_title.c": "e9558b02f40f5711de219d7754613a10244cece5bd19ef17e3680772abfb4a95"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aTrGroundDL",
@@ -6079,8 +5749,7 @@
           "src/assets/ast_training/ast_training.c": "2598f9a45d78c7b508aa0c990c330996a8cc24fcfa4f536b4f512a0404fedab6",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aUnusedShieldDL",
@@ -6094,8 +5763,7 @@
           "src/assets/ast_common/ast_common.c": "fea7def6e284f8cfc25800b4a8a0a21c5eb9100fbbb6b311a6ce8ea248a923e9",
           "src/engine/fox_display.c": "c965e86c1a7d5fb4e49f86a3b2d3e4fb5cab2ca3a4a73f96ba7e7208f8bca25b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aVe1BackdropDL",
@@ -6109,8 +5777,7 @@
           "src/assets/ast_venom_1/ast_venom_1.c": "86ff0c8a130d5e2b05aa59233899ad4a820918029915a655743814194e3d172c",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aVe1GroundDL",
@@ -6124,8 +5791,7 @@
           "src/assets/ast_venom_1/ast_venom_1.c": "86ff0c8a130d5e2b05aa59233899ad4a820918029915a655743814194e3d172c",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aVe1Wall1DL",
@@ -6139,8 +5805,7 @@
           "src/assets/ast_venom_1/ast_venom_1.c": "86ff0c8a130d5e2b05aa59233899ad4a820918029915a655743814194e3d172c",
           "src/engine/fox_edata.c": "9c2a8173ab59b16b0f89283d21090059b7e0c4d137ccd3112d83af2f2d78d483"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aVe1Wall2DL",
@@ -6154,8 +5819,7 @@
           "src/assets/ast_venom_1/ast_venom_1.c": "86ff0c8a130d5e2b05aa59233899ad4a820918029915a655743814194e3d172c",
           "src/engine/fox_edata.c": "9c2a8173ab59b16b0f89283d21090059b7e0c4d137ccd3112d83af2f2d78d483"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "aVe2AndBrainBackdropDL",
@@ -6169,8 +5833,7 @@
           "src/assets/ast_venom_2/ast_venom_2.c": "5426638d085a83eeaf1ccf9b79c1b42dfe3c1180df1000f5ba9264b7c04fdb7c",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aVe2AndBrainTentacleDL",
@@ -6184,8 +5847,7 @@
           "src/assets/ast_venom_2/ast_venom_2.c": "5426638d085a83eeaf1ccf9b79c1b42dfe3c1180df1000f5ba9264b7c04fdb7c",
           "src/overlays/ovl_i6/fox_andross.c": "6acc4d52a5b7fde3477abac2645e2738c2712f3bcb6864847ed78bcbcedd3c9f"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aVe2AndBrainTentacleTipDL",
@@ -6199,8 +5861,7 @@
           "src/assets/ast_venom_2/ast_venom_2.c": "5426638d085a83eeaf1ccf9b79c1b42dfe3c1180df1000f5ba9264b7c04fdb7c",
           "src/overlays/ovl_i6/fox_andross.c": "6acc4d52a5b7fde3477abac2645e2738c2712f3bcb6864847ed78bcbcedd3c9f"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aVe2BackdropDL",
@@ -6214,8 +5875,7 @@
           "src/assets/ast_venom_2/ast_venom_2.c": "5426638d085a83eeaf1ccf9b79c1b42dfe3c1180df1000f5ba9264b7c04fdb7c",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aVe2GroundDL",
@@ -6229,8 +5889,7 @@
           "src/assets/ast_venom_2/ast_venom_2.c": "5426638d085a83eeaf1ccf9b79c1b42dfe3c1180df1000f5ba9264b7c04fdb7c",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aVsCorneriaBackdropDL",
@@ -6244,8 +5903,7 @@
           "src/assets/ast_versus/ast_versus.c": "e9968da85e990b39a1d9a8aa6e62af965cd9e5fe6c2d2a0b090d44db805f4d9b",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aVsKatinaBackdropDL",
@@ -6259,8 +5917,7 @@
           "src/assets/ast_versus/ast_versus.c": "e9968da85e990b39a1d9a8aa6e62af965cd9e5fe6c2d2a0b090d44db805f4d9b",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aVsKatinaGroundDL",
@@ -6274,8 +5931,7 @@
           "src/assets/ast_versus/ast_versus.c": "e9968da85e990b39a1d9a8aa6e62af965cd9e5fe6c2d2a0b090d44db805f4d9b",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aVsLandmasterThrusterDL",
@@ -6289,8 +5945,7 @@
           "src/assets/ast_versus/ast_versus.c": "e9968da85e990b39a1d9a8aa6e62af965cd9e5fe6c2d2a0b090d44db805f4d9b",
           "src/engine/fox_display.c": "c965e86c1a7d5fb4e49f86a3b2d3e4fb5cab2ca3a4a73f96ba7e7208f8bca25b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aVsLaserShotDL",
@@ -6304,8 +5959,7 @@
           "src/assets/ast_versus/ast_versus.c": "e9968da85e990b39a1d9a8aa6e62af965cd9e5fe6c2d2a0b090d44db805f4d9b",
           "src/engine/fox_beam.c": "f036f317a5cdd568b63785ae97ac5cca9748a5af7730f5b8ca3a538f6bd2fa1c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aVsSectorZBackdropDL",
@@ -6319,8 +5973,7 @@
           "src/assets/ast_versus/ast_versus.c": "e9968da85e990b39a1d9a8aa6e62af965cd9e5fe6c2d2a0b090d44db805f4d9b",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aWzBackdropDL",
@@ -6334,8 +5987,7 @@
           "src/assets/ast_warp_zone/ast_warp_zone.c": "c2347ee70330a5fc2f64b5191fbd28cb7564218d15823a93d19422d25fa64480",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aZoBackdropDL",
@@ -6349,8 +6001,7 @@
           "src/assets/ast_zoness/ast_zoness.c": "122f7fb6153db8e7d645e7cc51b81d6ceb7baab98f95b8bfdc952b50a8bf9b6b",
           "src/engine/fox_bg.c": "d7b5db7368595fa869050971de6c957a1d1f189b1bc8783f057ae56192498b4c"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "aZoBallDL",
@@ -6364,8 +6015,7 @@
           "src/assets/ast_zoness/ast_zoness.c": "122f7fb6153db8e7d645e7cc51b81d6ceb7baab98f95b8bfdc952b50a8bf9b6b",
           "src/overlays/ovl_i3/fox_zo.c": "f12de6de3052fa7ed6240b887658cebe894a3a567247f7774a80bd3be00c512b"
         },
-        "qualification": "direct_reads_only",
-        "baseline": false
+        "qualification": "direct_reads_only"
       },
       {
         "name": "ast_aquas_seg6_gfx_20CC0",
@@ -6378,8 +6028,7 @@
           "include/assets/ast_aquas.h": "6c92f6ab1cb04b70992b9dae98972fb5f4c9a962a435500acbc240291b79c6fa",
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_aquas_seg6_gfx_20D50",
@@ -6392,8 +6041,7 @@
           "include/assets/ast_aquas.h": "6c92f6ab1cb04b70992b9dae98972fb5f4c9a962a435500acbc240291b79c6fa",
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_aquas_seg6_gfx_20DF0",
@@ -6406,8 +6054,7 @@
           "include/assets/ast_aquas.h": "6c92f6ab1cb04b70992b9dae98972fb5f4c9a962a435500acbc240291b79c6fa",
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_aquas_seg6_gfx_20E90",
@@ -6420,8 +6067,7 @@
           "include/assets/ast_aquas.h": "6c92f6ab1cb04b70992b9dae98972fb5f4c9a962a435500acbc240291b79c6fa",
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_aquas_seg6_gfx_20F30",
@@ -6434,8 +6080,7 @@
           "include/assets/ast_aquas.h": "6c92f6ab1cb04b70992b9dae98972fb5f4c9a962a435500acbc240291b79c6fa",
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_aquas_seg6_gfx_20FD0",
@@ -6448,8 +6093,7 @@
           "include/assets/ast_aquas.h": "6c92f6ab1cb04b70992b9dae98972fb5f4c9a962a435500acbc240291b79c6fa",
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_aquas_seg6_gfx_21E30",
@@ -6462,8 +6106,7 @@
           "include/assets/ast_aquas.h": "6c92f6ab1cb04b70992b9dae98972fb5f4c9a962a435500acbc240291b79c6fa",
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_22110",
@@ -6476,8 +6119,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_222A0",
@@ -6490,8 +6132,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_2BBA0",
@@ -6504,8 +6145,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_2C390",
@@ -6518,8 +6158,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_373D0",
@@ -6532,8 +6171,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_374F0",
@@ -6546,8 +6184,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_375B0",
@@ -6560,8 +6197,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_37770",
@@ -6574,8 +6210,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_37840",
@@ -6588,8 +6223,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_37970",
@@ -6602,8 +6236,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_400D0",
@@ -6616,8 +6249,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_401E0",
@@ -6630,8 +6262,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_402B0",
@@ -6644,8 +6275,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_404D0",
@@ -6658,8 +6288,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_406F0",
@@ -6672,8 +6301,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_407C0",
@@ -6686,8 +6314,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_40B90",
@@ -6700,8 +6327,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_40CA0",
@@ -6714,8 +6340,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_40E00",
@@ -6728,8 +6353,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_40F60",
@@ -6742,8 +6366,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_41900",
@@ -6756,8 +6379,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_41A20",
@@ -6770,8 +6392,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_41AF0",
@@ -6784,8 +6405,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_41BF0",
@@ -6798,8 +6418,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_424F0",
@@ -6812,8 +6431,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_425C0",
@@ -6826,8 +6444,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_42D70",
@@ -6840,8 +6457,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_43340",
@@ -6854,8 +6470,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_43720",
@@ -6868,8 +6483,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_43900",
@@ -6882,8 +6496,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_43A10",
@@ -6896,8 +6509,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_43B20",
@@ -6910,8 +6522,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_43D00",
@@ -6924,8 +6535,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_44E40",
@@ -6938,8 +6548,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_44F40",
@@ -6952,8 +6561,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_45100",
@@ -6966,8 +6574,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_45280",
@@ -6980,8 +6587,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_45400",
@@ -6994,8 +6600,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       },
       {
         "name": "ast_title_seg6_gfx_455C0",
@@ -7008,8 +6613,7 @@
           "include/assets/ast_title.h": "cc7925feee22b27eedaa6dce1d4e7f44485dbc87d4714e77a376ba267b677880",
           "src/assets/ast_title/ast_title.c": "a526c43398d2ff3b041e306564c6c6eb0496be5bab89542ff5841d6009b34b3b"
         },
-        "qualification": "accepted_commands",
-        "baseline": false
+        "qualification": "accepted_commands"
       }
     ],
     "caller_contract": {
