@@ -288,7 +288,7 @@ static __attribute__((noinline)) int psp_gfx_dl_retained_dispatch(PspGfxDlContex
 
     psp_gfx_dl_prepare_batch_matrices(ctx);
     // Projection handlers maintain one common render and fog projection
-    admitted = n64psp_aabb_inside_clip(sRetainedCache->bounds,
+    admitted = n64psp_aabb_inside_clip_affine(sRetainedCache->bounds,
         &ctx->alignedMatrices.modelview, &ctx->alignedMatrices.projection, 1.0f, 0.001f, 0.0005f);
 
     if (!admitted) {

@@ -84,24 +84,7 @@ static void psp_renderer_draw_overlays(void) {
         );
     }
 #endif
-#if PSP_GFX_BACKEND_GU
-    {
-        PspGfxDlRetainedStats stats;
-        PspGfxDl_GetRetainedStats(&stats);
-        pspDebugScreenSetXY(0, 3);
-        pspDebugScreenPrintf("NM H%lu F%lu D%lu V%lu R%lu S%lu       ",
-            (unsigned long) stats.hits, (unsigned long) stats.fallbacks,
-            (unsigned long) stats.spans, (unsigned long) stats.vertices,
-            (unsigned long) stats.restored, (unsigned long) stats.skipped);
-        pspDebugScreenSetXY(0, 4);
-        pspDebugScreenPrintf("T%lu L%lu E%lu/%lu/%lu/%lu/%lu/%lu/%lu       ",
-            (unsigned long) stats.triangles, (unsigned long) stats.loaded,
-            (unsigned long) stats.rejects[0], (unsigned long) stats.rejects[1],
-            (unsigned long) stats.rejects[2], (unsigned long) stats.rejects[3],
-            (unsigned long) stats.rejects[4], (unsigned long) stats.rejects[5],
-            (unsigned long) stats.rejects[6]);
-    }
-#elif PSP_NATIVE_COVERAGE_AB
+#if PSP_NATIVE_COVERAGE_AB && !PSP_GFX_BACKEND_GU
     {
         PspGfxDlNativeCoverageStats stats;
 

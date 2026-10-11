@@ -1,0 +1,12 @@
+{
+  "description": "Retained scalar-math placement from the clean GU production image",
+  "inputs": [
+    {
+      "archive": "libn64psp_math.a",
+      "member": "math_scalar.o",
+      "section": ".text",
+      "address": 7436,
+      "size": 664
+    }
+  ]
+}
