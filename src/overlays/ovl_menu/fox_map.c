@@ -6366,6 +6366,10 @@ void Map_801A9FD4(bool arg0) {
     }
 
     Matrix_Push(&gGfxMatrix);
+#ifdef TARGET_PSP
+    // Match the planet icons to the course boxes
+    Lib_InitPerspectiveAspect(&gMasterDisp, (f32) SCREEN_WIDTH / SCREEN_HEIGHT);
+#endif
     Matrix_LookAt(gGfxMatrix, 0.0f, 0.0f, 100.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, MTXF_APPLY);
     Matrix_SetGfxMtx(&gMasterDisp);
 
@@ -6375,6 +6379,9 @@ void Map_801A9FD4(bool arg0) {
         }
     }
 
+#ifdef TARGET_PSP
+    Lib_InitPerspective(&gMasterDisp);
+#endif
     Matrix_Pop(&gGfxMatrix);
 }
 
