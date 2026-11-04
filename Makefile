@@ -9,6 +9,7 @@
 #   make bootstrap         # same, isolated under build/psp-bootstrap
 #   make PROFILE_PSP=1 psp # profiling-friendly ELF packaging
 #   make PSP_VME=1 psp # VME validation build
+#   make SCRATCHPAD=1 psp # experimental GU scratchpad execution
 
 -include .make_options
 
@@ -29,6 +30,12 @@ ifneq ($(PSP_GFX_BACKEND),unified)
 PSP_GFX_BACKEND_CFLAGS += -DPSP_GFX_BACKEND_DIRECT_CALLS=1
 endif
 PSP_FULL ?= 1
+SCRATCHPAD ?= 0
+ifneq ($(SCRATCHPAD),0)
+ifneq ($(SCRATCHPAD),1)
+$(error SCRATCHPAD must be 0 or 1)
+endif
+endif
 PROFILE_CENSUS ?= 0
 PROFILE_CENSUS_DISPATCH ?= 0
 ifeq ($(PROFILE_CENSUS_DISPATCH),1)
@@ -167,7 +174,7 @@ PSP_LOAD_BASE ?= 0x08804000
 PSPGL_DIR ?= lib/pspgl
 LOCAL_PSPGL_LIB := $(PSPGL_DIR)/libGL.a
 
-PSP_LIBS ?= -lm -lpspdebug -lpspdisplay -lpspgu -lpspge -lpspctrl -lpspaudio -lpsppower -lpspwlan -lpsputility
+PSP_LIBS ?= -lm -lpspdebug -lpspdisplay -lpspgu -lpspge -lpspctrl -lpspaudio -lpsppower -lpspwlan -lpsputility -lpspnet -lpspnet_adhoc -lpspnet_adhocctl
 ifeq ($(PSP_FULL),1)
 ifeq ($(wildcard $(PSPDEV)/psp/include/me-core-mapper/me-core.h),)
 $(error PSP Media Engine headers not found. Install psp-media-engine-custom-core)
@@ -437,7 +444,7 @@ endif
 endif
 
 PSP_LINK_FLAG = -Wl,-q,-T$(PSP_LINK_SCRIPT)
-PSP_GFX_GU_SCRATCHPAD := $(if $(PSP_LAYOUT_DEPS),1,0)
+PSP_GFX_GU_SCRATCHPAD := $(if $(filter 1,$(SCRATCHPAD)),$(if $(PSP_LAYOUT_DEPS),1,0),0)
 CFLAGS += -DPSP_GFX_GU_SCRATCHPAD=$(PSP_GFX_GU_SCRATCHPAD)
 LDFLAGS += -specs=$(PSPSDK)/lib/prxspecs \
            $(PSP_LINK_FLAG) \
