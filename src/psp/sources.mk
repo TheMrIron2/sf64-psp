@@ -31,6 +31,7 @@ PSP_RENDERER_C_FILES := \
     src/psp/settings.c \
     src/psp/aquas_particles_emit.c \
     src/psp/menu.c \
+    src/psp/adhoc.c \
     src/psp/overlay.c \
     src/psp/gfx/gfx_psp_backend_dispatch.c \
     src/psp/gfx/gfx_psp_device_dispatch.c \

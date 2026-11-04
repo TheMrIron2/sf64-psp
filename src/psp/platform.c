@@ -10,6 +10,7 @@
 #endif
 #include "src/psp/audio_output.h"
 #include "src/psp/input.h"
+#include "src/psp/adhoc.h"
 #include "src/psp/hw_counter_profile.h"
 #include "src/psp/platform.h"
 #include "src/psp/profiler.h"
@@ -1937,6 +1938,7 @@ void PspPlatform_PollInput(OSContPad* pads) {
 
 // The scheduler has drained the active graphics task before saving captures
 void PspPlatform_ExitGame(void) {
+    PspAdhoc_Shutdown();
     PspProfiler_Shutdown();
     PspHwCounterProfile_Shutdown();
     PspPlatform_RequestExit();

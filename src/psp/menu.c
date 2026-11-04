@@ -5,6 +5,7 @@
 #include <stdio.h>
 
 #include "src/psp/menu.h"
+#include "src/psp/adhoc.h"
 #include "src/psp/gu_census.h"
 #include "src/psp/overlay.h"
 #include "src/psp/settings.h"
@@ -45,6 +46,7 @@ static int sMultiplayerMatchType;
 static int sMultiplayerChannel;
 static int sMultiplayerActive;
 static PspMultiplayerMenuResult sMultiplayerResult;
+static PspAdhocView sMultiplayerNet;
 static const u32 sAccents[] = { 0xCD4E5C26, 0xCD3838A0, 0xCDA06030 };
 #if PSP_MENU_DIAGNOSTICS
 static int sAction;
@@ -75,6 +77,7 @@ PspMultiplayerMenuResult PspMenu_GetMultiplayerResult(void) {
 }
 
 static void menu_multiplayer_finish(PspMultiplayerMenuResult result) {
+    PspAdhoc_Stop();
     sMultiplayerResult = result;
     sMultiplayerActive = 0;
     sOpen = 0;
@@ -82,14 +85,30 @@ static void menu_multiplayer_finish(PspMultiplayerMenuResult result) {
     sSelected = 0;
 }
 
+static int menu_multiplayer_rows(void) {
+    PspAdhocState state = sMultiplayerNet.state;
+    if (sScreen == MENU_MULTIPLAYER) return 4;
+    if (state == PSP_ADHOC_ERROR) return sScreen == MENU_MULTIPLAYER_HOST ? 3 : 2;
+    if (sScreen == MENU_MULTIPLAYER_HOST) return 2;
+    if (state == PSP_ADHOC_SEARCHING) return sMultiplayerNet.roomCount + 1;
+    if (state == PSP_ADHOC_RESULTS) return sMultiplayerNet.roomCount + 2;
+    return 1;
+}
+
+static void menu_multiplayer_back(void) {
+    PspAdhoc_Stop();
+    sSelected = sScreen == MENU_MULTIPLAYER_HOST ? 0 : 1;
+    sScreen = MENU_MULTIPLAYER;
+}
+
 static void menu_multiplayer_update(u32 pressed) {
     int detail = sScreen != MENU_MULTIPLAYER;
-    int rows = detail ? 2 : 4;
+    int rows = menu_multiplayer_rows();
+    PspAdhocState state = sMultiplayerNet.state;
 
     if (pressed & (PSP_CTRL_CIRCLE | PSP_CTRL_SELECT)) {
         if (detail) {
-            sSelected = sScreen == MENU_MULTIPLAYER_HOST ? 0 : 1;
-            sScreen = MENU_MULTIPLAYER;
+            menu_multiplayer_back();
         } else {
             menu_multiplayer_finish(PSP_MULTIPLAYER_BACK);
         }
@@ -99,17 +118,57 @@ static void menu_multiplayer_update(u32 pressed) {
     else if (pressed & PSP_CTRL_DOWN) sSelected = (sSelected + 1) % rows;
     if (!(pressed & PSP_CTRL_CROSS)) return;
 
-    if (detail) {
+    if (detail && state == PSP_ADHOC_ERROR) {
+        if (sSelected == 0) {
+            if (sScreen == MENU_MULTIPLAYER_HOST) PspAdhoc_Host(sMultiplayerMatchType);
+            else PspAdhoc_Search(sMultiplayerMatchType);
+        } else if (sScreen == MENU_MULTIPLAYER_HOST && sSelected == 1) {
+            menu_multiplayer_finish(PSP_MULTIPLAYER_SOLO);
+        } else menu_multiplayer_back();
+    } else if (detail && sScreen == MENU_MULTIPLAYER_HOST) {
         if (sSelected == 0) menu_multiplayer_finish(PSP_MULTIPLAYER_SOLO);
-        else {
-            sSelected = sScreen == MENU_MULTIPLAYER_HOST ? 0 : 1;
-            sScreen = MENU_MULTIPLAYER;
-        }
+        else menu_multiplayer_back();
+    } else if (detail && (state == PSP_ADHOC_SEARCHING || state == PSP_ADHOC_RESULTS)) {
+        if (sSelected < sMultiplayerNet.roomCount) PspAdhoc_Join(&sMultiplayerNet.rooms[sSelected]);
+        else if (state == PSP_ADHOC_RESULTS && sSelected == sMultiplayerNet.roomCount)
+            PspAdhoc_Search(sMultiplayerMatchType);
+        else menu_multiplayer_back();
+    } else if (detail) {
+        menu_multiplayer_back();
     } else if (sSelected < 2) {
         sScreen = sSelected == 0 ? MENU_MULTIPLAYER_HOST : MENU_MULTIPLAYER_JOIN;
         sSelected = 0;
+        if (sScreen == MENU_MULTIPLAYER_HOST) PspAdhoc_Host(sMultiplayerMatchType);
+        else PspAdhoc_Search(sMultiplayerMatchType);
     } else {
         menu_multiplayer_finish(sSelected == 2 ? PSP_MULTIPLAYER_SOLO : PSP_MULTIPLAYER_BACK);
+    }
+}
+
+static int menu_same_room(const PspAdhocRoom* a, const PspAdhocRoom* b) {
+    int i;
+    if (a->session != b->session) return 0;
+    for (i = 0; i < 6; i++) if (a->mac[i] != b->mac[i]) return 0;
+    return 1;
+}
+
+static void menu_multiplayer_refresh(void) {
+    PspAdhocView previous = sMultiplayerNet;
+    int i;
+    PspAdhoc_GetView(&sMultiplayerNet);
+    if (sScreen != MENU_MULTIPLAYER_JOIN) return;
+    if ((previous.state != PSP_ADHOC_SEARCHING && previous.state != PSP_ADHOC_RESULTS) ||
+        (sMultiplayerNet.state != PSP_ADHOC_SEARCHING && sMultiplayerNet.state != PSP_ADHOC_RESULTS)) return;
+    if (sSelected >= previous.roomCount) {
+        int action = sSelected - previous.roomCount;
+        if (previous.state == PSP_ADHOC_SEARCHING && sMultiplayerNet.state == PSP_ADHOC_RESULTS) action++;
+        sSelected = sMultiplayerNet.roomCount + action;
+    } else {
+        PspAdhocRoom* room = &previous.rooms[sSelected];
+        for (i = 0; i < sMultiplayerNet.roomCount; i++) {
+            if (menu_same_room(room, &sMultiplayerNet.rooms[i])) break;
+        }
+        sSelected = i;
     }
 }
 
@@ -295,6 +354,10 @@ void PspMenu_Publish(void) {
         return;
     }
     view = (PspMenuView){ 0 };
+    if (sMultiplayerActive) {
+        menu_multiplayer_refresh();
+        if (sSelected >= menu_multiplayer_rows()) sSelected = menu_multiplayer_rows() - 1;
+    }
     view.open = 1;
     view.selected = sSelected;
     view.cursor = sSelected;
@@ -317,11 +380,45 @@ void PspMenu_Publish(void) {
             snprintf(view.subtitle, MENU_TEXT, "%s", sMultiplayerMatchType >= 0 && sMultiplayerMatchType < 3 ?
                      matches[sMultiplayerMatchType] : "Versus");
             ROW("Host"); ROW("Join"); ROW("Continue Solo"); ROW("Back");
-        } else {
-            int host = sScreen == MENU_MULTIPLAYER_HOST;
-            snprintf(view.title, MENU_TEXT, "Ad-Hoc %s", host ? "Host" : "Join");
-            snprintf(view.subtitle, MENU_TEXT, "%s", host ? "Hosting is not available yet" : "Search is not available yet");
+        } else if (sScreen == MENU_MULTIPLAYER_HOST) {
+            snprintf(view.title, MENU_TEXT, "%s", "Ad-Hoc Host");
+            if (sMultiplayerNet.state == PSP_ADHOC_HOSTING)
+                snprintf(view.subtitle, MENU_TEXT, "Hosting game %02d", sMultiplayerNet.roomId);
+            else snprintf(view.subtitle, MENU_TEXT, "%s", "Preparing room");
+            if (sMultiplayerNet.state == PSP_ADHOC_ERROR) {
+                snprintf(view.subtitle, MENU_TEXT, "%s", "Could not host a room");
+                ROW("Retry");
+            }
             ROW("Continue Solo"); ROW("Back");
+            snprintf(view.status, MENU_TEXT, "%s", sMultiplayerNet.status);
+        } else {
+            PspAdhocState state = sMultiplayerNet.state;
+            int i;
+            snprintf(view.title, MENU_TEXT, "%s", "Ad-Hoc Join");
+            snprintf(view.status, MENU_TEXT, "%s", sMultiplayerNet.status);
+            if (state == PSP_ADHOC_SEARCHING || state == PSP_ADHOC_RESULTS) {
+                snprintf(view.subtitle, MENU_TEXT, "%s", state == PSP_ADHOC_SEARCHING ? "Searching..." :
+                         sMultiplayerNet.roomCount ? "Nearby games" : "No games found");
+                for (i = 0; i < sMultiplayerNet.roomCount; i++) {
+                    PspAdhocRoom* room = &sMultiplayerNet.rooms[i];
+                    int j, duplicate = 0;
+                    for (j = 0; j < sMultiplayerNet.roomCount; j++)
+                        if (j != i && sMultiplayerNet.rooms[j].roomId == room->roomId) duplicate = 1;
+                    if (duplicate) ROW("Game %02d (%02X%02X)", room->roomId, room->mac[4], room->mac[5]);
+                    else ROW("Game %02d", room->roomId);
+                }
+                if (state == PSP_ADHOC_RESULTS) ROW("Search Again");
+                ROW("Cancel");
+            } else if (state == PSP_ADHOC_ERROR) {
+                snprintf(view.subtitle, MENU_TEXT, "%s", "Could not join a room");
+                ROW("Retry"); ROW("Back");
+            } else if (state == PSP_ADHOC_CONNECTED) {
+                snprintf(view.subtitle, MENU_TEXT, "Connected to game %02d", sMultiplayerNet.roomId);
+                ROW("Back");
+            } else {
+                snprintf(view.subtitle, MENU_TEXT, "%s", state == PSP_ADHOC_JOINING ? "Joining game..." : "Starting Ad-Hoc...");
+                ROW("Cancel");
+            }
         }
     } else if (sScreen == MENU_MAIN) {
         snprintf(view.title, MENU_TEXT, "%s", "Star Fox 64 PSP");
