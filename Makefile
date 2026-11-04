@@ -167,7 +167,7 @@ PSP_LOAD_BASE ?= 0x08804000
 PSPGL_DIR ?= lib/pspgl
 LOCAL_PSPGL_LIB := $(PSPGL_DIR)/libGL.a
 
-PSP_LIBS ?= -lm -lpspdebug -lpspdisplay -lpspgu -lpspge -lpspctrl -lpspaudio -lpsppower
+PSP_LIBS ?= -lm -lpspdebug -lpspdisplay -lpspgu -lpspge -lpspctrl -lpspaudio -lpsppower -lpspwlan -lpsputility
 ifeq ($(PSP_FULL),1)
 ifeq ($(wildcard $(PSPDEV)/psp/include/me-core-mapper/me-core.h),)
 $(error PSP Media Engine headers not found. Install psp-media-engine-custom-core)

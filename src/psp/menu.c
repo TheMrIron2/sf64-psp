@@ -1,5 +1,7 @@
 #include <pspctrl.h>
 #include <pspkernel.h>
+#include <psputility_sysparam.h>
+#include <pspwlan.h>
 #include <stdio.h>
 
 #include "src/psp/menu.h"
@@ -17,7 +19,8 @@
 #define MENU_TEXT 60
 #define MENU_VISIBLE_ROWS 5
 
-enum { MENU_MAIN, MENU_SETTINGS, MENU_GRAPHICS, MENU_DIAGNOSTICS };
+enum { MENU_MAIN, MENU_SETTINGS, MENU_GRAPHICS, MENU_DIAGNOSTICS,
+       MENU_MULTIPLAYER, MENU_MULTIPLAYER_HOST, MENU_MULTIPLAYER_JOIN };
 enum { ACTION_NONE, ACTION_START, ACTION_STOP, ACTION_TYPE, ACTION_SCENE_PREV, ACTION_SCENE_NEXT,
        ACTION_TRACE, ACTION_COVERAGE };
 
@@ -29,6 +32,7 @@ typedef struct {
     int main;
     u32 accent;
     char title[MENU_TEXT];
+    char subtitle[MENU_TEXT];
     char rows[MENU_ROWS][MENU_TEXT];
     char status[MENU_TEXT];
 } PspMenuView;
@@ -37,6 +41,10 @@ static int sOpen;
 static int sScreen;
 static int sSelected;
 static int sColour;
+static int sMultiplayerMatchType;
+static int sMultiplayerChannel;
+static int sMultiplayerActive;
+static PspMultiplayerMenuResult sMultiplayerResult;
 static const u32 sAccents[] = { 0xCD4E5C26, 0xCD3838A0, 0xCDA06030 };
 #if PSP_MENU_DIAGNOSTICS
 static int sAction;
@@ -49,6 +57,60 @@ static PspMenuView sView;
 
 static const char* menu_backend_name(PspGfxBackendKind backend) {
     return backend == PSP_GFX_KIND_GU ? "GU" : "PSPGL";
+}
+
+void PspMenu_OpenMultiplayer(int matchType) {
+    sMultiplayerMatchType = matchType;
+    sMultiplayerActive = 1;
+    sMultiplayerResult = PSP_MULTIPLAYER_PENDING;
+    sOpen = 1;
+    sScreen = MENU_MULTIPLAYER;
+    sSelected = 0;
+    sMultiplayerChannel = -1;
+    sceUtilityGetSystemParamInt(PSP_SYSTEMPARAM_ID_INT_ADHOC_CHANNEL, &sMultiplayerChannel);
+}
+
+PspMultiplayerMenuResult PspMenu_GetMultiplayerResult(void) {
+    return sMultiplayerResult;
+}
+
+static void menu_multiplayer_finish(PspMultiplayerMenuResult result) {
+    sMultiplayerResult = result;
+    sMultiplayerActive = 0;
+    sOpen = 0;
+    sScreen = MENU_MAIN;
+    sSelected = 0;
+}
+
+static void menu_multiplayer_update(u32 pressed) {
+    int detail = sScreen != MENU_MULTIPLAYER;
+    int rows = detail ? 2 : 4;
+
+    if (pressed & (PSP_CTRL_CIRCLE | PSP_CTRL_SELECT)) {
+        if (detail) {
+            sSelected = sScreen == MENU_MULTIPLAYER_HOST ? 0 : 1;
+            sScreen = MENU_MULTIPLAYER;
+        } else {
+            menu_multiplayer_finish(PSP_MULTIPLAYER_BACK);
+        }
+        return;
+    }
+    if (pressed & PSP_CTRL_UP) sSelected = (sSelected + rows - 1) % rows;
+    else if (pressed & PSP_CTRL_DOWN) sSelected = (sSelected + 1) % rows;
+    if (!(pressed & PSP_CTRL_CROSS)) return;
+
+    if (detail) {
+        if (sSelected == 0) menu_multiplayer_finish(PSP_MULTIPLAYER_SOLO);
+        else {
+            sSelected = sScreen == MENU_MULTIPLAYER_HOST ? 0 : 1;
+            sScreen = MENU_MULTIPLAYER;
+        }
+    } else if (sSelected < 2) {
+        sScreen = sSelected == 0 ? MENU_MULTIPLAYER_HOST : MENU_MULTIPLAYER_JOIN;
+        sSelected = 0;
+    } else {
+        menu_multiplayer_finish(sSelected == 2 ? PSP_MULTIPLAYER_SOLO : PSP_MULTIPLAYER_BACK);
+    }
 }
 
 static int menu_rows(void) {
@@ -78,6 +140,10 @@ void PspMenu_Update(u32 pressed) {
     int direction = (pressed & PSP_CTRL_LEFT) ? -1 : 1;
     int row;
 
+    if (sMultiplayerActive) {
+        menu_multiplayer_update(pressed);
+        return;
+    }
     if (pressed & PSP_CTRL_SELECT) {
         sOpen = !sOpen;
         sScreen = MENU_MAIN;
@@ -235,7 +301,29 @@ void PspMenu_Publish(void) {
     view.main = sScreen == MENU_MAIN;
     view.accent = sAccents[sColour];
 #define ROW(...) snprintf(view.rows[n++], MENU_TEXT, __VA_ARGS__)
-    if (sScreen == MENU_MAIN) {
+    if (sMultiplayerActive) {
+        static const char* const matches[] = { "Point Match", "Battle Royal", "Time Trial" };
+        int wlan = sceWlanGetSwitchState();
+        char channel[16];
+
+        if (sMultiplayerChannel == 0) snprintf(channel, sizeof(channel), "%s", "Auto");
+        else if (sMultiplayerChannel == 1 || sMultiplayerChannel == 6 || sMultiplayerChannel == 11)
+            snprintf(channel, sizeof(channel), "%d", sMultiplayerChannel);
+        else snprintf(channel, sizeof(channel), "%s", "Unknown");
+        snprintf(view.status, MENU_TEXT, "WLAN: %s   Channel: %s",
+                 wlan < 0 ? "Unknown" : wlan ? "On" : "Off", channel);
+        if (sScreen == MENU_MULTIPLAYER) {
+            snprintf(view.title, MENU_TEXT, "%s", "Ad-Hoc Multiplayer");
+            snprintf(view.subtitle, MENU_TEXT, "%s", sMultiplayerMatchType >= 0 && sMultiplayerMatchType < 3 ?
+                     matches[sMultiplayerMatchType] : "Versus");
+            ROW("Host"); ROW("Join"); ROW("Continue Solo"); ROW("Back");
+        } else {
+            int host = sScreen == MENU_MULTIPLAYER_HOST;
+            snprintf(view.title, MENU_TEXT, "Ad-Hoc %s", host ? "Host" : "Join");
+            snprintf(view.subtitle, MENU_TEXT, "%s", host ? "Hosting is not available yet" : "Search is not available yet");
+            ROW("Continue Solo"); ROW("Back");
+        }
+    } else if (sScreen == MENU_MAIN) {
         snprintf(view.title, MENU_TEXT, "%s", "Star Fox 64 PSP");
         ROW("Resume Game"); ROW("Settings"); ROW("Graphics & Display");
 #if PSP_MENU_DIAGNOSTICS
@@ -332,7 +420,7 @@ static void menu_label(int x, int y, int width, int centered, u32 color, const c
 
 void PspMenu_Draw(void) {
     PspMenuView view;
-    int visible, first, height, top, rowTop, rowHeight, i;
+    int visible, first, height, top, rowTop, rowHeight, subtitleHeight, i;
     int lock = sceKernelCpuSuspendIntr();
     view = sView;
     sceKernelCpuResumeIntr(lock);
@@ -342,9 +430,10 @@ void PspMenu_Draw(void) {
     if (first > view.count - visible) first = view.count - visible;
     if (first < 0) first = 0;
     rowHeight = view.main ? 36 : 24;
-    height = visible * rowHeight + (view.main ? 20 : 50) + (view.status[0] ? 24 : 0);
+    subtitleHeight = view.subtitle[0] ? 20 : 0;
+    height = visible * rowHeight + (view.main ? 20 : 50) + subtitleHeight + (view.status[0] ? 24 : 0);
     top = (272 - height) / 2;
-    rowTop = top + (view.main ? 10 : 38);
+    rowTop = top + (view.main ? 10 : 38) + subtitleHeight;
     PspOverlay_MenuBegin();
     PspOverlay_Rect(90, top, 300, height, 0xE0000000);
     PspOverlay_Rect(90, top, 300, 1, view.accent);
@@ -352,6 +441,7 @@ void PspMenu_Draw(void) {
     PspOverlay_Rect(90, top + 1, 1, height - 2, view.accent);
     PspOverlay_Rect(389, top + 1, 1, height - 2, view.accent);
     if (!view.main) menu_label(110, top + 9, 260, 1, 0xFFF5FFFF, view.title);
+    if (view.subtitle[0]) menu_label(110, top + 31, 260, 1, 0xFFB4BEAA, view.subtitle);
     for (i = 0; i < visible; i++) {
         int row = first + i;
         int y = rowTop + i * rowHeight;

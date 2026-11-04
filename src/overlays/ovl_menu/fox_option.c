@@ -10,6 +10,7 @@
 
 #ifdef TARGET_PSP
 #include "src/psp/display.h"
+#include "src/psp/menu.h"
 #include "src/psp/renderer.h"
 #endif
 #include "fox_option.h"
@@ -1207,11 +1208,14 @@ void Option_Versus_Update(void) {
             if (gControllerPress[gMainController].button & (A_BUTTON | START_BUTTON)) {
                 AUDIO_PLAY_SFX(NA_SE_ARWING_DECIDE, gDefaultSfxSource, 4);
                 sLightningYpos = D_menu_801AEF84[sVsMenuCursor];
+#ifdef TARGET_PSP
+                PspMenu_OpenMultiplayer(sVsMenuCursor);
+                sMainMenuState = 10;
+#else
                 sDrawCursor = false;
                 sMainMenuState = 11;
-            }
-
-            if (gControllerPress[gMainController].button & B_BUTTON) {
+#endif
+            } else if (gControllerPress[gMainController].button & B_BUTTON) {
                 AUDIO_PLAY_SFX(NA_SE_ARWING_CANCEL, gDefaultSfxSource, 4);
                 sMainMenuState = 0;
                 sMenuEntryState = OPTION_MAIN_MENU;
@@ -1219,6 +1223,17 @@ void Option_Versus_Update(void) {
                 sMainMenuFromCancel = true;
             }
             break;
+
+#ifdef TARGET_PSP
+        case 10:
+            if (PspMenu_GetMultiplayerResult() == PSP_MULTIPLAYER_SOLO) {
+                sDrawCursor = false;
+                sMainMenuState = 11;
+            } else if (PspMenu_GetMultiplayerResult() == PSP_MULTIPLAYER_BACK) {
+                sMainMenuState = 1;
+            }
+            break;
+#endif
 
         case 11:
             gBlurAlpha = 16;
