@@ -25,7 +25,11 @@ u32 PspGfxRetainedSource_Find(const Gfx* commands, u32* count) {
         uintptr_t target = (uintptr_t) sRetainedSources[slot].commands;
         if ((uintptr_t) commands < target) last = slot;
         else if ((uintptr_t) commands > target) first = slot + 1;
-        else { *count = sRetainedSources[slot].count; return slot; }
+        else {
+            if (!sRetainedSources[slot].count) break;
+            *count = sRetainedSources[slot].count;
+            return slot;
+        }
     }
     return PSP_RETAINED_CACHE_SLOTS;
 }
@@ -158,6 +162,7 @@ void PspGfxRetainedSource_Prepare(void) {
 
 PspGfxDlRetainedCache* PspGfxRetainedSource_Get(u32 slot) {
     if (slot >= PSP_RETAINED_CACHE_SLOTS) return NULL;
+    if (!sRetainedSources[slot].count) return NULL;
     if (!sRetainedBuilt[slot]) {
         psp_gfx_dl_retained_build(sRetainedSources[slot].commands, sRetainedSources[slot].count, slot);
     }

@@ -11,6 +11,7 @@ import re
 import shlex
 import struct
 import subprocess
+import sys
 
 MANIFEST_PATH = Path(__file__).with_name('native_assets.json')
 
@@ -1043,64 +1044,36 @@ def rank_retained_frequency(rows, captures):
     return sorted(ranked, key=lambda row: (-row['avoided_per_frame'], row['name']))
 
 
-def generate_retained(build):
-    config = ACCEPTED_MANIFEST.get('retained', {})
-    if config.get('version') != 1 or not config.get('assets'):
-        raise ValueError('expected retained qualification in shared asset manifest')
-    rows = []
-    vertex_names = set()
-    seen = set()
-    for row in config['assets']:
-        if row['name'] in seen:
-            raise ValueError('duplicate retained source')
-        seen.add(row['name'])
-        validate_manifest({'version': 1, 'objects': [dict(source=row['source'],
-            header='assets/'+Path(row['source']).stem+'.h', assets=[row['name']])]})
-        if row['qualification'] not in ('hardware_validated', 'direct_reads_only', 'reviewed_render_table', 'accepted_commands'):
-            raise ValueError('unqualified retained source')
-        if row['qualification'] == 'accepted_commands' and row['name'] not in ACCEPTED_ASSETS:
-            raise ValueError('retained command is outside accepted AOT coverage')
-        required = {row['source'], 'include/PR/gbi.h', 'include/assets/'+Path(row['source']).stem+'.h'}
-        if not required <= row['source_sha256'].keys():
-            raise ValueError('incomplete retained source evidence')
-        for source, expected in row['source_sha256'].items():
-            if hashlib.sha256(Path(source).read_bytes()).hexdigest() != expected:
-                raise ValueError('stale retained source evidence for ' + source)
-        if row['qualification'] == 'reviewed_render_table':
-            alias = row.get('alias_review', {})
-            symbol = alias.get('symbol', '')
-            if not re.fullmatch(r'[A-Za-z_]\w*', symbol):
-                raise ValueError('missing render-table review')
-            consumers = retained_runtime_users({symbol}).get(symbol, [])
-            if set(consumers) != set(alias.get('consumers', [])) or not consumers:
-                raise ValueError('render-table consumers changed')
-            if not set(consumers) <= row['source_sha256'].keys():
-                raise ValueError('render-table consumers lack fingerprints')
-        cost, hashes = retained_payloads(build, row)
-        if hashes != row['vertex_sha256']:
-            raise ValueError('retained vertex payload changed for ' + row['name'])
-        rows.append(dict(row, cost=cost))
-        vertex_names.update(hashes)
-    users = retained_runtime_users(vertex_names)
-    if users:
-        raise ValueError('retained vertices have runtime references: ' + ', '.join(sorted(users)))
-    if sum(row['cost']['packet_bytes'] for row in rows) > 3*1024*1024:
-        raise ValueError('retained selection exceeds cache byte ceiling')
-    order = asset_object_order()
-    definitions = {}
-    for source in {row['source'] for row in rows}:
-        _, _, symbols, _ = read_symbols(Path(build)/Path(source).with_suffix('.o'))
-        definitions.update({name:(order[source], section, value) for name,value,size,section in symbols if name and size})
-    rows.sort(key=lambda row: definitions[row['name']])
-    header = '#ifndef PSP_RETAINED_ASSETS_H\n#define PSP_RETAINED_ASSETS_H\n\n'
-    header += '#define PSP_RETAINED_CACHE_SLOTS '+str(len(rows))+'\n'
-    header += '#define PSP_RETAINED_PACKET_BYTES '+str(sum(r['cost']['packet_bytes'] for r in rows))+'\n\n#endif\n'
-    source = ''.join('extern Gfx '+row['name']+'[];\n' for row in rows)
-    source += '\nconst PspGfxDlRetainedSource sRetainedSources[PSP_RETAINED_CACHE_SLOTS] = {\n'
-    source += ''.join('    { '+row['name']+', '+str(row['cost']['commands'])+' },\n' for row in rows)+'};\n'
-    source += '\nconst PspGfxDlRetainedWrites sRetainedWrites[PSP_RETAINED_CACHE_SLOTS] = {\n'
-    source += ''.join('    { { 0x%08x, 0x%08x }, %d },\n' % (*row['cost']['written_slots'], row['cost']['final']) for row in rows)+'};\n'
-    contract = config.get('caller_contract', {})
+def qualify_retained(build, row):
+    validate_manifest({'version': 1, 'objects': [dict(source=row['source'],
+        header='assets/'+Path(row['source']).stem+'.h', assets=[row['name']])]})
+    if row['qualification'] not in ('hardware_validated', 'direct_reads_only', 'reviewed_render_table', 'accepted_commands'):
+        raise ValueError('unqualified retained source')
+    if row['qualification'] == 'accepted_commands' and row['name'] not in ACCEPTED_ASSETS:
+        raise ValueError('retained command is outside accepted AOT coverage')
+    required = {row['source'], 'include/PR/gbi.h', 'include/assets/'+Path(row['source']).stem+'.h'}
+    if not required <= row['source_sha256'].keys():
+        raise ValueError('incomplete retained source evidence')
+    for source, expected in row['source_sha256'].items():
+        if hashlib.sha256(Path(source).read_bytes()).hexdigest() != expected:
+            raise ValueError('stale retained source evidence for ' + source)
+    if row['qualification'] == 'reviewed_render_table':
+        alias = row.get('alias_review', {})
+        symbol = alias.get('symbol', '')
+        if not re.fullmatch(r'[A-Za-z_]\w*', symbol):
+            raise ValueError('missing render-table review')
+        consumers = retained_runtime_users({symbol}).get(symbol, [])
+        if set(consumers) != set(alias.get('consumers', [])) or not consumers:
+            raise ValueError('render-table consumers changed')
+        if not set(consumers) <= row['source_sha256'].keys():
+            raise ValueError('render-table consumers lack fingerprints')
+    cost, hashes = retained_payloads(build, row)
+    if hashes != row['vertex_sha256']:
+        raise ValueError('retained vertex payload changed for ' + row['name'])
+    return dict(row, cost=cost)
+
+
+def retained_setup_rows(build, contract):
     expected_users = set(contract.get('setup_users', []))
     users = {source for source in retained_runtime_users({'gRcpSetupDLs'}).get('gRcpSetupDLs', [])
              if not source.startswith('src/psp/gfx/')}
@@ -1114,14 +1087,71 @@ def generate_retained(build):
             raise ValueError('setup contract source changed')
     obj = Path(build)/'src/engine/fox_rcp.o'
     data, sections, symbols, _ = read_symbols(obj)
-    table = next(row for row in symbols if row[0] == 'gRcpSetupDLs')
+    table = next((row for row in symbols if row[0] == 'gRcpSetupDLs'), None)
+    if table is None:
+        raise ValueError('missing setup table')
     _, start, size, section = table
     if not size or size % 72: raise ValueError('unexpected setup table extent')
     words = [struct.unpack_from('<II',data,sections[section][4]+start+i) for i in range(0,size,8)]
     state_ops = {0,1,3,0xb3,0xb4,0xb6,0xb7,0xb9,0xba,0xbb,0xbc,0xbd,0xe4,0xe5} | set(range(0xe6,0x100)) - {0xf1}
     if any(w0>>24 not in state_ops for i,(w0,w1) in enumerate(words) if i%9!=8) or any(w0!=0xb8000000 or w1 for i,(w0,w1) in enumerate(words) if i%9==8):
         raise ValueError('setup table now consumes vertices or changes control flow')
-    header = header.replace('\n#endif\n','#define PSP_RETAINED_SETUP_ROWS '+str(size//72)+'\n\n#endif\n')
+    return size // 72
+
+
+def generate_retained(build):
+    config = ACCEPTED_MANIFEST.get('retained', {})
+    if config.get('version') != 1 or not config.get('assets'):
+        raise ValueError('expected retained qualification in shared asset manifest')
+    rows = []
+    skipped = collections.Counter()
+    vertex_names = set()
+    seen = set()
+    for row in config['assets']:
+        if row['name'] in seen:
+            raise ValueError('duplicate retained source')
+        seen.add(row['name'])
+        try:
+            qualified = qualify_retained(build, row)
+        except (ValueError, OSError) as error:
+            skipped[str(error)] += 1
+            continue
+        rows.append(qualified)
+        vertex_names.update(row['vertex_sha256'])
+    users = retained_runtime_users(vertex_names)
+    safe = []
+    for row in rows:
+        hits = users.keys() & row['vertex_sha256'].keys()
+        if hits:
+            skipped['retained vertices have runtime references: ' + ', '.join(sorted(hits))] += 1
+        else:
+            safe.append(row)
+    rows = safe
+    if sum(row['cost']['packet_bytes'] for row in rows) > 3*1024*1024:
+        skipped['retained selection exceeds cache byte ceiling'] += len(rows)
+        rows = []
+    for reason, count in sorted(skipped.items()):
+        print(f'Warning: normal rendering for {count} retained leaves: {reason}', file=sys.stderr)
+    order = asset_object_order()
+    definitions = {}
+    for source in {row['source'] for row in rows}:
+        _, _, symbols, _ = read_symbols(Path(build)/Path(source).with_suffix('.o'))
+        definitions.update({name:(order[source], section, value) for name,value,size,section in symbols if name and size})
+    rows.sort(key=lambda row: definitions[row['name']])
+    header = '#ifndef PSP_RETAINED_ASSETS_H\n#define PSP_RETAINED_ASSETS_H\n\n'
+    header += '#define PSP_RETAINED_CACHE_SLOTS '+str(max(1, len(rows)))+'\n'
+    header += '#define PSP_RETAINED_PACKET_BYTES '+str(sum(r['cost']['packet_bytes'] for r in rows))+'\n\n#endif\n'
+    source = ''.join('extern Gfx '+row['name']+'[];\n' for row in rows)
+    source += '\nconst PspGfxDlRetainedSource sRetainedSources[PSP_RETAINED_CACHE_SLOTS] = {\n'
+    source += (''.join('    { '+row['name']+', '+str(row['cost']['commands'])+' },\n' for row in rows) or '    { NULL, 0 },\n')+'};\n'
+    source += '\nconst PspGfxDlRetainedWrites sRetainedWrites[PSP_RETAINED_CACHE_SLOTS] = {\n'
+    source += (''.join('    { { 0x%08x, 0x%08x }, %d },\n' % (*row['cost']['written_slots'], row['cost']['final']) for row in rows) or '    { { 0, 0 }, 0 },\n')+'};\n'
+    try:
+        setup_rows = retained_setup_rows(build, config.get('caller_contract', {}))
+    except (ValueError, OSError) as error:
+        setup_rows = 0
+        print(f'Warning: retained setup calls preserve vertex outputs: {error}', file=sys.stderr)
+    header = header.replace('\n#endif\n','#define PSP_RETAINED_SETUP_ROWS '+str(setup_rows)+'\n\n#endif\n')
     write_output(Path(build)/'retained_assets.h', header)
     write_output(Path(build)/'retained_assets.inc.c', source)
     write_output(Path(build)/'retained_assets.json', json.dumps(rows, indent=2)+'\n')

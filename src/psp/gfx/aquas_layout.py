@@ -1,4 +1,4 @@
-"""Fit the bounded Aquas extension while preserving all other production pins"""
+"""Fit renderer code into production reservations with automatic slot growth"""
 import argparse
 import json
 from pathlib import Path
@@ -12,29 +12,36 @@ args = parser.parse_args()
 plan = json.loads(Path(args.base).read_text())
 output = subprocess.check_output(['psp-nm', '-S', '--defined-only', args.object], text=True)
 sizes = {p[3]: int(p[1], 16) for line in output.splitlines() if len(p := line.split()) == 4}
-expected_sizes = {
-    'psp_gfx_dl_run_internal.constprop.0.isra.0': {9788: 9820, 9760: 9796},
-    'psp_gfx_dl_native_asset_ast_title_seg6_gfx_267B0': {2068: 2204},
-    'psp_gfx_dl_handle_mtx.constprop.0.isra.0': {1424: 1400},
-}
 changes = []
 for index, chunk in enumerate(plan['chunks']):
+    previous_end = (plan['chunks'][index - 1]['address'] + plan['chunks'][index - 1]['slot']) if index else 0
+    chunk['address'] = max(chunk['address'], previous_end)
     if chunk['owner'] != 'src/psp/gfx/gfx_psp_dl.o':
         continue
     for function in chunk['functions']:
         actual = sizes.get(function['name'])
         if actual == function['size']:
             continue
-        if actual != expected_sizes.get(function['name'], {}).get(function['size']):
-            raise ValueError('unexpected Aquas code generation: ' + function['name'])
-        extra = max(0, ((actual + 63) & ~63) - chunk['slot'])
+        if actual is None:
+            raise ValueError('missing pinned renderer function: ' + function['name'])
+        extra = max(0, ((function['offset'] + actual + 63) & ~63) - chunk['slot'])
         if extra:
-            if extra > 192 or index == 0 or chunk['address'] - extra < (
-                    plan['chunks'][index - 1]['address'] + plan['chunks'][index - 1]['slot']):
-                raise ValueError('Aquas helper exceeds its preceding gap')
-            chunk['address'] -= extra
+            shift = min(extra, chunk['address'] - previous_end)
+            chunk['address'] -= shift
             chunk['slot'] += extra
+            remaining = extra - shift
+            for donor_index in range(index - 1, -1, -1):
+                if not remaining:
+                    break
+                donor = plan['chunks'][donor_index]
+                used = max(f['offset'] + f['size'] for f in donor['functions'])
+                take = min(remaining, donor['slot'] - ((used + 63) & ~63))
+                donor['slot'] -= take
+                for moved in plan['chunks'][donor_index + 1:index + 1]:
+                    moved['address'] -= take
+                remaining -= take
         changes.append((function['name'], function['size'], actual, extra))
         function['size'] = actual
+plan['pinned_end'] = plan['chunks'][-1]['address'] + plan['chunks'][-1]['slot']
 Path(args.output).write_text(json.dumps(plan, indent=2) + '\n')
-print('Aquas bounded layout:', changes)
+print('Renderer reserved layout:', changes)

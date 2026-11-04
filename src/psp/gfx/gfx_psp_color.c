@@ -4,6 +4,10 @@
 
 u8 gPspGfxColorTransferLut[256];
 
+int PspGfxColor_IsFinite(float value) {
+    return isfinite(value);
+}
+
 void PspGfxColor_Init(void) {
     static int initialized;
     u32 i;
