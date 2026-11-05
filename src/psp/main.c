@@ -22,7 +22,8 @@ void bootproc(void);
 PSP_MODULE_INFO("Star Fox 64", PSP_MODULE_USER, 1, 0);
 PSP_MAIN_THREAD_ATTR(PSP_THREAD_ATTR_USER | PSP_THREAD_ATTR_VFPU);
 // Leave memory for wireless networking
-PSP_HEAP_SIZE_KB(-2048);
+PSP_HEAP_SIZE_KB(-1);
+PSP_HEAP_THRESHOLD_SIZE_KB(2048);
 
 int exit_callback(int arg1, int arg2, void* common) {
     (void) arg1;
