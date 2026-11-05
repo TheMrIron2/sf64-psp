@@ -1106,6 +1106,9 @@ void Option_MainMenu_Draw(void) {
 void Option_Versus_Setup(void) {
     s32 i;
 
+#ifdef TARGET_PSP
+    PspMenu_EndHosting();
+#endif
     gBlurAlpha = 255;
     gControllerLock = 0;
     gStarCount = 800;
@@ -1226,7 +1229,8 @@ void Option_Versus_Update(void) {
 
 #ifdef TARGET_PSP
         case 10:
-            if (PspMenu_GetMultiplayerResult() == PSP_MULTIPLAYER_SOLO) {
+            if (PspMenu_GetMultiplayerResult() == PSP_MULTIPLAYER_SOLO ||
+                PspMenu_GetMultiplayerResult() == PSP_MULTIPLAYER_HOST) {
                 sDrawCursor = false;
                 sMainMenuState = 11;
             } else if (PspMenu_GetMultiplayerResult() == PSP_MULTIPLAYER_BACK) {

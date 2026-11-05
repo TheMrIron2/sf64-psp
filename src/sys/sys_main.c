@@ -376,6 +376,10 @@ static SPTask* Graphics_BuildSimulationTask(u32 simulationVi) {
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_GAME_UPDATE);
     PspCensus_Simulation(0);
     Game_Update();
+    PspMenu_UpdateHosting(gGameState == GSTATE_MENU || gGameState == GSTATE_VS_INIT ||
+                         (gGameState == GSTATE_PLAY && gCurrentLevel == LEVEL_VERSUS),
+                         gGameState == GSTATE_PLAY ? (gPlayState == PLAY_PAUSE ? PSP_ADHOC_HOST_PAUSED :
+                         PSP_ADHOC_HOST_PLAYING) : PSP_ADHOC_HOST_SETUP, gVersusStage, gGameFrameCount);
     PspCensus_Simulation(1);
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_GAME_UPDATE);
     PspFrameInterpolation_EndSimulationFrame(gGfxTask, Graphics_InterpolationEligible());
