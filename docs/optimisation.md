@@ -1,5 +1,16 @@
 Rules for optimising PSP code for Star Fox 64.
 
+## Optional scratchpad execution
+
+Scratchpad execution is disabled by default while instability and build
+complications remain unresolved. Use `make SCRATCHPAD=1 psp` to enable the
+preserved implementation, or `make SCRATCHPAD=0 psp` to disable it explicitly.
+It remains limited to full GU/unified builds with the production pinned layout;
+profiling and diagnostic configurations that disable that layout still use RAM.
+Disabled builds omit scratchpad sources, assembly rewriting, linker wrappers,
+image generation and verification. The compile flags stamp rebuilds affected
+objects when switching settings in the same build directory.
+
 ## OOT gap audit — October 2026
 
 The [current-head comparison](OOT_PSP_OPTIMISATION_GAP_AUDIT.md) recommends a
@@ -932,6 +943,23 @@ slot counts together, make both renderer objects depend on those outputs, and
 verify linked array sizes. Four gameplay candidates add no linked text growth
 to this experiment; clipping and instance frequency still determine real benefit.
 
+Retained qualification is optional at build time. Stale or missing source
+evidence, changed vertex payloads, new runtime vertex users and changed reviewed
+table consumers exclude affected leaves with a warning and use normal rendering.
+Unchanged qualified leaves remain enabled. An empty selection emits an inert
+entry so the same renderer still builds without zero-sized arrays. A changed
+setup-table contract disables only its outgoing-slot proof shortcut, preserving
+vertex outputs at those calls. Keep safety checks active and never refresh hashes
+automatically to silence a build error. Saved qualifications can be reviewed
+later to recover coverage; ordinary source edits must not require that review
+before compilation. Scratchpad verification must accept the resulting registry
+count and check texture helper growth against its reserved space rather than
+an enumerated list of past compiler sizes.
+Generate renderer pin sizes from the current object, use earlier reservation
+padding for growth first, and move following slots only when needed. Keep
+alignment, non-overlap and linked-size verification; changed placement still
+needs hardware performance validation.
+
 For repeated-mesh selection, rank avoided position loads by measured gameplay
 calls/frame. Aggregate source labels and exclude Title; archived peak rates
 are selection evidence rather than millisecond predictions. Two reviewed
@@ -1082,3 +1110,170 @@ acceptance found no visual compromise, so it should not depend on quality. The
 `PSP_FAST_AQUAS` build flag is removed; PSPGL and failure paths retain the original
 renderer. The historical 5.7 ms result measures the representation change, not
 a current Accurate/Fast difference.
+
+The [Corneria Boss 2 investigation](codex/corneria_explosion_optimisation.md)
+identifies effect 357's metal quad subtype in both main and reflected passes,
+not the already retained six-triangle debris meshes. Its first 60 diagnostic
+tasks average 10.24 ms for 357 across both passes. The separate actor region is
+detailed Arwing rendering; the carrier has its own boss category. The later
+sphere also comes from effect 395 state 12 as well as 383, and has no reflected
+geometry. Measure these workloads independently before replacing rendering;
+frontend timing does not establish the large blended sphere's GE pixel cost.
+
+The [stage-one debris skip experiment](codex/corneria_debris_skip.md) now has
+independent main/reflection controls and a debug Corneria checkpoint start.
+Validated skipped runs keep only the last object's state-only commands while
+preserving simulation and matrix records. Clean and coarse EBOOTs are prepared;
+the hardware skip ceiling and visual-state checks were the first review gate.
+Effect-tagged captures deliberately split runs; use clean GFX timings
+and the coarse census for counts.
+
+The viewport FPU fix in `53ff2f75` changes several compiled helper sizes when
+outlining shared viewport resolution. The reviewed layout adapter expands two
+slots using existing padding, moving 23 pins back 64 bytes without growing the
+pinned extent. Texture preparation is now 1,228 bytes: scratchpad code totals
+4,736 bytes with 5,248 bytes of guarded storage. Keep explicit size and
+relocation checks; a small source fix can change distant compiler decisions.
+Both Corneria EBOOTs rebuild with all 198 pins and ten scratchpad routes verified;
+matched production timing for the placement change remains unmeasured.
+
+The owner's 26 October retest `census-000` records Original/Original throughout:
+up to 40 eligible metal fragments per pass, 32+8 runs at that population and
+zero fallback. Debris-bearing tasks average 23.328 ms GFX in the coarse build.
+This confirms adjacency and the validated source pattern on PSP, not a skip
+ceiling; the changing recovery interval cannot substitute for a matched Skip run.
+
+Retest `census-001` confirms Skip/Skip with zero fallback and exactly reconciled
+command removal. Debris-bearing mean GFX is 19.021 versus 23.328 ms Original;
+balancing exact per-pass counts, runs and presentation type gives a 4.760 ms
+descriptive difference. Independent runs still differ in camera/other effects,
+and the owner has not checked visual isolation. This supports the debris trial,
+but clean matched-cue timing and skipped-state visual acceptance remain unverified.
+
+The owner authorised the [native debris experiment](codex/corneria_debris_native.md)
+on 26 October. Developer controls now cycle Original, Skip and Native separately
+for main/reflection, independent of Accurate/Fast. Native consumes bounded,
+frame-owned matrix records and uses the original quad, texture and lighting;
+clipped or unsupported runs replay original bodies. Replay final vertex slots
+as well as material state. Census records actual native coverage and fallback,
+because eligible counts alone do not prove batching occurred. The clean/coarse
+renderer objects match; eleven scratchpad routes and all layout checks pass.
+Native performance and visual acceptance require PSP testing before promotion.
+
+The first native-debris launch exposed a separate undefined gameplay read:
+`ActorMissileSeek_Update` compared an uninitialised local steering delta when
+banking without a steering update. Initialise the delta before the branches;
+masking FPU exceptions or changing layout would leave the bug intact. The host
+regression uses NaN auto-initialisation and checks floating-point invalid flags,
+and rejects the original function while passing the corrected one.
+
+The native-debris retest records 23.486 / 18.881 / 23.982 ms mean GFX for
+Original / Skip / Native on debris-bearing tasks. Native has no demonstrated
+overall win. Only 50.97% of eligible instance visits use Native; a single clipped
+corner rejects the whole run, with particularly low middle-phase coverage.
+The dense 33–40 population band achieves 100% coverage and lower descriptive
+GFX time, but the scene is not fully matched. Do not equate run-fallback counts
+with individually clipped fragments. Split native runs around original-path
+fragments before another narrow A/B; visual acceptance is still unrecorded.
+
+## PSPLink smoke flow — 2 November 2026
+
+The one-command smoke helper is `scripts/psp/psplink_smoke.sh`. With PSPLink
+running on the PSP, PSP Type B shared through usbipd, and the PSPDEV udev rule
+installed, it builds an isolated unified PRX, attaches the device to WSL if
+needed, launches through `host0`, captures a BMP after eight seconds, and records
+hashes and logs. The 2 November run began with the device already attached to WSL;
+it reached the Star Fox title screen and produced a 480×272 screenshot. This
+verifies delivery and startup, not a benchmark result; gameplay input and
+profiler capture are not automated yet.
+
+PSP Type B is USB ID `054c:01c9`; use the bundled
+`/home/dwelch/pspdev/share/psplinkusb/50-psplink.rules` for WSL device access.
+`reset` returns to the PSPLink bootstrap and disconnects USB while the device
+re-enumerates; reattach it with `usbipd` before the next run. `exit` leaves
+PSPLink. The smoke script leaves the game running after it saves the capture.
+
+## Hardware performance phase one — 3 November 2026
+
+The direct PSPLink runner can start test-hook builds at a selected gameplay
+scene, capture 1,800 low-instrumentation GU tasks, and retrieve the raw profile
+and screenshot without extending the smoke script. Keep runtime audio state
+separate from the audio compile flag: these captures built audio code but RAM
+inspection confirmed requested and active audio were both Off.
+
+Measure completion-to-completion intervals after `sceGuSwapBuffers` returns,
+and sample `sceDisplayGetVcount` for the exact intervening VBlank pulses. These
+are software Present completion timings, not LCD scanout timestamps. The PSP
+hardware counter source was unavailable, so combined `sceGuFinish`/`sceGuSync`
+CPU time must not be described as GE execution time. Run `PROFILE_PHASES`
+captures separately: in Bolse, phase instrumentation raised mean task time
+from about 14.4 ms to 26.6 ms while still providing useful simulation and
+render-only counts.
+
+The Bolse reference measured about 1.24 ms/task of retained vertex preparation
+with about 15 admissions per task. Even eliminating all measured preparation
+would miss the 2 ms architecture gate, so this evidence did not justify a
+persistent retained vertex pilot. Aquas bubble draw omission removed about
+0.57 ms/task of frontend work, but changed mean Present completion by only
+0.019 ms and worsened p95 by 0.20 ms. Local producer or renderer savings do not
+guarantee better delivered frame timing; keep end-to-end intervals as the
+decision metric.
+
+## Attribute retained meshes by asset and view — 3 November 2026
+
+A retained asset is not automatically admissible from every camera position. In
+Bolse, `aBoBaseDL` fell back on bounds for all 276 center visits, while 250 of
+299 middle visits were admitted. The opaque body consumed 1.581 ms of center
+frontend time, including 0.645 ms of CPU vertex preparation. The complete body
+span is the upper bound for that class; do not add the nested vertex timer or
+attribute the enclosing boss span to it. Keep conservative clipping fallback
+until a hardware path is verified against the original output.
+
+Put profiling markers around the measured asset and its neighboring effects,
+and record retained rejection reasons by position. Capture requested and active
+runtime graphics and audio modes in the profile itself. A HostFS-launched PRX
+needs its settings file beside it; absent settings can change the rendering
+policy and invalidate the intended comparison.
+
+## Use whole-frame timing for decorative draw ceilings — 3 November 2026
+
+In Bolse Fast mode, omitting the entire dynamic-ground draw while preserving
+each tile's RNG call removed 0.832 ms of ground-source frontend work and
+improved the matched completed presentation interval by 0.807 ms. It still
+averaged 18.954 ms and visibly removed most of the ground. Treat this as an
+upper bound, not a rendering policy. The smaller half-density ground policy
+did not improve the A/B/B/A mean. Keep these changes test-only unless a smaller
+visually acceptable policy demonstrates an end-to-end benefit on hardware.
+See `docs/codex/hardware_performance_phase1.md` for profiles and screenshots.
+
+## Consolidated PSP performance assessment — 4 November 2026
+
+[PSP performance: architecture, evidence and remaining limits](psp-performance-state.md)
+consolidates the historical `SF64PROFILE` captures, accepted optimisations and
+the November hardware accounting. It distinguishes renderer regions from
+recoverable work, GE replay from normal occupancy, and software Present
+completion from physical display timing. Use its evidence boundaries before
+reopening a concluded experiment.
+
+The Bolse alternating-beam experiment is rejected: those beams are collision
+hazards, and its compile override also suppressed them in Accurate. Preserving
+simulation while hiding a damaging object's visual warning is incorrect. The
+measured saving is not an accepted optimisation. Stable per-object identities
+are also required for repeated interpolated draws: changing the visible members
+without changing their count can pair different ground tiles by emission order.
+The isolated correctness repair still needs moving PSP visual acceptance before
+a corrected performance baseline is collected.
+
+## Reserve PSP system memory with the heap threshold — 5 November 2026
+
+The installed PSPSDK treats any negative `PSP_HEAP_SIZE_KB` as automatic sizing;
+the negative magnitude is ignored. Its `_sbrk` subtracts
+`PSP_HEAP_THRESHOLD_SIZE_KB`, defaulting to 512 KiB when that symbol is absent.
+Changing `-1024` to `-2048` therefore left the same 48-KiB free block at failed
+Ad-Hoc network initialisation. Use an explicit threshold to reserve memory for
+firmware modules, threads and networking, and verify its value in the linked ELF.
+The corrected two-MiB threshold reduces the libc heap by 1.5 MiB against the
+effective old default; it does not demonstrate a speedup or successful radio
+operation. Recheck game allocations on PSP-1000. The installed runtime
+disassembly and [SDK source](https://github.com/pspdev/pspsdk/blob/master/src/libcglue/glue.c)
+agree on this behaviour. See [the multiplayer review](psp-adhoc-multiplayer.md).

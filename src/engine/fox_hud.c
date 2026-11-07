@@ -103,6 +103,15 @@ typedef enum HUDPspAnchor {
 #define HUD_PSP_RADIO_ANCHOR_Y 222
 
 static void HUD_PspLayoutBegin(HUDPspAnchor anchor, s16 x, s16 y) {
+    if (gCamCount != 1) {
+        if (PspDisplay_IsWidescreen()) {
+            PSP_RENDERER_DL_VIEWPORT_HUD_CANVAS_MARKER(gMasterDisp++);
+            PSP_RENDERER_DL_HUD_ANCHOR_PARAM(gMasterDisp++, x, y);
+        } else {
+            PSP_RENDERER_DL_VIEWPORT_FULL_MARKER(gMasterDisp++);
+        }
+        return;
+    }
     if (anchor == HUD_PSP_ANCHOR_TOP_LEFT) {
         PSP_RENDERER_DL_VIEWPORT_HUD_TOP_LEFT_MARKER(gMasterDisp++);
     } else if (anchor == HUD_PSP_ANCHOR_TOP_RIGHT) {
@@ -125,6 +134,18 @@ static void HUD_PspLayoutBegin(HUDPspAnchor anchor, s16 x, s16 y) {
         return;
     }
     PSP_RENDERER_DL_HUD_ANCHOR_PARAM(gMasterDisp++, x, y);
+}
+
+static void HUD_PspVsWidgetBegin(s16 x, s16 y, unsigned alignment) {
+    if (PspDisplay_IsWidescreen()) {
+        PSP_RENDERER_DL_VIEWPORT_HUD_WIDGET_MARKER(gMasterDisp++);
+        PSP_RENDERER_DL_HUD_ANCHOR_PARAM(gMasterDisp++, x, y);
+        PSP_RENDERER_DL_HUD_WIDGET_PARAM(gMasterDisp++, gPlayerNum, alignment);
+    }
+}
+
+static void HUD_PspVsWidgetEnd(void) {
+    if (PspDisplay_IsWidescreen()) PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER(gMasterDisp++);
 }
 
 static void HUD_PspLayoutEnd(void) {
@@ -3166,16 +3187,52 @@ void HUD_VS_BombCount_Draw(void) {
 }
 
 void HUD_VS_DrawHUD(void) {
+#ifdef TARGET_PSP
+    s16 left = (gPlayerNum & 1) * 160;
+    s16 top = (gPlayerNum >> 1) * 120;
+    s16 numberX = left + ((gPlayerNum & 1) ? 8 : 152);
+    s16 numberY = top + (gPlayerNum < 2 ? 114 : 8);
+    unsigned corner = ((gPlayerNum & 1) ? N64PSP_HUD_LEFT : N64PSP_HUD_RIGHT) |
+                      (gPlayerNum < 2 ? N64PSP_HUD_BOTTOM : 0);
+#endif
     if (gVsMatchStart && !gVsMatchOver) {
+#ifdef TARGET_PSP
+        HUD_PspVsWidgetBegin(left + 140, top + 104, N64PSP_HUD_RIGHT | N64PSP_HUD_BOTTOM);
+#endif
         HUD_VsModePortrait_Draw();
+#ifdef TARGET_PSP
+        HUD_PspVsWidgetEnd();
+        HUD_PspVsWidgetBegin(numberX, numberY, corner);
+#endif
         HUD_VS_PlayerNumber_Draw();
+#ifdef TARGET_PSP
+        HUD_PspVsWidgetEnd();
+        HUD_PspVsWidgetBegin(left + 142, top + 16, N64PSP_HUD_RIGHT);
+#endif
         HUD_BoostGauge_Draw(0, 0);
+#ifdef TARGET_PSP
+        HUD_PspVsWidgetEnd();
+        HUD_PspVsWidgetBegin(left + 140, top + 104, N64PSP_HUD_RIGHT | N64PSP_HUD_BOTTOM);
+#endif
         HUD_VS_ShieldGauge_Draw();
+#ifdef TARGET_PSP
+        HUD_PspVsWidgetEnd();
+        HUD_PspVsWidgetBegin(numberX, numberY, corner);
+#endif
         HUD_VS_BombCount_Draw();
+#ifdef TARGET_PSP
+        HUD_PspVsWidgetEnd();
+#endif
     }
 
     if (!gVsMatchOver) {
+#ifdef TARGET_PSP
+        HUD_PspVsWidgetBegin(left + 140, top + 104, N64PSP_HUD_RIGHT | N64PSP_HUD_BOTTOM);
+#endif
         HUD_KillCountStars_Update();
+#ifdef TARGET_PSP
+        HUD_PspVsWidgetEnd();
+#endif
     }
 }
 
@@ -3347,6 +3404,9 @@ void HUD_DrawCountdown(s32* countdown, f32 scale) {
 void HUD_Radar(void) {
     if (gVersusMode) {
         HUD_VS_DrawHUD();
+#ifdef TARGET_PSP
+        HUD_PspLayoutBegin(HUD_PSP_ANCHOR_CENTER, 80 + (gPlayerNum & 1) * 160, 60 + (gPlayerNum >> 1) * 120);
+#endif
     }
     HUD_RadarMarks_Update();
 }
@@ -3662,7 +3722,19 @@ void HUD_BombCounter_Draw(f32 x, f32 y) {
 }
 
 void HUD_VS_Radar(void) {
+#ifdef TARGET_PSP
+    if (PspDisplay_IsWidescreen()) {
+        Matrix_Push(&gGfxMatrix);
+        Lib_InitPerspectiveAspect(&gMasterDisp, (f32) SCREEN_WIDTH / SCREEN_HEIGHT);
+    }
+#endif
     HUD_Radar();
+#ifdef TARGET_PSP
+    if (PspDisplay_IsWidescreen()) {
+        Lib_InitPerspective(&gMasterDisp);
+        Matrix_Pop(&gGfxMatrix);
+    }
+#endif
 }
 
 void HUD_SinglePlayer(void) {
@@ -3830,7 +3902,7 @@ void HUD_Draw(void) {
 
     if (gCamCount != 1) {
 #ifdef TARGET_PSP
-        HUD_PspLayoutBegin(HUD_PSP_ANCHOR_CENTER, 160, 120);
+        HUD_PspLayoutBegin(HUD_PSP_ANCHOR_CENTER, 80 + (gPlayerNum & 1) * 160, 60 + (gPlayerNum >> 1) * 120);
 #endif
         HUD_VS_Radar();
 #ifdef TARGET_PSP

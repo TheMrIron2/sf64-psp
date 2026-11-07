@@ -225,6 +225,7 @@ static void psp_gfx_dl_retained_draw(PspGfxDlContext* ctx, PspGfxVertex* stream,
             state.projectionSerial = ctx->projectionSerial;
             state.viewport = psp_gfx_dl_resolve_viewport(ctx, NULL, 0, state.projectionMatrix);
 
+            psp_gfx_dl_apply_rsp_viewport(ctx, &state);
             PspGfxBackendGu_DrawMesh(vertices, sRetainedCache->mesh.indices + indexFirst, indexCount, &state,
                 &ctx->alignedMatrices.modelview.m[0][0], (ctx->geometryMode & G_CULL_FRONT) != 0,
                 (ctx->geometryMode & G_CULL_BACK) != 0);

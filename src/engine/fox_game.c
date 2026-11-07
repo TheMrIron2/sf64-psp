@@ -685,6 +685,21 @@ void Game_Update(void) {
             Graphics_FillRectangle(&gMasterDisp, 0, 0, SCREEN_WIDTH - 1, SCREEN_HEIGHT - 1, gFillScreenRed,
                                    gFillScreenGreen, gFillScreenBlue, gFillScreenAlpha);
         }
+#ifdef TARGET_PSP
+        if (gCamCount == 4) {
+            // Keep the original border after full surface clears
+            PSP_RENDERER_DL_VIEWPORT_FULL_MARKER(gMasterDisp++);
+            gDPSetScissor(gMasterDisp++, G_SC_NON_INTERLACE, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+            Graphics_FillRectangle(&gMasterDisp, 0, 0, SCREEN_WIDTH - 1, SCREEN_MARGIN - 1, 0, 0, 0, 255);
+            Graphics_FillRectangle(&gMasterDisp, 0, SCREEN_HEIGHT - SCREEN_MARGIN, SCREEN_WIDTH - 1,
+                                   SCREEN_HEIGHT - 1, 0, 0, 0, 255);
+            Graphics_FillRectangle(&gMasterDisp, 0, SCREEN_MARGIN, SCREEN_MARGIN - 1,
+                                   SCREEN_HEIGHT - SCREEN_MARGIN - 1, 0, 0, 0, 255);
+            Graphics_FillRectangle(&gMasterDisp, SCREEN_WIDTH - SCREEN_MARGIN, SCREEN_MARGIN, SCREEN_WIDTH - 1,
+                                   SCREEN_HEIGHT - SCREEN_MARGIN - 1, 0, 0, 0, 255);
+            PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER(gMasterDisp++);
+        }
+#endif
         Audio_dummy_80016A50();
         PSP_TRACE("game update: tail done");
 #if MODS_RAM_MOD == 1

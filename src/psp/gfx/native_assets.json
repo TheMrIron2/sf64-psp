@@ -4008,7 +4008,7 @@
           "src/engine/fox_display.c": "c965e86c1a7d5fb4e49f86a3b2d3e4fb5cab2ca3a4a73f96ba7e7208f8bca25b",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b",
           "src/engine/fox_effect.c": "fbec6a84ca5763dccf4a096e4c856d2119e69e9d5b512c0950438141592526d7",
-          "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
+          "src/engine/fox_hud.c": "1e9f18c9516a6352d69996fa04f721affd3bd5839ec8243b9f1e13ac4ed99090"
         },
         "qualification": "accepted_commands"
       },
@@ -4423,7 +4423,7 @@
           "include/PR/gbi.h": "e4f3b010bdcfa92e7220b8194aa524ff10ba43679f82219559017d02f9d1fd8c",
           "include/assets/ast_fortuna.h": "b690dcfcd7a5bd69d1acb63a88fdf2f560f1def319f8dc6f9f52d3ffdde4bde8",
           "src/assets/ast_fortuna/ast_fortuna.c": "c62f0bdda7a84a7826841f25b25e4c1b0f130abcf39b9020005654520691e85c",
-          "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
+          "src/engine/fox_hud.c": "1e9f18c9516a6352d69996fa04f721affd3bd5839ec8243b9f1e13ac4ed99090"
         },
         "qualification": "direct_reads_only"
       },
@@ -4451,7 +4451,7 @@
           "include/PR/gbi.h": "e4f3b010bdcfa92e7220b8194aa524ff10ba43679f82219559017d02f9d1fd8c",
           "include/assets/ast_common.h": "418cbe0bb6c7c40e9a840aa4e1c71473829fab1c6e674ef0c1b8556c1696d74f",
           "src/assets/ast_common/ast_common.c": "fea7def6e284f8cfc25800b4a8a0a21c5eb9100fbbb6b311a6ce8ea248a923e9",
-          "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
+          "src/engine/fox_hud.c": "1e9f18c9516a6352d69996fa04f721affd3bd5839ec8243b9f1e13ac4ed99090"
         },
         "qualification": "accepted_commands"
       },
@@ -4577,7 +4577,7 @@
           "include/PR/gbi.h": "e4f3b010bdcfa92e7220b8194aa524ff10ba43679f82219559017d02f9d1fd8c",
           "include/assets/ast_allies.h": "ebc2b65a973d6bab24e4e221496b4337e12d9150834eb926ed552c41c8651a7e",
           "src/assets/ast_allies/ast_allies.c": "ca5468a457b607c01fa781bc411d1ae410611fcd922ba45cd28d8c323c62dd39",
-          "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
+          "src/engine/fox_hud.c": "1e9f18c9516a6352d69996fa04f721affd3bd5839ec8243b9f1e13ac4ed99090"
         },
         "qualification": "direct_reads_only"
       },
@@ -5004,7 +5004,7 @@
           "src/engine/fox_display.c": "c965e86c1a7d5fb4e49f86a3b2d3e4fb5cab2ca3a4a73f96ba7e7208f8bca25b",
           "src/engine/fox_edisplay.c": "1687c6a8ddc4cbec6c261d10dedd9c0323bb6c808c3e0e55be1066dd7471e53b",
           "src/engine/fox_effect.c": "fbec6a84ca5763dccf4a096e4c856d2119e69e9d5b512c0950438141592526d7",
-          "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be",
+          "src/engine/fox_hud.c": "1e9f18c9516a6352d69996fa04f721affd3bd5839ec8243b9f1e13ac4ed99090",
           "src/overlays/ovl_i1/fox_ve1.c": "e792e97a56dcc057f46e64bcd77ee748d0803f81b8d0fa04d63f128ea26bb989",
           "src/overlays/ovl_i3/fox_a6.c": "cc6787acbfc07b8c7b163cb305862c1c8ec3dcbd1509b30545deafcb7d7ee1db",
           "src/overlays/ovl_i3/fox_aq.c": "d88adbbba9a2d0b38c50cfaa74a16bcaf59c06ffb777d99276cd658af3736634",
@@ -5060,7 +5060,7 @@
           "include/assets/ast_bg_planet.h": "d723cd1f1ef3849a61a7f19b19f25dbde41b6d5e55bb2068510e6a5dba1042d9",
           "src/assets/ast_bg_planet/ast_bg_planet.c": "d48e3b6ceebee965272bb2852a5ae1961c362aa555998e5c02bf21508e6753ad",
           "src/engine/fox_effect.c": "fbec6a84ca5763dccf4a096e4c856d2119e69e9d5b512c0950438141592526d7",
-          "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
+          "src/engine/fox_hud.c": "1e9f18c9516a6352d69996fa04f721affd3bd5839ec8243b9f1e13ac4ed99090"
         },
         "qualification": "accepted_commands"
       },
@@ -5075,7 +5075,7 @@
           "include/assets/ast_bg_planet.h": "d723cd1f1ef3849a61a7f19b19f25dbde41b6d5e55bb2068510e6a5dba1042d9",
           "src/assets/ast_bg_planet/ast_bg_planet.c": "d48e3b6ceebee965272bb2852a5ae1961c362aa555998e5c02bf21508e6753ad",
           "src/engine/fox_effect.c": "fbec6a84ca5763dccf4a096e4c856d2119e69e9d5b512c0950438141592526d7",
-          "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
+          "src/engine/fox_hud.c": "1e9f18c9516a6352d69996fa04f721affd3bd5839ec8243b9f1e13ac4ed99090"
         },
         "qualification": "accepted_commands"
       },
@@ -5090,7 +5090,7 @@
           "include/assets/ast_bg_planet.h": "d723cd1f1ef3849a61a7f19b19f25dbde41b6d5e55bb2068510e6a5dba1042d9",
           "src/assets/ast_bg_planet/ast_bg_planet.c": "d48e3b6ceebee965272bb2852a5ae1961c362aa555998e5c02bf21508e6753ad",
           "src/engine/fox_effect.c": "fbec6a84ca5763dccf4a096e4c856d2119e69e9d5b512c0950438141592526d7",
-          "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
+          "src/engine/fox_hud.c": "1e9f18c9516a6352d69996fa04f721affd3bd5839ec8243b9f1e13ac4ed99090"
         },
         "qualification": "accepted_commands"
       },
@@ -5119,7 +5119,7 @@
           "include/assets/ast_bg_planet.h": "d723cd1f1ef3849a61a7f19b19f25dbde41b6d5e55bb2068510e6a5dba1042d9",
           "src/assets/ast_bg_planet/ast_bg_planet.c": "d48e3b6ceebee965272bb2852a5ae1961c362aa555998e5c02bf21508e6753ad",
           "src/engine/fox_effect.c": "fbec6a84ca5763dccf4a096e4c856d2119e69e9d5b512c0950438141592526d7",
-          "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be",
+          "src/engine/fox_hud.c": "1e9f18c9516a6352d69996fa04f721affd3bd5839ec8243b9f1e13ac4ed99090",
           "src/overlays/ovl_i6/fox_andross.c": "6acc4d52a5b7fde3477abac2645e2738c2712f3bcb6864847ed78bcbcedd3c9f"
         },
         "qualification": "accepted_commands"
@@ -5135,7 +5135,7 @@
           "include/assets/ast_bg_planet.h": "d723cd1f1ef3849a61a7f19b19f25dbde41b6d5e55bb2068510e6a5dba1042d9",
           "src/assets/ast_bg_planet/ast_bg_planet.c": "d48e3b6ceebee965272bb2852a5ae1961c362aa555998e5c02bf21508e6753ad",
           "src/engine/fox_effect.c": "fbec6a84ca5763dccf4a096e4c856d2119e69e9d5b512c0950438141592526d7",
-          "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
+          "src/engine/fox_hud.c": "1e9f18c9516a6352d69996fa04f721affd3bd5839ec8243b9f1e13ac4ed99090"
         },
         "qualification": "accepted_commands"
       },
@@ -5150,7 +5150,7 @@
           "include/assets/ast_bg_planet.h": "d723cd1f1ef3849a61a7f19b19f25dbde41b6d5e55bb2068510e6a5dba1042d9",
           "src/assets/ast_bg_planet/ast_bg_planet.c": "d48e3b6ceebee965272bb2852a5ae1961c362aa555998e5c02bf21508e6753ad",
           "src/engine/fox_effect.c": "fbec6a84ca5763dccf4a096e4c856d2119e69e9d5b512c0950438141592526d7",
-          "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
+          "src/engine/fox_hud.c": "1e9f18c9516a6352d69996fa04f721affd3bd5839ec8243b9f1e13ac4ed99090"
         },
         "qualification": "accepted_commands"
       },
@@ -5165,7 +5165,7 @@
           "include/assets/ast_bg_planet.h": "d723cd1f1ef3849a61a7f19b19f25dbde41b6d5e55bb2068510e6a5dba1042d9",
           "src/assets/ast_bg_planet/ast_bg_planet.c": "d48e3b6ceebee965272bb2852a5ae1961c362aa555998e5c02bf21508e6753ad",
           "src/engine/fox_effect.c": "fbec6a84ca5763dccf4a096e4c856d2119e69e9d5b512c0950438141592526d7",
-          "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
+          "src/engine/fox_hud.c": "1e9f18c9516a6352d69996fa04f721affd3bd5839ec8243b9f1e13ac4ed99090"
         },
         "qualification": "accepted_commands"
       },
@@ -5180,7 +5180,7 @@
           "include/assets/ast_bg_planet.h": "d723cd1f1ef3849a61a7f19b19f25dbde41b6d5e55bb2068510e6a5dba1042d9",
           "src/assets/ast_bg_planet/ast_bg_planet.c": "d48e3b6ceebee965272bb2852a5ae1961c362aa555998e5c02bf21508e6753ad",
           "src/engine/fox_effect.c": "fbec6a84ca5763dccf4a096e4c856d2119e69e9d5b512c0950438141592526d7",
-          "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
+          "src/engine/fox_hud.c": "1e9f18c9516a6352d69996fa04f721affd3bd5839ec8243b9f1e13ac4ed99090"
         },
         "qualification": "accepted_commands"
       },
@@ -5195,7 +5195,7 @@
           "include/assets/ast_bg_planet.h": "d723cd1f1ef3849a61a7f19b19f25dbde41b6d5e55bb2068510e6a5dba1042d9",
           "src/assets/ast_bg_planet/ast_bg_planet.c": "d48e3b6ceebee965272bb2852a5ae1961c362aa555998e5c02bf21508e6753ad",
           "src/engine/fox_effect.c": "fbec6a84ca5763dccf4a096e4c856d2119e69e9d5b512c0950438141592526d7",
-          "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be",
+          "src/engine/fox_hud.c": "1e9f18c9516a6352d69996fa04f721affd3bd5839ec8243b9f1e13ac4ed99090",
           "src/overlays/ovl_i3/fox_so.c": "28a80578f6fb0a46edd63a451c2e0339c9182970f4008bee6779c6796643ce18"
         },
         "qualification": "accepted_commands"
@@ -5211,7 +5211,7 @@
           "include/assets/ast_bg_planet.h": "d723cd1f1ef3849a61a7f19b19f25dbde41b6d5e55bb2068510e6a5dba1042d9",
           "src/assets/ast_bg_planet/ast_bg_planet.c": "d48e3b6ceebee965272bb2852a5ae1961c362aa555998e5c02bf21508e6753ad",
           "src/engine/fox_effect.c": "fbec6a84ca5763dccf4a096e4c856d2119e69e9d5b512c0950438141592526d7",
-          "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be",
+          "src/engine/fox_hud.c": "1e9f18c9516a6352d69996fa04f721affd3bd5839ec8243b9f1e13ac4ed99090",
           "src/overlays/ovl_i3/fox_so.c": "28a80578f6fb0a46edd63a451c2e0339c9182970f4008bee6779c6796643ce18"
         },
         "qualification": "accepted_commands"
@@ -5227,7 +5227,7 @@
           "include/assets/ast_bg_planet.h": "d723cd1f1ef3849a61a7f19b19f25dbde41b6d5e55bb2068510e6a5dba1042d9",
           "src/assets/ast_bg_planet/ast_bg_planet.c": "d48e3b6ceebee965272bb2852a5ae1961c362aa555998e5c02bf21508e6753ad",
           "src/engine/fox_effect.c": "fbec6a84ca5763dccf4a096e4c856d2119e69e9d5b512c0950438141592526d7",
-          "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be",
+          "src/engine/fox_hud.c": "1e9f18c9516a6352d69996fa04f721affd3bd5839ec8243b9f1e13ac4ed99090",
           "src/overlays/ovl_i3/fox_so.c": "28a80578f6fb0a46edd63a451c2e0339c9182970f4008bee6779c6796643ce18"
         },
         "qualification": "accepted_commands"
@@ -5243,7 +5243,7 @@
           "include/assets/ast_bg_planet.h": "d723cd1f1ef3849a61a7f19b19f25dbde41b6d5e55bb2068510e6a5dba1042d9",
           "src/assets/ast_bg_planet/ast_bg_planet.c": "d48e3b6ceebee965272bb2852a5ae1961c362aa555998e5c02bf21508e6753ad",
           "src/engine/fox_effect.c": "fbec6a84ca5763dccf4a096e4c856d2119e69e9d5b512c0950438141592526d7",
-          "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
+          "src/engine/fox_hud.c": "1e9f18c9516a6352d69996fa04f721affd3bd5839ec8243b9f1e13ac4ed99090"
         },
         "qualification": "accepted_commands"
       },
@@ -5258,7 +5258,7 @@
           "include/assets/ast_bg_planet.h": "d723cd1f1ef3849a61a7f19b19f25dbde41b6d5e55bb2068510e6a5dba1042d9",
           "src/assets/ast_bg_planet/ast_bg_planet.c": "d48e3b6ceebee965272bb2852a5ae1961c362aa555998e5c02bf21508e6753ad",
           "src/engine/fox_effect.c": "fbec6a84ca5763dccf4a096e4c856d2119e69e9d5b512c0950438141592526d7",
-          "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
+          "src/engine/fox_hud.c": "1e9f18c9516a6352d69996fa04f721affd3bd5839ec8243b9f1e13ac4ed99090"
         },
         "qualification": "accepted_commands"
       },
@@ -5273,7 +5273,7 @@
           "include/assets/ast_bg_planet.h": "d723cd1f1ef3849a61a7f19b19f25dbde41b6d5e55bb2068510e6a5dba1042d9",
           "src/assets/ast_bg_planet/ast_bg_planet.c": "d48e3b6ceebee965272bb2852a5ae1961c362aa555998e5c02bf21508e6753ad",
           "src/engine/fox_effect.c": "fbec6a84ca5763dccf4a096e4c856d2119e69e9d5b512c0950438141592526d7",
-          "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
+          "src/engine/fox_hud.c": "1e9f18c9516a6352d69996fa04f721affd3bd5839ec8243b9f1e13ac4ed99090"
         },
         "qualification": "accepted_commands"
       },
@@ -5288,7 +5288,7 @@
           "include/assets/ast_bg_planet.h": "d723cd1f1ef3849a61a7f19b19f25dbde41b6d5e55bb2068510e6a5dba1042d9",
           "src/assets/ast_bg_planet/ast_bg_planet.c": "d48e3b6ceebee965272bb2852a5ae1961c362aa555998e5c02bf21508e6753ad",
           "src/engine/fox_effect.c": "fbec6a84ca5763dccf4a096e4c856d2119e69e9d5b512c0950438141592526d7",
-          "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
+          "src/engine/fox_hud.c": "1e9f18c9516a6352d69996fa04f721affd3bd5839ec8243b9f1e13ac4ed99090"
         },
         "qualification": "accepted_commands"
       },
@@ -5303,7 +5303,7 @@
           "include/assets/ast_bg_planet.h": "d723cd1f1ef3849a61a7f19b19f25dbde41b6d5e55bb2068510e6a5dba1042d9",
           "src/assets/ast_bg_planet/ast_bg_planet.c": "d48e3b6ceebee965272bb2852a5ae1961c362aa555998e5c02bf21508e6753ad",
           "src/engine/fox_effect.c": "fbec6a84ca5763dccf4a096e4c856d2119e69e9d5b512c0950438141592526d7",
-          "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
+          "src/engine/fox_hud.c": "1e9f18c9516a6352d69996fa04f721affd3bd5839ec8243b9f1e13ac4ed99090"
         },
         "qualification": "accepted_commands"
       },
@@ -5318,7 +5318,7 @@
           "include/assets/ast_bg_planet.h": "d723cd1f1ef3849a61a7f19b19f25dbde41b6d5e55bb2068510e6a5dba1042d9",
           "src/assets/ast_bg_planet/ast_bg_planet.c": "d48e3b6ceebee965272bb2852a5ae1961c362aa555998e5c02bf21508e6753ad",
           "src/engine/fox_effect.c": "fbec6a84ca5763dccf4a096e4c856d2119e69e9d5b512c0950438141592526d7",
-          "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
+          "src/engine/fox_hud.c": "1e9f18c9516a6352d69996fa04f721affd3bd5839ec8243b9f1e13ac4ed99090"
         },
         "qualification": "accepted_commands"
       },
@@ -5332,7 +5332,7 @@
           "include/PR/gbi.h": "e4f3b010bdcfa92e7220b8194aa524ff10ba43679f82219559017d02f9d1fd8c",
           "include/assets/ast_common.h": "418cbe0bb6c7c40e9a840aa4e1c71473829fab1c6e674ef0c1b8556c1696d74f",
           "src/assets/ast_common/ast_common.c": "fea7def6e284f8cfc25800b4a8a0a21c5eb9100fbbb6b311a6ce8ea248a923e9",
-          "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
+          "src/engine/fox_hud.c": "1e9f18c9516a6352d69996fa04f721affd3bd5839ec8243b9f1e13ac4ed99090"
         },
         "qualification": "direct_reads_only"
       },
@@ -5346,7 +5346,7 @@
           "include/PR/gbi.h": "e4f3b010bdcfa92e7220b8194aa524ff10ba43679f82219559017d02f9d1fd8c",
           "include/assets/ast_common.h": "418cbe0bb6c7c40e9a840aa4e1c71473829fab1c6e674ef0c1b8556c1696d74f",
           "src/assets/ast_common/ast_common.c": "fea7def6e284f8cfc25800b4a8a0a21c5eb9100fbbb6b311a6ce8ea248a923e9",
-          "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
+          "src/engine/fox_hud.c": "1e9f18c9516a6352d69996fa04f721affd3bd5839ec8243b9f1e13ac4ed99090"
         },
         "qualification": "direct_reads_only"
       },
@@ -5375,7 +5375,7 @@
           "include/assets/ast_common.h": "418cbe0bb6c7c40e9a840aa4e1c71473829fab1c6e674ef0c1b8556c1696d74f",
           "src/assets/ast_common/ast_common.c": "fea7def6e284f8cfc25800b4a8a0a21c5eb9100fbbb6b311a6ce8ea248a923e9",
           "src/engine/fox_effect.c": "fbec6a84ca5763dccf4a096e4c856d2119e69e9d5b512c0950438141592526d7",
-          "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
+          "src/engine/fox_hud.c": "1e9f18c9516a6352d69996fa04f721affd3bd5839ec8243b9f1e13ac4ed99090"
         },
         "qualification": "direct_reads_only"
       },
@@ -5449,7 +5449,7 @@
           "src/engine/fox_beam.c": "f036f317a5cdd568b63785ae97ac5cca9748a5af7730f5b8ca3a538f6bd2fa1c",
           "src/engine/fox_display.c": "c965e86c1a7d5fb4e49f86a3b2d3e4fb5cab2ca3a4a73f96ba7e7208f8bca25b",
           "src/engine/fox_effect.c": "fbec6a84ca5763dccf4a096e4c856d2119e69e9d5b512c0950438141592526d7",
-          "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be",
+          "src/engine/fox_hud.c": "1e9f18c9516a6352d69996fa04f721affd3bd5839ec8243b9f1e13ac4ed99090",
           "src/overlays/ovl_i3/fox_a6.c": "cc6787acbfc07b8c7b163cb305862c1c8ec3dcbd1509b30545deafcb7d7ee1db"
         },
         "qualification": "direct_reads_only"
@@ -5464,7 +5464,7 @@
           "include/PR/gbi.h": "e4f3b010bdcfa92e7220b8194aa524ff10ba43679f82219559017d02f9d1fd8c",
           "include/assets/ast_star_wolf.h": "bb3bae3f9663fc366be5a48b752d7b8567a738e5b94dfb984adcf5834e88a249",
           "src/assets/ast_star_wolf/ast_star_wolf.c": "489ce86b9c39eecb39a073b9526ec6b4c7a9fe184daab7fc89fe59fecc3bdc70",
-          "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
+          "src/engine/fox_hud.c": "1e9f18c9516a6352d69996fa04f721affd3bd5839ec8243b9f1e13ac4ed99090"
         },
         "qualification": "direct_reads_only"
       },
@@ -5620,7 +5620,7 @@
           "include/PR/gbi.h": "e4f3b010bdcfa92e7220b8194aa524ff10ba43679f82219559017d02f9d1fd8c",
           "include/assets/ast_sector_z.h": "1359982994e8fda10ab0edd33f462d4983abe1b4120b18c4f021ce4257a26a29",
           "src/assets/ast_sector_z/ast_sector_z.c": "b4427ed884b2bf3552994adf69048ec631da448deed5cdb7d6499453a0e98526",
-          "src/engine/fox_hud.c": "e4968f268427787083309061f27148ce0970a3592f496d725b48fc6f4af8a4be"
+          "src/engine/fox_hud.c": "1e9f18c9516a6352d69996fa04f721affd3bd5839ec8243b9f1e13ac4ed99090"
         },
         "qualification": "direct_reads_only"
       },

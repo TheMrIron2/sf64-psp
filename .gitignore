@@ -36,3 +36,4 @@ torch.hash.yml
 docs/codex/*
 /tests
 /SF64PROFILE
+/src/psp/tests

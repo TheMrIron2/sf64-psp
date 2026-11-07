@@ -4,6 +4,24 @@
 #include "assets/ast_vs_menu.h"
 #include "assets/ast_text.h"
 #include "assets/ast_versus.h"
+#ifdef TARGET_PSP
+#include "src/psp/display.h"
+#include "src/psp/renderer.h"
+#endif
+
+#ifdef TARGET_PSP
+static void Versus_PspHudBegin(s32 player, s16 x, s16 y, unsigned alignment) {
+    if (PspDisplay_IsWidescreen()) {
+        PSP_RENDERER_DL_VIEWPORT_HUD_WIDGET_MARKER(gMasterDisp++);
+        PSP_RENDERER_DL_HUD_ANCHOR_PARAM(gMasterDisp++, x, y);
+        PSP_RENDERER_DL_HUD_WIDGET_PARAM(gMasterDisp++, player, alignment);
+    }
+}
+
+static void Versus_PspHudEnd(void) {
+    if (PspDisplay_IsWidescreen()) PSP_RENDERER_DL_VIEWPORT_AUTO_MARKER(gMasterDisp++);
+}
+#endif
 
 #define VS_TIE 99
 
@@ -548,7 +566,13 @@ void func_versus_800BECA8(s32 index) {
 void func_versus_800BED78(void) {
     RCP_SetupDL(&gMasterDisp, SETUPDL_78);
     gDPSetPrimColor(gMasterDisp++, 0, 0, 255, 255, 255, 255);
+#ifdef TARGET_PSP
+    Versus_PspHudBegin(4, 160, 120, N64PSP_HUD_CENTER);
+#endif
     func_versus_800BC8D8(84.0f, 108.0f, 1.0f);
+#ifdef TARGET_PSP
+    Versus_PspHudEnd();
+#endif
 }
 
 s32 func_versus_800BEDDC(void) {
@@ -621,12 +645,18 @@ s32 func_versus_800BEFE4(void) {
             continue;
         }
 
+#ifdef TARGET_PSP
+        Versus_PspHudBegin(i, 80 + (i & 1) * 160, 60 + (i >> 1) * 120, N64PSP_HUD_CENTER);
+#endif
         if (sStartCountdown != 0) {
             func_versus_800BC9DC(D_800D4BD0[i] + D_800D4BF0[sStartCountdown - 1], D_800D4BE0[i], 1.0f,
                                  sStartCountdown - 1);
         } else {
             func_versus_800BCB44(D_800D4BD0[i] - 16.0f, D_800D4BE0[i], 1.0f);
         }
+#ifdef TARGET_PSP
+        Versus_PspHudEnd();
+#endif
     }
     return 0;
 }
@@ -736,6 +766,9 @@ s32 func_versus_800BF59C(void) {
             continue;
         }
 
+#ifdef TARGET_PSP
+        Versus_PspHudBegin(i, D_800D4BFC[i] + 64, D_800D4C0C[i] + 13, N64PSP_HUD_RIGHT | N64PSP_HUD_BOTTOM);
+#endif
         if (gPlayerInactive[i] || (gVsMatchType == VS_MATCH_BATTLE)) {
             colorGB = D_801787D8[i];
             gDPSetPrimColor(gMasterDisp++, 0, 0, 255, colorGB, colorGB, 255);
@@ -745,6 +778,9 @@ s32 func_versus_800BF59C(void) {
                 func_versus_800BE924(i);
             }
         }
+#ifdef TARGET_PSP
+        Versus_PspHudEnd();
+#endif
     }
     return 0;
 }
@@ -765,6 +801,9 @@ void func_versus_800BF750(void) {
         if (gPlayer[i].state != PLAYERSTATE_ACTIVE) {
             continue;
         }
+#ifdef TARGET_PSP
+        Versus_PspHudBegin(i, 142 + (i & 1) * 160, 75 + (i >> 1) * 120, N64PSP_HUD_RIGHT | N64PSP_HUD_BOTTOM);
+#endif
         for (j = 0, temp = 0; j < 4; j++) {
             if ((gVsLockOnTimers[i][j] != 0) && (gGameFrameCount & 4)) {
                 gDPSetPrimColor(gMasterDisp++, 0, 0, D_800D4C3C[j], D_800D4C4C[j], D_800D4C5C[j], 255);
@@ -772,6 +811,9 @@ void func_versus_800BF750(void) {
                 temp++;
             }
         }
+#ifdef TARGET_PSP
+        Versus_PspHudEnd();
+#endif
     }
 }
 

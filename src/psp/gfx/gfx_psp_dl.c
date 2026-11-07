@@ -35,6 +35,8 @@ extern u16 aTrBackdropBottomTex[];
 extern u16 aTrBackdropTopTex[];
 
 #include <n64psp/display.h>
+#include <n64psp/hud.h>
+#include <n64psp/viewport.h>
 #include <n64psp/math.h>
 #include <n64psp/fog.h>
 #include <n64psp/lighting.h>
@@ -378,6 +380,12 @@ typedef struct {
     u32 cachedProjectionSerial;
     int alignedMatricesValid;
     u32 matrixFlagsSeen;
+    float viewportProjection[4][4] __attribute__((aligned(16)));
+    u32 viewportDrawSerial;
+    float hudCanvasScaleX;
+    float hudCanvasAnchorX;
+    n64psp_hud_transform hudWidget;
+    int hudWidgetActive;
     s16 viewportScaleX;
     s16 viewportScaleY;
     s16 viewportTransX;
@@ -491,6 +499,7 @@ typedef struct {
     float fogDepthMin;
     float fogDepthMax;
     int batchPretransformed;
+    int batchScreenSpace;
     int batchTransformSet;
     PspGfxDlUiLayout uiLayout;
     PspGfxViewportPolicy viewportPolicy;
@@ -2267,6 +2276,8 @@ static u32 psp_gfx_dl_batch_owner_component(const PspGfxDlContext* ctx) {
 #define psp_gfx_dl_mark_batch_component(ctx) ((void) 0)
 #endif
 
+static void psp_gfx_dl_pool_drain(PspGfxDlContext* ctx, PspProfileFlushReason reason);
+
 static void psp_gfx_dl_handle_movemem(PspGfxDlContext* ctx, const Gfx* gfx) {
     u32 index = (gfx->words.w0 >> 16) & 0xFF;
     const Vp* viewport;
@@ -2279,6 +2290,7 @@ static void psp_gfx_dl_handle_movemem(PspGfxDlContext* ctx, const Gfx* gfx) {
             psp_gfx_dl_count_unsupported(ctx, PSP_GFX_OP_F3D_MOVEMEM);
             return;
         }
+        psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_TRANSFORM_CHANGE);
         ctx->stats.viewportCount++;
         ctx->viewportScaleX = viewport->vp.vscale[0];
         ctx->viewportScaleY = viewport->vp.vscale[1];
@@ -2387,10 +2399,37 @@ static int psp_gfx_dl_batch_covers_screen(const PspGfxVertex* vertices, u32 coun
     return minX <= -0.99f && maxX >= 0.99f && minY <= -0.99f && maxY >= 0.99f;
 }
 
+static int psp_gfx_dl_has_subviewport(const PspGfxDlContext* ctx) {
+    return ctx->viewportScaleX != SCREEN_WIDTH * 2 || ctx->viewportScaleY != SCREEN_HEIGHT * 2 ||
+           ctx->viewportTransX != SCREEN_WIDTH * 2 || ctx->viewportTransY != SCREEN_HEIGHT * 2;
+}
+
+static void psp_gfx_dl_apply_rsp_viewport(PspGfxDlContext* ctx, PspGfxDrawState* state) {
+    float identity[4][4];
+    const float (*projection)[4] = (const float (*)[4]) state->projectionMatrix;
+
+    if (!psp_gfx_dl_has_subviewport(ctx) && ctx->hudCanvasScaleX == 1.0f) return;
+    if (state->pretransformed || projection == NULL) {
+        psp_gfx_dl_identity(identity);
+        projection = identity;
+    }
+    n64psp_viewport_project(ctx->viewportProjection, projection,
+        ctx->viewportScaleX, ctx->viewportScaleY, ctx->viewportTransX, ctx->viewportTransY,
+        SCREEN_WIDTH, SCREEN_HEIGHT);
+    if (ctx->hudCanvasScaleX != 1.0f) {
+        n64psp_viewport_fit_projection_x(ctx->viewportProjection, ctx->hudCanvasAnchorX,
+                                        SCREEN_WIDTH, ctx->hudCanvasScaleX);
+    }
+    state->projectionMatrix = &ctx->viewportProjection[0][0];
+    state->projectionSerial = ++ctx->viewportDrawSerial;
+    state->pretransformed = 0;
+}
+
 static PspGfxViewportPolicy __attribute__((noinline)) psp_gfx_dl_resolve_viewport(const PspGfxDlContext* ctx,
                                                                                    const PspGfxVertex* vertices,
                                                                                    u32 count,
                                                                                    const float* projection) {
+    if (psp_gfx_dl_has_subviewport(ctx)) return PSP_GFX_VIEWPORT_FULL;
     if (ctx->viewportPolicy != PSP_GFX_VIEWPORT_AUTO) {
         return ctx->viewportPolicy;
     }
@@ -2462,6 +2501,7 @@ static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason 
     drawState.pointFilter = ctx->batchPointFilter;
     drawState.viewport =
         psp_gfx_dl_resolve_viewport(ctx, PSP_GFX_DL_BATCH, ctx->batchCount, &ctx->batchProjection[0][0]);
+    if (!ctx->batchScreenSpace) psp_gfx_dl_apply_rsp_viewport(ctx, &drawState);
     if (ctx->batchSprites) {
         PspGfxBackend_DrawSprites(PSP_GFX_DL_BATCH, ctx->batchCount, &drawState);
     } else if (ctx->batchReserved) {
@@ -2471,9 +2511,9 @@ static void psp_gfx_dl_flush_reason(PspGfxDlContext* ctx, PspProfileFlushReason 
     }
 #if PSP_ORIGINAL_FOG
     if (originalFogVertexCount != 0) {
-        fogDrawState.projectionMatrix = &ctx->batchProjection[0][0];
-        fogDrawState.projectionSerial = ctx->batchProjectionSerial;
-        fogDrawState.pretransformed = ctx->batchPretransformed;
+        fogDrawState.projectionMatrix = drawState.projectionMatrix;
+        fogDrawState.projectionSerial = drawState.projectionSerial;
+        fogDrawState.pretransformed = drawState.pretransformed;
         fogDrawState.depthTest = ctx->batchDepthTest;
         fogDrawState.viewport = drawState.viewport;
         PspGfxBackend_DrawFogTriangles(sPspGfxDlFogBatch, originalFogVertexCount, &fogDrawState);
@@ -3151,10 +3191,10 @@ static void psp_gfx_dl_set_batch_fog(PspGfxDlContext* ctx, int fog,
                                       originalFog, color, start, end);
 }
 
-static void psp_gfx_dl_set_batch_transform(PspGfxDlContext* ctx, int pretransformed, u32 projectionSerial,
+static void psp_gfx_dl_set_batch_transform(PspGfxDlContext* ctx, int pretransformed, int screenSpace, u32 projectionSerial,
                                            const float projection[4][4]) {
     if (psp_gfx_dl_texture_barrier_has_pending(ctx) &&
-        ((ctx->batchPretransformed != pretransformed) ||
+        ((ctx->batchScreenSpace != screenSpace) || (ctx->batchPretransformed != pretransformed) ||
          (!pretransformed && (ctx->batchProjectionSerial != projectionSerial)))) {
 #if PROFILE_TRIVIAL_REJECTS
         if (ctx->trivialRejectDiagnosticActive) {
@@ -3164,8 +3204,10 @@ static void psp_gfx_dl_set_batch_transform(PspGfxDlContext* ctx, int pretransfor
 #endif
         psp_gfx_dl_flush_all(ctx, PSP_PROFILE_FLUSH_TRANSFORM_CHANGE);
     }
-    if (!ctx->batchTransformSet || (ctx->batchPretransformed != pretransformed) ||
+    if (!ctx->batchTransformSet || (ctx->batchScreenSpace != screenSpace) ||
+        (ctx->batchPretransformed != pretransformed) ||
         (!pretransformed && (ctx->batchProjectionSerial != projectionSerial))) {
+        ctx->batchScreenSpace = screenSpace;
         ctx->batchPretransformed = pretransformed;
         ctx->batchProjectionSerial = projectionSerial;
         if (!pretransformed && (projection != NULL)) {
@@ -3426,7 +3468,7 @@ static int psp_gfx_dl_apply_effective_batch_state(PspGfxDlContext* ctx, const Ps
     if (!resolved) {
         return PspGfxTextureHandle_IsValid(ctx->effectiveMaterial.texture);
     }
-    psp_gfx_dl_set_batch_transform(ctx, pretransformed, vertex->projectionSerial, vertex->projection);
+    psp_gfx_dl_set_batch_transform(ctx, pretransformed, 0, vertex->projectionSerial, vertex->projection);
     psp_gfx_dl_set_batch_depth(ctx, ctx->effectiveDepth.depthTest, ctx->effectiveDepth.depthWrite,
                                ctx->effectiveDepth.depthBias);
     {
@@ -4996,6 +5038,10 @@ static void psp_gfx_dl_emit_rect_vertex(PspGfxDlContext* ctx,
 
     dst->color = psp_gfx_dl_pack_rgba_u8(r, g, b, a, ctx->batchPremultiplied);
 
+    if (ctx->hudWidgetActive) {
+        x = x * ctx->hudWidget.scale_x + ctx->hudWidget.offset_x;
+        y = y * ctx->hudWidget.scale_y + ctx->hudWidget.offset_y;
+    }
     if ((ctx->uiLayout == PSP_GFX_DL_UI_LAYOUT_WIDE) ||
         (ctx->uiLayout == PSP_GFX_DL_UI_LAYOUT_SQUARE_TEXT)) {
         const n64psp_display_config* display = PspDisplay_GetConfig();
@@ -5005,6 +5051,9 @@ static void psp_gfx_dl_emit_rect_vertex(PspGfxDlContext* ctx,
     } else {
         dst->x = (x / 160.0f) - 1.0f;
         dst->y = 1.0f - (y / 120.0f);
+    }
+    if (ctx->hudCanvasScaleX != 1.0f) {
+        dst->x = n64psp_viewport_fit_x(x, ctx->hudCanvasAnchorX, ctx->hudCanvasScaleX) / 160.0f - 1.0f;
     }
     dst->z = 0.0f;
 }
@@ -5085,7 +5134,7 @@ static void psp_gfx_dl_handle_texture_rectangle(PspGfxDlContext* ctx, const Gfx*
     if (sprites) {
         psp_gfx_dl_set_batch_depth(ctx, 0, 0, 0);
         psp_gfx_dl_set_batch_fog(ctx, 0, NULL);
-        psp_gfx_dl_set_batch_transform(ctx, 1, 0, NULL);
+        psp_gfx_dl_set_batch_transform(ctx, 1, 1, 0, NULL);
     }
     psp_gfx_dl_set_batch_texture(
         ctx, ctx->texture, PSP_GFX_TEX_MODULATE,
@@ -5105,7 +5154,7 @@ static void psp_gfx_dl_handle_texture_rectangle(PspGfxDlContext* ctx, const Gfx*
     if (!sprites) {
         psp_gfx_dl_set_batch_depth(ctx, 0, 0, 0);
         psp_gfx_dl_set_batch_fog(ctx, 0, NULL);
-        psp_gfx_dl_set_batch_transform(ctx, 1, 0, NULL);
+        psp_gfx_dl_set_batch_transform(ctx, 1, 1, 0, NULL);
     }
     psp_gfx_dl_mark_effective_state_dirty(ctx);
 
@@ -5273,12 +5322,22 @@ static void psp_gfx_dl_handle_fill_rectangle(PspGfxDlContext* ctx, const Gfx* gf
     viewport =
         (ulx <= 0.0f && uly <= 0.0f && lrx >= 320.0f && lry >= 240.0f)
             ? PSP_GFX_VIEWPORT_FULL
-            : (ctx->viewportPolicy != PSP_GFX_VIEWPORT_AUTO ? ctx->viewportPolicy : PSP_GFX_VIEWPORT_CENTERED_UI);
+            : psp_gfx_dl_resolve_viewport(ctx, NULL, 0, NULL);
 #if PSP_RENDERER_DIAGNOSTICS
     if (ctx->traceActive && activeBackgroundRect) {
         psp_gfx_dl_log_active_background_fill(ctx, color, primitiveFill, blend);
     }
 #endif
+    if (ctx->hudCanvasScaleX != 1.0f) {
+        ulx = n64psp_viewport_fit_x(ulx, ctx->hudCanvasAnchorX, ctx->hudCanvasScaleX);
+        lrx = n64psp_viewport_fit_x(lrx, ctx->hudCanvasAnchorX, ctx->hudCanvasScaleX);
+    }
+    if (ctx->hudWidgetActive) {
+        ulx = ulx * ctx->hudWidget.scale_x + ctx->hudWidget.offset_x;
+        lrx = lrx * ctx->hudWidget.scale_x + ctx->hudWidget.offset_x;
+        uly = uly * ctx->hudWidget.scale_y + ctx->hudWidget.offset_y;
+        lry = lry * ctx->hudWidget.scale_y + ctx->hudWidget.offset_y;
+    }
     if (primitiveFill && blend && activeBackgroundRect && !sPspGfxDlBackgroundFeedbackPrimed) {
         PspGfxBackend_DrawSolidRect(ulx, uly, lrx, lry, sPspGfxDlBackgroundFeedbackSeedColor, 0, viewport);
         sPspGfxDlBackgroundFeedbackPrimed = 1;
@@ -6233,36 +6292,48 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
             }
             if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_VIEWPORT_FULL) {
                 psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+                ctx->hudWidgetActive = 0;
+                ctx->hudCanvasScaleX = 1.0f;
                 ctx->uiLayout = PSP_GFX_DL_UI_LAYOUT_AUTO;
                 ctx->viewportPolicy = PSP_GFX_VIEWPORT_FULL;
                 continue;
             }
             if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_VIEWPORT_AUTO) {
                 psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+                ctx->hudWidgetActive = 0;
+                ctx->hudCanvasScaleX = 1.0f;
                 ctx->uiLayout = PSP_GFX_DL_UI_LAYOUT_AUTO;
                 ctx->viewportPolicy = PSP_GFX_VIEWPORT_AUTO;
                 continue;
             }
             if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_VIEWPORT_WIDE_UI) {
                 psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+                ctx->hudWidgetActive = 0;
+                ctx->hudCanvasScaleX = 1.0f;
                 ctx->uiLayout = PSP_GFX_DL_UI_LAYOUT_WIDE;
                 ctx->viewportPolicy = PSP_GFX_VIEWPORT_WIDE_UI;
                 continue;
             }
             if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_VIEWPORT_SQUARE_TEXT_UI) {
                 psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+                ctx->hudWidgetActive = 0;
+                ctx->hudCanvasScaleX = 1.0f;
                 ctx->uiLayout = PSP_GFX_DL_UI_LAYOUT_SQUARE_TEXT;
                 ctx->viewportPolicy = PSP_GFX_VIEWPORT_WIDE_UI;
                 continue;
             }
             if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_VIEWPORT_NATIVE_HUD) {
                 psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+                ctx->hudWidgetActive = 0;
+                ctx->hudCanvasScaleX = 1.0f;
                 ctx->uiLayout = PSP_GFX_DL_UI_LAYOUT_AUTO;
                 ctx->viewportPolicy = PSP_GFX_VIEWPORT_NATIVE_HUD;
                 continue;
             }
             if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_VIEWPORT_NATIVE_UI) {
                 psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+                ctx->hudWidgetActive = 0;
+                ctx->hudCanvasScaleX = 1.0f;
                 ctx->uiLayout = PSP_GFX_DL_UI_LAYOUT_NATIVE;
                 ctx->viewportPolicy = PSP_GFX_VIEWPORT_NATIVE_HUD;
                 continue;
@@ -6270,6 +6341,8 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
             if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_VIEWPORT_HUD_TOP_LEFT) {
                 psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
                 psp_gfx_dl_set_hud_anchor(pc++);
+                ctx->hudWidgetActive = 0;
+                ctx->hudCanvasScaleX = 1.0f;
                 ctx->uiLayout = PSP_GFX_DL_UI_LAYOUT_AUTO;
                 ctx->viewportPolicy = PSP_GFX_VIEWPORT_HUD_TOP_LEFT;
                 continue;
@@ -6277,6 +6350,8 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
             if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_VIEWPORT_HUD_TOP_RIGHT) {
                 psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
                 psp_gfx_dl_set_hud_anchor(pc++);
+                ctx->hudWidgetActive = 0;
+                ctx->hudCanvasScaleX = 1.0f;
                 ctx->uiLayout = PSP_GFX_DL_UI_LAYOUT_AUTO;
                 ctx->viewportPolicy = PSP_GFX_VIEWPORT_HUD_TOP_RIGHT;
                 continue;
@@ -6284,6 +6359,8 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
             if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_VIEWPORT_HUD_BOTTOM_LEFT) {
                 psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
                 psp_gfx_dl_set_hud_anchor(pc++);
+                ctx->hudWidgetActive = 0;
+                ctx->hudCanvasScaleX = 1.0f;
                 ctx->uiLayout = PSP_GFX_DL_UI_LAYOUT_AUTO;
                 ctx->viewportPolicy = PSP_GFX_VIEWPORT_HUD_BOTTOM_LEFT;
                 continue;
@@ -6291,6 +6368,8 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
             if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_VIEWPORT_HUD_BOTTOM_RIGHT) {
                 psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
                 psp_gfx_dl_set_hud_anchor(pc++);
+                ctx->hudWidgetActive = 0;
+                ctx->hudCanvasScaleX = 1.0f;
                 ctx->uiLayout = PSP_GFX_DL_UI_LAYOUT_AUTO;
                 ctx->viewportPolicy = PSP_GFX_VIEWPORT_HUD_BOTTOM_RIGHT;
                 continue;
@@ -6298,6 +6377,8 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
             if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_VIEWPORT_HUD_TOP_CENTER) {
                 psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
                 psp_gfx_dl_set_hud_anchor(pc++);
+                ctx->hudWidgetActive = 0;
+                ctx->hudCanvasScaleX = 1.0f;
                 ctx->uiLayout = PSP_GFX_DL_UI_LAYOUT_AUTO;
                 ctx->viewportPolicy = PSP_GFX_VIEWPORT_HUD_TOP_CENTER;
                 continue;
@@ -6305,6 +6386,8 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
             if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_VIEWPORT_HUD_SCALED_TOP_LEFT) {
                 psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
                 psp_gfx_dl_set_hud_anchor(pc++);
+                ctx->hudWidgetActive = 0;
+                ctx->hudCanvasScaleX = 1.0f;
                 ctx->uiLayout = PSP_GFX_DL_UI_LAYOUT_AUTO;
                 ctx->viewportPolicy = PSP_GFX_VIEWPORT_HUD_SCALED_TOP_LEFT;
                 continue;
@@ -6312,8 +6395,38 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
             if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_VIEWPORT_HUD_SCALED_BOTTOM_RIGHT) {
                 psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
                 psp_gfx_dl_set_hud_anchor(pc++);
+                ctx->hudWidgetActive = 0;
+                ctx->hudCanvasScaleX = 1.0f;
                 ctx->uiLayout = PSP_GFX_DL_UI_LAYOUT_AUTO;
                 ctx->viewportPolicy = PSP_GFX_VIEWPORT_HUD_SCALED_BOTTOM_RIGHT;
+                continue;
+            }
+            if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_VIEWPORT_HUD_CANVAS) {
+                psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+                ctx->hudWidgetActive = 0;
+                ctx->hudCanvasAnchorX = (s16) (pc++->words.w1 >> 16);
+                ctx->hudCanvasScaleX = PspDisplay_IsWidescreen() ?
+                    (4.0f / 3.0f) / PspDisplay_GetProjectionAspect() : 1.0f;
+                ctx->uiLayout = PSP_GFX_DL_UI_LAYOUT_AUTO;
+                ctx->viewportPolicy = PSP_GFX_VIEWPORT_FULL;
+                continue;
+            }
+            if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_VIEWPORT_HUD_WIDGET) {
+                const Gfx* anchor = pc++;
+                u32 detail = pc++->words.w1;
+                u32 player = detail & 0xffu;
+                float left = player < 4 ? (player & 1) * 160.0f : 0;
+                float top = player < 4 ? (player >> 1) * 120.0f : 0;
+
+                psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_RENDER_STATE_CHANGE);
+                n64psp_hud_region_fit(&ctx->hudWidget, PspDisplay_GetConfig(), left, top,
+                    player < 4 ? 160 : 320, player < 4 ? 120 : 240,
+                    (s16) (anchor->words.w1 >> 16), (s16) anchor->words.w1,
+                    detail >> 8, PspDisplay_IsUiScalingEnabled());
+                ctx->hudWidgetActive = PspDisplay_IsWidescreen();
+                ctx->hudCanvasScaleX = 1.0f;
+                ctx->uiLayout = PSP_GFX_DL_UI_LAYOUT_AUTO;
+                ctx->viewportPolicy = PSP_GFX_VIEWPORT_FULL;
                 continue;
             }
             if (PSP_RENDERER_DL_MARKER_ID(cmd->words.w1) == PSP_RENDERER_DL_MARKER_TERRAIN_DEPTH_BIAS_ON) {
@@ -6705,6 +6818,9 @@ static void psp_gfx_dl_reset_context(PspGfxDlContext* ctx) {
     ctx->textureScaleS = 0xFFFF;
     ctx->textureScaleT = 0xFFFF;
     ctx->textureUvCoefficientsDirty = 1;
+    ctx->hudCanvasScaleX = 1.0f;
+    ctx->viewportScaleX = ctx->viewportTransX = SCREEN_WIDTH * 2;
+    ctx->viewportScaleY = ctx->viewportTransY = SCREEN_HEIGHT * 2;
     ctx->viewportPolicy = PSP_GFX_VIEWPORT_AUTO;
     ctx->fogA = 255;
     ctx->combineUsesTextureAlpha = 1;
