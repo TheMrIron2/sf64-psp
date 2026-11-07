@@ -17,6 +17,8 @@
 #include "src/psp/hw_counter_profile.h"
 #include "src/psp/gfx/gfx_psp_dl.h"
 
+void Versus_LeaveMultiplayer(void);
+
 #define MENU_ROWS 12
 #define MENU_TEXT 60
 #define MENU_VISIBLE_ROWS 5
@@ -116,6 +118,15 @@ static void menu_multiplayer_back(void) {
     sScreen = MENU_MULTIPLAYER;
 }
 
+static void menu_multiplayer_close_room(void) {
+    PspMenu_EndHosting();
+    Versus_LeaveMultiplayer();
+    sMultiplayerFromGame = sMultiplayerActive = 0;
+    sOpen = 0;
+    sScreen = MENU_MAIN;
+    sSelected = 0;
+}
+
 static void menu_multiplayer_update(u32 pressed) {
     int detail = sScreen != MENU_MULTIPLAYER;
     int rows = menu_multiplayer_rows();
@@ -135,7 +146,7 @@ static void menu_multiplayer_update(u32 pressed) {
 
     if (detail && sScreen == MENU_MULTIPLAYER_HOST && sMultiplayerFromGame) {
         if (sSelected == 0) menu_multiplayer_finish(PSP_MULTIPLAYER_HOST);
-        else if (sSelected == 1) PspMenu_EndHosting();
+        else if (sSelected == 1) menu_multiplayer_close_room();
         else menu_multiplayer_back();
     } else if (detail && state == PSP_ADHOC_ERROR) {
         if (sSelected == 0) {

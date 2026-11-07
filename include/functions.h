@@ -498,6 +498,7 @@ void Scenery360_Initialize(Scenery360*);
 s32 Versus_Main(void);
 void Versus_Draw(void);
 void Versus_StartMatch(void);
+void Versus_LeaveMultiplayer(void);
 void func_versus_800C2190(void);
 void func_versus_800C26C8(void);
 

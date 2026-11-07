@@ -1482,6 +1482,13 @@ void Versus_ReturnToMenu(void) {
     gBgColor = 0;
 }
 
+void Versus_LeaveMultiplayer(void) {
+    if (gGameState == GSTATE_VS_INIT ||
+        (gGameState == GSTATE_PLAY && gCurrentLevel == LEVEL_VERSUS)) {
+        Versus_ReturnToMenu();
+    }
+}
+
 void Versus_dummy_800C1758(void) {
 }
 
