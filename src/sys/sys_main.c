@@ -10,6 +10,7 @@
 #include "src/psp/input.h"
 #include "src/psp/audio_mode.h"
 #include "src/psp/menu.h"
+#include "src/psp/spectate.h"
 #include "src/psp/platform.h"
 #include "src/psp/profiler.h"
 #include "src/psp/renderer.h"
@@ -344,7 +345,7 @@ static u8 Graphics_GetPresentationVIs(void) {
 }
 
 static s32 Graphics_InterpolationEligible(void) {
-    return gVIsPerFrame > Graphics_GetPresentationVIs();
+    return !PspSpectate_IsWatching() && gVIsPerFrame > Graphics_GetPresentationVIs();
 }
 
 static void Graphics_FinalizeDisplayList(void) {

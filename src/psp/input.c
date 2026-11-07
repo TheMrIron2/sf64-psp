@@ -1,3 +1,4 @@
+#include "src/psp/spectate.h"
 #include <pspctrl.h>
 
 #include <pspkernel.h>
@@ -6,8 +7,8 @@
 
 static OSContPad sPad;
 static u32 sPreviousButtons;
-static int sReleaseGate;
-static int sReleaseReady;
+static volatile int sReleaseGate;
+static volatile int sReleaseReady;
 #if PSP_MENU_CAPTURES
 static u32 sCaptureCombo;
 static u32 sCaptureSince;
@@ -140,9 +141,25 @@ void PspInput_Poll(OSContPad* pads) {
     sceKernelCpuResumeIntr(lock);
 }
 
+void PspInput_RequireRelease(void) {
+    int lock = sceKernelCpuSuspendIntr();
+    sReleaseGate = 1;
+    sReleaseReady = 0;
+    sPad.button = 0;
+    sPad.stick_x = sPad.stick_y = 0;
+    sceKernelCpuResumeIntr(lock);
+}
+
 // Preserve serial input locks and supply one neutral simulation sample on close
 void PspInput_FilterGameInput(OSContPad* pads) {
-    if (sReleaseGate || PspMenu_IsOpen()) {
+    int i;
+    if (PspSpectate_IsWatching()) {
+        for (i = 0; i < 4; i++) {
+            pads[i].button = 0;
+            pads[i].stick_x = pads[i].stick_y = 0;
+        }
+    }
+    if (sReleaseGate || PspMenu_IsOpen() || PspSpectate_IsWatching()) {
         pads[0].button = 0;
         pads[0].stick_x = 0;
         pads[0].stick_y = 0;

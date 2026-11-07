@@ -1277,3 +1277,15 @@ effective old default; it does not demonstrate a speedup or successful radio
 operation. Recheck game allocations on PSP-1000. The installed runtime
 disassembly and [SDK source](https://github.com/pspdev/pspsdk/blob/master/src/libcglue/glue.c)
 agree on this behaviour. See [the multiplayer review](psp-adhoc-multiplayer.md).
+
+## VFPU memcpy needs a VFPU thread — 7 November 2026
+
+The libultra `memcpy` replacement switches to 64-byte `lv.q`/`sv.q` blocks at
+128 bytes, and the N64PSP `n64psp_memcpy` does the same. VFPU is coprocessor 2:
+calling that path from a thread without `PSP_THREAD_ATTR_VFPU` traps with
+`Coprocessor unusable` (Cause CE=2), usually reported at the first `lv.q`.
+The main and N64 worker threads already opt in. The Ad-Hoc worker did not, so
+recent world-snapshot copies of a few KiB crashed it. Any new worker that can
+reach `memcpy`, `n64psp_memcpy` or VFPU code must request the attribute at
+creation, otherwise keep its copies below the VFPU threshold or use a scalar
+copy. The host Ad-Hoc fixture now asserts the worker attribute.

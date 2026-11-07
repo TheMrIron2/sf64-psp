@@ -11,6 +11,7 @@
 #ifdef TARGET_PSP
 #include "src/psp/display.h"
 #include "src/psp/menu.h"
+#include "src/psp/spectate.h"
 #include "src/psp/renderer.h"
 #endif
 #include "fox_option.h"
@@ -1233,6 +1234,9 @@ void Option_Versus_Update(void) {
                 PspMenu_GetMultiplayerResult() == PSP_MULTIPLAYER_HOST) {
                 sDrawCursor = false;
                 sMainMenuState = 11;
+            } else if (PspMenu_GetMultiplayerResult() == PSP_MULTIPLAYER_WATCH) {
+                sDrawCursor = false;
+                PspSpectate_Start();
             } else if (PspMenu_GetMultiplayerResult() == PSP_MULTIPLAYER_BACK) {
                 sMainMenuState = 1;
             }

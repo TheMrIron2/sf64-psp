@@ -1,3 +1,4 @@
+#include "src/psp/spectate.h"
 #include <pspctrl.h>
 #include <pspkernel.h>
 #include <psputility_sysparam.h>
@@ -81,7 +82,7 @@ PspMultiplayerMenuResult PspMenu_GetMultiplayerResult(void) {
 }
 
 static void menu_multiplayer_finish(PspMultiplayerMenuResult result) {
-    if (result != PSP_MULTIPLAYER_HOST) PspAdhoc_Stop();
+    if (result != PSP_MULTIPLAYER_HOST && result != PSP_MULTIPLAYER_WATCH) PspAdhoc_Stop();
     sHostingContinued = result == PSP_MULTIPLAYER_HOST;
     sMultiplayerFromGame = 0;
     sMultiplayerResult = result;
@@ -97,6 +98,7 @@ static int menu_multiplayer_rows(void) {
     if (sScreen == MENU_MULTIPLAYER_HOST && sMultiplayerFromGame) return 3;
     if (state == PSP_ADHOC_ERROR) return sScreen == MENU_MULTIPLAYER_HOST ? 3 : 2;
     if (sScreen == MENU_MULTIPLAYER_HOST) return state == PSP_ADHOC_HOSTING ? 3 : 2;
+    if (state == PSP_ADHOC_CONNECTED && sMultiplayerNet.worldSnapshots) return 2;
     if (state == PSP_ADHOC_SEARCHING) return sMultiplayerNet.roomCount + 1;
     if (state == PSP_ADHOC_RESULTS) return sMultiplayerNet.roomCount + 2;
     return 1;
@@ -151,6 +153,8 @@ static void menu_multiplayer_update(u32 pressed) {
         else if (state == PSP_ADHOC_RESULTS && sSelected == sMultiplayerNet.roomCount)
             PspAdhoc_Search(sMultiplayerMatchType);
         else menu_multiplayer_back();
+    } else if (detail && state == PSP_ADHOC_CONNECTED && sMultiplayerNet.worldSnapshots && sSelected == 0) {
+        menu_multiplayer_finish(PSP_MULTIPLAYER_WATCH);
     } else if (detail) {
         menu_multiplayer_back();
     } else if (sSelected < 2) {
@@ -175,6 +179,8 @@ static void menu_multiplayer_refresh(void) {
     int i;
     PspAdhoc_GetView(&sMultiplayerNet);
     if (sScreen != MENU_MULTIPLAYER_JOIN) return;
+    if (previous.state == PSP_ADHOC_CONNECTED && sMultiplayerNet.state == PSP_ADHOC_CONNECTED &&
+        !previous.worldSnapshots && sMultiplayerNet.worldSnapshots && sSelected == 0) sSelected = 1;
     if ((previous.state != PSP_ADHOC_SEARCHING && previous.state != PSP_ADHOC_RESULTS) ||
         (sMultiplayerNet.state != PSP_ADHOC_SEARCHING && sMultiplayerNet.state != PSP_ADHOC_RESULTS)) return;
     if (sSelected >= previous.roomCount) {
@@ -191,7 +197,7 @@ static void menu_multiplayer_refresh(void) {
 }
 
 static int menu_rows(void) {
-    if (sScreen == MENU_MAIN) return 3 + !!PSP_MENU_DIAGNOSTICS + sHostingContinued;
+    if (sScreen == MENU_MAIN) return 3 + !!PSP_MENU_DIAGNOSTICS + sHostingContinued + PspSpectate_IsWatching();
     if (sScreen == MENU_GRAPHICS) return 3 + !!PSP_FPS_OVERLAY + PSP_GFX_BACKEND_SELECTABLE;
     if (sScreen == MENU_SETTINGS) return 2;
     if (sScreen == MENU_DIAGNOSTICS) {
@@ -253,6 +259,10 @@ void PspMenu_Update(u32 pressed) {
 
     if (sScreen == MENU_MAIN && activate) {
         if (sSelected == 0) sOpen = 0;
+        else if (PspSpectate_IsWatching() && sSelected == 3 + !!PSP_MENU_DIAGNOSTICS) {
+            PspSpectate_Stop();
+            sOpen = 0;
+        }
         else if (sHostingContinued && sSelected == 3 + !!PSP_MENU_DIAGNOSTICS) {
             sScreen = MENU_MULTIPLAYER_HOST;
             sMultiplayerActive = sMultiplayerFromGame = 1;
@@ -394,6 +404,7 @@ void PspMenu_Publish(void) {
         menu_multiplayer_refresh();
         if (sSelected >= menu_multiplayer_rows()) sSelected = menu_multiplayer_rows() - 1;
     }
+    if (!sMultiplayerActive && sSelected >= menu_rows()) sSelected = menu_rows() - 1;
     view.open = 1;
     view.selected = sSelected;
     view.cursor = sSelected;
@@ -464,6 +475,7 @@ void PspMenu_Publish(void) {
                              sMultiplayerNet.hostPhase == PSP_ADHOC_HOST_PAUSED ? "Paused: " : "",
                              stages[sMultiplayerNet.hostStage], (unsigned long) sMultiplayerNet.hostFrame);
                 else snprintf(view.status, MENU_TEXT, "%s", "Host is waiting in lobby");
+                if (sMultiplayerNet.worldSnapshots) ROW("Watch Game");
                 ROW("Back");
             } else {
                 snprintf(view.subtitle, MENU_TEXT, "%s", state == PSP_ADHOC_JOINING ? "Joining game..." : "Starting Ad-Hoc...");
@@ -477,6 +489,13 @@ void PspMenu_Publish(void) {
         ROW("Performance / Diagnostics");
 #endif
         if (sHostingContinued) ROW("Ad-Hoc Room");
+        if (PspSpectate_IsWatching()) {
+            PspAdhocView network;
+            ROW("Leave Spectate");
+            PspAdhoc_GetView(&network);
+            snprintf(view.status, MENU_TEXT, "%s [%lu]", PspSpectate_Status(),
+                     (unsigned long) network.worldSnapshots);
+        }
     } else if (sScreen == MENU_SETTINGS) {
         static const char* const audio[] = { "Off", "Sync", "Async (fast)" };
         static const char* const colours[] = { "Green", "Red", "Blue" };

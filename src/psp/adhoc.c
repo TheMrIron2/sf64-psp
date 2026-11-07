@@ -13,6 +13,8 @@
 #define ADHOC_PORT 6464
 #define ADHOC_PACKET_BYTES 24
 #define ADHOC_PROGRESS_BYTES 28
+#define ADHOC_WORLD_HEADER 32
+#define ADHOC_WORLD_CHUNK 1024
 #define ADHOC_INTERVAL_US 500000U
 #define ADHOC_PEER_TIMEOUT_US 3000000U
 #define ADHOC_SEARCH_US 10000000U
@@ -21,7 +23,7 @@
 #define ADHOC_WOULD_BLOCK 0x80410709U
 
 enum { REQUEST_STOP, REQUEST_HOST, REQUEST_SEARCH, REQUEST_JOIN, REQUEST_EXIT };
-enum { PACKET_ADVERT = 1, PACKET_JOIN, PACKET_ACCEPT, PACKET_LEAVE, PACKET_CLOSE, PACKET_REJECT, PACKET_PROGRESS };
+enum { PACKET_ADVERT = 1, PACKET_JOIN, PACKET_ACCEPT, PACKET_LEAVE, PACKET_CLOSE, PACKET_REJECT, PACKET_PROGRESS, PACKET_WORLD };
 
 typedef struct {
     unsigned serial;
@@ -81,6 +83,16 @@ static struct {
     u32 sequence;
 } sProgress;
 static u32 sProgressReceived;
+
+static u8 sWorldPending[PSP_ADHOC_WORLD_MAX_BYTES];
+static u8 sWorldSending[PSP_ADHOC_WORLD_MAX_BYTES];
+static u8 sWorldAssembly[PSP_ADHOC_WORLD_MAX_BYTES];
+static u8 sWorldPublished[PSP_ADHOC_WORLD_MAX_BYTES];
+static int sWorldPendingBytes, sWorldSendingBytes, sWorldPublishedBytes;
+static u32 sWorldPendingSequence, sWorldSendingSequence, sWorldPublishedSequence;
+static u32 sWorldAssemblySequence, sWorldAssemblyChecksum, sWorldAssemblyMask;
+static int sWorldAssemblyBytes;
+static int sWorldOffset, sWorldPeer;
 
 static u32 adhoc_nonce(void);
 
@@ -166,6 +178,93 @@ static int adhoc_send(const u8* mac, int type, u32 token, u32 sequence) {
         return 0;
     }
     return 1;
+}
+
+static u32 adhoc_world_checksum(const u8* data, int bytes) {
+    u32 hash = 2166136261U;
+    int i;
+    for (i = 0; i < bytes; i++) hash = (hash ^ data[i]) * 16777619U;
+    return hash;
+}
+
+static void adhoc_world_send(void) {
+    static u8 packet[ADHOC_WORLD_HEADER + ADHOC_WORLD_CHUNK];
+    static u32 checksum;
+    int budget, lock, bytes, result;
+
+    if (!sHost || sView.state != PSP_ADHOC_HOSTING || !sView.peerCount) return;
+    if (!sWorldSendingBytes) {
+        lock = sceKernelCpuSuspendIntr();
+        if (sWorldPendingSequence != sWorldSendingSequence && sWorldPendingBytes) {
+            sWorldSendingBytes = sWorldPendingBytes;
+            sWorldSendingSequence = sWorldPendingSequence;
+            memcpy(sWorldSending, sWorldPending, sWorldSendingBytes);
+        }
+        sceKernelCpuResumeIntr(lock);
+        if (!sWorldSendingBytes) return;
+        checksum = adhoc_world_checksum(sWorldSending, sWorldSendingBytes);
+        sWorldOffset = sWorldPeer = 0;
+    }
+    for (budget = 0; budget < 4 && sWorldPeer < 3; ) {
+        if (adhoc_cancelled()) return;
+        if (!sPeers[sWorldPeer].token) { sWorldPeer++; sWorldOffset = 0; continue; }
+        bytes = sWorldSendingBytes - sWorldOffset;
+        if (bytes > ADHOC_WORLD_CHUNK) bytes = ADHOC_WORLD_CHUNK;
+        memcpy(packet, "SFAL", 4);
+        packet[4] = 1; packet[5] = PACKET_WORLD; packet[6] = sMatchType; packet[7] = sView.roomId;
+        adhoc_write_u32(packet + 8, sSession);
+        adhoc_write_u32(packet + 12, sPeers[sWorldPeer].token);
+        adhoc_write_u32(packet + 16, sWorldSendingSequence);
+        adhoc_write_u32(packet + 20, sWorldSendingBytes);
+        adhoc_write_u32(packet + 24, sWorldOffset);
+        adhoc_write_u32(packet + 28, checksum);
+        memcpy(packet + ADHOC_WORLD_HEADER, sWorldSending + sWorldOffset, bytes);
+        result = sceNetAdhocPdpSend(sResources.socket, sPeers[sWorldPeer].mac, ADHOC_PORT,
+                                   packet, bytes + ADHOC_WORLD_HEADER, 0, 1);
+        if ((u32) result == ADHOC_WOULD_BLOCK) return;
+        if (result < 0) { adhoc_error("World send", result); return; }
+        budget++;
+        sWorldOffset += bytes;
+        if (sWorldOffset == sWorldSendingBytes) { sWorldPeer++; sWorldOffset = 0; }
+    }
+    if (sWorldPeer == 3) sWorldSendingBytes = 0;
+}
+
+static void adhoc_world_receive(const u8* packet, int length) {
+    u32 sequence = adhoc_read_u32(packet + 16);
+    u32 bytes = adhoc_read_u32(packet + 20);
+    u32 offset = adhoc_read_u32(packet + 24);
+    u32 checksum = adhoc_read_u32(packet + 28);
+    u32 chunks, mask;
+    int payload = length - ADHOC_WORLD_HEADER;
+    int lock;
+
+    if (!sequence || bytes == 0 || bytes > PSP_ADHOC_WORLD_MAX_BYTES || offset >= bytes ||
+        offset % ADHOC_WORLD_CHUNK || payload <= 0 || payload > ADHOC_WORLD_CHUNK ||
+        (u32) payload != (bytes - offset > ADHOC_WORLD_CHUNK ? ADHOC_WORLD_CHUNK : bytes - offset) ||
+        (s32) (sequence - sWorldPublishedSequence) <= 0) return;
+    if (sequence != sWorldAssemblySequence) {
+        if (sWorldAssemblySequence && (s32) (sequence - sWorldAssemblySequence) <= 0) return;
+        sWorldAssemblySequence = sequence;
+        sWorldAssemblyBytes = bytes;
+        sWorldAssemblyChecksum = checksum;
+        sWorldAssemblyMask = 0;
+    }
+    if (bytes != (u32) sWorldAssemblyBytes || checksum != sWorldAssemblyChecksum) return;
+    memcpy(sWorldAssembly + offset, packet + ADHOC_WORLD_HEADER, payload);
+    sWorldAssemblyMask |= 1U << (offset / ADHOC_WORLD_CHUNK);
+    chunks = (bytes + ADHOC_WORLD_CHUNK - 1) / ADHOC_WORLD_CHUNK;
+    mask = chunks == 32 ? 0xffffffffU : (1U << chunks) - 1;
+    if (sWorldAssemblyMask != mask || adhoc_world_checksum(sWorldAssembly, bytes) != checksum) return;
+    lock = sceKernelCpuSuspendIntr();
+    if (sSerial == sRequest.serial) {
+        memcpy(sWorldPublished, sWorldAssembly, bytes);
+        sWorldPublishedBytes = bytes;
+        sWorldPublishedSequence = sequence;
+        sView.worldSnapshots++;
+        sView.worldBytes = bytes;
+    }
+    sceKernelCpuResumeIntr(lock);
 }
 
 static int adhoc_cleanup(void) {
@@ -396,9 +495,11 @@ static void adhoc_packet(const u8* mac, unsigned short port, const u8* packet, i
     if (length < ADHOC_PACKET_BYTES || port != ADHOC_PORT || (mac[0] & 1) ||
         !(mac[0] | mac[1] | mac[2] | mac[3] | mac[4] | mac[5]) ||
         memcmp(mac, sMac, 6) == 0 || memcmp(packet, "SFAL", 4) != 0 || packet[4] != 1 ||
-        packet[5] < PACKET_ADVERT || packet[5] > PACKET_PROGRESS || packet[6] != sMatchType ||
+        packet[5] < PACKET_ADVERT || packet[5] > PACKET_WORLD || packet[6] != sMatchType ||
         packet[7] > 99) return;
-    if (packet[5] == PACKET_PROGRESS) {
+    if (packet[5] == PACKET_WORLD) {
+        if (length <= ADHOC_WORLD_HEADER || length > ADHOC_WORLD_HEADER + ADHOC_WORLD_CHUNK) return;
+    } else if (packet[5] == PACKET_PROGRESS) {
         if (length != ADHOC_PROGRESS_BYTES || packet[20] > PSP_ADHOC_HOST_PAUSED ||
             packet[21] > 2 || packet[22] || packet[23]) return;
     } else if (length != ADHOC_PACKET_BYTES || adhoc_read_u32(packet + 20) != 0) return;
@@ -417,6 +518,10 @@ static void adhoc_packet(const u8* mac, unsigned short port, const u8* packet, i
     }
     if ((sView.state != PSP_ADHOC_JOINING && sView.state != PSP_ADHOC_CONNECTED) ||
         !adhoc_same_room(&sTarget, mac, session) || token != sToken) return;
+    if (packet[5] == PACKET_WORLD) {
+        if (sView.state == PSP_ADHOC_CONNECTED) adhoc_world_receive(packet, length);
+        return;
+    }
     if (packet[5] == PACKET_PROGRESS) {
         if ((s32) (sequence - sProgressReceived) > 0) {
             sProgressReceived = sequence;
@@ -548,6 +653,7 @@ static void adhoc_step(void) {
         adhoc_status(PSP_ADHOC_ERROR, "The host connection timed out");
     if (sHost && sView.state == PSP_ADHOC_HOSTING)
         snprintf(sView.status, sizeof(sView.status), "Watchers connected: %d / 3", sView.peerCount);
+    adhoc_world_send();
     adhoc_publish();
 }
 
@@ -566,6 +672,8 @@ static void adhoc_leave(void) {
 
 static int adhoc_apply_request(const AdhocRequest* request) {
     sSerial = request->serial;
+    sWorldSendingBytes = 0;
+    sWorldSendingSequence = sWorldAssemblySequence = sWorldAssemblyMask = 0;
     if (request->action == REQUEST_JOIN && sResources.control && !sHost &&
         request->room.matchType == sMatchType &&
         (sView.state == PSP_ADHOC_SEARCHING || sView.state == PSP_ADHOC_RESULTS)) {
@@ -629,7 +737,8 @@ static void adhoc_request(int action, int matchType, const PspAdhocRoom* room) {
     int result, lock;
     if (sThread < 0 && (action == REQUEST_STOP || action == REQUEST_EXIT)) return;
     if (sThread < 0) {
-        sThread = sceKernelCreateThread("sf64_adhoc", adhoc_worker, 0x68, 0x4000, 0, NULL);
+        sThread = sceKernelCreateThread("sf64_adhoc", adhoc_worker, 0x68, 0x4000,
+                                        PSP_THREAD_ATTR_USER | PSP_THREAD_ATTR_VFPU, NULL);
         if (sThread >= 0) {
             result = sceKernelStartThread(sThread, 0, NULL);
             if (result < 0) { sceKernelDeleteThread(sThread); sThread = result; }
@@ -644,6 +753,8 @@ static void adhoc_request(int action, int matchType, const PspAdhocRoom* room) {
         }
     }
     lock = sceKernelCpuSuspendIntr();
+    sWorldPendingBytes = sWorldPublishedBytes = 0;
+    sWorldPendingSequence = sWorldPublishedSequence = 0;
     sRequest.serial++;
     sRequest.action = action;
     sRequest.matchType = matchType;
@@ -694,6 +805,35 @@ void PspAdhoc_SetHostProgress(PspAdhocHostPhase phase, int stage, u32 frame) {
         sProgress.sequence++;
     }
     sceKernelCpuResumeIntr(lock);
+}
+
+int PspAdhoc_PublishWorld(const void* data, int bytes) {
+    int lock;
+    if (!data || bytes <= 0 || bytes > PSP_ADHOC_WORLD_MAX_BYTES) return 0;
+    lock = sceKernelCpuSuspendIntr();
+    if (sRequest.action != REQUEST_HOST || sPublished.state != PSP_ADHOC_HOSTING) {
+        sceKernelCpuResumeIntr(lock);
+        return 0;
+    }
+    memcpy(sWorldPending, data, bytes);
+    sWorldPendingBytes = bytes;
+    if (++sWorldPendingSequence == 0) sWorldPendingSequence++;
+    sceKernelCpuResumeIntr(lock);
+    return 1;
+}
+
+int PspAdhoc_ReadWorld(void* data, int capacity, u32* sequence) {
+    int bytes = 0, lock;
+    if (!data || !sequence || capacity <= 0) return 0;
+    lock = sceKernelCpuSuspendIntr();
+    if (sRequest.action == REQUEST_JOIN && sPublished.state == PSP_ADHOC_CONNECTED &&
+        sWorldPublishedBytes && capacity >= sWorldPublishedBytes && *sequence != sWorldPublishedSequence) {
+        bytes = sWorldPublishedBytes;
+        memcpy(data, sWorldPublished, bytes);
+        *sequence = sWorldPublishedSequence;
+    }
+    sceKernelCpuResumeIntr(lock);
+    return bytes;
 }
 
 void PspAdhoc_Shutdown(void) {

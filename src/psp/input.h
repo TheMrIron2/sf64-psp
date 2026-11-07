@@ -15,5 +15,6 @@ void PspInput_Init(void);
 void PspInput_Update(void);
 void PspInput_Poll(OSContPad* pads);
 void PspInput_FilterGameInput(OSContPad* pads);
+void PspInput_RequireRelease(void);
 
 #endif

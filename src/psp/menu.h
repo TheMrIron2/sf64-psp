@@ -15,7 +15,8 @@ typedef enum {
     PSP_MULTIPLAYER_PENDING,
     PSP_MULTIPLAYER_SOLO,
     PSP_MULTIPLAYER_BACK,
-    PSP_MULTIPLAYER_HOST
+    PSP_MULTIPLAYER_HOST,
+    PSP_MULTIPLAYER_WATCH
 } PspMultiplayerMenuResult;
 
 void PspMenu_OpenMultiplayer(int matchType);

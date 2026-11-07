@@ -4,6 +4,7 @@
 #include "PR/ultratypes.h"
 
 #define PSP_ADHOC_MAX_ROOMS 8
+#define PSP_ADHOC_WORLD_MAX_BYTES 32768
 
 typedef enum {
     PSP_ADHOC_IDLE,
@@ -46,6 +47,8 @@ typedef struct {
     PspAdhocHostPhase hostPhase;
     int hostStage;
     u32 hostFrame;
+    u32 worldSnapshots;
+    int worldBytes;
     int scans;
     int scanGroups;
 } PspAdhocView;
@@ -56,6 +59,8 @@ void PspAdhoc_Join(const PspAdhocRoom* room);
 void PspAdhoc_Stop(void);
 void PspAdhoc_GetView(PspAdhocView* view);
 void PspAdhoc_SetHostProgress(PspAdhocHostPhase phase, int stage, u32 frame);
+int PspAdhoc_PublishWorld(const void* data, int bytes);
+int PspAdhoc_ReadWorld(void* data, int capacity, u32* sequence);
 void PspAdhoc_Shutdown(void);
 
 #endif

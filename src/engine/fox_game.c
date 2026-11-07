@@ -8,6 +8,7 @@
 #include "src/psp/profiler.h"
 #include "src/psp/renderer.h"
 #include "src/psp/command_source.h"
+#include "src/psp/spectate.h"
 #endif
 
 #if defined(TARGET_PSP) && defined(PSP_TRACE_ENABLED) && PSP_TRACE_ENABLED
@@ -375,6 +376,9 @@ void Game_Update(void) {
     u8 soundMode;
 
     PSP_TRACE("game update: set state");
+#ifdef TARGET_PSP
+    PspSpectate_BeforeGame();
+#endif
     Game_SetGameState();
 
     if (gGameStandby) {
@@ -404,6 +408,9 @@ void Game_Update(void) {
         PSP_TRACE("game update: state switch");
 #ifdef TARGET_PSP
         PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_SIMULATION_STATE);
+#endif
+#ifdef TARGET_PSP
+        if (!PspSpectate_OverrideSimulation())
 #endif
         switch (gGameState) {
             case GSTATE_BOOT:
@@ -589,6 +596,7 @@ void Game_Update(void) {
         PSP_TRACE("game update: draw");
 #ifdef TARGET_PSP
         PspFrameInterpolation_SetWorldScope(true);
+        PspSpectate_Capture();
 #endif
         Game_Draw(0);
         PSP_TRACE("game update: draw done");
