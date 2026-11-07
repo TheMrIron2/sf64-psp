@@ -6,6 +6,7 @@
 #include "assets/ast_versus.h"
 #ifdef TARGET_PSP
 #include "src/psp/display.h"
+#include "src/psp/platform.h"
 #include "src/psp/renderer.h"
 #endif
 
@@ -1483,8 +1484,11 @@ void Versus_ReturnToMenu(void) {
 }
 
 void Versus_LeaveMultiplayer(void) {
-    if (gGameState == GSTATE_VS_INIT ||
-        (gGameState == GSTATE_PLAY && gCurrentLevel == LEVEL_VERSUS)) {
+#ifdef TARGET_PSP
+    PspPlatform_LogValue("close room state", (u32) gGameState);
+    PspPlatform_LogValue("close room level", (u32) gCurrentLevel);
+#endif
+    if (gGameState == GSTATE_VS_INIT || gGameState == GSTATE_PLAY) {
         Versus_ReturnToMenu();
     }
 }

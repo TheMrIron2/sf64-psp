@@ -36,6 +36,17 @@ static volatile int sWatching, sStop;
 static u32 sReceivedSequence, sEpoch, sHostEpoch, sLastCapture, sLastUpdate;
 static int sHostNeedsEpoch = 1;
 static const char* volatile sStatus = "Waiting for a world snapshot";
+static const char* volatile sInvalidReason;
+static int sInvalidIndex;
+static u32 sInvalidValue;
+static const char* volatile sLoggedReason;
+static int sLoggedIndex = -2;
+
+static int spectate_reject(const char* reason, int index) {
+    sInvalidReason = reason;
+    sInvalidIndex = index;
+    return 0;
+}
 
 static void spectate_zero(void* data, unsigned bytes) {
     u8* out = data;
@@ -49,8 +60,11 @@ static u32 spectate_schema(void) {
 }
 
 static int spectate_vector(const Vec3f* v) {
-    return __builtin_isfinite(v->x) && __builtin_isfinite(v->y) && __builtin_isfinite(v->z) &&
-           fabsf(v->x) < 10000000.0f && fabsf(v->y) < 10000000.0f && fabsf(v->z) < 10000000.0f;
+    union { f32 f; u32 u; } bits;
+    if (!__builtin_isfinite(v->x) || fabsf(v->x) >= 10000000.0f) { bits.f = v->x; sInvalidValue = bits.u; return 0; }
+    if (!__builtin_isfinite(v->y) || fabsf(v->y) >= 10000000.0f) { bits.f = v->y; sInvalidValue = bits.u; return 0; }
+    if (!__builtin_isfinite(v->z) || fabsf(v->z) >= 10000000.0f) { bits.f = v->z; sInvalidValue = bits.u; return 0; }
+    return 1;
 }
 
 static int spectate_object(const Object* obj, int type) {
@@ -87,22 +101,25 @@ static int spectate_records(const u8* data, int bytes, int commit) {
         ObjectInfo* info = NULL;
         Object* target = NULL;
         int limit;
-        if (bytes - at < (int) sizeof(record)) return 0;
+        if (bytes - at < (int) sizeof(record)) return spectate_reject("record truncated", at);
         memcpy(&record, data + at, sizeof(record));
         at += sizeof(record);
         if (record.type > WORLD_SCENERY || record.bytes != spectate_size(record.type) ||
-            record.bytes > bytes - at) return 0;
+            record.bytes > bytes - at) return spectate_reject("record header", record.type);
         limit = record.type == WORLD_ACTOR ? 60 : record.type == WORLD_ITEM ? 20 :
                 record.type == WORLD_EFFECT ? 100 : 200;
-        if (record.index >= limit || seen[record.type][record.index]++) return 0;
+        if (record.index >= limit || seen[record.type][record.index]++)
+            return spectate_reject("record index", record.index);
         memcpy(&sDecode, data + at, record.bytes);
-        if (!spectate_object(&sDecode.object, record.type)) return 0;
+        if (!spectate_object(&sDecode.object, record.type))
+            return spectate_reject("record object", record.index);
         if (record.type != WORLD_SCENERY) {
             const u8* raw = (const u8*) &sDecode;
             for (i = sizeof(Object); i < (int) (sizeof(Object) + sizeof(ObjectInfo)); i++)
-                if (raw[i]) return 0;
+                if (raw[i]) return spectate_reject("record info", record.index);
         }
-        if (record.type == WORLD_EFFECT && sDecode.effect.dList) return 0;
+        if (record.type == WORLD_EFFECT && sDecode.effect.dList)
+            return spectate_reject("effect pointer", record.index);
         if (commit) {
             switch (record.type) {
                 case WORLD_ACTOR:
@@ -119,41 +136,63 @@ static int spectate_records(const u8* data, int bytes, int commit) {
         }
         at += record.bytes;
     }
-    return at == bytes;
+    return at == bytes ? 1 : spectate_reject("record length", at);
 }
 
 static int spectate_valid(const u8* data, int bytes) {
     const SpectateWorld* world = (const SpectateWorld*) data;
     int i, j;
-    if (bytes < (int) sizeof(*world) || world->magic != 0x53505731U ||
-        world->schema != spectate_schema() || world->bytes != (u32) bytes || !world->epoch ||
-        world->stage < 0 || world->stage > 2 || world->matchType < 0 || world->matchType > 2 ||
-        world->matchStart < 0 || world->matchStart > 1 || world->matchOver < 0 || world->matchOver > 1 ||
-        (world->matchType == VS_MATCH_TIME ? world->points != 10000 :
-         (world->points < 1 || world->points > 10)) || world->paused < 0 || world->paused > 1 ||
-        world->matchWon < 0 || world->matchWon > 1 || world->matchState < 0 || world->matchState > VS_STATE_20 ||
-        !__builtin_isfinite(world->fov) || world->fov < 10 || world->fov > 100 ||
-        !__builtin_isfinite(world->viewScale) || world->viewScale < 0.5f || world->viewScale > 1.5f ||
-        world->drawMode < 0 || world->drawMode > 11 || world->countdown < 0 || world->countdown > 4 ||
-        (world->drawMode == 2 && world->countdown > 3) ||
-        (world->winner != 99 && (world->winner < 0 || world->winner > 3))) return 0;
+    if (bytes < (int) sizeof(*world)) return spectate_reject("short world", bytes);
+    if (world->magic != 0x53505731U) return spectate_reject("bad magic", -1);
+    if (world->schema != spectate_schema()) return spectate_reject("bad schema", -1);
+    if (world->bytes != (u32) bytes) return spectate_reject("bad size", world->bytes);
+    if (!world->epoch) return spectate_reject("bad epoch", -1);
+    if (world->stage < 0 || world->stage > 2) return spectate_reject("bad stage", world->stage);
+    if (world->matchType < 0 || world->matchType > 2) return spectate_reject("bad match type", world->matchType);
+    if (world->matchStart < 0 || world->matchStart > 1) return spectate_reject("bad match start", world->matchStart);
+    if (world->matchOver < 0 || world->matchOver > 1) return spectate_reject("bad match over", world->matchOver);
+    if (world->matchType == VS_MATCH_TIME ? world->points != 10000 :
+        (world->points < 1 || world->points > 10)) return spectate_reject("bad points", world->points);
+    if (world->paused < 0 || world->paused > 1) return spectate_reject("bad paused", world->paused);
+    if (world->matchWon < 0 || world->matchWon > 1) return spectate_reject("bad match won", world->matchWon);
+    if (world->matchState < 0 || world->matchState > VS_STATE_20)
+        return spectate_reject("bad match state", world->matchState);
+    if (!__builtin_isfinite(world->fov) || world->fov < 10 || world->fov > 100)
+        return spectate_reject("bad fov", -1);
+    if (!__builtin_isfinite(world->viewScale) || world->viewScale < 0.5f || world->viewScale > 1.5f)
+        return spectate_reject("bad view scale", -1);
+    if (world->drawMode < 0 || world->drawMode > 11) return spectate_reject("bad draw mode", world->drawMode);
+    if (world->countdown < 0 || world->countdown > 4) return spectate_reject("bad countdown", world->countdown);
+    if (world->drawMode == 2 && world->countdown > 3)
+        return spectate_reject("bad countdown draw", world->countdown);
+    if (world->winner != 99 && (world->winner < 0 || world->winner > 3))
+        return spectate_reject("bad winner", world->winner);
     for (i = 0; i < 4; i++) {
         const Player* player = &world->player[i];
-        if (player->sfx.srcPos || player->sfx.srcVel || player->num != i ||
-            player->state < 0 || player->state >= PLAYERSTATE_MAX ||
-            player->form < FORM_ARWING || player->form > FORM_ON_FOOT ||
-            !spectate_vector(&player->pos) || !spectate_vector(&player->cam.eye) ||
-            !spectate_vector(&player->cam.at) || !spectate_vector(&player->rot) ||
-            world->inactive[i] < 0 || world->inactive[i] > 1 ||
-            world->cameraLabels[i] < 0 || world->cameraLabels[i] > 1 ||
-            world->pointsScored[i] < 0 || world->pointsScored[i] > 10 ||
-            world->laser[i] < 0 || world->laser[i] >= LASERS_MAX ||
-            world->reticles[i] < 0 || world->reticles[i] > 1) return 0;
-        for (j = 0; j < 10; j++) if (world->kills[i][j] < 0 || world->kills[i][j] > 3) return 0;
+        if (player->sfx.srcPos || player->sfx.srcVel) return spectate_reject("player sfx", i);
+        if (player->num != i) return spectate_reject("player num", i);
+        if (player->state < 0 || player->state >= PLAYERSTATE_MAX) return spectate_reject("player state", i);
+        if (player->form < FORM_ARWING || player->form > FORM_ON_FOOT) return spectate_reject("player form", i);
+        if (!spectate_vector(&player->pos)) return spectate_reject("player pos", i);
+        if (!spectate_vector(&player->cam.eye)) return spectate_reject("player cam eye", i);
+        if (!spectate_vector(&player->cam.at)) return spectate_reject("player cam at", i);
+        if (!spectate_vector(&player->rot)) return spectate_reject("player rot", i);
+        if (world->inactive[i] < 0 || world->inactive[i] > 1) return spectate_reject("player inactive", i);
+        if (world->cameraLabels[i] < 0 || world->cameraLabels[i] > 1)
+            return spectate_reject("player cam label", i);
+        if (world->pointsScored[i] < 0 || world->pointsScored[i] > 10)
+            return spectate_reject("player points", i);
+        if (world->laser[i] < 0 || world->laser[i] >= LASERS_MAX) return spectate_reject("player laser", i);
+        if (world->reticles[i] < 0 || world->reticles[i] > 1) return spectate_reject("player reticle", i);
+        for (j = 0; j < 10; j++) {
+            if (world->kills[i][j] < 0 || world->kills[i][j] > 3) return spectate_reject("player kills", i);
+        }
     }
     for (i = 0; i < 16; i++) {
-        if (world->shot[i].obj.status > SHOT_HITMARK || world->shot[i].obj.id > PLAYERSHOT_GFOX_LASER ||
-            !spectate_vector(&world->shot[i].obj.pos) || !spectate_vector(&world->shot[i].obj.rot)) return 0;
+        if (world->shot[i].obj.status > SHOT_HITMARK) return spectate_reject("shot status", i);
+        if (world->shot[i].obj.id > PLAYERSHOT_GFOX_LASER) return spectate_reject("shot id", i);
+        if (!spectate_vector(&world->shot[i].obj.pos)) return spectate_reject("shot pos", i);
+        if (!spectate_vector(&world->shot[i].obj.rot)) return spectate_reject("shot rot", i);
     }
     return spectate_records(data, bytes, 0);
 }
@@ -196,6 +235,8 @@ void PspSpectate_Start(void) {
     if (sWatching) return;
     sWatching = 1; sStop = sReady = sInvalid = sBytes = 0;
     sReceivedSequence = sEpoch = 0;
+    sInvalidReason = NULL; sInvalidIndex = -1; sInvalidValue = 0;
+    sLoggedReason = NULL; sLoggedIndex = -2;
     sLastUpdate = PspPlatform_GetViCount();
     sStatus = "Loading the host world";
 }
@@ -230,11 +271,29 @@ void PspSpectate_BeforeGame(void) {
     bytes = PspAdhoc_ReadWorld(sIncoming.data, sizeof(sIncoming.data), &sReceivedSequence);
     if (bytes) {
         const SpectateWorld* incoming = (const SpectateWorld*) sIncoming.data;
-        sInvalid = !spectate_valid(sIncoming.data, bytes) ||
-            (sEpoch && incoming->epoch != sEpoch && (s32) (incoming->epoch - sEpoch) <= 0) ||
-            (sEpoch && incoming->epoch == sEpoch &&
-             (incoming->stage != gVersusStage || incoming->matchType != gVsMatchType));
-        if (sInvalid) { sStatus = "Dropped incompatible or invalid snapshot"; return; }
+        sInvalidReason = NULL;
+        sInvalidIndex = -1;
+        sInvalidValue = 0;
+        sInvalid = !spectate_valid(sIncoming.data, bytes);
+        if (!sInvalid && sEpoch && incoming->epoch != sEpoch && (s32) (incoming->epoch - sEpoch) <= 0) {
+            sInvalid = 1;
+            sInvalidReason = "stale epoch";
+        } else if (!sInvalid && sEpoch && incoming->epoch == sEpoch &&
+                   (incoming->stage != gVersusStage || incoming->matchType != gVsMatchType)) {
+            sInvalid = 1;
+            sInvalidReason = "stage changed";
+        }
+        if (sInvalid) {
+            if (sInvalidReason != sLoggedReason || sInvalidIndex != sLoggedIndex) {
+                sLoggedReason = sInvalidReason;
+                sLoggedIndex = sInvalidIndex;
+                PspPlatform_LogValue(sInvalidReason ? sInvalidReason : "invalid snapshot",
+                                     (u32) (sInvalidIndex + 1));
+                PspPlatform_LogValue("invalid value bits", sInvalidValue);
+            }
+            sStatus = sInvalidReason ? sInvalidReason : "Dropped incompatible or invalid snapshot";
+            return;
+        }
         memcpy(sWorld.data, sIncoming.data, bytes);
         sBytes = bytes;
         sLastUpdate = PspPlatform_GetViCount();
@@ -261,7 +320,7 @@ void PspSpectate_BeforeGame(void) {
         }
         sReady = 1;
         spectate_apply();
-        sStatus = sInvalid ? "Dropped incompatible or invalid snapshot" :
+        sStatus = sInvalid ? (sInvalidReason ? sInvalidReason : "Dropped incompatible or invalid snapshot") :
                   PspPlatform_GetViCount() - sLastUpdate > 60 ? "Waiting for world updates" :
                   view.hostPhase == PSP_ADHOC_HOST_SETUP ? "Host is choosing match settings" :
                   world->paused ? "Watching - host paused" :
@@ -309,8 +368,9 @@ void PspSpectate_Capture(void) {
     world->frame = gGameFrameCount; world->allRangeFrame = gAllRangeFrameCount; world->stage = gVersusStage; world->matchType = gVsMatchType;
     world->points = gVsPointsToWin; world->timeLimit = gVsTimeTrialLimit;
     world->paused = gPlayState == PLAY_PAUSE;
-    world->matchStart = gVsMatchStart; world->matchOver = gVsMatchOver;
-    world->matchWon = gVsMatchWon; world->matchState = gVsMatchState;
+    // gVsMatchStart is an int bool and is incremented to 2 once the match begins
+    world->matchStart = gVsMatchStart != 0; world->matchOver = gVsMatchOver != 0;
+    world->matchWon = gVsMatchWon != 0; world->matchState = gVsMatchState;
     world->drawMode = sVsDrawMode; world->countdown = sStartCountdown; world->winner = sVsWinner;
     world->fov = gFovY; world->viewScale = gVsViewScale; world->background = gBgColor;
     world->fillRed = gFillScreenRed; world->fillGreen = gFillScreenGreen;
