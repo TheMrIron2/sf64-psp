@@ -1,8 +1,3 @@
-# Curated source manifest for the PSP port.
-#
-# Keep this explicit. New sources should be added deliberately so the PSP build
-# does not silently pick up generated/decomp files that are not portable yet.
-
 PSP_BOOTSTRAP_C_FILES := src/psp/main.c
 
 ifeq ($(PROFILE_CENSUS),1)
@@ -24,8 +19,9 @@ endif
 #       -> selected backend adapter
 #       -> shared display state and selected device
 #       -> public renderer bridge in renderer_bridge.c
-# This explicit list is authoritative. The retired direct-GU renderer
-# src/psp/renderer.c and its private helpers are legacy/reference code only.
+# This explicit list is authoritative. Native GU is the default backend and
+# PSPGL is a supported secondary backend. The original direct-GU prototype was
+# removed; it is unrelated to the modern GU backend below.
 PSP_RENDERER_C_FILES := \
     src/psp/display.c \
     src/psp/settings.c \

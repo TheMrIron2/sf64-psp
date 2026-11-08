@@ -5258,7 +5258,7 @@ static void psp_gfx_dl_log_active_background_fill(const PspGfxDlContext* ctx, u3
     char line[192];
 
     snprintf(line, sizeof(line),
-             "[pspgl-dl] active-bg-fill prim=%d blend=%d cycleFill=%d color=%08lx prim=%02x%02x%02x%02x "
+             "[psp-dl] active-bg-fill prim=%d blend=%d cycleFill=%d color=%08lx prim=%02x%02x%02x%02x "
              "fill=%08lx seed=%08lx otherL=%08lx otherH=%08lx",
              primitiveFill, blend, psp_gfx_dl_is_fill_cycle(ctx), (unsigned long) color,
              ctx->primitiveR, ctx->primitiveG, ctx->primitiveB, ctx->primitiveA,
@@ -6558,7 +6558,7 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
                     char line[192];
 
                     snprintf(line, sizeof(line),
-                             "[pspgl-dl] rejected target task=%lu depth=%lu cmd=%p w0=%08lx w1=%08lx target=%p",
+                             "[psp-dl] rejected target task=%lu depth=%lu cmd=%p w0=%08lx w1=%08lx target=%p",
                              (unsigned long) ctx->taskIndex, (unsigned long) depth, (const void*) cmd,
                              (unsigned long) cmd->words.w0, (unsigned long) cmd->words.w1,
                              (const void*) child);
@@ -6857,7 +6857,7 @@ static void psp_gfx_dl_material_class_cache_report_line(u32 taskIndex, const cha
     u32 total = hits + misses;
 
     snprintf(line, sizeof(line),
-             "[pspgl-material-class-cache] task=%lu policy=%s entries=%lu ways=%lu "
+             "[psp-material-class-cache] task=%lu policy=%s entries=%lu ways=%lu "
              "nonImmediateHits=%lu trueMisses=%lu hitPermille=%lu",
              (unsigned long) taskIndex, policy, (unsigned long) entries, (unsigned long) ways,
              (unsigned long) hits, (unsigned long) misses,
@@ -6871,7 +6871,7 @@ static void psp_gfx_dl_material_class_cache_report(u32 taskIndex) {
     char line[512];
 
     snprintf(line, sizeof(line),
-             "[pspgl-material-class] task=%lu dirty=%lu immediate=%lu immediatePermille=%lu "
+             "[psp-material-class] task=%lu dirty=%lu immediate=%lu immediatePermille=%lu "
              "unique=%lu seenOverflow=%lu signatureMismatches=%lu",
              (unsigned long) taskIndex, (unsigned long) material->dirtyResolves,
              (unsigned long) material->immediateHits,
@@ -6882,7 +6882,7 @@ static void psp_gfx_dl_material_class_cache_report(u32 taskIndex) {
     PspPlatform_LogLine(line);
 
     snprintf(line, sizeof(line),
-             "[pspgl-material-class-reuse] task=%lu d1=%lu d2_4=%lu d5_8=%lu d9_16=%lu "
+             "[psp-material-class-reuse] task=%lu d1=%lu d2_4=%lu d5_8=%lu d9_16=%lu "
              "d17_32=%lu d33plus=%lu",
              (unsigned long) taskIndex, (unsigned long) material->reuseDistance[0],
              (unsigned long) material->reuseDistance[1], (unsigned long) material->reuseDistance[2],
@@ -6892,7 +6892,7 @@ static void psp_gfx_dl_material_class_cache_report(u32 taskIndex) {
 
     if (material->signatureMismatches != 0) {
         snprintf(line, sizeof(line),
-                 "[pspgl-material-class-mismatch] task=%lu key=0x%08lx expected=0x%08lx actual=0x%08lx",
+                 "[psp-material-class-mismatch] task=%lu key=0x%08lx expected=0x%08lx actual=0x%08lx",
                  (unsigned long) taskIndex, (unsigned long) material->firstMismatchKey,
                  (unsigned long) material->firstMismatchExpected,
                  (unsigned long) material->firstMismatchActual);
@@ -6911,7 +6911,7 @@ static void psp_gfx_dl_material_class_cache_report(u32 taskIndex) {
                                                 material->assoc128Hits, material->assoc128Misses);
 
     snprintf(line, sizeof(line),
-             "[pspgl-combine-cache] task=%lu commands=%lu immediate=%lu immediatePermille=%lu "
+             "[psp-combine-cache] task=%lu commands=%lu immediate=%lu immediatePermille=%lu "
              "unique=%lu seenOverflow=%lu direct32Hits=%lu direct32Misses=%lu "
              "assoc32Hits=%lu assoc32Misses=%lu",
              (unsigned long) taskIndex, (unsigned long) combine->commands,
@@ -6931,7 +6931,7 @@ static void psp_gfx_dl_material_corpus_report(u32 taskIndex) {
     u32 i;
 
     snprintf(line, sizeof(line),
-             "[pspgl-material-corpus] task=%lu keys=%lu overflow=%lu tris=%lu unattributed=%lu",
+             "[psp-material-corpus] task=%lu keys=%lu overflow=%lu tris=%lu unattributed=%lu",
              (unsigned long) taskIndex, (unsigned long) sPspGfxDlMaterialCorpusCount,
              (unsigned long) sPspGfxDlMaterialCorpusOverflow, (unsigned long) total,
              (unsigned long) sPspGfxDlMaterialCorpusUnattributed);
@@ -6971,7 +6971,7 @@ static void psp_gfx_dl_material_corpus_report(u32 taskIndex) {
         permille = (u32) (((u64) entry->triangleCount * 1000U) / total);
 
         snprintf(line, sizeof(line),
-                 "[pspgl-material-key] rank=%lu key=0x%08lx tris=%lu permille=%lu cumPermille=%lu applies=%lu "
+                 "[psp-material-key] rank=%lu key=0x%08lx tris=%lu permille=%lu cumPermille=%lu applies=%lu "
                  "combine=%lu omH=0x%08lx omL=0x%08lx geom=0x%08lx tex=%u fmt=%lu size=%lu env=%u wrap=%u,%u "
                  "aTest=%u blend=%u premul=%u point=%u zTest=%u zWrite=%u fog=%u",
                  (unsigned long) rank, (unsigned long) entry->key, (unsigned long) entry->triangleCount,
@@ -6992,7 +6992,7 @@ static void psp_gfx_dl_pool_report(u32 taskIndex) {
     char line[320];
 
     snprintf(line, sizeof(line),
-             "[pspgl-pool] task=%lu slots=%u cap=%u hits=%lu opens=%lu evictions=%lu capFlush=%lu "
+             "[psp-pool] task=%lu slots=%u cap=%u hits=%lu opens=%lu evictions=%lu capFlush=%lu "
              "drained=%lu unpooled=%lu peakOpen=%lu",
              (unsigned long) taskIndex, PSP_BATCH_POOL_SLOTS, PSP_BATCH_POOL_VERTICES,
              (unsigned long) sPspGfxDlPoolHits, (unsigned long) sPspGfxDlPoolOpens,
@@ -7010,7 +7010,7 @@ static void psp_gfx_dl_pool_lookup_report(u32 taskIndex) {
     u32 lineUsed;
 
     snprintf(line, sizeof(line),
-             "[pspgl-pool-lookup] task=%lu lookups=%lu hits=%lu misses=%lu hitCmp=%lu missCmp=%lu "
+             "[psp-pool-lookup] task=%lu lookups=%lu hits=%lu misses=%lu hitCmp=%lu missCmp=%lu "
              "lastFast=%lu currentReuse=%lu lastReuse=%lu peakOpen=%lu",
              (unsigned long) taskIndex, (unsigned long) sPspGfxDlPoolLookupCount,
              (unsigned long) sPspGfxDlPoolLookupHits, (unsigned long) sPspGfxDlPoolLookupMisses,
@@ -7022,7 +7022,7 @@ static void psp_gfx_dl_pool_lookup_report(u32 taskIndex) {
              (unsigned long) sPspGfxDlPoolPeakOpen);
     PspPlatform_LogLine(line);
 
-    lineUsed = (u32) snprintf(line, sizeof(line), "[pspgl-pool-open-hist] task=%lu",
+    lineUsed = (u32) snprintf(line, sizeof(line), "[psp-pool-open-hist] task=%lu",
                               (unsigned long) taskIndex);
     for (i = 0; i <= PSP_BATCH_POOL_SLOTS; i++) {
         if (sPspGfxDlPoolLookupOpenHistogram[i] == 0) {
@@ -7030,7 +7030,7 @@ static void psp_gfx_dl_pool_lookup_report(u32 taskIndex) {
         }
         if (lineUsed > (sizeof(line) - 32)) {
             PspPlatform_LogLine(line);
-            lineUsed = (u32) snprintf(line, sizeof(line), "[pspgl-pool-open-hist] task=%lu",
+            lineUsed = (u32) snprintf(line, sizeof(line), "[psp-pool-open-hist] task=%lu",
                                       (unsigned long) taskIndex);
         }
         lineUsed += (u32) snprintf(line + lineUsed, sizeof(line) - lineUsed, " %lu:%lu",
@@ -7040,7 +7040,7 @@ static void psp_gfx_dl_pool_lookup_report(u32 taskIndex) {
     PspPlatform_LogLine(line);
 
     snprintf(line, sizeof(line),
-             "[pspgl-pool-hit-pos] task=%lu scan0=%lu scan1=%lu scan2_3=%lu scan4_7=%lu "
+             "[psp-pool-hit-pos] task=%lu scan0=%lu scan1=%lu scan2_3=%lu scan4_7=%lu "
              "scan8_15=%lu scan16plus=%lu",
              (unsigned long) taskIndex, (unsigned long) sPspGfxDlPoolLookupHitPosition[0],
              (unsigned long) sPspGfxDlPoolLookupHitPosition[1],
@@ -7178,7 +7178,7 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
     if ((taskIndex < 4) || ((taskIndex % 30) == 0) || (ctx->stats.commandLimitHit != 0) ||
         (ctx->stats.depthLimitHit != 0)) {
         snprintf(line, sizeof(line),
-                 "[pspgl-dl] task=%lu cmds=%lu vtx=%lu tri=%lu drawv=%lu dl=%lu reject=%lu mtx=%lu unsup=%lu "
+                 "[psp-dl] task=%lu cmds=%lu vtx=%lu tri=%lu drawv=%lu dl=%lu reject=%lu mtx=%lu unsup=%lu "
                  "push=%lu pop=%lu mtxReject=%lu vp=%lu invalid=%lu outside=%lu tex=%lu texReject=%lu "
                  "rgba16=%lu rgba32=%lu ci4=%lu ia8=%lu ia16=%lu texTri=%lu alphaTestTri=%lu blendTri=%lu "
                  "texRect=%lu rectReject=%lu fillRect=%lu fillPrim=%lu fillUnsup=%lu "
@@ -7213,7 +7213,7 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
         PspPlatform_LogLine(line);
         if (ctx->hasFogDepthRange) {
             snprintf(line, sizeof(line),
-                     "[pspgl-fog] task=%lu color=%u,%u,%u,%u factor=%d,%d range=%.2f..%.2f depth=%.2f..%.2f",
+                     "[psp-fog] task=%lu color=%u,%u,%u,%u factor=%d,%d range=%.2f..%.2f depth=%.2f..%.2f",
                      (unsigned long) taskIndex, ctx->fogR, ctx->fogG, ctx->fogB, ctx->fogA, ctx->fogMul,
                      ctx->fogOffset, ctx->fogRangeStart, ctx->fogRangeEnd, ctx->fogDepthMin, ctx->fogDepthMax);
             PspPlatform_LogLine(line);
@@ -7225,7 +7225,7 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
         ((ctx->stats.vertexCount != 0) || (ctx->stats.invalidTriangleCount != 0) ||
          (ctx->stats.displayListPointerRejected != 0))) {
         snprintf(line, sizeof(line),
-                 "[pspgl-geom] task=%lu nearW=%lu behindVtx=%lu invalidTri=%lu sharedClipTri=%lu "
+                 "[psp-geom] task=%lu nearW=%lu behindVtx=%lu invalidTri=%lu sharedClipTri=%lu "
                  "eyeCrossTri=%lu behindTri=%lu clippedTri=%lu nearClipTri=%lu clipRejectTri=%lu "
                  "clipGenTri=%lu clipTex=%lu/%lu clipGenVtx=%lu clipPolyMax=%lu wRatioMax=%.2f "
                  "perspSplit=%lu perspTri=%lu gpuProjTri=%lu preXformTri=%lu "
@@ -7262,7 +7262,7 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
 
     if (!sLoggedTexturedClipSample && ctx->hasClipSample) {
         snprintf(line, sizeof(line),
-                 "[pspgl-clip-sample] task=%lu verts=%lu generated=%lu w=%.3f..%.3f "
+                 "[psp-clip-sample] task=%lu verts=%lu generated=%lu w=%.3f..%.3f "
                  "ndc=%.3f..%.3f,%.3f..%.3f,%.3f..%.3f uv=%.3f..%.3f,%.3f..%.3f",
                  (unsigned long) taskIndex, (unsigned long) ctx->clipSampleVertexCount,
                  (unsigned long) ctx->clipSampleGeneratedCount, ctx->clipSampleMinW, ctx->clipSampleMaxW,
@@ -7276,7 +7276,7 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
     if ((ctx->lightingVertexCount != 0) &&
         (!sLoggedFirstLightingTask || (taskIndex < 4) || ((taskIndex % 30) == 0))) {
         snprintf(line, sizeof(line),
-                 "[pspgl-light] task=%lu vertices=%lu lights=%lu ambient=%u,%u,%u "
+                 "[psp-light] task=%lu vertices=%lu lights=%lu ambient=%u,%u,%u "
                  "linear=%.1f..%.1f mapped=%u..%u",
                  (unsigned long) taskIndex, (unsigned long) ctx->lightingVertexCount,
                  (unsigned long) ctx->lightCount, ctx->ambientR, ctx->ambientG, ctx->ambientB,
@@ -7293,7 +7293,7 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
         u32 lineUsed;
 
         snprintf(line, sizeof(line),
-                 "[pspgl-vtx-hist] task=%lu cmds=%lu lit=%lu unlit=%lu",
+                 "[psp-vtx-hist] task=%lu cmds=%lu lit=%lu unlit=%lu",
                  (unsigned long) taskIndex,
                  (unsigned long) ctx->vtxCommandCount,
                  (unsigned long) ctx->litVertexCount,
@@ -7301,7 +7301,7 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
         PspPlatform_LogLine(line);
 
         lineUsed = (u32) snprintf(line, sizeof(line),
-                                  "[pspgl-vtx-sizes] task=%lu",
+                                  "[psp-vtx-sizes] task=%lu",
                                   (unsigned long) taskIndex);
         for (i = 1; i <= PSP_GFX_DL_MAX_VERTICES; i++) {
             if (ctx->vtxBatchSizeHistogram[i] == 0) {
@@ -7310,7 +7310,7 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
             if (lineUsed > 430) {
                 PspPlatform_LogLine(line);
                 lineUsed = (u32) snprintf(line, sizeof(line),
-                                          "[pspgl-vtx-sizes] task=%lu",
+                                          "[psp-vtx-sizes] task=%lu",
                                           (unsigned long) taskIndex);
             }
             lineUsed += (u32) snprintf(line + lineUsed, sizeof(line) - lineUsed,
@@ -7321,7 +7321,7 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
         PspPlatform_LogLine(line);
 
         lineUsed = (u32) snprintf(line, sizeof(line),
-                                  "[pspgl-vtx-lights] task=%lu",
+                                  "[psp-vtx-lights] task=%lu",
                                   (unsigned long) taskIndex);
         for (i = 0; i <= 7; i++) {
             if (ctx->vtxLightCountHistogram[i] == 0) {
@@ -7346,7 +7346,7 @@ int PspGfxDl_Run(const Gfx* dl, u32 taskIndex, PspGfxDlStats* outStats) {
 
     if (!sLoggedFirstDrawableTask && (ctx->stats.triangleCount != 0)) {
         snprintf(line, sizeof(line),
-                 "[pspgl-dl-bounds] task=%lu x=%.3f..%.3f y=%.3f..%.3f z=%.3f..%.3f mtxFlags=0x%02lx "
+                 "[psp-dl-bounds] task=%lu x=%.3f..%.3f y=%.3f..%.3f z=%.3f..%.3f mtxFlags=0x%02lx "
                  "vpScale=%d,%d vpTrans=%d,%d",
                  (unsigned long) taskIndex, ctx->minX, ctx->maxX, ctx->minY, ctx->maxY, ctx->minZ, ctx->maxZ,
                  (unsigned long) ctx->matrixFlagsSeen, ctx->viewportScaleX, ctx->viewportScaleY,

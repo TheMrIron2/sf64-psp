@@ -16,6 +16,14 @@ include/mods.h is a local debug configuration file. Preserve its current working
 
 You may change the pinned layout if it makes sense to do so.
 
+## Renderer architecture
+
+- `src/psp/gfx/gfx_psp_dl.c` is the shared Fast3D/display-list frontend.
+- Native GU (`gfx_psp_backend_gu.c` plus its GU device and texture modules) is the preferred default backend.
+- PSPGL remains a supported secondary backend. The standard EBOOT is unified and contains both backends.
+- `src/psp/renderer_bridge.c` provides the current public renderer entry points.
+- The original direct-GU prototype was abandoned and removed; it is unrelated to the modern GU backend.
+
 ## Docs
 
 Refer to `docs/optimisation.md` and https://themriron2.github.io/psp-survival-guide/optimisation.html for optimising the code. It contains useful lessons and should be updated if new learnings are discovered. Every optimisation that preserves the intended visual result belongs in Accurate. Fast inherits those optimisations and additionally permits selective visual simplification.

@@ -7,7 +7,7 @@ A work-in-progress port of **Star Fox 64** to PSP, based on the SF64 decomp proj
 This port has a few key goals:
 
 - **Reference quality** codebase
-- **GPU acceleration** with two renderers - PSPGL first, followed by native sceGu
+- **GPU acceleration** with a unified renderer - shared Fast3D frontend, GU default, PSPGL also available
 - **Media Engine** audio
 - Experimental implementation of **Virtual Mobile Engine** (VME)
 
