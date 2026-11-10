@@ -29,11 +29,16 @@ typedef char SpectateHeaderFits[(sizeof(SpectateWorld) < PSP_ADHOC_WORLD_MAX_BYT
 
 typedef struct { u16 bytes; u8 type, index; } SpectateRecord;
 
-static union { u32 aligned; u8 data[PSP_ADHOC_WORLD_MAX_BYTES]; } sWorld, sIncoming;
+static union { u32 aligned; u8 data[PSP_ADHOC_WORLD_MAX_BYTES]; } sWorld, sWorldPrev, sIncoming;
 static union { Player player; Actor actor; Item item; Effect effect; Object object; } sDecode;
-static int sBytes, sReady, sInvalid;
+static int sBytes, sPrevBytes, sReady, sInvalid;
 static volatile int sWatching, sStop;
 static u32 sReceivedSequence, sEpoch, sHostEpoch, sLastCapture, sLastUpdate;
+static u32 sPrevVi, sCurrVi;
+#define SPECTATE_MAX_INTERVAL_VIS 6
+// Camera_FollowPlayer keeps a fixed eye-at offset until it hard-cuts to a new
+// attacker; a larger offset change between snapshots is that cut, not motion
+#define SPECTATE_FOLLOW_CUT_DISTANCE 150.0f
 static int sHostNeedsEpoch = 1;
 static const char* volatile sStatus = "Waiting for a world snapshot";
 static const char* volatile sInvalidReason;
@@ -52,6 +57,52 @@ static void spectate_zero(void* data, unsigned bytes) {
     u8* out = data;
     unsigned i;
     for (i = 0; i < bytes; i++) out[i] = 0;
+}
+
+static f32 spectate_blend(f32 previous, f32 current, f32 alpha) {
+    return previous + ((current - previous) * alpha);
+}
+
+static void spectate_blend_vec(Vec3f* out, const Vec3f* previous, const Vec3f* current, f32 alpha) {
+    out->x = spectate_blend(previous->x, current->x, alpha);
+    out->y = spectate_blend(previous->y, current->y, alpha);
+    out->z = spectate_blend(previous->z, current->z, alpha);
+}
+
+// Headings wrap at 360 degrees, so blend along the shortest arc
+static f32 spectate_blend_angle(f32 previous, f32 current, f32 alpha) {
+    f32 delta = current - previous;
+    while (delta > 180.0f) delta -= 360.0f;
+    while (delta < -180.0f) delta += 360.0f;
+    return previous + (delta * alpha);
+}
+
+#define SPECTATE_OBJECT_TYPES 3
+#define SPECTATE_OBJECT_SLOTS 100
+typedef struct { Vec3f pos, rot; u16 id; u8 valid, pad; } SpectateObjectState;
+static SpectateObjectState sObjectPrev[SPECTATE_OBJECT_TYPES][SPECTATE_OBJECT_SLOTS];
+
+static void spectate_cache_previous_objects(void) {
+    int at = sizeof(SpectateWorld);
+    spectate_zero(sObjectPrev, sizeof(sObjectPrev));
+    if (!sPrevBytes) return;
+    while (at + (int) sizeof(SpectateRecord) <= sPrevBytes) {
+        SpectateRecord record;
+        const Object* obj;
+        SpectateObjectState* state;
+        memcpy(&record, sWorldPrev.data + at, sizeof(record));
+        at += sizeof(record);
+        if (record.bytes > sPrevBytes - at) break;
+        if ((record.type < SPECTATE_OBJECT_TYPES) && (record.index < SPECTATE_OBJECT_SLOTS)) {
+            obj = (const Object*) (sWorldPrev.data + at);
+            state = &sObjectPrev[record.type][record.index];
+            state->pos = obj->pos;
+            state->rot = obj->rot;
+            state->id = obj->id;
+            state->valid = 1;
+        }
+        at += record.bytes;
+    }
 }
 
 static u32 spectate_schema(void) {
@@ -86,7 +137,7 @@ static int spectate_size(int type) {
     return 0;
 }
 
-static int spectate_records(const u8* data, int bytes, int commit) {
+static int spectate_records(const u8* data, int bytes, int commit, f32 alpha) {
     int at = sizeof(SpectateWorld), i;
     u8 seen[4][200];
     spectate_zero(seen, sizeof(seen));
@@ -133,6 +184,16 @@ static int spectate_records(const u8* data, int bytes, int commit) {
             }
             memcpy(target, &sDecode, record.bytes);
             Object_SetInfo(info, target->id);
+            if ((record.type < SPECTATE_OBJECT_TYPES) && (record.index < SPECTATE_OBJECT_SLOTS)) {
+                const SpectateObjectState* state = &sObjectPrev[record.type][record.index];
+                if (state->valid && (state->id == target->id)) {
+                    Vec3f pos, rot;
+                    spectate_blend_vec(&pos, &state->pos, &target->pos, alpha);
+                    spectate_blend_vec(&rot, &state->rot, &target->rot, alpha);
+                    target->pos = pos;
+                    target->rot = rot;
+                }
+            }
         }
         at += record.bytes;
     }
@@ -194,22 +255,85 @@ static int spectate_valid(const u8* data, int bytes) {
         if (!spectate_vector(&world->shot[i].obj.pos)) return spectate_reject("shot pos", i);
         if (!spectate_vector(&world->shot[i].obj.rot)) return spectate_reject("shot rot", i);
     }
-    return spectate_records(data, bytes, 0);
+    return spectate_records(data, bytes, 0, 0.0f);
 }
 
 #define WORLD_ARRAY(field, global) memcpy(world->field, global, sizeof(world->field))
 #define APPLY_ARRAY(global, field) memcpy(global, world->field, sizeof(world->field))
 
-static void spectate_apply(void) {
+// Blend every continuous field the arwing/tank/on-foot model transform reads.
+// pos.z is a path coordinate; trueZpos is the position actually drawn.
+static void spectate_blend_player(Player* out, const Player* previous, const Player* current, f32 alpha) {
+    int i;
+    // Never interpolate across a respawn or form change: the host teleports and
+    // rebuilds the player, so the in-between pose is meaningless
+    if ((previous->form != current->form) || (previous->state != current->state)) return;
+    if (current->state != PLAYERSTATE_ACTIVE) {
+        // Standby views only contribute their camera. Blend the follow motion,
+        // but take the hard cut to a new attacker/offset whole
+        f32 dx = (current->cam.eye.x - current->cam.at.x) - (previous->cam.eye.x - previous->cam.at.x);
+        f32 dy = (current->cam.eye.y - current->cam.at.y) - (previous->cam.eye.y - previous->cam.at.y);
+        f32 dz = (current->cam.eye.z - current->cam.at.z) - (previous->cam.eye.z - previous->cam.at.z);
+        if ((dx * dx + dy * dy + dz * dz) < (SPECTATE_FOLLOW_CUT_DISTANCE * SPECTATE_FOLLOW_CUT_DISTANCE)) {
+            spectate_blend_vec(&out->cam.eye, &previous->cam.eye, &current->cam.eye, alpha);
+            spectate_blend_vec(&out->cam.at, &previous->cam.at, &current->cam.at, alpha);
+            out->camRoll = spectate_blend(previous->camRoll, current->camRoll, alpha);
+        }
+        return;
+    }
+    spectate_blend_vec(&out->pos, &previous->pos, &current->pos, alpha);
+    out->trueZpos = spectate_blend(previous->trueZpos, current->trueZpos, alpha);
+    out->zPath = spectate_blend(previous->zPath, current->zPath, alpha);
+    spectate_blend_vec(&out->rot, &previous->rot, &current->rot, alpha);
+    spectate_blend_vec(&out->rot_104, &previous->rot_104, &current->rot_104, alpha);
+    out->yRot_114 = spectate_blend_angle(previous->yRot_114, current->yRot_114, alpha);
+    out->xRot_120 = spectate_blend(previous->xRot_120, current->xRot_120, alpha);
+    out->aerobaticPitch = spectate_blend(previous->aerobaticPitch, current->aerobaticPitch, alpha);
+    out->bankAngle = spectate_blend(previous->bankAngle, current->bankAngle, alpha);
+    out->rockAngle = spectate_blend(previous->rockAngle, current->rockAngle, alpha);
+    out->zRotBank = spectate_blend(previous->zRotBank, current->zRotBank, alpha);
+    out->zRotBarrelRoll = spectate_blend_angle(previous->zRotBarrelRoll, current->zRotBarrelRoll, alpha);
+    out->damageShake = spectate_blend(previous->damageShake, current->damageShake, alpha);
+    out->xShake = spectate_blend(previous->xShake, current->xShake, alpha);
+    out->yBob = spectate_blend(previous->yBob, current->yBob, alpha);
+    spectate_blend_vec(&out->cam.eye, &previous->cam.eye, &current->cam.eye, alpha);
+    spectate_blend_vec(&out->cam.at, &previous->cam.at, &current->cam.at, alpha);
+    out->camRoll = spectate_blend(previous->camRoll, current->camRoll, alpha);
+    spectate_blend_vec(&out->groundPos, &previous->groundPos, &current->groundPos, alpha);
+    out->groundRotY = spectate_blend(previous->groundRotY, current->groundRotY, alpha);
+    out->barrelRollAlpha = (s32) (spectate_blend((f32) previous->barrelRollAlpha, (f32) current->barrelRollAlpha,
+                                                 alpha) + 0.5f);
+    for (i = 0; i < (int) (sizeof(out->jointTable) / sizeof(out->jointTable[0])); i++) {
+        spectate_blend_vec(&out->jointTable[i], &previous->jointTable[i], &current->jointTable[i], alpha);
+    }
+}
+
+static void spectate_apply(f32 alpha) {
     SpectateWorld* world = (SpectateWorld*) sWorld.data;
     int i;
     memcpy(gPlayer, world->player, sizeof(world->player));
     memcpy(gPlayerShots, world->shot, sizeof(world->shot));
+    if (sPrevBytes) {
+        const SpectateWorld* previous = (const SpectateWorld*) sWorldPrev.data;
+        for (i = 0; i < 4; i++) {
+            spectate_blend_player(&gPlayer[i], &previous->player[i], &world->player[i], alpha);
+        }
+        for (i = 0; i < 16; i++) {
+            if ((previous->shot[i].obj.status == SHOT_ACTIVE) && (world->shot[i].obj.status == SHOT_ACTIVE) &&
+                (previous->shot[i].obj.id == world->shot[i].obj.id)) {
+                spectate_blend_vec(&gPlayerShots[i].obj.pos, &previous->shot[i].obj.pos, &world->shot[i].obj.pos,
+                                   alpha);
+                spectate_blend_vec(&gPlayerShots[i].obj.rot, &previous->shot[i].obj.rot, &world->shot[i].obj.rot,
+                                   alpha);
+            }
+        }
+    }
     for (i = 0; i < 4; i++) {
         gPlayer[i].sfx.srcPos = gPlayer[i].sfxSource;
         gPlayer[i].sfx.srcVel = gPlayer[i].sfxVel;
     }
-    spectate_records(sWorld.data, sBytes, 1);
+    spectate_cache_previous_objects();
+    spectate_records(sWorld.data, sBytes, 1, alpha);
     APPLY_ARRAY(gPlayerInactive, inactive); APPLY_ARRAY(D_80178850, cameraLabels);
     APPLY_ARRAY(gBombCount, bombs); APPLY_ARRAY(gVsPoints, pointsScored); APPLY_ARRAY(gVsKills, kills);
     APPLY_ARRAY(gVsCountdown, countdownTime); APPLY_ARRAY(gLaserStrength, laser);
@@ -233,8 +357,9 @@ static void spectate_apply(void) {
 
 void PspSpectate_Start(void) {
     if (sWatching) return;
-    sWatching = 1; sStop = sReady = sInvalid = sBytes = 0;
+    sWatching = 1; sStop = sReady = sInvalid = sBytes = sPrevBytes = 0;
     sReceivedSequence = sEpoch = 0;
+    sPrevVi = sCurrVi = 0;
     sInvalidReason = NULL; sInvalidIndex = -1; sInvalidValue = 0;
     sLoggedReason = NULL; sLoggedIndex = -2;
     sLastUpdate = PspPlatform_GetViCount();
@@ -249,6 +374,7 @@ void PspSpectate_BeforeGame(void) {
     PspAdhocView view;
     SpectateWorld* world = (SpectateWorld*) sWorld.data;
     int bytes;
+    f32 alpha;
     if (!sWatching) {
         if (gGameState != GSTATE_PLAY || gCurrentLevel != LEVEL_VERSUS || gPlayState == PLAY_INIT)
             sHostNeedsEpoch = 1;
@@ -294,11 +420,18 @@ void PspSpectate_BeforeGame(void) {
             sStatus = sInvalidReason ? sInvalidReason : "Dropped incompatible or invalid snapshot";
             return;
         }
+        if (sBytes) {
+            memcpy(sWorldPrev.data, sWorld.data, sBytes);
+            sPrevBytes = sBytes;
+            sPrevVi = sCurrVi;
+        }
         memcpy(sWorld.data, sIncoming.data, bytes);
         sBytes = bytes;
-        sLastUpdate = PspPlatform_GetViCount();
+        sCurrVi = PspPlatform_GetViCount();
+        sLastUpdate = sCurrVi;
         if (world->epoch != sEpoch) {
             sEpoch = world->epoch;
+            sPrevBytes = 0;
             sReady = 0;
             gCamCount = 1;
             gVersusMode = false;
@@ -314,12 +447,27 @@ void PspSpectate_BeforeGame(void) {
     if (!sBytes) return;
     if (gGameState == GSTATE_PLAY && gCurrentLevel == LEVEL_VERSUS &&
         (gPlayState == PLAY_UPDATE || gPlayState == PLAY_PAUSE) && gPlayer && gScenery360) {
+        alpha = 1.0f;
+        if (sPrevBytes) {
+            u32 interval = sCurrVi - sPrevVi;
+            u32 tick = gVIsPerFrame ? gVIsPerFrame : 1;
+            u32 delay;
+            s32 offset;
+            if (interval < tick) interval = tick;
+            if (interval > SPECTATE_MAX_INTERVAL_VIS) interval = SPECTATE_MAX_INTERVAL_VIS;
+            // Lag one interval but step alpha per simulation tick so samples join smoothly
+            delay = interval - tick;
+            offset = (s32) (PspPlatform_GetViCount() - delay) - (s32) sPrevVi;
+            if (offset <= 0) alpha = 0.0f;
+            else if ((u32) offset >= interval) alpha = 1.0f;
+            else alpha = (f32) offset / (f32) interval;
+        }
         if (!sReady) {
             APPLY_ARRAY(gPlayerInactive, inactive);
             Versus_InitMatch();
         }
         sReady = 1;
-        spectate_apply();
+        spectate_apply(alpha);
         sStatus = sInvalid ? (sInvalidReason ? sInvalidReason : "Dropped incompatible or invalid snapshot") :
                   PspPlatform_GetViCount() - sLastUpdate > 60 ? "Waiting for world updates" :
                   view.hostPhase == PSP_ADHOC_HOST_SETUP ? "Host is choosing match settings" :
