@@ -11,6 +11,14 @@ This port has a few key goals:
 - **Media Engine** audio
 - Experimental implementation of **Virtual Mobile Engine** (VME)
 
+> [!NOTE]
+> This port is still WIP and not intended for end users yet.
+> When it is done, a 1.0 release will appear in the Releases tab. You are welcome to try building it manually before then, but it is not polished yet.
+>
+> Thank you for your patience while I work on this port. It is a complete port from the N64's source code, which takes a long time. 
+
+## Contributions
+
 Contributions are welcome! This is an educational project that welcomes other contributors and aims to be a high quality port that can serve other PSP developers well in the long term.
 
 If you'd like to contribute, aim for good native code as much as possible, and don't be afraid to collaborate or ask for help! We'd love to work together to make this port a benchmark for the PSP scene.
