@@ -279,7 +279,7 @@ int PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
         presented = PspGfxDevice_Present();
         if (measure) {
             PspNetStats_Time(PSP_NET_PRESENT, measureStarted);
-            if (presented) PspNetStats_Add(PSP_NET_PRESENTED, 1);
+            if (presented) PspNetStats_Presented(task, PspNetStats_NowUs());
         }
         PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PRESENT_SWAP);
         PspHwCounterProfile_ScopeEnd(PSP_HW_SCOPE_PRESENT);

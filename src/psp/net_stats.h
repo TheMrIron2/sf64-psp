@@ -15,7 +15,8 @@ typedef enum {
 typedef enum {
     PSP_NET_GUARD_PUBLISH, PSP_NET_GUARD_SEND, PSP_NET_GUARD_RECEIVE, PSP_NET_GUARD_READ,
     PSP_NET_BUILD, PSP_NET_VALIDATE, PSP_NET_APPLY, PSP_NET_GAME, PSP_NET_SERVICE,
-    PSP_NET_STEP_INTERVAL, PSP_NET_RENDER, PSP_NET_PRESENT, PSP_NET_TIMING_COUNT
+    PSP_NET_STEP_INTERVAL, PSP_NET_RENDER, PSP_NET_PRESENT, PSP_NET_CAPTURE_INTERVAL, PSP_NET_RECEIVE_INTERVAL,
+    PSP_NET_WATCH_PRESENT_INTERVAL, PSP_NET_TIMING_COUNT
 } PspNetTimingKind;
 
 typedef enum {
@@ -41,6 +42,8 @@ typedef struct {
     u32 activeSequence, pendingSequence, activeBytes, pendingBytes, offset, peer;
     u32 queueAgeUs, maxQueueAgeUs;
     PspNetPeerStats peers[3];
+    u32 cadenceBins[3][8];
+    u32 playbackBins[6], playbackMaxAdvanceQ8, playbackMaxHold;
 } PspNetStats;
 
 void PspNetStats_Init(const char* executablePath);
@@ -64,6 +67,9 @@ void PspNetStats_ReadLocked(u32 sequence);
 void PspNetStats_QueueLocked(u32 activeSequence, u32 pendingSequence, int activeBytes,
                            int pendingBytes, int offset, int peer, u32 queuedUs);
 void PspNetStats_Service(u32 startedUs);
+void PspNetStats_SetWatchPose(u32 epoch, u32 frame, unsigned fractionQ8);
+void PspNetStats_TagTask(int slot, const void* task);
+void PspNetStats_Presented(const void* task, u32 nowUs);
 void PspNetStats_Get(PspNetStats* out);
 // Save reports only at an idle graphics boundary
 int PspNetStats_Save(void);

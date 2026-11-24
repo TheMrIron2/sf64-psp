@@ -11,6 +11,17 @@ static PspNetStats sStats;
 static volatile int sActive, sAvailable;
 static u32 sStarted, sStopped, sPreviousStep, sLastReceived, sLastRead;
 static int sStepValid, sPathValid = 1;
+typedef struct {
+    u32 epoch, frame;
+    unsigned fractionQ8;
+} PspWatchPose;
+static PspWatchPose sBuiltPose, sLastPose;
+static struct {
+    const void* task;
+    PspWatchPose pose;
+} sTaskPoses[2];
+static u32 sLastCaptureUs, sLastReceiveUs, sLastWatchPresentUs, sWatchHold;
+static int sCaptureValid;
 static char sPath[256] = "sf64-adhoc-stats.csv";
 static const char* sSaveStatus = "No report saved";
 
@@ -25,7 +36,7 @@ static const char* const sCounterNames[] = {
 static const char* const sTimingNames[] = {
     "guard_publish", "guard_send_copy", "guard_receive_promote", "guard_game_read",
     "capture_build", "game_validate", "game_apply", "game_update", "adhoc_service", "service_interval",
-    "render_through_submit", "present"
+    "render_through_submit", "present", "capture_interval", "receive_interval", "watch_present_interval"
 };
 static const char* const sPartNames[] = { "header", "players", "shots", "actors", "items", "effects", "scenery" };
 
@@ -47,7 +58,10 @@ void PspNetStats_Reset(void) {
     sStats.role = role;
     sStarted = sStopped = PspNetStats_NowUs();
     sLastReceived = sLastRead = 0;
-    sStepValid = 0;
+    sStepValid = sCaptureValid = 0;
+    sLastPose.epoch = sBuiltPose.epoch = 0;
+    sTaskPoses[0].task = sTaskPoses[1].task = NULL;
+    sWatchHold = 0;
     sAvailable = 1;
     sSaveStatus = "Counters reset";
     sceKernelCpuResumeIntr(lock);
@@ -96,6 +110,66 @@ void PspNetStats_Time(PspNetTimingKind kind, u32 startedUs) {
     sceKernelCpuResumeIntr(lock);
 }
 
+static const unsigned sCadenceLimits[] = { 25000, 42000, 58000, 75000, 92000, 110000, 150000 };
+
+static void stats_cadence(PspNetTimingKind kind, u32 elapsedUs) {
+    unsigned bin = 0;
+    while (bin < 7 && elapsedUs > sCadenceLimits[bin]) bin++;
+    sStats.cadenceBins[kind - PSP_NET_CAPTURE_INTERVAL][bin]++;
+    PspNetStats_TimeLocked(kind, elapsedUs);
+}
+
+void PspNetStats_SetWatchPose(u32 epoch, u32 frame, unsigned fractionQ8) {
+    sBuiltPose = (PspWatchPose) { epoch, frame, fractionQ8 };
+}
+
+void PspNetStats_TagTask(int slot, const void* task) {
+    int lock;
+    if (!sActive || sStats.role != 2) return;
+    lock = sceKernelCpuSuspendIntr();
+    sTaskPoses[slot].task = task;
+    sTaskPoses[slot].pose = sBuiltPose;
+    sBuiltPose.epoch = 0;
+    sceKernelCpuResumeIntr(lock);
+}
+
+void PspNetStats_Presented(const void* task, u32 nowUs) {
+    int lock = sceKernelCpuSuspendIntr();
+    PspWatchPose pose = { 0 };
+    int slot;
+    PspNetStats_AddLocked(PSP_NET_PRESENTED, 1);
+    if (sActive && sStats.role == 2) {
+        for (slot = 0; slot < 2; slot++) {
+            if (sTaskPoses[slot].task == task) {
+                pose = sTaskPoses[slot].pose;
+                break;
+            }
+        }
+        if (pose.epoch && pose.epoch == sLastPose.epoch) {
+            s64 advance = (s64) (s32) (pose.frame - sLastPose.frame) * 256 +
+                          (int) pose.fractionQ8 - (int) sLastPose.fractionQ8;
+            unsigned bin;
+            stats_cadence(PSP_NET_WATCH_PRESENT_INTERVAL, nowUs - sLastWatchPresentUs);
+            if (advance < 0) bin = 0;
+            else if (advance == 0) bin = 1;
+            else if (advance < 192) bin = 2;
+            else if (advance <= 320) bin = 3;
+            else if (advance < 512) bin = 4;
+            else bin = 5;
+            sStats.playbackBins[bin]++;
+            if (advance > sStats.playbackMaxAdvanceQ8)
+                sStats.playbackMaxAdvanceQ8 = advance > 0xffffffffLL ? 0xffffffffU : (u32) advance;
+            if (advance == 0) {
+                sWatchHold++;
+                if (sWatchHold > sStats.playbackMaxHold) sStats.playbackMaxHold = sWatchHold;
+            } else sWatchHold = 0;
+        } else sWatchHold = 0;
+        sLastPose = pose;
+        sLastWatchPresentUs = nowUs;
+    }
+    sceKernelCpuResumeIntr(lock);
+}
+
 void PspNetStats_Capture(int bytes, const u32 parts[PSP_NET_PART_COUNT], u32 startedUs) {
     u32 elapsed = PspNetStats_NowUs() - startedUs;
     unsigned bin, i;
@@ -104,6 +178,9 @@ void PspNetStats_Capture(int bytes, const u32 parts[PSP_NET_PART_COUNT], u32 sta
     PspNetStats_TimeLocked(PSP_NET_BUILD, elapsed);
     if (bytes <= 0) PspNetStats_AddLocked(PSP_NET_OVERSIZE, 1);
     else if (sActive) {
+        if (sCaptureValid) stats_cadence(PSP_NET_CAPTURE_INTERVAL, startedUs - sLastCaptureUs);
+        sCaptureValid = 1;
+        sLastCaptureUs = startedUs;
         bin = ((u32) bytes - 1) / 4096;
         if (bin > 7) bin = 7;
         sStats.sizeBins[bin]++;
@@ -150,6 +227,9 @@ void PspNetStats_Transmit(int peer, const u8* mac, int bytes, u32 queuedUs, int 
 void PspNetStats_ReceivedLocked(u32 sequence) {
     PspNetStats_AddLocked(PSP_NET_RX_WORLD, 1);
     if (sActive) {
+        u32 nowUs = PspNetStats_NowUs();
+        if (sLastReceived) stats_cadence(PSP_NET_RECEIVE_INTERVAL, nowUs - sLastReceiveUs);
+        sLastReceiveUs = nowUs;
         if (sLastReceived && (s32) (sequence - sLastReceived) > 1)
             PspNetStats_AddLocked(PSP_NET_RX_GAPS, sequence - sLastReceived - 1);
         sLastReceived = sequence;
@@ -260,6 +340,24 @@ int PspNetStats_Save(void) {
                  i, peer->mac[0], peer->mac[1], peer->mac[2], peer->mac[3], peer->mac[4], peer->mac[5],
                  (unsigned long) peer->worlds, (unsigned long) peer->fragments, (unsigned long long) peer->payloadBytes,
                  (unsigned long) peer->blocked, (unsigned long long) peer->latency.totalUs, (unsigned long) peer->latency.maxUs);
+        ok = stats_write(file, line);
+    }
+    for (i = 0; i < 3 && ok; i++) {
+        unsigned bin;
+        for (bin = 0; bin < 8 && ok; bin++) {
+            snprintf(line, sizeof(line), "cadence_bin_us,%s,%u,%lu\n",
+                     sTimingNames[PSP_NET_CAPTURE_INTERVAL + i], bin < 7 ? sCadenceLimits[bin] : 0,
+                     (unsigned long) stats.cadenceBins[i][bin]);
+            ok = stats_write(file, line);
+        }
+    }
+    if (ok) {
+        snprintf(line, sizeof(line),
+                 "watch_playback,backward,%lu,hold,%lu,lt_0_75,%lu,0_75_to_1_25,%lu,gt_1_25_lt_2,%lu,ge_2,%lu,max_advance_q8,%lu,max_hold_run,%lu\n",
+                 (unsigned long) stats.playbackBins[0], (unsigned long) stats.playbackBins[1],
+                 (unsigned long) stats.playbackBins[2], (unsigned long) stats.playbackBins[3],
+                 (unsigned long) stats.playbackBins[4], (unsigned long) stats.playbackBins[5],
+                 (unsigned long) stats.playbackMaxAdvanceQ8, (unsigned long) stats.playbackMaxHold);
         ok = stats_write(file, line);
     }
     snprintf(line, sizeof(line), "queue,active_seq,%lu,pending_seq,%lu,active_bytes,%lu,pending_bytes,%lu,offset,%lu,peer,%lu,age_us,%lu,max_age_us,%lu\nend_report\n",

@@ -391,6 +391,7 @@ static SPTask* Graphics_BuildSimulationTask(u32 simulationVi) {
     PspFrameInterpolation_EndSimulationFrame(gGfxTask, Graphics_InterpolationEligible());
     Graphics_FinalizeDisplayList();
     Graphics_PrepareTask();
+    PspNetStats_TagTask(gSysFrameCount % 2, gGfxTask);
     return gGfxTask;
 }
 

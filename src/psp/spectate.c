@@ -5,13 +5,14 @@
 #include "src/psp/spectate.h"
 #include "src/psp/net_stats.h"
 
+extern u32 gSysFrameCount;
 extern s32 sVsDrawMode, sStartCountdown, sVsWinner, D_80178850[4];
 void Versus_InitMatch(void);
 
 enum { WORLD_ACTOR, WORLD_ITEM, WORLD_EFFECT, WORLD_SCENERY };
 
 typedef struct {
-    u32 magic, schema, bytes, epoch;
+    u32 magic, schema, bytes, epoch, hostTick;
     s32 frame, allRangeFrame, stage, matchType, points, timeLimit, paused;
     s32 matchStart, matchOver, matchWon, matchState, drawMode, countdown, winner;
     s32 inactive[4], cameraLabels[4], bombs[4], pointsScored[4], kills[4][10], countdownTime[3];
@@ -611,6 +612,18 @@ void PspSpectate_BeforeGame(void) {
         }
         sReady = 1;
         spectate_apply(alpha);
+        if (!world->paused && PspNetStats_Active()) {
+            u64 poseQ8 = (u64) world->hostTick * 256;
+            if (sPrevBytes) {
+                const SpectateWorld* previous = (const SpectateWorld*) sWorldPrev.data;
+                if (!previous->paused) {
+                    s32 frames = (s32) (world->hostTick - previous->hostTick);
+                    poseQ8 = (u64) previous->hostTick * 256 +
+                             (s64) ((f32) frames * (alpha * 256.0f));
+                }
+            }
+            PspNetStats_SetWatchPose(world->epoch, (u32) (poseQ8 >> 8), poseQ8 & 255);
+        }
         PspNetStats_Time(PSP_NET_APPLY, measureStarted);
         sStatus = sInvalid ? (sInvalidReason ? sInvalidReason : "Dropped incompatible or invalid snapshot") :
                   PspPlatform_GetViCount() - sLastUpdate > 60 ? "Waiting for world updates" :
@@ -665,6 +678,7 @@ void PspSpectate_Capture(void) {
     }
     spectate_zero(world, sizeof(*world));
     world->magic = SPECTATE_NATIVE_MAGIC; world->schema = spectate_schema(); world->epoch = sHostEpoch;
+    world->hostTick = gSysFrameCount;
     world->frame = gGameFrameCount; world->allRangeFrame = gAllRangeFrameCount; world->stage = gVersusStage; world->matchType = gVsMatchType;
     world->points = gVsPointsToWin; world->timeLimit = gVsTimeTrialLimit;
     world->paused = gPlayState == PLAY_PAUSE;

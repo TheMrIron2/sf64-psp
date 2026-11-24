@@ -16,6 +16,7 @@
 #define ADHOC_PROGRESS_BYTES 28
 #define ADHOC_WORLD_HEADER 32
 #define ADHOC_WORLD_CHUNK 1024
+#define ADHOC_WORLD_SEND_BUDGET 4
 #define ADHOC_INTERVAL_US 500000U
 #define ADHOC_PEER_TIMEOUT_US 3000000U
 #define ADHOC_SEARCH_US 10000000U
@@ -192,7 +193,7 @@ static u32 adhoc_world_checksum(const u8* data, int bytes) {
 static void adhoc_world_send(void) {
     static u8 packet[ADHOC_WORLD_HEADER + ADHOC_WORLD_CHUNK];
     static u32 checksum;
-    int budget, lock, bytes, result;
+    int budget, limit, lock, bytes, result;
     u32 copyStarted;
 
     if (!sHost || sView.state != PSP_ADHOC_HOSTING || !sView.peerCount) return;
@@ -211,9 +212,13 @@ static void adhoc_world_send(void) {
         checksum = adhoc_world_checksum(sWorldSending, sWorldSendingBytes);
         sWorldOffset = sWorldPeer = 0;
     }
-    for (budget = 0; budget < 4 && sWorldPeer < 3; ) {
+    limit = ADHOC_WORLD_SEND_BUDGET;
+    // Finish a small world in one pass when only one watcher is connected
+    if (sView.peerCount == 1 && sWorldSendingBytes <= (limit + 1) * ADHOC_WORLD_CHUNK) limit++;
+    for (budget = 0; sWorldPeer < 3; ) {
         if (adhoc_cancelled()) return;
         if (!sPeers[sWorldPeer].token) { sWorldPeer++; sWorldOffset = 0; continue; }
+        if (budget == limit) break;
         bytes = sWorldSendingBytes - sWorldOffset;
         if (bytes > ADHOC_WORLD_CHUNK) bytes = ADHOC_WORLD_CHUNK;
         memcpy(packet, "SFAL", 4);
