@@ -11,6 +11,7 @@
 #include "src/psp/audio_mode.h"
 #include "src/psp/menu.h"
 #include "src/psp/spectate.h"
+#include "src/psp/net_stats.h"
 #include "src/psp/platform.h"
 #include "src/psp/profiler.h"
 #include "src/psp/renderer.h"
@@ -360,6 +361,8 @@ static void Graphics_FinalizeDisplayList(void) {
 }
 
 static SPTask* Graphics_BuildSimulationTask(u32 simulationVi) {
+    u32 measureStarted = 0;
+    int measure = PspNetStats_Active();
     gSysFrameCount++;
     Graphics_InitializeTask(gSysFrameCount);
     PspFrameInterpolation_BeginSimulationFrame(gGfxTask, simulationVi, gVIsPerFrame,
@@ -376,7 +379,9 @@ static SPTask* Graphics_BuildSimulationTask(u32 simulationVi) {
     gSPDisplayList(gMasterDisp++, gGfxPool->unkDL1);
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_GAME_UPDATE);
     PspCensus_Simulation(0);
+    if (measure) measureStarted = PspNetStats_NowUs();
     Game_Update();
+    if (measure) PspNetStats_Time(PSP_NET_GAME, measureStarted);
     PspMenu_UpdateHosting(gGameState == GSTATE_MENU || gGameState == GSTATE_VS_INIT ||
                          (gGameState == GSTATE_PLAY && gCurrentLevel == LEVEL_VERSUS),
                          gGameState == GSTATE_PLAY ? (gPlayState == PLAY_PAUSE ? PSP_ADHOC_HOST_PAUSED :

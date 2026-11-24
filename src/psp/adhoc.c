@@ -9,6 +9,7 @@
 #include <pspwlan.h>
 
 #include "src/psp/adhoc.h"
+#include "src/psp/net_stats.h"
 
 #define ADHOC_PORT 6464
 #define ADHOC_PACKET_BYTES 24
@@ -93,6 +94,7 @@ static u32 sWorldPendingSequence, sWorldSendingSequence, sWorldPublishedSequence
 static u32 sWorldAssemblySequence, sWorldAssemblyChecksum, sWorldAssemblyMask;
 static int sWorldAssemblyBytes;
 static int sWorldOffset, sWorldPeer;
+static u32 sWorldPendingUs, sWorldQueuedUs;
 
 static u32 adhoc_nonce(void);
 
@@ -191,14 +193,18 @@ static void adhoc_world_send(void) {
     static u8 packet[ADHOC_WORLD_HEADER + ADHOC_WORLD_CHUNK];
     static u32 checksum;
     int budget, lock, bytes, result;
+    u32 copyStarted;
 
     if (!sHost || sView.state != PSP_ADHOC_HOSTING || !sView.peerCount) return;
     if (!sWorldSendingBytes) {
         lock = sceKernelCpuSuspendIntr();
+        copyStarted = PspNetStats_NowUs();
         if (sWorldPendingSequence != sWorldSendingSequence && sWorldPendingBytes) {
             sWorldSendingBytes = sWorldPendingBytes;
             sWorldSendingSequence = sWorldPendingSequence;
             memcpy(sWorldSending, sWorldPending, sWorldSendingBytes);
+            sWorldQueuedUs = sWorldPendingUs;
+            PspNetStats_TimeLocked(PSP_NET_GUARD_SEND, PspNetStats_NowUs() - copyStarted);
         }
         sceKernelCpuResumeIntr(lock);
         if (!sWorldSendingBytes) return;
@@ -221,8 +227,13 @@ static void adhoc_world_send(void) {
         memcpy(packet + ADHOC_WORLD_HEADER, sWorldSending + sWorldOffset, bytes);
         result = sceNetAdhocPdpSend(sResources.socket, sPeers[sWorldPeer].mac, ADHOC_PORT,
                                    packet, bytes + ADHOC_WORLD_HEADER, 0, 1);
-        if ((u32) result == ADHOC_WOULD_BLOCK) return;
+        if ((u32) result == ADHOC_WOULD_BLOCK) {
+            PspNetStats_Transmit(sWorldPeer, sPeers[sWorldPeer].mac, 0, sWorldQueuedUs, 0, 1);
+            return;
+        }
         if (result < 0) { adhoc_error("World send", result); return; }
+        PspNetStats_Transmit(sWorldPeer, sPeers[sWorldPeer].mac, bytes, sWorldQueuedUs,
+                            sWorldOffset + bytes == sWorldSendingBytes, 0);
         budget++;
         sWorldOffset += bytes;
         if (sWorldOffset == sWorldSendingBytes) { sWorldPeer++; sWorldOffset = 0; }
@@ -238,31 +249,55 @@ static void adhoc_world_receive(const u8* packet, int length) {
     u32 chunks, mask;
     int payload = length - ADHOC_WORLD_HEADER;
     int lock;
+    u32 copyStarted;
 
+    PspNetStats_Add(PSP_NET_RX_PACKET, length);
     if (!sequence || bytes == 0 || bytes > PSP_ADHOC_WORLD_MAX_BYTES || offset >= bytes ||
         offset % ADHOC_WORLD_CHUNK || payload <= 0 || payload > ADHOC_WORLD_CHUNK ||
-        (u32) payload != (bytes - offset > ADHOC_WORLD_CHUNK ? ADHOC_WORLD_CHUNK : bytes - offset) ||
-        (s32) (sequence - sWorldPublishedSequence) <= 0) return;
+        (u32) payload != (bytes - offset > ADHOC_WORLD_CHUNK ? ADHOC_WORLD_CHUNK : bytes - offset)) {
+        PspNetStats_Add(PSP_NET_RX_INVALID, 1);
+        return;
+    }
+    if ((s32) (sequence - sWorldPublishedSequence) <= 0) {
+        PspNetStats_Add(PSP_NET_RX_OLD, 1);
+        return;
+    }
     if (sequence != sWorldAssemblySequence) {
-        if (sWorldAssemblySequence && (s32) (sequence - sWorldAssemblySequence) <= 0) return;
+        if (sWorldAssemblySequence && (s32) (sequence - sWorldAssemblySequence) <= 0) {
+            PspNetStats_Add(PSP_NET_RX_OLD, 1);
+            return;
+        }
+        if (sWorldAssemblySequence && sWorldAssemblySequence != sWorldPublishedSequence)
+            PspNetStats_Add(PSP_NET_RX_ABANDONED, 1);
         sWorldAssemblySequence = sequence;
         sWorldAssemblyBytes = bytes;
         sWorldAssemblyChecksum = checksum;
         sWorldAssemblyMask = 0;
     }
-    if (bytes != (u32) sWorldAssemblyBytes || checksum != sWorldAssemblyChecksum) return;
+    if (bytes != (u32) sWorldAssemblyBytes || checksum != sWorldAssemblyChecksum) {
+        PspNetStats_Add(PSP_NET_RX_INVALID, 1);
+        return;
+    }
+    PspNetStats_Fragment(payload, (sWorldAssemblyMask & (1U << (offset / ADHOC_WORLD_CHUNK))) != 0);
     memcpy(sWorldAssembly + offset, packet + ADHOC_WORLD_HEADER, payload);
     sWorldAssemblyMask |= 1U << (offset / ADHOC_WORLD_CHUNK);
     chunks = (bytes + ADHOC_WORLD_CHUNK - 1) / ADHOC_WORLD_CHUNK;
     mask = chunks == 32 ? 0xffffffffU : (1U << chunks) - 1;
-    if (sWorldAssemblyMask != mask || adhoc_world_checksum(sWorldAssembly, bytes) != checksum) return;
+    if (sWorldAssemblyMask != mask) return;
+    if (adhoc_world_checksum(sWorldAssembly, bytes) != checksum) {
+        PspNetStats_Add(PSP_NET_RX_CHECKSUM, 1);
+        return;
+    }
     lock = sceKernelCpuSuspendIntr();
+    copyStarted = PspNetStats_NowUs();
     if (sSerial == sRequest.serial) {
         memcpy(sWorldPublished, sWorldAssembly, bytes);
         sWorldPublishedBytes = bytes;
         sWorldPublishedSequence = sequence;
         sView.worldSnapshots++;
         sView.worldBytes = bytes;
+        PspNetStats_TimeLocked(PSP_NET_GUARD_RECEIVE, PspNetStats_NowUs() - copyStarted);
+        PspNetStats_ReceivedLocked(sequence);
     }
     sceKernelCpuResumeIntr(lock);
 }
@@ -654,6 +689,10 @@ static void adhoc_step(void) {
     if (sHost && sView.state == PSP_ADHOC_HOSTING)
         snprintf(sView.status, sizeof(sView.status), "Watchers connected: %d / 3", sView.peerCount);
     adhoc_world_send();
+    lock = sceKernelCpuSuspendIntr();
+    if (sHost) PspNetStats_QueueLocked(sWorldSendingSequence, sWorldPendingSequence, sWorldSendingBytes,
+        sWorldPendingBytes, sWorldOffset, sWorldPeer, sWorldQueuedUs);
+    sceKernelCpuResumeIntr(lock);
     adhoc_publish();
 }
 
@@ -715,6 +754,7 @@ static int adhoc_worker(SceSize args, void* argp) {
 
     for (;;) {
         AdhocRequest request;
+        u32 serviceStarted;
         int lock = sceKernelCpuSuspendIntr();
         request = sRequest;
         sceKernelCpuResumeIntr(lock);
@@ -726,7 +766,9 @@ static int adhoc_worker(SceSize args, void* argp) {
         if (sView.state == PSP_ADHOC_IDLE || sView.state == PSP_ADHOC_ERROR) {
             sceKernelSleepThread();
         } else {
+            serviceStarted = PspNetStats_NowUs();
             adhoc_step();
+            PspNetStats_Service(serviceStarted);
             if (sView.state == PSP_ADHOC_ERROR) adhoc_cleanup();
             sceKernelDelayThread(20000);
         }
@@ -752,6 +794,8 @@ static void adhoc_request(int action, int matchType, const PspAdhocRoom* room) {
             return;
         }
     }
+    if (action == REQUEST_HOST || action == REQUEST_SEARCH) PspNetStats_Begin(action == REQUEST_HOST);
+    else if (action == REQUEST_STOP || action == REQUEST_EXIT) PspNetStats_End();
     lock = sceKernelCpuSuspendIntr();
     sWorldPendingBytes = sWorldPublishedBytes = 0;
     sWorldPendingSequence = sWorldPublishedSequence = 0;
@@ -809,28 +853,39 @@ void PspAdhoc_SetHostProgress(PspAdhocHostPhase phase, int stage, u32 frame) {
 
 int PspAdhoc_PublishWorld(const void* data, int bytes) {
     int lock;
+    u32 started;
     if (!data || bytes <= 0 || bytes > PSP_ADHOC_WORLD_MAX_BYTES) return 0;
     lock = sceKernelCpuSuspendIntr();
+    started = PspNetStats_NowUs();
     if (sRequest.action != REQUEST_HOST || sPublished.state != PSP_ADHOC_HOSTING) {
         sceKernelCpuResumeIntr(lock);
         return 0;
     }
+    if (sWorldPendingBytes && sWorldPendingSequence != sWorldSendingSequence)
+        PspNetStats_AddLocked(PSP_NET_REPLACED, 1);
     memcpy(sWorldPending, data, bytes);
+    sWorldPendingUs = PspNetStats_NowUs();
     sWorldPendingBytes = bytes;
     if (++sWorldPendingSequence == 0) sWorldPendingSequence++;
+    PspNetStats_TimeLocked(PSP_NET_GUARD_PUBLISH, PspNetStats_NowUs() - started);
+    PspNetStats_AddLocked(PSP_NET_PUBLISH, 1);
     sceKernelCpuResumeIntr(lock);
     return 1;
 }
 
 int PspAdhoc_ReadWorld(void* data, int capacity, u32* sequence) {
     int bytes = 0, lock;
+    u32 started;
     if (!data || !sequence || capacity <= 0) return 0;
     lock = sceKernelCpuSuspendIntr();
+    started = PspNetStats_NowUs();
     if (sRequest.action == REQUEST_JOIN && sPublished.state == PSP_ADHOC_CONNECTED &&
         sWorldPublishedBytes && capacity >= sWorldPublishedBytes && *sequence != sWorldPublishedSequence) {
         bytes = sWorldPublishedBytes;
         memcpy(data, sWorldPublished, bytes);
         *sequence = sWorldPublishedSequence;
+        PspNetStats_TimeLocked(PSP_NET_GUARD_READ, PspNetStats_NowUs() - started);
+        PspNetStats_ReadLocked(*sequence);
     }
     sceKernelCpuResumeIntr(lock);
     return bytes;

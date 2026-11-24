@@ -7,6 +7,7 @@
 
 #include "src/psp/menu.h"
 #include "src/psp/adhoc.h"
+#include "src/psp/net_stats.h"
 #include "src/psp/gu_census.h"
 #include "src/psp/overlay.h"
 #include "src/psp/settings.h"
@@ -24,7 +25,7 @@ void Versus_LeaveMultiplayer(void);
 #define MENU_VISIBLE_ROWS 5
 
 enum { MENU_MAIN, MENU_SETTINGS, MENU_GRAPHICS, MENU_DIAGNOSTICS,
-       MENU_MULTIPLAYER, MENU_MULTIPLAYER_HOST, MENU_MULTIPLAYER_JOIN };
+       MENU_MULTIPLAYER, MENU_MULTIPLAYER_HOST, MENU_MULTIPLAYER_JOIN, MENU_NET_STATS };
 enum { ACTION_NONE, ACTION_START, ACTION_STOP, ACTION_TYPE, ACTION_SCENE_PREV, ACTION_SCENE_NEXT,
        ACTION_TRACE, ACTION_COVERAGE };
 
@@ -52,6 +53,7 @@ static PspMultiplayerMenuResult sMultiplayerResult;
 static PspAdhocView sMultiplayerNet;
 static int sHostingContinued;
 static int sMultiplayerFromGame;
+static int sStatsPage, sStatsAction;
 static const u32 sAccents[] = { 0xCD4E5C26, 0xCD3838A0, 0xCDA06030 };
 #if PSP_MENU_DIAGNOSTICS
 static int sAction;
@@ -208,8 +210,9 @@ static void menu_multiplayer_refresh(void) {
 }
 
 static int menu_rows(void) {
-    if (sScreen == MENU_MAIN) return 3 + !!PSP_MENU_DIAGNOSTICS + sHostingContinued + PspSpectate_IsWatching();
+    if (sScreen == MENU_MAIN) return 3 + !!PSP_MENU_DIAGNOSTICS + sHostingContinued + PspSpectate_IsWatching() + PspNetStats_Available();
     if (sScreen == MENU_GRAPHICS) return 3 + !!PSP_FPS_OVERLAY + PSP_GFX_BACKEND_SELECTABLE;
+    if (sScreen == MENU_NET_STATS) return 8;
     if (sScreen == MENU_SETTINGS) return 2;
     if (sScreen == MENU_DIAGNOSTICS) {
         return 2 + (PSP_MENU_CAPTURES ? 3 : 0) + !!PROFILE_HW_COUNTERS +
@@ -270,6 +273,11 @@ void PspMenu_Update(u32 pressed) {
 
     if (sScreen == MENU_MAIN && activate) {
         if (sSelected == 0) sOpen = 0;
+        else if (PspNetStats_Available() && sSelected == 3 + !!PSP_MENU_DIAGNOSTICS +
+                 sHostingContinued + PspSpectate_IsWatching()) {
+            sScreen = MENU_NET_STATS;
+            sSelected = 0;
+        }
         else if (PspSpectate_IsWatching() && sSelected == 3 + !!PSP_MENU_DIAGNOSTICS) {
             PspSpectate_Stop();
             sOpen = 0;
@@ -283,6 +291,11 @@ void PspMenu_Update(u32 pressed) {
             sScreen = sSelected == 1 ? MENU_SETTINGS : sSelected == 2 ? MENU_GRAPHICS : MENU_DIAGNOSTICS;
             sSelected = 0;
         }
+    } else if (sScreen == MENU_NET_STATS) {
+        if (sSelected == 0) sStatsPage = (sStatsPage + direction + 7) % 7;
+        else if (activate && sSelected == 5) sStatsAction = 1;
+        else if (activate && sSelected == 6) sStatsAction = 2;
+        else if (activate && sSelected == 7) { sScreen = MENU_MAIN; sSelected = 0; }
     } else if (sScreen == MENU_SETTINGS) {
         if (sSelected == 0) PspAudioMode_Request((PspAudioMode_GetRequested() + direction + PSP_AUDIO_MODE_COUNT) % PSP_AUDIO_MODE_COUNT);
         else sColour = (sColour + direction + 3) % 3;
@@ -333,6 +346,7 @@ void PspMenu_Update(u32 pressed) {
 }
 
 int PspMenu_NeedsBoundary(void) {
+    if (sStatsAction) return 1;
 #if PSP_MENU_DIAGNOSTICS
     if (sAction != ACTION_NONE) return 1;
 #endif
@@ -347,6 +361,9 @@ int PspMenu_NeedsBoundary(void) {
 
 // Diagnostic writes run on the scheduler thread with no graphics task in flight
 void PspMenu_Apply(void) {
+    if (sStatsAction == 1) PspNetStats_Reset();
+    else if (sStatsAction == 2) PspNetStats_Save();
+    sStatsAction = 0;
 #if PROFILE_GPROF || PROFILE_PHASES
     PspProfiler_Service();
 #endif
@@ -400,6 +417,80 @@ void PspMenu_Apply(void) {
     PspSettings_Apply();
 }
 
+static u32 menu_stats_rate(u64 count, u32 elapsedUs) {
+    return elapsedUs ? (u32) ((count * 10000000ULL) / elapsedUs) : 0;
+}
+
+static u32 menu_stats_average(const PspNetTiming* timing) {
+    return timing->count ? (u32) (timing->totalUs / timing->count) : 0;
+}
+
+static void menu_stats_view(PspMenuView* view) {
+    static const char* const pages[] = { "Traffic", "Payload", "Queue", "Loss", "Guards", "CPU", "Peers" };
+    PspNetStats stats;
+    u32 a, b;
+    int i;
+    PspNetStats_Get(&stats);
+    snprintf(view->title, MENU_TEXT, "%s", "Ad-Hoc Statistics");
+    snprintf(view->subtitle, MENU_TEXT, "%s - %lu.%lu s %s", stats.role == 1 ? "Host" : "Client",
+        (unsigned long) stats.elapsedUs / 1000000, (unsigned long) (stats.elapsedUs / 100000) % 10,
+        stats.active ? "measuring" : "stopped");
+    snprintf(view->rows[0], MENU_TEXT, "Page: %s", pages[sStatsPage]);
+    if (sStatsPage == 0) {
+        a = menu_stats_rate(stats.counters[PSP_NET_CAPTURE], stats.elapsedUs);
+        b = menu_stats_rate(stats.counters[PSP_NET_PUBLISH], stats.elapsedUs);
+        snprintf(view->rows[1], MENU_TEXT, "Capture %lu.%lu/s publish %lu.%lu/s", (unsigned long)a/10, (unsigned long)a%10, (unsigned long)b/10, (unsigned long)b%10);
+        a = menu_stats_rate(stats.counters[PSP_NET_TX_WORLD], stats.elapsedUs);
+        b = menu_stats_rate(stats.counters[PSP_NET_RX_WORLD], stats.elapsedUs);
+        snprintf(view->rows[2], MENU_TEXT, "Peer sends %lu.%lu/s RX %lu.%lu/s", (unsigned long)a/10, (unsigned long)a%10, (unsigned long)b/10, (unsigned long)b%10);
+        a = menu_stats_rate(stats.counters[PSP_NET_READ], stats.elapsedUs);
+        b = menu_stats_rate(stats.timings[PSP_NET_APPLY].count, stats.elapsedUs);
+        snprintf(view->rows[3], MENU_TEXT, "Read %lu.%lu/s apply %lu.%lu/s", (unsigned long)a/10, (unsigned long)a%10, (unsigned long)b/10, (unsigned long)b%10);
+        a = menu_stats_rate(stats.counters[PSP_NET_TX_PAYLOAD] / 1024, stats.elapsedUs);
+        b = menu_stats_rate(stats.counters[PSP_NET_RX_PAYLOAD] / 1024, stats.elapsedUs);
+        snprintf(view->rows[4], MENU_TEXT, "Payload TX %lu.%lu RX %lu.%lu KiB/s", (unsigned long)a/10, (unsigned long)a%10, (unsigned long)b/10, (unsigned long)b%10);
+    } else if (sStatsPage == 1) {
+        u64 total = 0, count = 0;
+        for (i = 0; i < PSP_NET_PART_COUNT; i++) total += stats.payload[i];
+        for (i = 0; i < 8; i++) count += stats.sizeBins[i];
+        snprintf(view->rows[1], MENU_TEXT, "Bytes last %lu avg %lu max %lu", (unsigned long)stats.lastBytes, (unsigned long)(count ? total/count : 0), (unsigned long)stats.maxBytes);
+        snprintf(view->rows[2], MENU_TEXT, "Fragments max %lu oversize %llu", (unsigned long)stats.maxFragments, (unsigned long long)stats.counters[PSP_NET_OVERSIZE]);
+        snprintf(view->rows[3], MENU_TEXT, "Avg players %lu shots %lu bytes", (unsigned long)(count ? stats.payload[PSP_NET_PLAYERS]/count : 0), (unsigned long)(count ? stats.payload[PSP_NET_SHOTS]/count : 0));
+        snprintf(view->rows[4], MENU_TEXT, "Avg actors %lu FX %lu scenery %lu", (unsigned long)(count ? stats.payload[PSP_NET_ACTORS]/count : 0), (unsigned long)(count ? stats.payload[PSP_NET_EFFECTS]/count : 0), (unsigned long)(count ? stats.payload[PSP_NET_SCENERY]/count : 0));
+    } else if (sStatsPage == 2) {
+        snprintf(view->rows[1], MENU_TEXT, "Pending replacements: %llu", (unsigned long long)stats.counters[PSP_NET_REPLACED]);
+        snprintf(view->rows[2], MENU_TEXT, "Active %lu pending %lu", (unsigned long)stats.activeSequence, (unsigned long)stats.pendingSequence);
+        snprintf(view->rows[3], MENU_TEXT, "Age %lu max %lu ms peer %lu", (unsigned long)stats.queueAgeUs/1000, (unsigned long)stats.maxQueueAgeUs/1000, (unsigned long)stats.peer+1);
+        snprintf(view->rows[4], MENU_TEXT, "Offset %lu/%lu blocked %llu", (unsigned long)stats.offset, (unsigned long)stats.activeBytes, (unsigned long long)stats.counters[PSP_NET_TX_BLOCK]);
+    } else if (sStatsPage == 3) {
+        snprintf(view->rows[1], MENU_TEXT, "Sequence gaps RX %llu read %llu", (unsigned long long)stats.counters[PSP_NET_RX_GAPS], (unsigned long long)stats.counters[PSP_NET_READ_GAPS]);
+        snprintf(view->rows[2], MENU_TEXT, "Fragments duplicate %llu old %llu", (unsigned long long)stats.counters[PSP_NET_RX_DUPLICATE], (unsigned long long)stats.counters[PSP_NET_RX_OLD]);
+        snprintf(view->rows[3], MENU_TEXT, "Abandoned %llu checksum %llu", (unsigned long long)stats.counters[PSP_NET_RX_ABANDONED], (unsigned long long)stats.counters[PSP_NET_RX_CHECKSUM]);
+        snprintf(view->rows[4], MENU_TEXT, "Bad fragments %llu game rejects %llu", (unsigned long long)stats.counters[PSP_NET_RX_INVALID], (unsigned long long)stats.counters[PSP_NET_REJECTED]);
+    } else if (sStatsPage == 4) {
+        static const char* const labels[] = { "Publish", "Send copy", "Promote RX", "Game read" };
+        for (i = 0; i < 4; i++) snprintf(view->rows[i+1], MENU_TEXT, "%s avg %lu max %lu us", labels[i],
+            (unsigned long)menu_stats_average(&stats.timings[i]), (unsigned long)stats.timings[i].maxUs);
+    } else if (sStatsPage == 5) {
+        static const char* const labels[] = { "Build", "Validate", "Apply", "Game update" };
+        for (i = 0; i < 4; i++) snprintf(view->rows[i+1], MENU_TEXT, "%s avg %lu max %lu us", labels[i],
+            (unsigned long)menu_stats_average(&stats.timings[PSP_NET_BUILD+i]), (unsigned long)stats.timings[PSP_NET_BUILD+i].maxUs);
+    } else {
+        for (i = 0; i < 3; i++) {
+            a = menu_stats_rate(stats.peers[i].worlds, stats.elapsedUs);
+            snprintf(view->rows[i+1], MENU_TEXT, "Peer %d (%02X%02X) sent %lu.%lu/s age %lu ms", i+1,
+                stats.peers[i].mac[4], stats.peers[i].mac[5], (unsigned long)a/10, (unsigned long)a%10,
+                (unsigned long)stats.peers[i].latency.maxUs/1000);
+        }
+        snprintf(view->rows[4], MENU_TEXT, "Worker step avg %lu max %lu us",
+            (unsigned long)menu_stats_average(&stats.timings[PSP_NET_STEP_INTERVAL]), (unsigned long)stats.timings[PSP_NET_STEP_INTERVAL].maxUs);
+    }
+    snprintf(view->rows[5], MENU_TEXT, "%s", "Reset Counters");
+    snprintf(view->rows[6], MENU_TEXT, "%s", "Save Report");
+    snprintf(view->rows[7], MENU_TEXT, "%s", "Back");
+    snprintf(view->status, MENU_TEXT, "%s", PspNetStats_SaveStatus());
+}
+
 void PspMenu_Publish(void) {
     PspMenuView view;
     int n = 0;
@@ -422,7 +513,10 @@ void PspMenu_Publish(void) {
     view.main = sScreen == MENU_MAIN;
     view.accent = sAccents[sColour];
 #define ROW(...) snprintf(view.rows[n++], MENU_TEXT, __VA_ARGS__)
-    if (sMultiplayerActive) {
+    if (sScreen == MENU_NET_STATS) {
+        menu_stats_view(&view);
+        n = 8;
+    } else if (sMultiplayerActive) {
         static const char* const matches[] = { "Point Match", "Battle Royal", "Time Trial" };
         int wlan = sceWlanGetSwitchState();
         char channel[16];
@@ -507,6 +601,7 @@ void PspMenu_Publish(void) {
             snprintf(view.status, MENU_TEXT, "%s [%lu]", PspSpectate_Status(),
                      (unsigned long) network.worldSnapshots);
         }
+        if (PspNetStats_Available()) ROW("Ad-Hoc Statistics");
     } else if (sScreen == MENU_SETTINGS) {
         static const char* const audio[] = { "Off", "Sync", "Async (fast)" };
         static const char* const colours[] = { "Green", "Red", "Blue" };

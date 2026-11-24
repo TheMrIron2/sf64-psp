@@ -12,6 +12,7 @@
 #include "src/psp/renderer.h"
 #include "src/psp/gu_census.h"
 #include "src/psp/menu.h"
+#include "src/psp/net_stats.h"
 #include "src/psp/settings.h"
 #include "src/psp/overlay.h"
 
@@ -192,6 +193,8 @@ void PspRenderer_Init(void) {
 int PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
     const Gfx* dl;
     int presented;
+    int measure = PspNetStats_Active();
+    u32 measureStarted = 0;
 #if PSP_GFX_BACKEND_GU
     int menuDrawn = 0;
 #endif
@@ -231,6 +234,7 @@ int PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
         renderStart = sceKernelGetSystemTimeWide();
     #endif
 
+        if (measure) measureStarted = PspNetStats_NowUs();
         PspHwCounterProfile_FrameBegin();
         PspHwCounterProfile_ScopeBegin(PSP_HW_SCOPE_TASK);
         PspHwCounterProfile_ScopeBegin(PSP_HW_SCOPE_FRONTEND);
@@ -262,6 +266,7 @@ int PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
     #if PSP_FPS_OVERLAY
         renderEnd = sceKernelGetSystemTimeWide();
     #endif
+        if (measure) PspNetStats_Time(PSP_NET_RENDER, measureStarted);
 
 #if PSP_GFX_BACKEND_GU
         if (!PspGfxBackend_IsGu() || !menuDrawn) psp_renderer_draw_overlays(0);
@@ -270,7 +275,12 @@ int PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
 #endif
         PspHwCounterProfile_ScopeBegin(PSP_HW_SCOPE_PRESENT);
         PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PRESENT_SWAP);
+        if (measure) measureStarted = PspNetStats_NowUs();
         presented = PspGfxDevice_Present();
+        if (measure) {
+            PspNetStats_Time(PSP_NET_PRESENT, measureStarted);
+            if (presented) PspNetStats_Add(PSP_NET_PRESENTED, 1);
+        }
         PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_PRESENT_SWAP);
         PspHwCounterProfile_ScopeEnd(PSP_HW_SCOPE_PRESENT);
         PspCensus_End(presented);

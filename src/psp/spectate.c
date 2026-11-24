@@ -3,6 +3,7 @@
 #include "src/psp/platform.h"
 #include "src/psp/input.h"
 #include "src/psp/spectate.h"
+#include "src/psp/net_stats.h"
 
 extern s32 sVsDrawMode, sStartCountdown, sVsWinner, D_80178850[4];
 void Versus_InitMatch(void);
@@ -40,6 +41,7 @@ static u32 sPrevVi, sCurrVi;
 // attacker; a larger offset change between snapshots is that cut, not motion
 #define SPECTATE_FOLLOW_CUT_DISTANCE 150.0f
 static int sHostNeedsEpoch = 1;
+static u32 sCaptureParts[PSP_NET_PART_COUNT];
 static const char* volatile sStatus = "Waiting for a world snapshot";
 static const char* volatile sInvalidReason;
 static int sInvalidIndex;
@@ -108,6 +110,141 @@ static void spectate_cache_previous_objects(void) {
 static u32 spectate_schema(void) {
     return 0x53570100U ^ sizeof(SpectateWorld) ^ (sizeof(Player) << 12) ^
            (sizeof(Actor) << 4) ^ (sizeof(Effect) << 20) ^ (sizeof(Item) << 8);
+}
+
+#define SPECTATE_NATIVE_MAGIC 0x53505731U
+#define SPECTATE_PACKED_MAGIC 0x53505732U
+#define SPECTATE_FIXED_BYTES __builtin_offsetof(SpectateWorld, player)
+#define SPECTATE_SLOT_COUNT 20
+
+typedef char SpectateWordSizes[((sizeof(Player) % 4 == 0) && (sizeof(PlayerShot) % 4 == 0) &&
+    (sizeof(sDecode) >= sizeof(PlayerShot)) &&
+    (sizeof(SpectateWorld) == SPECTATE_FIXED_BYTES + sizeof(Player) * 4 + sizeof(PlayerShot) * 16)) ? 1 : -1];
+
+static u32 spectate_word(const u8* data) {
+    u32 word;
+    memcpy(&word, data, sizeof(word));
+    return word;
+}
+
+// Each mask describes the nonzero words in the next group
+static int spectate_pack_record(u8* out, const u8* source, int bytes) {
+    int group, word, at = 0;
+    for (group = 0; group < bytes; group += 128) {
+        u32 mask = 0;
+        int count = (bytes - group) / 4;
+        if (count > 32) count = 32;
+        for (word = 0; word < count; word++)
+            if (spectate_word(source + group + word * 4)) mask |= 1U << word;
+        if (out) memcpy(out + at, &mask, 4);
+        at += 4;
+        for (word = 0; word < count; word++) if (mask & (1U << word)) {
+            if (out) memcpy(out + at, source + group + word * 4, 4);
+            at += 4;
+        }
+    }
+    return at;
+}
+
+static int spectate_unpack_record(u8* out, const u8* source, int available, int bytes) {
+    int group, word, at = 0;
+    if (out) spectate_zero(out, bytes);
+    for (group = 0; group < bytes; group += 128) {
+        u32 mask;
+        int count = (bytes - group) / 4;
+        if (count > 32) count = 32;
+        if (available - at < 4) return -1;
+        mask = spectate_word(source + at);
+        at += 4;
+        if (count < 32 && (mask >> count)) return -1;
+        for (word = 0; word < count; word++) if (mask & (1U << word)) {
+            if (available - at < 4) return -1;
+            if (out) memcpy(out + group + word * 4, source + at, 4);
+            at += 4;
+        }
+    }
+    return at;
+}
+
+// Dense records remain native and each world carries its own masks
+static int spectate_pack(u8* out, const u8* source, int bytes) {
+    int slot, from = SPECTATE_FIXED_BYTES, at = SPECTATE_FIXED_BYTES;
+    u32 modes = 0;
+    u32 players = 0, shots = 0;
+    SpectateWorld* packed = (SpectateWorld*) out;
+    memcpy(out, source, SPECTATE_FIXED_BYTES);
+    for (slot = 0; slot < SPECTATE_SLOT_COUNT; slot++) {
+        int native = slot < 4 ? sizeof(Player) : sizeof(PlayerShot);
+        int encoded = spectate_pack_record(NULL, source + from, native);
+        if (encoded < native) {
+            modes |= 1U << slot;
+            spectate_pack_record(out + at, source + from, native);
+        } else {
+            encoded = native;
+            memcpy(out + at, source + from, native);
+        }
+        if (slot < 4) players += encoded;
+        else shots += encoded;
+        from += native;
+        at += encoded;
+    }
+    if (at + (bytes - from) + 4 >= bytes) return 0;
+    memcpy(out + at, source + from, bytes - from);
+    at += bytes - from;
+    memcpy(out + at, &modes, 4);
+    at += 4;
+    packed->magic = SPECTATE_PACKED_MAGIC;
+    packed->bytes = at;
+    sCaptureParts[PSP_NET_HEADER] += 4;
+    sCaptureParts[PSP_NET_PLAYERS] = players;
+    sCaptureParts[PSP_NET_SHOTS] = shots;
+    return at;
+}
+
+// Expand backwards so unread records survive without another world buffer
+static int spectate_unpack(u8* data, int bytes) {
+    SpectateWorld* world = (SpectateWorld*) data;
+    int offsets[SPECTATE_SLOT_COUNT + 1];
+    int slot, at = SPECTATE_FIXED_BYTES, expanded, tail;
+    u32 modes;
+    if (bytes < 4 || bytes > PSP_ADHOC_WORLD_MAX_BYTES) return spectate_reject("wire size", bytes);
+    if (world->magic == SPECTATE_NATIVE_MAGIC) return bytes;
+    if (world->magic != SPECTATE_PACKED_MAGIC) return spectate_reject("bad wire magic", -1);
+    if (bytes < (int) SPECTATE_FIXED_BYTES + 4 || bytes > PSP_ADHOC_WORLD_MAX_BYTES ||
+        world->bytes != (u32) bytes || world->schema != spectate_schema())
+        return spectate_reject("wire header", -1);
+    modes = spectate_word(data + bytes - 4);
+    if (modes >> SPECTATE_SLOT_COUNT) return spectate_reject("wire modes", -1);
+    for (slot = 0; slot < SPECTATE_SLOT_COUNT; slot++) {
+        int native = slot < 4 ? sizeof(Player) : sizeof(PlayerShot);
+        int available = bytes - 4 - at;
+        int encoded;
+        offsets[slot] = at;
+        if (modes & (1U << slot)) {
+            encoded = spectate_unpack_record(NULL, data + at, available, native);
+            if (encoded < 0 || encoded >= native) return spectate_reject("wire mask", slot);
+        } else encoded = native;
+        if (encoded > available) return spectate_reject("wire record", slot);
+        at += encoded;
+    }
+    offsets[SPECTATE_SLOT_COUNT] = at;
+    tail = bytes - 4 - at;
+    expanded = sizeof(SpectateWorld) + tail;
+    if (expanded > PSP_ADHOC_WORLD_MAX_BYTES) return spectate_reject("wire expansion", expanded);
+    memmove(data + sizeof(SpectateWorld), data + at, tail);
+    at = sizeof(SpectateWorld);
+    for (slot = SPECTATE_SLOT_COUNT - 1; slot >= 0; slot--) {
+        int native = slot < 4 ? sizeof(Player) : sizeof(PlayerShot);
+        at -= native;
+        if (modes & (1U << slot)) {
+            spectate_unpack_record((u8*) &sDecode, data + offsets[slot],
+                                  offsets[slot + 1] - offsets[slot], native);
+            memcpy(data + at, &sDecode, native);
+        } else memmove(data + at, data + offsets[slot], native);
+    }
+    world->magic = SPECTATE_NATIVE_MAGIC;
+    world->bytes = expanded;
+    return expanded;
 }
 
 static int spectate_vector(const Vec3f* v) {
@@ -204,7 +341,7 @@ static int spectate_valid(const u8* data, int bytes) {
     const SpectateWorld* world = (const SpectateWorld*) data;
     int i, j;
     if (bytes < (int) sizeof(*world)) return spectate_reject("short world", bytes);
-    if (world->magic != 0x53505731U) return spectate_reject("bad magic", -1);
+    if (world->magic != SPECTATE_NATIVE_MAGIC) return spectate_reject("bad magic", -1);
     if (world->schema != spectate_schema()) return spectate_reject("bad schema", -1);
     if (world->bytes != (u32) bytes) return spectate_reject("bad size", world->bytes);
     if (!world->epoch) return spectate_reject("bad epoch", -1);
@@ -289,7 +426,7 @@ static void spectate_blend_player(Player* out, const Player* previous, const Pla
     out->yRot_114 = spectate_blend_angle(previous->yRot_114, current->yRot_114, alpha);
     out->xRot_120 = spectate_blend(previous->xRot_120, current->xRot_120, alpha);
     out->aerobaticPitch = spectate_blend(previous->aerobaticPitch, current->aerobaticPitch, alpha);
-    out->bankAngle = spectate_blend(previous->bankAngle, current->bankAngle, alpha);
+    out->bankAngle = spectate_blend_angle(previous->bankAngle, current->bankAngle, alpha);
     out->rockAngle = spectate_blend(previous->rockAngle, current->rockAngle, alpha);
     out->zRotBank = spectate_blend(previous->zRotBank, current->zRotBank, alpha);
     out->zRotBarrelRoll = spectate_blend_angle(previous->zRotBarrelRoll, current->zRotBarrelRoll, alpha);
@@ -375,6 +512,7 @@ void PspSpectate_BeforeGame(void) {
     SpectateWorld* world = (SpectateWorld*) sWorld.data;
     int bytes;
     f32 alpha;
+    u32 measureStarted;
     if (!sWatching) {
         if (gGameState != GSTATE_PLAY || gCurrentLevel != LEVEL_VERSUS || gPlayState == PLAY_INIT)
             sHostNeedsEpoch = 1;
@@ -397,10 +535,12 @@ void PspSpectate_BeforeGame(void) {
     bytes = PspAdhoc_ReadWorld(sIncoming.data, sizeof(sIncoming.data), &sReceivedSequence);
     if (bytes) {
         const SpectateWorld* incoming = (const SpectateWorld*) sIncoming.data;
+        measureStarted = PspNetStats_NowUs();
         sInvalidReason = NULL;
         sInvalidIndex = -1;
         sInvalidValue = 0;
-        sInvalid = !spectate_valid(sIncoming.data, bytes);
+        bytes = spectate_unpack(sIncoming.data, bytes);
+        sInvalid = !bytes || !spectate_valid(sIncoming.data, bytes);
         if (!sInvalid && sEpoch && incoming->epoch != sEpoch && (s32) (incoming->epoch - sEpoch) <= 0) {
             sInvalid = 1;
             sInvalidReason = "stale epoch";
@@ -409,7 +549,9 @@ void PspSpectate_BeforeGame(void) {
             sInvalid = 1;
             sInvalidReason = "stage changed";
         }
+        PspNetStats_Time(PSP_NET_VALIDATE, measureStarted);
         if (sInvalid) {
+            PspNetStats_Add(PSP_NET_REJECTED, 1);
             if (sInvalidReason != sLoggedReason || sInvalidIndex != sLoggedIndex) {
                 sLoggedReason = sInvalidReason;
                 sLoggedIndex = sInvalidIndex;
@@ -447,6 +589,7 @@ void PspSpectate_BeforeGame(void) {
     if (!sBytes) return;
     if (gGameState == GSTATE_PLAY && gCurrentLevel == LEVEL_VERSUS &&
         (gPlayState == PLAY_UPDATE || gPlayState == PLAY_PAUSE) && gPlayer && gScenery360) {
+        measureStarted = PspNetStats_NowUs();
         alpha = 1.0f;
         if (sPrevBytes) {
             u32 interval = sCurrVi - sPrevVi;
@@ -468,6 +611,7 @@ void PspSpectate_BeforeGame(void) {
         }
         sReady = 1;
         spectate_apply(alpha);
+        PspNetStats_Time(PSP_NET_APPLY, measureStarted);
         sStatus = sInvalid ? (sInvalidReason ? sInvalidReason : "Dropped incompatible or invalid snapshot") :
                   PspPlatform_GetViCount() - sLastUpdate > 60 ? "Waiting for world updates" :
                   view.hostPhase == PSP_ADHOC_HOST_SETUP ? "Host is choosing match settings" :
@@ -492,6 +636,7 @@ static int spectate_append(int at, int type, int index, const void* source) {
     at += sizeof(record);
     memcpy(sWorld.data + at, source, bytes);
     if (type != WORLD_SCENERY) spectate_zero(sWorld.data + at + sizeof(Object), sizeof(ObjectInfo));
+    sCaptureParts[PSP_NET_ACTORS + type] += sizeof(record) + bytes;
     return at + bytes;
 }
 
@@ -499,6 +644,8 @@ void PspSpectate_Capture(void) {
     PspAdhocView view;
     SpectateWorld* world = (SpectateWorld*) sWorld.data;
     u32 vi = PspPlatform_GetViCount();
+    u32 measureStarted;
+    int wireBytes;
     int i, at = sizeof(*world);
     if (sWatching || gGameState != GSTATE_PLAY || gCurrentLevel != LEVEL_VERSUS ||
         !gPlayer || !gScenery360 || (gPlayState != PLAY_UPDATE && gPlayState != PLAY_PAUSE) ||
@@ -507,12 +654,17 @@ void PspSpectate_Capture(void) {
     if (view.state != PSP_ADHOC_HOSTING || !view.peerCount) return;
     for (i = 0; i < 4; i++) if (gPlayer[i].num != i) return;
     sLastCapture = vi;
+    measureStarted = PspNetStats_NowUs();
+    spectate_zero(sCaptureParts, sizeof(sCaptureParts));
+    sCaptureParts[PSP_NET_HEADER] = sizeof(*world) - sizeof(world->player) - sizeof(world->shot);
+    sCaptureParts[PSP_NET_PLAYERS] = sizeof(world->player);
+    sCaptureParts[PSP_NET_SHOTS] = sizeof(world->shot);
     if (!sHostEpoch || sHostNeedsEpoch) {
         if (++sHostEpoch == 0) sHostEpoch++;
         sHostNeedsEpoch = 0;
     }
     spectate_zero(world, sizeof(*world));
-    world->magic = 0x53505731U; world->schema = spectate_schema(); world->epoch = sHostEpoch;
+    world->magic = SPECTATE_NATIVE_MAGIC; world->schema = spectate_schema(); world->epoch = sHostEpoch;
     world->frame = gGameFrameCount; world->allRangeFrame = gAllRangeFrameCount; world->stage = gVersusStage; world->matchType = gVsMatchType;
     world->points = gVsPointsToWin; world->timeLimit = gVsTimeTrialLimit;
     world->paused = gPlayState == PLAY_PAUSE;
@@ -540,7 +692,14 @@ void PspSpectate_Capture(void) {
         at = spectate_append(at, WORLD_EFFECT, i, &gEffects[i]);
     for (i = 0; i < 200 && at >= 0; i++) if (gScenery360[i].obj.status)
         at = spectate_append(at, WORLD_SCENERY, i, &gScenery360[i].obj);
-    if (at < 0) return;
+    if (at < 0) {
+        PspNetStats_Capture(0, sCaptureParts, measureStarted);
+        return;
+    }
     world->bytes = at;
-    PspAdhoc_PublishWorld(sWorld.data, at);
+    wireBytes = spectate_pack(sWorldPrev.data, sWorld.data, at);
+    PspNetStats_Add(PSP_NET_CAPTURE_NATIVE_BYTES, at);
+    PspNetStats_Add(wireBytes ? PSP_NET_PACKED_CAPTURE : PSP_NET_NATIVE_CAPTURE, 1);
+    PspAdhoc_PublishWorld(wireBytes ? sWorldPrev.data : sWorld.data, wireBytes ? wireBytes : at);
+    PspNetStats_Capture(wireBytes ? wireBytes : at, sCaptureParts, measureStarted);
 }

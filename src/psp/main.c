@@ -9,6 +9,7 @@
 #include "src/psp/audio_me.h"
 #endif
 #include "src/psp/settings.h"
+#include "src/psp/net_stats.h"
 #include "src/psp/gfx/gfx_psp_backend.h"
 #include "src/psp/hw_counter_profile.h"
 #include "src/psp/n64psp_integration.h"
@@ -81,6 +82,7 @@ int main(int argc, char* argv[]) {
     buildBackend = PspGfxBackend_GetBuildDefault();
     PspEeprom_SetExecutablePath(argc > 0 ? argv[0] : NULL);
     PspSettings_Init(argc > 0 ? argv[0] : NULL, buildBackend);
+    PspNetStats_Init(argc > 0 ? argv[0] : NULL);
     if (!PspGfxBackend_Select(PspSettings_GetGraphicsBackend())) {
         PspGfxBackend_Select(buildBackend);
     }
