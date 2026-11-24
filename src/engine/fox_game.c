@@ -372,6 +372,7 @@ void Game_SetScene(void) {
 
 void Game_Update(void) {
     s32 i;
+    s32 fullViewSlot = -1;
     u8 partialFill;
     u8 soundMode;
 
@@ -399,7 +400,10 @@ void Game_Update(void) {
         PSP_TRACE("game update: perspective");
         Lib_InitPerspective(&gUnkDisp1);
         PSP_TRACE("game update: viewport");
-        Game_InitViewport(&gUnkDisp1, gCamCount, 0);
+#ifdef TARGET_PSP
+        fullViewSlot = PspSpectate_FullViewSlot();
+#endif
+        Game_InitViewport(&gUnkDisp1, fullViewSlot >= 0 ? 1 : gCamCount, 0);
 
         if (gNextGameStateTimer != 0) {
             gNextGameStateTimer--;
@@ -598,7 +602,7 @@ void Game_Update(void) {
         PspFrameInterpolation_SetWorldScope(true);
         PspSpectate_Capture();
 #endif
-        Game_Draw(0);
+        Game_Draw(fullViewSlot >= 0 ? fullViewSlot : 0);
         PSP_TRACE("game update: draw done");
 
         if (gCamCount == 2) {
@@ -608,7 +612,7 @@ void Game_Update(void) {
             gDPPipeSync(gMasterDisp++);
             gDPSetScissor(gMasterDisp++, G_SC_NON_INTERLACE, SCREEN_MARGIN, SCREEN_MARGIN, SCREEN_WIDTH - SCREEN_MARGIN,
                           SCREEN_HEIGHT - SCREEN_MARGIN);
-        } else if ((gCamCount == 4) && (gDrawMode != DRAW_NONE)) {
+        } else if ((fullViewSlot < 0) && (gCamCount == 4) && (gDrawMode != DRAW_NONE)) {
             Game_InitViewport(&gMasterDisp, gCamCount, 3);
             Game_Draw(3);
 
@@ -663,6 +667,18 @@ void Game_Update(void) {
                 }
                 HUD_DrawBossHealth();
             }
+        } else if (fullViewSlot >= 0) {
+            for (i = 0; i < gCamCount; i++) {
+                if (gPlayer[i].dmgEffectTimer != 0) partialFill = true;
+            }
+            if (gPlayer[fullViewSlot].dmgEffectTimer != 0) {
+                Graphics_FillRectangle(&gMasterDisp, 0, 0, SCREEN_WIDTH - 1, SCREEN_HEIGHT - 1,
+                                       gFillScreenRed, gFillScreenGreen, gFillScreenBlue, gFillScreenAlpha);
+            } else {
+                Graphics_FillRectangle(&gMasterDisp, 0, 0, SCREEN_WIDTH - 1, SCREEN_HEIGHT - 1,
+                                       gPlayerGlareReds[fullViewSlot], gPlayerGlareGreens[fullViewSlot],
+                                       gPlayerGlareBlues[fullViewSlot], gPlayerGlareAlphas[fullViewSlot]);
+            }
         } else {
             for (i = 0; i < gCamCount; i++) {
                 if (gPlayer[i].dmgEffectTimer != 0) {
@@ -694,7 +710,7 @@ void Game_Update(void) {
                                    gFillScreenGreen, gFillScreenBlue, gFillScreenAlpha);
         }
 #ifdef TARGET_PSP
-        if (gCamCount == 4) {
+        if (gCamCount == 4 && fullViewSlot < 0) {
             // Keep the original border after full surface clears
             PSP_RENDERER_DL_VIEWPORT_FULL_MARKER(gMasterDisp++);
             gDPSetScissor(gMasterDisp++, G_SC_NON_INTERLACE, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);

@@ -210,7 +210,7 @@ static void menu_multiplayer_refresh(void) {
 }
 
 static int menu_rows(void) {
-    if (sScreen == MENU_MAIN) return 3 + !!PSP_MENU_DIAGNOSTICS + sHostingContinued + PspSpectate_IsWatching() + PspNetStats_Available();
+    if (sScreen == MENU_MAIN) return 3 + !!PSP_MENU_DIAGNOSTICS + sHostingContinued + 2 * PspSpectate_IsWatching() + PspNetStats_Available();
     if (sScreen == MENU_GRAPHICS) return 3 + !!PSP_FPS_OVERLAY + PSP_GFX_BACKEND_SELECTABLE;
     if (sScreen == MENU_NET_STATS) return 8;
     if (sScreen == MENU_SETTINGS) return 2;
@@ -274,11 +274,16 @@ void PspMenu_Update(u32 pressed) {
     if (sScreen == MENU_MAIN && activate) {
         if (sSelected == 0) sOpen = 0;
         else if (PspNetStats_Available() && sSelected == 3 + !!PSP_MENU_DIAGNOSTICS +
-                 sHostingContinued + PspSpectate_IsWatching()) {
+                 sHostingContinued + 2 * PspSpectate_IsWatching()) {
             sScreen = MENU_NET_STATS;
             sSelected = 0;
         }
-        else if (PspSpectate_IsWatching() && sSelected == 3 + !!PSP_MENU_DIAGNOSTICS) {
+        else if (PspSpectate_IsWatching() &&
+                 sSelected == 3 + !!PSP_MENU_DIAGNOSTICS + sHostingContinued) {
+            PspSpectate_CycleCamera();
+        }
+        else if (PspSpectate_IsWatching() &&
+                 sSelected == 4 + !!PSP_MENU_DIAGNOSTICS + sHostingContinued) {
             PspSpectate_Stop();
             sOpen = 0;
         }
@@ -596,6 +601,9 @@ void PspMenu_Publish(void) {
         if (sHostingContinued) ROW("Ad-Hoc Room");
         if (PspSpectate_IsWatching()) {
             PspAdhocView network;
+            int camera = PspSpectate_CameraSelection();
+            if (camera < 0) { ROW("Spectate View: Split Screen"); }
+            else { ROW("Spectate View: Camera %d", camera + 1); }
             ROW("Leave Spectate");
             PspAdhoc_GetView(&network);
             snprintf(view.status, MENU_TEXT, "%s [%lu]", PspSpectate_Status(),

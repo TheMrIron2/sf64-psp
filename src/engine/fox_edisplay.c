@@ -6,6 +6,9 @@
 #include "prevent_bss_reordering.h"
 #include "global.h"
 #include "src/psp/command_source.h"
+#ifdef TARGET_PSP
+#include "src/psp/spectate.h"
+#endif
 #include "sf64object.h"
 #include "assets/ast_katina.h"
 #include "assets/ast_venom_1.h"
@@ -1541,15 +1544,24 @@ void Object_ClampSfxSource(f32* sfxSrc) {
     }
 }
 
+static s32 Object_SfxListenerSlot(void) {
+#ifdef TARGET_PSP
+    s32 slot = PspSpectate_FullViewSlot();
+    if (slot >= 0) return slot;
+#endif
+    return gCamCount == 1 ? 0 : -1;
+}
+
 void Object_SetSfxSourceToPos(f32* sfxSrc, Vec3f* pos) {
     Vec3f src;
     Vec3f dest;
+    s32 listener = Object_SfxListenerSlot();
 
-    if (gCamCount != 1) {
+    if (listener < 0) {
         sfxSrc[0] = sfxSrc[1] = sfxSrc[2] = 0.0f;
     } else {
-        Matrix_RotateY(gCalcMatrix, gPlayer[0].camYaw, MTXF_NEW);
-        Matrix_RotateX(gCalcMatrix, gPlayer[0].camPitch, MTXF_APPLY);
+        Matrix_RotateY(gCalcMatrix, gPlayer[listener].camYaw, MTXF_NEW);
+        Matrix_RotateX(gCalcMatrix, gPlayer[listener].camPitch, MTXF_APPLY);
         src.x = pos->x - gPlayCamEye.x;
         src.y = pos->y - gPlayCamEye.y;
         src.z = pos->z + gPathProgress - gPlayCamEye.z;
@@ -1566,7 +1578,7 @@ void Object_UpdateSfxSource(f32* sfxSrc) {
     Vec3f dest;
     s32 pad;
 
-    if (gCamCount != 1) {
+    if (Object_SfxListenerSlot() < 0) {
         sfxSrc[0] = sfxSrc[1] = sfxSrc[2] = 0.0f;
     } else {
         Matrix_MultVec3f(&D_edisplay_801615F0, &src, &dest);

@@ -35,6 +35,7 @@ static union { u32 aligned; u8 data[PSP_ADHOC_WORLD_MAX_BYTES]; } sWorld, sWorld
 static union { Player player; Actor actor; Item item; Effect effect; Object object; } sDecode;
 static int sBytes, sPrevBytes, sReady, sInvalid;
 static volatile int sWatching, sStop;
+static int sCameraSelection = -1;
 static u32 sReceivedSequence, sEpoch, sHostEpoch, sLastCapture, sLastUpdate;
 static u32 sPrevVi, sCurrVi;
 #define SPECTATE_MAX_INTERVAL_VIS 6
@@ -376,6 +377,7 @@ static int spectate_valid(const u8* data, int bytes) {
         if (!spectate_vector(&player->cam.eye)) return spectate_reject("player cam eye", i);
         if (!spectate_vector(&player->cam.at)) return spectate_reject("player cam at", i);
         if (!spectate_vector(&player->rot)) return spectate_reject("player rot", i);
+        if (!(fabsf(player->aerobaticPitch) <= 360.0f)) return spectate_reject("player aerobatic pitch", i);
         if (world->inactive[i] < 0 || world->inactive[i] > 1) return spectate_reject("player inactive", i);
         if (world->cameraLabels[i] < 0 || world->cameraLabels[i] > 1)
             return spectate_reject("player cam label", i);
@@ -426,7 +428,7 @@ static void spectate_blend_player(Player* out, const Player* previous, const Pla
     spectate_blend_vec(&out->rot_104, &previous->rot_104, &current->rot_104, alpha);
     out->yRot_114 = spectate_blend_angle(previous->yRot_114, current->yRot_114, alpha);
     out->xRot_120 = spectate_blend(previous->xRot_120, current->xRot_120, alpha);
-    out->aerobaticPitch = spectate_blend(previous->aerobaticPitch, current->aerobaticPitch, alpha);
+    out->aerobaticPitch = spectate_blend_angle(previous->aerobaticPitch, current->aerobaticPitch, alpha);
     out->bankAngle = spectate_blend_angle(previous->bankAngle, current->bankAngle, alpha);
     out->rockAngle = spectate_blend(previous->rockAngle, current->rockAngle, alpha);
     out->zRotBank = spectate_blend(previous->zRotBank, current->zRotBank, alpha);
@@ -496,6 +498,7 @@ static void spectate_apply(f32 alpha) {
 void PspSpectate_Start(void) {
     if (sWatching) return;
     sWatching = 1; sStop = sReady = sInvalid = sBytes = sPrevBytes = 0;
+    sCameraSelection = -1;
     sReceivedSequence = sEpoch = 0;
     sPrevVi = sCurrVi = 0;
     sInvalidReason = NULL; sInvalidIndex = -1; sInvalidValue = 0;
@@ -506,6 +509,25 @@ void PspSpectate_Start(void) {
 
 void PspSpectate_Stop(void) { sStop = 1; }
 int PspSpectate_IsWatching(void) { return sWatching; }
+int PspSpectate_CameraSelection(void) { return sCameraSelection; }
+
+void PspSpectate_CycleCamera(void) {
+    if (sWatching) sCameraSelection = sCameraSelection == 3 ? -1 : sCameraSelection + 1;
+}
+
+int PspSpectate_FullViewSlot(void) {
+    if (sWatching && sReady && gGameState == GSTATE_PLAY && gVersusMode) {
+        switch (sVsDrawMode) {
+            case 2:
+            case 8:
+            case 10:
+            case 11:
+                return sCameraSelection;
+        }
+    }
+    return -1;
+}
+
 const char* PspSpectate_Status(void) { return sStatus; }
 
 void PspSpectate_BeforeGame(void) {

@@ -8,5 +8,8 @@ const char* PspSpectate_Status(void);
 void PspSpectate_BeforeGame(void);
 int PspSpectate_OverrideSimulation(void);
 void PspSpectate_Capture(void);
+int PspSpectate_CameraSelection(void);
+void PspSpectate_CycleCamera(void);
+int PspSpectate_FullViewSlot(void);
 
 #endif

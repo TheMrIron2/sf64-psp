@@ -4,6 +4,7 @@
 #ifdef TARGET_PSP
 #include "src/psp/display.h"
 #include "src/psp/renderer.h"
+#include "src/psp/spectate.h"
 #endif
 
 Vec3f D_801616A0;
@@ -87,6 +88,14 @@ s32 D_80161900[20];
 
 void HUD_TeammateStatus_Draw(void);
 
+static bool HUD_VsFullView(void) {
+#ifdef TARGET_PSP
+    return PspSpectate_FullViewSlot() >= 0;
+#else
+    return false;
+#endif
+}
+
 #ifdef TARGET_PSP
 typedef enum HUDPspAnchor {
     HUD_PSP_ANCHOR_CENTER,
@@ -140,7 +149,7 @@ static void HUD_PspVsWidgetBegin(s16 x, s16 y, unsigned alignment) {
     if (PspDisplay_IsWidescreen()) {
         PSP_RENDERER_DL_VIEWPORT_HUD_WIDGET_MARKER(gMasterDisp++);
         PSP_RENDERER_DL_HUD_ANCHOR_PARAM(gMasterDisp++, x, y);
-        PSP_RENDERER_DL_HUD_WIDGET_PARAM(gMasterDisp++, gPlayerNum, alignment);
+        PSP_RENDERER_DL_HUD_WIDGET_PARAM(gMasterDisp++, HUD_VsFullView() ? 4 : gPlayerNum, alignment);
     }
 }
 
@@ -2026,7 +2035,14 @@ void HUD_RadarWindow_Draw(f32 x, f32 y) {
     f32 xScale1;
     f32 yScale1;
 
-    if (gCamCount != 1) { // Versus mode
+    if (HUD_VsFullView()) {
+        xPos = 40.0f;
+        yPos = 144.0f;
+        xScale = 2.42f;
+        yScale = 3.38f;
+        xScale1 = 1.40f;
+        yScale1 = 1.40f;
+    } else if (gCamCount != 1) { // Versus mode
         xPos = sVsRadarWindowXpos[gPlayerNum];
         yPos = sVsRadarWindowYpos[gPlayerNum];
         xScale = 1.21f;
@@ -2104,8 +2120,8 @@ s32 HUD_RadarMarks_Update(void) {
     f32 x1;
     f32 y1;
     f32 z1;
-    f32 x;
-    f32 y;
+    f32 x = 0.0f;
+    f32 y = 0.0f;
     s32 pad;
     f32 temp;
     f32 temp2;
@@ -2965,6 +2981,11 @@ void HUD_KillCountStars_Update(void) {
     s32 i;
     s32 j;
 
+    if (HUD_VsFullView()) {
+        xPos[gPlayerNum] = 90.0f;
+        yPos[gPlayerNum] = 216.0f;
+    }
+
     if (gVsMatchType != VS_MATCH_POINTS) {
         return;
     }
@@ -3051,24 +3072,28 @@ void HUD_VsModePortrait_Draw(void) {
 
     RCP_SetupDL(&gMasterDisp, SETUPDL_76);
     gDPSetPrimColor(gMasterDisp++, 0, 0, 255, 255, 255, 255);
-    HUD_VsModePortraitTex_Draw(faceXpos[gPlayerNum], faceYpos[gPlayerNum], 0.54f, gPlayerNum);
+    HUD_VsModePortraitTex_Draw(HUD_VsFullView() ? 270.0f : faceXpos[gPlayerNum],
+                              HUD_VsFullView() ? 199.0f : faceYpos[gPlayerNum], 0.54f, gPlayerNum);
 }
 
 void HUD_VS_ShieldGauge_Draw(void) {
     f32 D_800D20E8[] = { 60.0f, 220.0f, 60.0f, 220.0f };
     f32 D_800D20F8[] = { 78.0f, 78.0f, 198.0f, 198.0f };
 
+    f32 x = HUD_VsFullView() ? 217.0f : D_800D20E8[gPlayerNum];
+    f32 y = HUD_VsFullView() ? 198.0f : D_800D20F8[gPlayerNum];
+
     Math_SmoothStepToF(&D_800D19E0[gPlayerNum], gPlayer[gPlayerNum].shields * (1.0f / 255.0f), 0.3f, 10.0f, 0.01f);
     RCP_SetupDL(&gMasterDisp, SETUPDL_78);
     gDPSetPrimColor(gMasterDisp++, 0, 0, 255, 255, 255, 255);
 
-    HUD_VS_ShieldGaugeTex_Draw(D_800D20E8[gPlayerNum] + 3.0f, D_800D20F8[gPlayerNum] + 18.0f, 1.0f, 1.0f,
+    HUD_VS_ShieldGaugeTex_Draw(x + 3.0f, y + 18.0f, 1.0f, 1.0f,
                                D_800D19E0[gPlayerNum]);
     RCP_SetupDL(&gMasterDisp, SETUPDL_76);
 
     gDPSetPrimColor(gMasterDisp++, 0, 0, 255, 255, 255, 255);
 
-    HUD_VS_ShieldGaugeFrame_Draw(D_800D20E8[gPlayerNum], D_800D20F8[gPlayerNum], 1.0f, 1.0f);
+    HUD_VS_ShieldGaugeFrame_Draw(x, y, 1.0f, 1.0f);
 }
 
 void HUD_BoostGauge_Draw(f32 xPos, f32 yPos) {
@@ -3092,6 +3117,10 @@ void HUD_BoostGauge_Draw(f32 xPos, f32 yPos) {
         sp60 = 1.0f;
         playerNum = gPlayerNum;
         sp68 = 24.0f;
+        if (HUD_VsFullView()) {
+            boostGaugeXpos[playerNum] = 270.0f;
+            boostGaugeYpos[playerNum] = 16.0f;
+        }
     } else {
         temp = 2.0f;
         sp60 = 2.0f;
@@ -3142,7 +3171,8 @@ void HUD_VS_PlayerNumber_Draw(void) {
     RCP_SetupDL(&gMasterDisp, SETUPDL_78);
     gDPSetPrimColor(gMasterDisp++, 0, 0, playerNumberR[gPlayerNum], playerNumberG[gPlayerNum],
                     playerNumberB[gPlayerNum], 255);
-    Graphics_DisplayHUDNumber(playerNumberXpos[gPlayerNum], playerNumberYpos[gPlayerNum], gPlayerNum + 1);
+    Graphics_DisplayHUDNumber(HUD_VsFullView() ? 298 : playerNumberXpos[gPlayerNum],
+                              HUD_VsFullView() ? 222 : playerNumberYpos[gPlayerNum], gPlayerNum + 1);
 }
 
 s32 sVsSavedBombCount[4] = { 0, 0, 0, 0 }; // Set but not used
@@ -3182,17 +3212,19 @@ void HUD_VS_BombCount_Draw(void) {
             D_800D21A4 = 255.0f;
         }
         gDPSetPrimColor(gMasterDisp++, 0, 0, 255, 255, 255, D_800D21A4);
-        HUD_VS_BombIcon_Draw(bombIconXpos[gPlayerNum], bombIconYpos[gPlayerNum], 1.0f, 1.0f);
+        HUD_VS_BombIcon_Draw(HUD_VsFullView() ? 298 : bombIconXpos[gPlayerNum],
+                             HUD_VsFullView() ? 208 : bombIconYpos[gPlayerNum], 1.0f, 1.0f);
     }
 }
 
 void HUD_VS_DrawHUD(void) {
 #ifdef TARGET_PSP
-    s16 left = (gPlayerNum & 1) * 160;
-    s16 top = (gPlayerNum >> 1) * 120;
-    s16 numberX = left + ((gPlayerNum & 1) ? 8 : 152);
-    s16 numberY = top + (gPlayerNum < 2 ? 114 : 8);
-    unsigned corner = ((gPlayerNum & 1) ? N64PSP_HUD_LEFT : N64PSP_HUD_RIGHT) |
+    bool full = HUD_VsFullView();
+    s16 left = full ? 160 : (gPlayerNum & 1) * 160;
+    s16 top = full ? 120 : (gPlayerNum >> 1) * 120;
+    s16 numberX = full ? 304 : left + ((gPlayerNum & 1) ? 8 : 152);
+    s16 numberY = full ? 230 : top + (gPlayerNum < 2 ? 114 : 8);
+    unsigned corner = full ? N64PSP_HUD_RIGHT | N64PSP_HUD_BOTTOM : ((gPlayerNum & 1) ? N64PSP_HUD_LEFT : N64PSP_HUD_RIGHT) |
                       (gPlayerNum < 2 ? N64PSP_HUD_BOTTOM : 0);
 #endif
     if (gVsMatchStart && !gVsMatchOver) {
@@ -3207,7 +3239,7 @@ void HUD_VS_DrawHUD(void) {
         HUD_VS_PlayerNumber_Draw();
 #ifdef TARGET_PSP
         HUD_PspVsWidgetEnd();
-        HUD_PspVsWidgetBegin(left + 142, top + 16, N64PSP_HUD_RIGHT);
+        HUD_PspVsWidgetBegin(left + 142, full ? 16 : top + 16, N64PSP_HUD_RIGHT);
 #endif
         HUD_BoostGauge_Draw(0, 0);
 #ifdef TARGET_PSP
@@ -3227,7 +3259,8 @@ void HUD_VS_DrawHUD(void) {
 
     if (!gVsMatchOver) {
 #ifdef TARGET_PSP
-        HUD_PspVsWidgetBegin(left + 140, top + 104, N64PSP_HUD_RIGHT | N64PSP_HUD_BOTTOM);
+        HUD_PspVsWidgetBegin(full ? 100 : left + 140, full ? 224 : top + 104,
+                            full ? N64PSP_HUD_LEFT | N64PSP_HUD_BOTTOM : N64PSP_HUD_RIGHT | N64PSP_HUD_BOTTOM);
 #endif
         HUD_KillCountStars_Update();
 #ifdef TARGET_PSP
@@ -3405,7 +3438,8 @@ void HUD_Radar(void) {
     if (gVersusMode) {
         HUD_VS_DrawHUD();
 #ifdef TARGET_PSP
-        HUD_PspLayoutBegin(HUD_PSP_ANCHOR_CENTER, 80 + (gPlayerNum & 1) * 160, 60 + (gPlayerNum >> 1) * 120);
+        HUD_PspLayoutBegin(HUD_PSP_ANCHOR_CENTER, HUD_VsFullView() ? 160 : 80 + (gPlayerNum & 1) * 160,
+                           HUD_VsFullView() ? 120 : 60 + (gPlayerNum >> 1) * 120);
 #endif
     }
     HUD_RadarMarks_Update();
@@ -3902,7 +3936,8 @@ void HUD_Draw(void) {
 
     if (gCamCount != 1) {
 #ifdef TARGET_PSP
-        HUD_PspLayoutBegin(HUD_PSP_ANCHOR_CENTER, 80 + (gPlayerNum & 1) * 160, 60 + (gPlayerNum >> 1) * 120);
+        HUD_PspLayoutBegin(HUD_PSP_ANCHOR_CENTER, HUD_VsFullView() ? 160 : 80 + (gPlayerNum & 1) * 160,
+                           HUD_VsFullView() ? 120 : 60 + (gPlayerNum >> 1) * 120);
 #endif
         HUD_VS_Radar();
 #ifdef TARGET_PSP
