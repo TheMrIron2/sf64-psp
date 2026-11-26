@@ -5,6 +5,9 @@
  */
 
 #include "global.h"
+#ifdef TARGET_PSP
+#include "src/psp/renderer.h"
+#endif
 #include "assets/ast_meteo.h"
 
 Vec3f D_i2_80195430[] = {
@@ -1721,6 +1724,9 @@ void Meteo_MeCrusher_Draw(MeCrusher* this) {
     }
 
     if ((this->state == 9) || (this->state == 10)) {
+#ifdef TARGET_PSP
+        unsigned repeat = PspRenderer_RepeatTextureBlock(aMeCrusherRingLaserDL, 8);
+#endif
         var_fs1 = this->fwork[15];
         for (i = 0; i < 10; i++) {
             var_fs1 += 0.3f;
@@ -1742,7 +1748,11 @@ void Meteo_MeCrusher_Draw(MeCrusher* this) {
                 }
 
                 Matrix_SetGfxMtx(&gMasterDisp);
+#ifdef TARGET_PSP
+                PSP_RENDERER_DL_TEXTURE_INSTANCE(gMasterDisp++, aMeCrusherRingLaserDL, i == 0 ? 0 : repeat);
+#else
                 gSPDisplayList(gMasterDisp++, aMeCrusherRingLaserDL);
+#endif
                 Matrix_Pop(&gGfxMatrix);
                 Matrix_Push(&gGfxMatrix);
                 Matrix_Translate(gGfxMatrix, -700.0f, 0.0f, -(1235.0f - ((var_fs0 - 1.0f) * 89.2f)), MTXF_APPLY);
@@ -1754,7 +1764,11 @@ void Meteo_MeCrusher_Draw(MeCrusher* this) {
                 }
 
                 Matrix_SetGfxMtx(&gMasterDisp);
+#ifdef TARGET_PSP
+                PSP_RENDERER_DL_TEXTURE_INSTANCE(gMasterDisp++, aMeCrusherRingLaserDL, repeat);
+#else
                 gSPDisplayList(gMasterDisp++, aMeCrusherRingLaserDL);
+#endif
                 Matrix_Pop(&gGfxMatrix);
             }
         }

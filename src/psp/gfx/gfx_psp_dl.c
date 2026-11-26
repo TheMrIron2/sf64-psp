@@ -6591,13 +6591,17 @@ static int psp_gfx_dl_run_internal(PspGfxDlContext* ctx, const Gfx* dl, u32 dept
 #endif
 #if PSP_GFX_BACKEND_GU
             if (PspGfxBackend_IsGu()) {
+                u32 texturePrefix = ((cmd->words.w0 & 0xFFF0u) == PSP_RENDERER_DL_REUSE_TEXTURE_TAG)
+                                        ? cmd->words.w0 & 0xFu : 0;
+
+                if (texturePrefix < 5 || texturePrefix > 8) texturePrefix = 0;
                 sRetainedContinuations[depth] = noPush ? NULL : (const n64psp_mesh_command*) pc;
                 sRetainedCallerLevels |= 1u << depth;
-                if (!psp_gfx_dl_retained_dispatch(ctx, child, depth + 1)) {
+                if (!psp_gfx_dl_retained_dispatch(ctx, child, depth + 1, texturePrefix)) {
                     if ((child == aVenomFighter1DL) && psp_gfx_dl_native_fighter_eligible(ctx, depth + 1)) {
                         psp_gfx_dl_native_fighter_run(ctx, depth + 1);
                     } else if (!psp_gfx_dl_native_leaf_dispatch(ctx, child, depth + 1)) {
-                        psp_gfx_dl_run_internal(ctx, child, depth + 1);
+                        psp_gfx_dl_run_internal(ctx, child + texturePrefix, depth + 1);
                     }
                 }
                 sRetainedCallerLevels &= ~(1u << depth);

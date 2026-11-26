@@ -16,6 +16,7 @@
 #include "src/psp/settings.h"
 #include "src/psp/overlay.h"
 
+#include <n64psp/trig.h>
 #include <pspkernel.h>
 #include <pspdebug.h>
 #include <stdint.h>
@@ -47,6 +48,85 @@ static int sPerfReady;
 #endif
 
 static int sRendererInitAttempted;
+
+extern float __sinf(float);
+extern float PspMath_AccurateVisualSine(float);
+
+static float psp_renderer_fast_visual_sine(float radians) {
+    int turns;
+    float sine, cosine;
+
+    if (!(radians >= -32768.0f && radians <= 32768.0f)) {
+        return __sinf(radians);
+    }
+    // The high part of two pi has an exact product across this range
+    turns = (int) (radians * 0.15915494309189535f);
+    radians = (radians - (float) turns * 6.28125f) - (float) turns * 0.0019353071795864769f;
+    n64psp_sincosf(radians, &sine, &cosine);
+    return sine;
+}
+
+PspVisualSine PspRenderer_GetVisualSine(void) {
+    if (!PspSettings_UseVisualSine()) {
+        return __sinf;
+    }
+    return PspSettings_UseFastGraphics() ? psp_renderer_fast_visual_sine : PspMath_AccurateVisualSine;
+}
+
+unsigned PspRenderer_RepeatTextureBlock(const Gfx* list, unsigned prefixCommands) {
+    enum { IMAGE = 1, RENDER_TILE = 2, LOAD_TILE = 4, TILE_SIZE = 8, LOAD = 16 };
+    unsigned i, seen = 0;
+
+    if (!PspSettings_ReuseTextureBlock() || prefixCommands < 5 || prefixCommands > 8) {
+        return 0;
+    }
+    for (i = 0; i < prefixCommands; i++) {
+        unsigned op = list[i].words.w0 >> 24;
+        unsigned tile = (list[i].words.w1 >> 24) & 7;
+        unsigned command;
+
+        switch (op) {
+            case G_RDPTILESYNC:
+            case G_RDPLOADSYNC:
+            case G_RDPPIPESYNC:
+                continue;
+            case G_SETTIMG:
+                command = IMAGE;
+                break;
+            case G_SETTILE:
+                if (tile != G_TX_RENDERTILE && tile != G_TX_LOADTILE) {
+                    return 0;
+                }
+                command = tile == G_TX_RENDERTILE ? RENDER_TILE : LOAD_TILE;
+                break;
+            case G_SETTILESIZE:
+                if (tile != G_TX_RENDERTILE) {
+                    return 0;
+                }
+                command = TILE_SIZE;
+                break;
+            case G_LOADBLOCK:
+                if (tile != G_TX_LOADTILE || !(seen & IMAGE) || !(seen & LOAD_TILE)) {
+                    return 0;
+                }
+                command = LOAD;
+                break;
+            default:
+                return 0;
+        }
+        if (seen & command) {
+            return 0;
+        }
+        seen |= command;
+    }
+    if (seen != (IMAGE | RENDER_TILE | LOAD_TILE | TILE_SIZE | LOAD) ||
+        list[i].words.w0 >> 24 != (u8) G_VTX ||
+        (list[i + 1].words.w0 >> 24 != (u8) G_TRI1 && list[i + 1].words.w0 >> 24 != (u8) G_TRI2) ||
+        list[i + 2].words.w0 >> 24 != (u8) G_ENDDL) {
+        return 0;
+    }
+    return i;
+}
 
 static int psp_renderer_draw_overlays(int menuFrame) {
     char text[96];

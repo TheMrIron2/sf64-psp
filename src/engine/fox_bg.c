@@ -800,7 +800,7 @@ void Background_DrawBackdrop(void) {
                                 }
                             }
                             Matrix_Translate(gGfxMatrix, bgXpos - 120.0f, -(bgYpos - 120.0f), -290.0f, MTXF_APPLY);
-                            Matrix_Scale(gGfxMatrix, bgScale * 0.75, bgScale * 0.75f, 1.0f, MTXF_APPLY);
+                            Matrix_Scale(gGfxMatrix, bgScale * 0.75f, bgScale * 0.75f, 1.0f, MTXF_APPLY);
                             Matrix_SetGfxMtx(&gMasterDisp);
                             gSPDisplayList(gMasterDisp++, aA6BackdropDL);
                             break;

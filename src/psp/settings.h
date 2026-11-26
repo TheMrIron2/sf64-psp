@@ -16,6 +16,8 @@ typedef enum {
 } PspGeLightingMode;
 
 int PspSettings_UseFastGraphics(void);
+int PspSettings_UseVisualSine(void);
+int PspSettings_ReuseTextureBlock(void);
 PspGeLightingMode PspSettings_GetGeLighting(void);
 int PspSettings_UseGeSideClip(void);
 int PspSettings_PrepareGePersistentVertices(void);

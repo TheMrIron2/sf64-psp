@@ -1293,14 +1293,14 @@ copy. The host Ad-Hoc fixture now asserts the worker attribute.
 ## Retained GE and matrix interpolation trials — 24 November 2026
 
 The unified EBOOT reads the following optional keys in `sf64-settings.cfg`
-beside the executable. The three GE keys apply to Fast GU graphics. Each
-lighting and clipping setting can be compared against its own control.
+beside the executable. The three GE keys apply to Fast GU graphics. The
+table gives the current defaults after hardware and visual acceptance.
 
 | Key | Values | Default |
 | --- | --- | --- |
-| `ge_lighting` | `off`, `diffuse`, `powered` | `off` |
+| `ge_lighting` | `off`, `diffuse`, `powered` | `powered` |
 | `ge_side_clip` | `off`, `on` | `off` |
-| `ge_persistent_vertices` | `off`, `on` with GE lighting | `off` |
+| `ge_persistent_vertices` | `off`, `on` with GE lighting | `on` |
 | `matrix_lerp` | `scalar`, `vfpu` | `scalar` |
 
 For GE lighting, use the existing one- and two-direction groups. Apply the
@@ -1579,3 +1579,220 @@ Fast GU functional check submitted 126 audio blocks in Async with ME
 mixer ownership and 126 in Sync with Allegrex ownership. Off submitted
 zero blocks. The audio output error count stayed unchanged.
 [Consolidation captures and commands](../build/experiments/me-consolidation/)
+
+## Andross brain and repeated segment lists — 26 November 2026
+
+A fixed-seed PSP run at 60 Hz with Async audio measured 59.57 FPS in the
+first phase and 32.15 FPS in the brain phase. Mean frontend time rose from
+13.80 to 21.14 ms and list generation from 1.27 to 8.58 ms. Simulation
+update fell from 1.24 to 0.61 ms and mean GU submission stayed below
+0.13 ms. The brain emits 30 runs of ten camera-facing quads.
+
+The tentacle loop took 7.60 ms. Ten sampled wave evaluations on the first
+tentacle took 221 µs, compared with 30 µs for the two rotations, 30 µs for
+the push and translation, and 29 µs for the matrix and list emission.
+The original sine reduces its input and evaluates a polynomial using
+software double arithmetic on Allegrex. The matrix commands use the
+existing float copy and history record followed by a direct modelview
+load in the frontend. A diagnostic substituted no-ops for only the 300 segment
+lists and left their matrix loads, stack work and interpolation in place.
+Mean frontend time fell to 11.22 ms with 359 matrix commands in both captures.
+That ablation isolated the cost of material setup, vertex processing and
+triangle dispatch together.
+
+The GU draw path now reuses the texture-block setup within each run of
+identical immutable segments. The first segment establishes the material.
+A bounded check of the texture prefix and geometry suffix qualifies the
+later calls. The renderer keeps the original list identity for retained
+admission and skips repeated material setup in both the retained and
+generic paths. A change of material,
+including the end of each tentacle, uses the full list again. This removes
+1,680 repeated RDP commands per brain draw while keeping vertex loads,
+slot writes, clipping, order, depth, alpha and per-segment interpolation.
+The Zoness crane, magnet and spike-ball chain loops use the same check
+and retain their existing mesh admission. The tentacle's primitive
+modulation falls back to generic vertex and triangle dispatch.
+
+Fast GU also reduces the original floating-point wave angle with split
+constants and uses the existing VFPU sine. The original comparison used
+the legacy sine in Accurate GU and PSPGL. The physical PSP sweep measured a maximum observed
+sine error of 0.000061 across 36,001 integer-degree phases and 262,145
+samples across the reduction range. Sampled out-of-range calls matched
+the original sine, which handles those inputs directly. The approximation
+only affects the draw pose.
+
+Both changes are on by default where supported. Use
+`repeat_texture_block=off` to control texture reuse in either GU quality
+and `visual_sine=off` to control the Fast GU wave. Fast GU now defaults
+to powered lighting and persistent vertices. Existing settings can
+override both defaults. Relaxed side clipping stays off.
+
+In the independent moving Zoness crane window, Accurate GU retained the
+same mesh admission and clipping counts. Reuse removed 40 commands per
+affected presentation across 296 of 420 frames. Over that affected
+subset the mean GFX saving was 0.046 ms. Across the full window, delivery
+held at 59.87 FPS and mean GFX was 13.27 ms on control and 13.25 ms with
+reuse. The matched end frame differed only in the performance overlay.
+
+The timing runs used one PRX, fixed seeds and normal Async audio. Both
+brain arms covered the same 210-tick moving window after the harness
+advanced the fight. Fast used powered lighting, persistent vertices,
+scalar matrix lerp and conservative clipping in both arms.
+
+| Scene and setting | Delivered FPS | Frontend ms | GFX ms | List generation ms | Present p95 / p99 ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Andross first phase, 60 Hz control | 59.33 | 13.93 | 14.01 | 1.29 | 20.45 / 20.88 |
+| Andross first phase, 60 Hz enabled | 59.33 | 13.93 | 14.01 | 1.30 | 20.38 / 20.94 |
+| Andross brain, 60 Hz control | 31.88 | 21.37 | 21.49 | 8.52 | 38.67 / 51.60 |
+| Andross brain, 60 Hz texture reuse only | 37.03 | 18.13 | 18.24 | 8.56 | 34.51 / 38.21 |
+| Andross brain, 60 Hz enabled | 46.15 | 18.26 | 18.37 | 2.31 | 28.24 / 32.68 |
+| Andross brain, 30 Hz control | 29.42 | 21.53 | 21.64 | 7.97 | 38.58 / 47.25 |
+| Andross brain, 30 Hz enabled | 30.08 | 17.98 | 18.08 | 2.15 | 33.68 / 34.56 |
+| Zoness, Accurate 60 Hz control | 59.87 | 13.15 | 13.27 | 0.81 | 20.74 / 22.28 |
+| Zoness, Accurate 60 Hz reuse | 59.87 | 13.13 | 13.25 | 0.80 | 20.70 / 22.19 |
+
+The texture-only arm confirms that material reuse accounts for about
+3.2 ms of frontend savings with the original game-side wave. The wave
+accounts for the separate list-generation gain. The remaining generic
+quad work puts mean GFX above one refresh period in the brain fight
+at 60 Hz.
+
+The active ME mixer submitted audio in each run. Both main arms at 30
+and 60 Hz recorded zero audio output errors and five cumulative
+starvations since boot. The baseline first phase matched the delivered
+rate and mean GFX time with both changes enabled.
+
+The unified, GU-only and PSPGL-only builds passed, along with the
+retained generator and n64psp host tests. The unified release PRX booted
+in Accurate GU, Fast GU and Fast PSPGL. The Fast GU boot confirmed
+powered lighting and persistent vertices with side clipping off.
+
+The separate 30 Hz visual run compared 18 matched poses. Sixteen pairs
+differed by at most ten pixels outside the FPS overlay. The other two
+included larger differences in the introductory effects and radio
+window. The captured tentacle motion, silhouettes and colour matched
+visually. Framebuffer export ran separately from the timing tests.
+
+For a manual PSP check, enter the Venom 2 brain encounter in Fast GU with
+audio enabled and switch between 30 and 60 Hz in the PSP menu. Watch the
+tentacles during the reveal and camera turn. In Accurate GU, the same
+fight uses texture reuse with the original wave calculation.
+
+[Raw captures](../build/experiments/andross-brain/captures/) ·
+[Matched PSP frames](../build/experiments/andross-brain/captures-visual/compare-144.png) ·
+[Commands](../build/experiments/andross-brain/commands.txt)
+
+### Follow-up on repeated draw work
+
+Checking the linked PSP call sites confirmed that `SIN_DEG` and `COS_DEG`
+enter software-double implementations even though the game passes floats.
+The Andross wave is the strongest confirmed render-side instance at 300
+calls per draw. The Zoness spike-ball chain has up to 50 sine/cosine pairs
+per draw, and the Katina enemy wobble calls sine on its conditional draw
+path. The starfield computes one pair outside its star loop. The linked
+build also confirmed implicit promotion in title-card drawing and in
+water-spray velocity setup. Those sites, simulation and weapon maths
+keep their original arithmetic.
+
+Accurate GU now evaluates the original Andross wave polynomial with
+single-precision Allegrex operations. Split-constant range reduction
+covers radians in ±8,192 and the original routine handles other inputs.
+Fast GU keeps its accepted VFPU implementation and PSPGL uses the
+original sine. `visual_sine=off` selects the original routine in either
+GU quality. The host sweep compared 1,085,889 values including both
+in-game bend rates and observed a maximum absolute difference of
+1.20e-7.
+
+Meteo's crusher beam uses the existing qualified-leaf path for subsequent
+rings while preserving each ring's colour, matrix, geometry and order.
+`repeat_texture_block=off` selects the full list. The Area 6 Gorgon
+limb has another load inside its geometry, and the silver ring and
+checkpoint leaves manage palettes. Those cases need different state
+proofs and keep their full lists.
+
+The PSP sweep reproduced the host error bound and found zero differences
+on the sampled out-of-range calls. Disassembly shows single-precision
+instructions throughout the in-range path. The same-binary timing runs
+used 60 Hz and Async audio.
+
+| Workload | Delivered FPS | Mean GFX ms | List generation ms | Present p95 / p99 ms |
+| --- | ---: | ---: | ---: | ---: |
+| Accurate Andross brain, legacy → single precision | 34.49 → 42.30 | 20.59 → 20.53 | 7.76 → 2.35 | 34.34 / 38.57 → 30.36 / 32.82 |
+| Accurate Meteo ring phase, original → reuse | 59.49 → 59.72 | 13.10 → 12.84 | 1.26 → 1.28 | 20.26 / 20.69 → 20.32 / 20.72 |
+
+The matched Andross end frame differed only in the FPS overlay and radio
+portrait. The first-phase mean frontend stayed within 0.06 ms. The Meteo
+harness advanced the initialized boss to its ring phase and let it run.
+At the busiest matched frames, reuse removed 152 commands. The Meteo
+end framebuffer differed only in the FPS overlay. Both workloads had
+active ME audio with zero output errors.
+
+The Bolse ground trial skipped identical loads between consecutive
+visible tiles. It saved about 28 commands per presentation, but both
+run orders gave slower whole graphics tasks. The original and reverse
+controls measured 25.44 and 25.54 ms. Reuse measured 25.76 and 25.84 ms.
+The trial was removed. In Meteo, affected matched frames across three
+parts of the existing capture saved 0.36, 0.48 and 0.06 ms of mean GFX
+time, respectively. The full-window mean improved by 0.26 ms at the
+refresh cap, so ring reuse stays enabled.
+
+### PSP floating-point diagnostics
+
+The PSP build enables `-Wdouble-promotion` and `-Wfloat-conversion`
+as warnings. The pre-experiment build emitted 77 and 1,600 respectively.
+Of the latter, 1,050 came from asset initializers. Many other conversions
+are deliberate integer packing, quantization or game thresholds. For
+example, matrix conversion truncates to the N64 fixed-point format, and
+the fault screen correctly promotes float registers for printf. The
+legacy sine and cosine do most of their work in explicit double locals.
+Their cost is visible in disassembly even without a promotion warning.
+
+The water-spray effect now multiplies its particle Z velocity by
+`0.6f`, matching the precision of the X component. It uses this
+velocity for the sprite's motion and fade, with no collision, damage or
+player movement dependency. The PSP sweep over velocities within ±204.8
+measured a maximum difference of 7.63e-6. The Area 6 backdrop uses the exact
+single-precision literal `0.75f` on both axes. GCC had already
+lowered that dyadic multiplication without double helpers.
+
+An opt-in `-fsingle-precision-constant` object comparison covered
+20 translation units selected from the warning and linked-call
+inventories. Static software-double helper relocations fell from 218
+to 58, including six across water-spray setup and its inlined caller,
+30 in the Katina opening, ten in Arwing shot setup and six in the
+legacy perspective builder. The flag also changes gameplay threshold
+comparisons and audio calculations. Neither legacy trig routine
+lost a double helper. The flag rounds their unsuffixed constants before
+double argument reduction, so these routines require explicit protection
+in any translation-unit experiment. The PSP and host both measured
+maximum sine and cosine differences of about 0.000311 through ±8,192
+radians and 1.898 at inputs near 100 million radians.
+[GCC optimisation options](https://gcc.gnu.org/onlinedocs/gcc/Optimize-Options.html#index-fsingle-precision-constant)
+
+The hardware opt-in trial scoped the flag to `fox_bg.c` and
+`fox_effect.c`, preserving the legacy trig and projection routines.
+The fixed-seed low-altitude Zoness comparison measured 50.77 FPS and
+16.53 ms mean GFX in both arms, with Async audio. Direct linked helper
+calls and tail calls fell from 468 to 460. The end framebuffer matched
+outside the performance overlay and both arms recorded zero audio output
+errors. The release uses the explicit literal corrections and the
+diagnostic warnings.
+
+The cosine prototype shares the float sine polynomial and reduces to the
+nearest half-integer multiple of pi. The legacy cosine handles arguments
+outside the same ±8,192-radian interval. This avoids adding pi/2 to a large
+input before reduction. The PSP sweep measured a maximum absolute legacy
+error of 1.2e-7 and zero sampled fallback mismatches for the protected
+sine and cosine. The existing n64psp VFPU kernel converts radians
+to quarter-turn units with 2/pi, so one full turn is 4. The Fast Andross
+path reduces the input before that conversion. Its observed error suits
+the Fast bend, while the scalar versions meet the tighter Accurate bound.
+The Zoness spike-ball chain is a candidate for a shared visual sine/cosine
+pair. Andross's backdrop samples only 32 discrete phases, and its integer
+texture offsets are suited to an exact table rather than an approximation.
+The release adds no new cosine caller or n64psp API.
+
+[Captures and comparison commands](../build/experiments/render-repetition/) ·
+[Warning inventory](../build/experiments/render-repetition/fp-probe/warnings-original.txt) ·
+[Assembly comparison](../build/experiments/render-repetition/fp-probe/relocation-summary.txt) ·
+[PSP numerical results](../build/experiments/render-repetition/fp-probe/numeric-psp.txt)

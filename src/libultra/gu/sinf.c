@@ -194,3 +194,28 @@ float fsin(float x) {
     return (zero.f);
 #endif
 }
+
+#ifdef TARGET_PSP
+float PspMath_AccurateVisualSine(float radians) {
+    float turns, square, polynomial;
+    int halfTurns;
+
+    if (!(radians >= -8192.0f && radians <= 8192.0f)) {
+        return __sinf(radians);
+    }
+    if (radians >= -0x1p-12f && radians <= 0x1p-12f) {
+        return radians;
+    }
+
+    turns = radians * 0.31830988618379067f;
+    halfTurns = (int) (turns + (turns < 0.0f ? -0.5f : 0.5f));
+    turns = (float) halfTurns;
+    // The rounded high part of pi has an exact product across this range
+    radians = (radians - turns * 3.1416015625f) + turns * 8.90891020676154e-6f;
+    square = radians * radians;
+    polynomial = (((2.5907305e-6f * square - 1.9515296e-4f) * square + 8.3321609e-3f) * square) -
+                 1.6666655e-1f;
+    radians += (radians * square) * polynomial;
+    return (halfTurns & 1) ? -radians : radians;
+}
+#endif

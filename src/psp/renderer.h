@@ -89,9 +89,18 @@
 #define PSP_RENDERER_DL_INVALIDATE_RGBA16(pkt, texture) \
     gImmp1((pkt), PSP_RENDERER_DL_OP_INVALIDATE_RGBA16, (texture))
 
+#define PSP_RENDERER_DL_REUSE_TEXTURE_TAG 0x5250u
+#define PSP_RENDERER_DL_TEXTURE_INSTANCE(pkt, list, repeat) \
+    gDma1p((pkt), G_DL, (list), (repeat) ? PSP_RENDERER_DL_REUSE_TEXTURE_TAG | (repeat) : 0, G_DL_PUSH)
+
 void PspRenderer_Init(void);
 int PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex);
 void PspRenderer_RecordSimulationTicks(u32 ticks);
+typedef float (*PspVisualSine)(float radians);
+PspVisualSine PspRenderer_GetVisualSine(void);
+
+// Use for immutable leaves with only modelview changes between instances
+unsigned PspRenderer_RepeatTextureBlock(const Gfx* list, unsigned prefixCommands);
 
 int PspRenderer_HistoryHudCacheReady(void);
 void PspRenderer_HistoryHudCacheInvalidate(void);

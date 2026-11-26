@@ -5,6 +5,9 @@
  */
 
 #include "global.h"
+#ifdef TARGET_PSP
+#include "src/psp/renderer.h"
+#endif
 #include "assets/ast_enmy_planet.h"
 #include "assets/ast_zoness.h"
 
@@ -3738,6 +3741,9 @@ void Zoness_ZoCraneMagnet_Draw(ZoCraneMagnet* this) {
     f32 var_fv0;
     s32 i;
     s32 j;
+#ifdef TARGET_PSP
+    unsigned chainRepeat;
+#endif
 
     Matrix_Scale(gGfxMatrix, 2.0f, 2.0f, 2.0f, MTXF_APPLY);
     Matrix_SetGfxMtx(&gMasterDisp);
@@ -3763,13 +3769,21 @@ void Zoness_ZoCraneMagnet_Draw(ZoCraneMagnet* this) {
         i = 1;
     }
 
+#ifdef TARGET_PSP
+    chainRepeat = PspRenderer_RepeatTextureBlock(D_ZO_6018660, 8);
+#endif
+
     for (j = 0; j < i; j++) {
         Matrix_Translate(gGfxMatrix, 0.0f, 30.0f, 0.0f, MTXF_APPLY);
         Matrix_RotateY(gGfxMatrix, M_PI / 2, MTXF_APPLY);
         Matrix_Push(&gGfxMatrix);
         Matrix_Scale(gGfxMatrix, 0.75f, 0.75f, 0.75f, MTXF_APPLY);
         Matrix_SetGfxMtx(&gMasterDisp);
+#ifdef TARGET_PSP
+        PSP_RENDERER_DL_TEXTURE_INSTANCE(gMasterDisp++, D_ZO_6018660, j == 0 ? 0 : chainRepeat);
+#else
         gSPDisplayList(gMasterDisp++, D_ZO_6018660);
+#endif
         Matrix_Pop(&gGfxMatrix);
     }
 }
@@ -3936,6 +3950,9 @@ void Zoness_ZoSpikeBall_Draw(ZoSpikeBall* this) {
     s32 i;
     f32 sp94;
     s32 var_s4;
+#ifdef TARGET_PSP
+    unsigned chainRepeat;
+#endif
 
     Matrix_Pop(&gGfxMatrix);
     Matrix_Push(&gGfxMatrix);
@@ -3965,6 +3982,10 @@ void Zoness_ZoSpikeBall_Draw(ZoSpikeBall* this) {
 
         sp94 = (180.0f / var_s4) + 1.0f;
 
+#ifdef TARGET_PSP
+        chainRepeat = PspRenderer_RepeatTextureBlock(D_ZO_6018660, 8);
+#endif
+
         for (i = 0; i < var_s4; i++) {
             temp_fs1_2 = SIN_DEG(i * sp94) * this->fwork[5];
             temp_fs0_4 = COS_DEG(i * sp94) * this->fwork[5] * -0.25f;
@@ -3977,7 +3998,11 @@ void Zoness_ZoSpikeBall_Draw(ZoSpikeBall* this) {
             Matrix_RotateX(gGfxMatrix, M_PI / 2, MTXF_APPLY);
             Matrix_Scale(gGfxMatrix, 1.5f, 1.5f, 1.5f, MTXF_APPLY);
             Matrix_SetGfxMtx(&gMasterDisp);
+#ifdef TARGET_PSP
+            PSP_RENDERER_DL_TEXTURE_INSTANCE(gMasterDisp++, D_ZO_6018660, i == 0 ? 0 : chainRepeat);
+#else
             gSPDisplayList(gMasterDisp++, D_ZO_6018660);
+#endif
             Matrix_Pop(&gGfxMatrix);
             Matrix_Pop(&gGfxMatrix);
             var_fs5 += 90.0f;
@@ -4488,6 +4513,9 @@ void Zoness_ZoSupplyCrane_Draw(ZoSupplyCrane* this) {
     f32 var_fv1;
     s32 i;
     s32 var_s1;
+#ifdef TARGET_PSP
+    unsigned chainRepeat;
+#endif
 
     Matrix_Push(&gGfxMatrix);
     Matrix_RotateZ(gGfxMatrix, this->fwork[0] * M_DTOR, MTXF_APPLY);
@@ -4526,13 +4554,21 @@ void Zoness_ZoSupplyCrane_Draw(ZoSupplyCrane* this) {
         var_s1 = 1;
     }
 
+#ifdef TARGET_PSP
+    chainRepeat = PspRenderer_RepeatTextureBlock(D_ZO_6018660, 8);
+#endif
+
     for (i = 0; i < var_s1; i++) {
         Matrix_Translate(gGfxMatrix, 0.0f, 9.3f, 0.0f, MTXF_APPLY);
         Matrix_RotateY(gGfxMatrix, M_PI / 2, MTXF_APPLY);
         Matrix_Push(&gGfxMatrix);
         Matrix_Scale(gGfxMatrix, 0.5f, 0.5f, 0.5f, MTXF_APPLY);
         Matrix_SetGfxMtx(&gMasterDisp);
+#ifdef TARGET_PSP
+        PSP_RENDERER_DL_TEXTURE_INSTANCE(gMasterDisp++, D_ZO_6018660, i == 0 ? 0 : chainRepeat);
+#else
         gSPDisplayList(gMasterDisp++, D_ZO_6018660);
+#endif
         Matrix_Pop(&gGfxMatrix);
     }
 }

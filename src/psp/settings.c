@@ -24,6 +24,8 @@ static PspGeLightingMode sGeLighting;
 static int sGeSideClip;
 static int sGePersistentVertices;
 static int sVfpuMatrixLerp;
+static int sVisualSine;
+static int sReuseTextureBlock;
 static char sExtraSettings[384];
 
 static int sDisplayMode = -1;
@@ -75,10 +77,12 @@ static int psp_settings_read(const char* path) {
     char data[512], extras[sizeof(sExtraSettings)];
     PspGfxBackendKind backend = sGraphicsBackend;
     PspGraphicsQuality quality = PSP_GRAPHICS_ACCURATE;
-    PspGeLightingMode geLighting = PSP_GE_LIGHTING_OFF;
+    PspGeLightingMode geLighting = PSP_GE_LIGHTING_POWERED;
     int geSideClip = 0;
-    int gePersistentVertices = 0;
+    int gePersistentVertices = 1;
     int vfpuMatrixLerp = 0;
+    int visualSine = 1;
+    int reuseTextureBlock = 1;
     unsigned version = 0, seenBackend = 0, seenQuality = 0, extraBytes = 0, i, begin;
     SceUID fd = sceIoOpen(path, PSP_O_RDONLY, 0);
     int bytes;
@@ -120,6 +124,10 @@ static int psp_settings_read(const char* path) {
                 gePersistentVertices = psp_settings_equal(data + begin + sizeof("ge_persistent_vertices=") - 1, "on");
             } else if (psp_settings_prefix(data + begin, "matrix_lerp=")) {
                 vfpuMatrixLerp = psp_settings_equal(data + begin + sizeof("matrix_lerp=") - 1, "vfpu");
+            } else if (psp_settings_prefix(data + begin, "visual_sine=")) {
+                visualSine = psp_settings_equal(data + begin + sizeof("visual_sine=") - 1, "on");
+            } else if (psp_settings_prefix(data + begin, "repeat_texture_block=")) {
+                reuseTextureBlock = psp_settings_equal(data + begin + sizeof("repeat_texture_block=") - 1, "on");
             }
             psp_settings_copy(extras + extraBytes, data + begin, length);
             extraBytes += length;
@@ -134,6 +142,8 @@ static int psp_settings_read(const char* path) {
     sGeSideClip = geSideClip;
     sGePersistentVertices = gePersistentVertices;
     sVfpuMatrixLerp = vfpuMatrixLerp;
+    sVisualSine = visualSine;
+    sReuseTextureBlock = reuseTextureBlock;
     psp_settings_copy(sExtraSettings, extras, extraBytes + 1);
     return 1;
 }
@@ -198,10 +208,12 @@ void PspSettings_Init(const char* executablePath, PspGfxBackendKind buildDefault
     sBackendSaveFailed = 0;
     sRecoveredBackup = 0;
     sGraphicsQuality = PSP_GRAPHICS_ACCURATE;
-    sGeLighting = PSP_GE_LIGHTING_OFF;
+    sGeLighting = PSP_GE_LIGHTING_POWERED;
     sGeSideClip = 0;
-    sGePersistentVertices = 0;
+    sGePersistentVertices = 1;
     sVfpuMatrixLerp = 0;
+    sVisualSine = 1;
+    sReuseTextureBlock = 1;
     sQualityPending = 0;
     sExtraSettings[0] = 0;
     if (!psp_settings_suffix(backup, ".bak") || !psp_settings_suffix(temporary, ".tmp")) {
@@ -217,6 +229,14 @@ void PspSettings_Init(const char* executablePath, PspGfxBackendKind buildDefault
 int PspSettings_UseFastGraphics(void) {
     return sActiveGraphicsBackend == PSP_GFX_KIND_GU &&
            sActiveGraphicsQuality == PSP_GRAPHICS_FAST;
+}
+
+int PspSettings_UseVisualSine(void) {
+    return sVisualSine && sActiveGraphicsBackend == PSP_GFX_KIND_GU;
+}
+
+int PspSettings_ReuseTextureBlock(void) {
+    return sReuseTextureBlock && sActiveGraphicsBackend == PSP_GFX_KIND_GU;
 }
 
 PspGeLightingMode PspSettings_GetGeLighting(void) {

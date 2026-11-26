@@ -1,6 +1,9 @@
 
 // #include "prevent_bss_reordering.h"
 #include "global.h"
+#ifdef TARGET_PSP
+#include "src/psp/renderer.h"
+#endif
 #include "assets/ast_venom_2.h"
 #include "assets/ast_andross.h"
 #include "assets/ast_arwing.h"
@@ -1327,6 +1330,12 @@ void Andross_AndBrain_Draw(AndBrain* this) {
     s32 pad;
     Vec3f spAC;
     Vec3f spA0;
+#ifdef TARGET_PSP
+    unsigned tentacleRepeat;
+    PspVisualSine visualSine = PspRenderer_GetVisualSine();
+
+    tentacleRepeat = PspRenderer_RepeatTextureBlock(aVe2AndBrainTentacleDL, 7);
+#endif
 
     if (this->state != 21) {
         Matrix_RotateZ(gGfxMatrix, -(f32) gGameFrameCount * 20.0f * M_DTOR, MTXF_APPLY);
@@ -1358,8 +1367,15 @@ void Andross_AndBrain_Draw(AndBrain* this) {
             Matrix_RotateY(gGfxMatrix, M_DTOR * -this->obj.rot.y - gPlayer[0].camYaw, MTXF_APPLY);
 
             for (j = 0; j < 10; j++) {
+                s32 phase = (s32) this->fwork[19] * (i * 10 + j) + (gGameFrameCount * 5);
+
                 Matrix_Translate(gGfxMatrix, 0.0f, -10.0f, 0.0f, MTXF_APPLY);
-                temp = SIN_DEG((s32) this->fwork[19] * (i * 10 + j) + (gGameFrameCount * 5)) * this->fwork[10];
+#ifdef TARGET_PSP
+                temp = visualSine(M_DTOR * phase);
+#else
+                temp = SIN_DEG(phase);
+#endif
+                temp *= this->fwork[10];
                 Matrix_RotateZ(gGfxMatrix, (this->fwork[18] + temp) * M_DTOR, MTXF_APPLY);
                 Matrix_RotateX(gGfxMatrix, this->fwork[17] * M_DTOR, MTXF_APPLY);
                 Matrix_Push(&gGfxMatrix);
@@ -1368,7 +1384,11 @@ void Andross_AndBrain_Draw(AndBrain* this) {
                 if (j == 9) {
                     gSPDisplayList(gMasterDisp++, aVe2AndBrainTentacleTipDL);
                 } else {
+#ifdef TARGET_PSP
+                    PSP_RENDERER_DL_TEXTURE_INSTANCE(gMasterDisp++, aVe2AndBrainTentacleDL, j == 0 ? 0 : tentacleRepeat);
+#else
                     gSPDisplayList(gMasterDisp++, aVe2AndBrainTentacleDL);
+#endif
                 }
                 Matrix_Pop(&gGfxMatrix);
             }

@@ -1105,7 +1105,7 @@ void Effect_WaterSpray_Setup(EffectWaterSpray* this, f32 xPos, f32 unused_posY, 
     this->scale1 = scale1;
     this->obj.rot.y = yRot;
     this->vel.x = gPlayer[0].vel.x * 0.6f;
-    this->vel.z = gPlayer[0].vel.z * 0.6; // Forgotten f means bad codegen
+    this->vel.z = gPlayer[0].vel.z * 0.6f;
     Object_SetInfo(&this->info, this->obj.id);
 }
 

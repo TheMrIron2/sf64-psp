@@ -233,7 +233,8 @@ static __attribute__((noinline)) void psp_gfx_dl_retained_material(PspGfxDlConte
 }
 
 static void psp_gfx_dl_retained_draw(PspGfxDlContext* ctx, u8* stream, int discard,
-                                    const PspGfxRetainedProgram* program, const PspGfxGuMeshLighting* lighting) {
+                                    const PspGfxRetainedProgram* program, const PspGfxGuMeshLighting* lighting,
+                                    u32 texturePrefix) {
     u32 i;
     PspGfxDlFogProjection fogProjection;
     float fogColor[4], fogStart, fogEnd;
@@ -246,7 +247,7 @@ static void psp_gfx_dl_retained_draw(PspGfxDlContext* ctx, u8* stream, int disca
     for (i = 0; i < program->count; i++) {
         const n64psp_mesh_span* span = &program->spans[i];
         u32 vertexFirst, vertexCount, indexFirst, indexCount;
-        psp_gfx_dl_retained_material(ctx, &span->material);
+        if (!texturePrefix) psp_gfx_dl_retained_material(ctx, &span->material);
         if (!span->count) continue;
         vertexFirst = span->vertex_first;
         vertexCount = span->vertex_count;
@@ -326,7 +327,8 @@ static void psp_gfx_dl_retained_draw(PspGfxDlContext* ctx, u8* stream, int disca
 
 }
 
-static __attribute__((noinline)) int psp_gfx_dl_retained_dispatch(PspGfxDlContext* ctx, const Gfx* child, u32 depth) {
+static __attribute__((noinline)) int psp_gfx_dl_retained_dispatch(PspGfxDlContext* ctx, const Gfx* child, u32 depth,
+                                                                 u32 texturePrefix) {
     void* stream = NULL;
     const PspGfxRetainedProgram* program;
     const PspGfxGuMeshLighting* lighting;
@@ -417,12 +419,17 @@ static __attribute__((noinline)) int psp_gfx_dl_retained_dispatch(PspGfxDlContex
         }
     }
 
-    ctx->stats.commandCount += sRetainedCache->mesh.command_count;
+    // A retained program ends with a state only span
+    if (texturePrefix && (program->count != 2 || program->spans[1].material.flags ||
+                          texturePrefix >= sRetainedCache->mesh.command_count)) {
+        texturePrefix = 0;
+    }
+    ctx->stats.commandCount += sRetainedCache->mesh.command_count - texturePrefix;
 
     discard = PspGfxRetainedSource_OutputsDead(slot, depth,
         PSP_GFX_DL_MAX_COMMANDS - ctx->stats.commandCount);
     if (discard) sRetainedStats.skipped += sRetainedWrites[slot].count;
-    psp_gfx_dl_retained_draw(ctx, stream, discard, program, lighting);
+    psp_gfx_dl_retained_draw(ctx, stream, discard, program, lighting, texturePrefix);
     sRetainedStats.fallbacks--;
     sRetainedStats.hits++;
     sRetainedStats.spans += sRetainedCache->mesh.span_count;

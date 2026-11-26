@@ -223,7 +223,7 @@ PSP_WARNINGS += -Wno-sign-compare -Wno-uninitialized
 QUIET_DECOMP ?= 1
 
 define source_warning_flags
-$(if $(filter src/psp/%,$<),$(PSP_WARNINGS),$(if $(filter 1,$(QUIET_DECOMP)),-w,$(PSP_WARNINGS)))
+$(if $(filter src/psp/%,$<),$(PSP_WARNINGS),$(if $(filter 0,$(QUIET_DECOMP)),$(PSP_WARNINGS)))
 endef
 
 PSP_OPTFLAGS ?= -O2 # -ffast-math
@@ -303,6 +303,7 @@ CFLAGS := -std=gnu89 -G0 -DPSP -D__PSP__ -D_PSP_FW_VERSION=600
 CFLAGS += $(PSP_OPTFLAGS) -g3
 CFLAGS += $(PSP_GFX_BACKEND_CFLAGS)
 CFLAGS += -fno-builtin -fno-common -fno-strict-aliasing
+CFLAGS += -Wdouble-promotion -Wfloat-conversion
 CFLAGS += -fwrapv -funsigned-char
 CFLAGS += -ffunction-sections -fdata-sections
 CFLAGS += -fno-exceptions -fno-unwind-tables
