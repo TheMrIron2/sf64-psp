@@ -1796,3 +1796,193 @@ The release adds no new cosine caller or n64psp API.
 [Warning inventory](../build/experiments/render-repetition/fp-probe/warnings-original.txt) ·
 [Assembly comparison](../build/experiments/render-repetition/fp-probe/relocation-summary.txt) ·
 [PSP numerical results](../build/experiments/render-repetition/fp-probe/numeric-psp.txt)
+
+## Graphics task ownership for concurrent rendering — 26 November 2026
+
+The [pinned OOT-PSP revision](https://github.com/z2442/oot-PSP/commit/afc762c4d1a30a4f71411720be486c035af3de35)
+moves the entire display-list interpreter to the Media Engine. Its render
+driver captures segment bases and interpolation sample indices at submission.
+A task can run several paced passes while Allegrex works on the next tick.
+The ME runs scalar transforms and writes an uncached GU list. Allegrex
+advances its stall address and handles list rollover and texture fences. The
+worker services audio every 256 commands and during service calls. The
+reported improvement comes from overlap. The interpreter takes longer on
+the ME, and the change uses scalar math. See the
+[architecture notes at that revision](https://github.com/z2442/oot-PSP/blob/afc762c4d1a30a4f71411720be486c035af3de35/docs/psp-me-render.md)
+and [mcidclan's shared GU-list sample](https://github.com/mcidclan/psp-media-engine-custom-core/tree/main/samples/gu-shared-list).
+The commit attributes its handoff and fault handling to mupen-psp. The cited
+mupen-psp source was unavailable in the public repositories checked.
+
+### Storage and lifetime
+
+The optional third `GfxPool` gives the producer space for a complete tick
+while the submitted presentation retains its task and predecessor. Each
+pool already owns the task header, display lists, viewports, lights and
+matrices. A history-only allocation would leave the task storage conflict
+or require a copy of the predecessor's matrices. Each sample records the
+actual predecessor slot and validates its generation, reset epoch, scene
+and VI interval. Preparation binds the selected pair to the task. A
+matrix invalidation for an actor or terrain row goes into the new sample's
+bitset. A reset changes the recording epoch. Older submitted samples and
+their starfield snapshots remain valid through consumption.
+
+Aquas boss muscle vertices follow the graphics pool index. Starfield and
+spectate pose storage follow the same pool count. Mutable data outside the
+pools still has a producer fence. Examples include Macbeth and Zoness
+terrain and its nested lists, scrolling texture pixels, the generated
+texture buffer and map replay state. GU releases these inputs after
+traversal and overlay preparation. Its GE list uses converted GU vertices,
+decoded texture storage and retained renderer-owned geometry. PSPGL
+releases the fence at the end of presentation. Pool ownership lasts until
+the existing task completion message. The scheduler still admits one
+presentation and replaces its pending sample with the latest completed
+simulation tick. The VI policy, N64 task completion and display buffer setup
+follow the existing paths.
+
+| Additional static storage | Bytes |
+| --- | ---: |
+| Graphics task pool | 175,440 |
+| Interpolation history and invalidation bits | 18,612 |
+| Starfield snapshot | 9,008 |
+| Aquas muscle vertices | 896 |
+| Spectator pose tag | 16 |
+| Total symbols | 203,972 |
+
+The release ELF adds 203,968 bytes of BSS after alignment and 204,160 bytes
+to the end of its load image, about 199.4 KiB of main RAM. Census builds add
+the same pool storage and their separate instrumentation. The PSP Go
+reported 1,880,064 free system bytes and a 1,835,008-byte largest block
+during these captures in both arms. The SDK reserves system memory outside
+its libc heap, so those values do not measure the heap capacity lost to
+the extra pool. The PSP-1000 runtime heap check remains open. Keep two
+pools as the default. Four enlarged interpolation routines now use
+ordinary text placement and the pinned matrix resolver kept its address.
+The Aquas retained-source fingerprints were refreshed after reviewing the
+vertex storage change. One pre-existing stale-source warning remains for
+the `aActorSuppliesDL` leaf in `fox_enmy.c`.
+
+### PSP Go validation
+
+Use the commands in
+[commands.txt](../build/experiments/gfx-task-pools/commands.txt) and the
+[raw captures](../build/experiments/gfx-task-pools/captures/). Both pool
+counts pass the host cadence, fallback, wrap and topology tests. The
+three-pool test records an actor-slot reuse and a reset while the old pair
+is bound, then resolves the old matrices and exercises the next sample's
+fallback.
+
+Census kind 0 includes the pool count and total `GfxPool` bytes in
+columns `g,h`. Kind 4 reports game-update duration, an outstanding task
+at simulation admission, the new pool and the simulation VI deadline in
+`a,b,c,d`. Kind 9 reports completion-wait time in microseconds and a
+bitmask in `a,b`. Mask bits 1, 2 and 4 indicate current-pool conflict,
+previous-pool conflict and the shared-input fence. Bits 8, 16 and 32
+indicate the presentation, settings and exit boundaries. The scheduler
+consumes already-posted completions before classifying simulation waits.
+The sample scripts capture 240 simulation ticks and 195 in the Andross
+brain phase. The timing summary omits the first second.
+
+| Accurate GU on PSP Go | Target | FPS 2 / 3 pools | p95 interval (ms) 2 / 3 | p99 interval (ms) 2 / 3 |
+| --- | ---: | ---: | ---: | ---: |
+| Corneria, Async | 60 Hz | 59.980 / 59.979 | 20.292 / 20.368 | 20.902 / 21.029 |
+| Bolse, Async | 60 Hz | 29.763 / 30.045 | 42.273 / 41.067 | 48.657 / 46.118 |
+| Aquas, Async | 60 Hz | 39.964 / 40.693 | 32.437 / 31.892 | 35.304 / 34.043 |
+| Aquas, Off | 60 Hz | 46.683 / 47.273 | 28.313 / 27.862 | 28.777 / 28.219 |
+| Aquas, Async | 30 Hz | 29.973 / 29.974 | 41.175 / 40.917 | 42.217 / 41.735 |
+| Andross brain, Async | 60 Hz | 44.048 / 45.116 | 26.348 / 25.736 | 28.176 / 27.664 |
+
+The Bolse control waited three times on the preceding sample, for 1.860 ms
+in total. The three-pool arm had zero pool waits. It admitted 13 simulation
+ticks while the preceding task was outstanding, compared with 11 in the
+control. The overlap between game update and the GU submit interval was
+805 μs across the whole three-pool measurement, compared with 488 μs.
+Corneria, Aquas and Andross admitted zero such ticks and recorded zero
+pool waits. Their end-to-end differences therefore have no observed
+pool-wait mechanism. The two arms processed an average of about 30
+simulation ticks per second in Corneria, Bolse and Andross and 20 in Aquas. Late Bolse wakes missed 10 simulation deadlines in
+both arms and used the existing catch-up path. The 60 Hz Aquas captures
+missed presentation slots while retaining simulation cadence.
+
+Matched gameplay captures in all four scenes had pixel
+differences only in the performance overlay's top seven rows. The steady
+capture windows recorded zero missing-history fallbacks. Topology mismatches
+continued to select per-matrix fallback without dropping a presentation.
+A separate Aquas run reset the history at tick 316. Two midpoint attempts
+retained the previously displayed image, and interpolation recovered at
+the next valid sample pair.
+Per-arm render-only counts, deadlines, waits and image comparisons are in
+[summary.csv](../build/experiments/gfx-task-pools/summary.csv) and
+[images.txt](../build/experiments/gfx-task-pools/images.txt).
+
+The packaged release PRXs booted in two-pool GU Accurate, three-pool GU
+Fast and three-pool PSPGL Accurate. PSPLink memory reads confirmed the
+active backend and quality in each boot. The archive includes the
+[boot screenshots](../build/experiments/gfx-task-pools/captures/smoke-preview.png).
+PSP-1000 heap headroom and an explicit hardware suspend and resume remain
+outside these runs.
+
+### ME feasibility
+
+The current main event thread calls the renderer synchronously and also
+forwards the VI wake to the graphics scheduling thread. VBlank interrupts
+can advance the clock during interpretation, but game scheduling generally
+sees the wake after that interpretation returns. An ME driver would have
+to release the main event thread while a presentation is in flight. The
+existing shared-input fence would still block simulation until the worker
+finished reading the mutable sources. The next tick needs owned copies or
+per-source fences for those inputs and an explicit drain for scene
+transitions and renderer facade calls. The frontend already resolves its
+local segment table from the task's display-list commands. That table and
+its backing regions must survive any handoff.
+
+The linked GU path still reaches VFPU kernels through packed T&L, directional
+lighting, matrix multiply and libc copy. The retained-source cold path
+allocates and performs cache maintenance. GU device start and finish,
+GE enqueue, stall updates and fences require Allegrex services. Texture
+uploads currently write backend-owned RAM and EDRAM arenas. The shared
+producer would need cache-line-isolated arenas and writable state, GE-visible
+command publication and Allegrex-mediated EDRAM writes. The pool stride is
+16-byte aligned in this patch and can share ME cache lines across owners.
+The present code is an Allegrex-only ownership boundary.
+
+A shared worker would need to service pending audio by measured time to the
+next mixer deadline and preserve the existing mixer completion ordering.
+Off, Sync and Async need explicit ownership transitions. Separate worker
+failure, producer cancellation and GE drain acknowledgements are required
+before reusing memory after timeout or suspend. The OOT-PSP timeout branch
+disables future ME submissions and returns without a worker-stop
+acknowledgement. SF64 needs separate acknowledgement before returning
+ownership to Allegrex.
+
+### Scalar feasibility on the PSP Go
+
+A single diagnostic binary switched four frontend call sites between their
+ordinary VFPU path and the existing scalar matrix multiply, directional
+lighting and packed transform and projection kernels. It kept the GE
+paths, the game-side VFPU code and the VFPU-capable copy path. Audio was
+Off for both arms. This measures the geometry math penalty on Allegrex.
+
+| Scene | Mean frontend (ms) VFPU / scalar | FPS VFPU / scalar | p95 interval (ms) VFPU / scalar |
+| --- | ---: | ---: | ---: |
+| Aquas | 17.700 / 20.544 | 47.500 / 41.252 | 27.806 / 31.131 |
+| Bolse | 21.328 / 24.089 | 38.242 / 34.000 | 31.298 / 34.421 |
+
+On the measured scalar costs, even complete overlap of the next game tick
+would leave about 0.44 ms in Aquas and 1.97 ms in Bolse to match the existing
+audio-off frame period after the measured GU submit tail. These are
+optimistic budgets that exclude cache handoffs, services and ME audio
+work. Both scalar frontend costs alone exceed the 16.68 ms 60 Hz period.
+The exact ME timings remain unknown. Together with the shared-input fence
+and the limited observed overlap, this leaves insufficient evidence to
+build out an ME render worker in this pass. The validated milestone is
+three-pool task ownership with Allegrex GU and PSPGL. Revisit moving the
+interpreter when a representative renderer can sustain a lower scalar
+cost with the accepted GE paths and when mutable inputs can be published
+within the resulting frame budget.
+
+The existing n64psp scalar matrix, packed T&L and lighting implementations
+are the first reuse candidates. Add explicit scalar entry points, portable
+cache-range publication and shared GE list support once a working caller
+proves the interface. Keep presentation cadence, task ownership and scene
+barriers in SF64. Price any VME work against measured ME scalar bottlenecks
+after concurrent rendering exists.

@@ -94,6 +94,8 @@
     gDma1p((pkt), G_DL, (list), (repeat) ? PSP_RENDERER_DL_REUSE_TEXTURE_TAG | (repeat) : 0, G_DL_PUSH)
 
 void PspRenderer_Init(void);
+void PspRenderer_LockTaskInputs(void);
+int PspRenderer_TaskInputsLocked(void);
 int PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex);
 void PspRenderer_RecordSimulationTicks(u32 ticks);
 typedef float (*PspVisualSine)(float radians);

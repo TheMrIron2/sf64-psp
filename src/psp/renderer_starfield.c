@@ -31,7 +31,7 @@ typedef struct {
 #endif
 } PspStarfieldFrame;
 
-static PspStarfieldFrame sStarfieldFrames[2];
+static PspStarfieldFrame sStarfieldFrames[GFX_TASK_POOL_COUNT];
 static PspGfxVertex sStarfieldVertices[PSP_STARFIELD_CHUNK_STARS * PSP_STARFIELD_VERTICES_PER_STAR]
     __attribute__((aligned(16)));
 static s32 sStarfieldRecordingPool = -1;
@@ -96,28 +96,7 @@ static void psp_starfield_log_diag(const PspStarfieldFrame* frame, u32 chunks) {
 }
 #endif
 
-static s32 psp_starfield_pool_for_task(const SPTask* task) {
-    if (task == &gGfxPools[0].task) {
-        return 0;
-    }
-    if (task == &gGfxPools[1].task) {
-        return 1;
-    }
-    return -1;
-}
-
-void PspStarfield_Reset(void) {
-    sStarfieldFrames[0].valid = false;
-    sStarfieldFrames[1].valid = false;
-    sStarfieldRecordingPool = -1;
-    sStarfieldPresentationPool = -1;
-    sStarfieldPreviousPool = -1;
-    sStarfieldPresentationAlpha = 1.0f;
-}
-
-void PspStarfield_BeginSimulationFrame(SPTask* task) {
-    s32 pool = psp_starfield_pool_for_task(task);
-
+void PspStarfield_BeginSimulationFrame(s32 pool) {
     sStarfieldRecordingPool = pool;
     if (pool >= 0) {
         sStarfieldFrames[pool].valid = false;
@@ -192,9 +171,9 @@ void PspStarfield_DiagCounts(u32 requested, u32 traversed) {
 }
 #endif
 
-void PspStarfield_PreparePresentation(SPTask* task, SPTask* previousTask, f32 alpha) {
-    sStarfieldPresentationPool = psp_starfield_pool_for_task(task);
-    sStarfieldPreviousPool = psp_starfield_pool_for_task(previousTask);
+void PspStarfield_PreparePresentation(s32 pool, s32 previousPool, f32 alpha) {
+    sStarfieldPresentationPool = pool;
+    sStarfieldPreviousPool = previousPool;
     sStarfieldPresentationAlpha = alpha;
 }
 

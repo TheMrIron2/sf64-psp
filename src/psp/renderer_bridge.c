@@ -270,6 +270,16 @@ void PspRenderer_Init(void) {
     PspGfxDevice_Present();
 }
 
+static volatile int sTaskInputsLocked;
+
+void PspRenderer_LockTaskInputs(void) {
+    sTaskInputsLocked = 1;
+}
+
+int PspRenderer_TaskInputsLocked(void) {
+    return sTaskInputsLocked;
+}
+
 int PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
     const Gfx* dl;
     int presented;
@@ -296,6 +306,7 @@ int PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
 
         if (!PspGfxDevice_IsReady()) {
             PspFrameInterpolation_FinishPresentation(task);
+            sTaskInputsLocked = 0;
             return 0;
         }
 
@@ -306,6 +317,7 @@ int PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
 #endif
             PspCensus_Interpolation(task);
             PspFrameInterpolation_FinishPresentation(task);
+            sTaskInputsLocked = 0;
             PspCensus_End(0);
             return 0;
         }
@@ -333,6 +345,8 @@ int PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
         PspFrameInterpolation_FinishPresentation(task);
 #if PSP_GFX_BACKEND_GU
         if (PspGfxBackend_IsGu() && PspMenu_Visible()) menuDrawn = psp_renderer_draw_overlays(1);
+        // GU uses converted vertices and textures once traversal ends
+        if (PspGfxBackend_IsGu()) sTaskInputsLocked = 0;
 #endif
 
         PspHwCounterProfile_ScopeEnd(PSP_HW_SCOPE_FRONTEND);
@@ -357,6 +371,7 @@ int PspRenderer_RenderGfxTask(SPTask* task, u32 taskIndex) {
         PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_PRESENT_SWAP);
         if (measure) measureStarted = PspNetStats_NowUs();
         presented = PspGfxDevice_Present();
+        sTaskInputsLocked = 0;
         if (measure) {
             PspNetStats_Time(PSP_NET_PRESENT, measureStarted);
             if (presented) PspNetStats_Presented(task, PspNetStats_NowUs());

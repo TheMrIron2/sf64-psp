@@ -19,7 +19,7 @@ static PspWatchPose sBuiltPose, sLastPose;
 static struct {
     const void* task;
     PspWatchPose pose;
-} sTaskPoses[2];
+} sTaskPoses[GFX_TASK_POOL_COUNT];
 static u32 sLastCaptureUs, sLastReceiveUs, sLastWatchPresentUs, sWatchHold;
 static int sCaptureValid;
 static char sPath[256] = "sf64-adhoc-stats.csv";
@@ -139,7 +139,7 @@ void PspNetStats_Presented(const void* task, u32 nowUs) {
     int slot;
     PspNetStats_AddLocked(PSP_NET_PRESENTED, 1);
     if (sActive && sStats.role == 2) {
-        for (slot = 0; slot < 2; slot++) {
+        for (slot = 0; slot < GFX_TASK_POOL_COUNT; slot++) {
             if (sTaskPoses[slot].task == task) {
                 pose = sTaskPoses[slot].pose;
                 break;

@@ -297,7 +297,7 @@ f32 D_i3_801C0190[5] = {
 
 PosRot* D_i3_801C27C0;
 PosRot D_i3_801C27C8[4 * 50];
-Vtx D_i3_801C3A88[2][2][28];
+Vtx D_i3_801C3A88[2][GFX_TASK_POOL_COUNT][28];
 
 // Waves the current that link Jellyfish together
 void Aquas_JellyfishCurrent_Wave(void) {
@@ -2030,6 +2030,12 @@ void Aquas_AqBacoonMuscle_Draw(AqBacoonMuscle* this) {
     u8 i;
     Vtx* var_t5;
     Vtx* temp_v1_2;
+#ifdef TARGET_PSP
+    s32 pool = Graphics_GetTaskPool(gGfxTask);
+#else
+    s32 pool = gSysFrameCount % GFX_TASK_POOL_COUNT;
+#endif
+    Vtx* vertices = D_i3_801C3A88[this->iwork[0]][pool];
 
     if ((this->timer_0C6 != 0) && (this->state == 0) && (gPlayState != PLAY_PAUSE)) {
         this->iwork[1]++;
@@ -2054,24 +2060,24 @@ void Aquas_AqBacoonMuscle_Draw(AqBacoonMuscle* this) {
     }
 
     for (i = 0; i < 28; i += 1) {
-        D_i3_801C3A88[this->iwork[0]][gSysFrameCount % 2][i].n.ob[0] =
+        vertices[i].n.ob[0] =
             temp_v1_2[i].n.ob[0] + (s16) ((((var_t5[i].n.ob[0] - temp_v1_2[i].n.ob[0]) * var_t1) / 2) * var_fv0);
-        D_i3_801C3A88[this->iwork[0]][gSysFrameCount % 2][i].n.ob[1] =
+        vertices[i].n.ob[1] =
             temp_v1_2[i].n.ob[1] + (((var_t5[i].n.ob[1] - temp_v1_2[i].n.ob[1]) * var_t1) / 2);
-        D_i3_801C3A88[this->iwork[0]][gSysFrameCount % 2][i].n.ob[2] =
+        vertices[i].n.ob[2] =
             temp_v1_2[i].n.ob[2] + (((var_t5[i].n.ob[2] - temp_v1_2[i].n.ob[2]) * var_t1) / 2);
-        D_i3_801C3A88[this->iwork[0]][gSysFrameCount % 2][i].n.flag = temp_v1_2[i].n.flag;
-        D_i3_801C3A88[this->iwork[0]][gSysFrameCount % 2][i].n.tc[0] =
+        vertices[i].n.flag = temp_v1_2[i].n.flag;
+        vertices[i].n.tc[0] =
             temp_v1_2[i].n.tc[0] + (((var_t5[i].n.tc[0] - temp_v1_2[i].n.tc[0]) * var_t1) / 2);
-        D_i3_801C3A88[this->iwork[0]][gSysFrameCount % 2][i].n.tc[1] =
+        vertices[i].n.tc[1] =
             temp_v1_2[i].n.tc[1] + (((var_t5[i].n.tc[1] - temp_v1_2[i].n.tc[1]) * var_t1) / 2);
-        D_i3_801C3A88[this->iwork[0]][gSysFrameCount % 2][i].n.n[0] =
+        vertices[i].n.n[0] =
             temp_v1_2[i].n.n[0] + (((var_t5[i].n.n[0] - temp_v1_2[i].n.n[0]) * var_t1) / 2);
-        D_i3_801C3A88[this->iwork[0]][gSysFrameCount % 2][i].n.n[1] =
+        vertices[i].n.n[1] =
             temp_v1_2[i].n.n[1] + (((var_t5[i].n.n[1] - temp_v1_2[i].n.n[1]) * var_t1) / 2);
-        D_i3_801C3A88[this->iwork[0]][gSysFrameCount % 2][i].n.n[2] =
+        vertices[i].n.n[2] =
             temp_v1_2[i].n.n[2] + (((var_t5[i].n.n[2] - temp_v1_2[i].n.n[2]) * var_t1) / 2);
-        D_i3_801C3A88[this->iwork[0]][gSysFrameCount % 2][i].n.a = temp_v1_2[i].n.a;
+        vertices[i].n.a = temp_v1_2[i].n.a;
     }
 
     Matrix_Scale(gGfxMatrix, this->fwork[1] - 0.25f + ((1.5f - this->scale) * 0.5f), this->scale, this->fwork[1],
@@ -2094,7 +2100,7 @@ void Aquas_AqBacoonMuscle_Draw(AqBacoonMuscle* this) {
     gDPLoadTLUT_pal256(gMasterDisp++, aAqRedGradientTLUT);
     gDPLoadTextureBlock(gMasterDisp++, aAqRedGradientTex, G_IM_FMT_CI, G_IM_SIZ_8b, 16, 16, 0,
                         G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMIRROR | G_TX_WRAP, 4, 4, G_TX_NOLOD, G_TX_NOLOD);
-    gSPVertex(gMasterDisp++, D_i3_801C3A88[this->iwork[0]][gSysFrameCount % 2], 14, 0);
+    gSPVertex(gMasterDisp++, vertices, 14, 0);
     gSP1Triangle(gMasterDisp++, 0, 1, 2, 0);
     gSP1Triangle(gMasterDisp++, 3, 1, 0, 0);
     gSP1Triangle(gMasterDisp++, 4, 5, 0, 0);
@@ -2115,9 +2121,9 @@ void Aquas_AqBacoonMuscle_Draw(AqBacoonMuscle* this) {
     gSP1Triangle(gMasterDisp++, 7, 6, 13, 0);
     gSP1Triangle(gMasterDisp++, 13, 12, 7, 0);
     gSP1Triangle(gMasterDisp++, 10, 7, 12, 0);
-    gSPVertex(gMasterDisp++, &D_i3_801C3A88[this->iwork[0]][gSysFrameCount % 2][1], 3, 0);
-    gSPVertex(gMasterDisp++, &D_i3_801C3A88[this->iwork[0]][gSysFrameCount % 2][9], 2, 3);
-    gSPVertex(gMasterDisp++, &D_i3_801C3A88[this->iwork[0]][gSysFrameCount % 2][12], 8, 5);
+    gSPVertex(gMasterDisp++, &vertices[1], 3, 0);
+    gSPVertex(gMasterDisp++, &vertices[9], 2, 3);
+    gSPVertex(gMasterDisp++, &vertices[12], 8, 5);
     gSP1Triangle(gMasterDisp++, 0, 2, 7, 0);
     gSP1Triangle(gMasterDisp++, 7, 2, 8, 0);
     gSP1Triangle(gMasterDisp++, 6, 8, 2, 0);
@@ -2133,7 +2139,7 @@ void Aquas_AqBacoonMuscle_Draw(AqBacoonMuscle* this) {
     gDPLoadTLUT_pal256(gMasterDisp++, aAqBacoonMuscleTLUT);
     gDPLoadTextureBlock(gMasterDisp++, aAqBacoonMuscleTex, G_IM_FMT_CI, G_IM_SIZ_8b, 16, 16, 0,
                         G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMIRROR | G_TX_WRAP, 4, 4, G_TX_NOLOD, G_TX_NOLOD);
-    gSPVertex(gMasterDisp++, &D_i3_801C3A88[this->iwork[0]][gSysFrameCount % 2][20], 8, 0);
+    gSPVertex(gMasterDisp++, &vertices[20], 8, 0);
     gSP1Triangle(gMasterDisp++, 0, 1, 2, 0);
     gSP1Triangle(gMasterDisp++, 2, 3, 0, 0);
     gSP1Triangle(gMasterDisp++, 4, 5, 6, 0);

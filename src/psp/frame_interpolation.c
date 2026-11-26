@@ -6,10 +6,13 @@
 
 #include <n64psp/math.h>
 
-#define PSP_FRAME_INTERPOLATION_MATRIX_CAPACITY 0x480
+#define PSP_FRAME_INTERPOLATION_MATRIX_CAPACITY ARRAY_COUNT(gGfxPools[0].mtx)
 #define PSP_FRAME_INTERPOLATION_BUCKETS 256
 
 typedef struct {
+    const SPTask* task;
+    s32 pool;
+    s32 previousPool;
     u32 requested;
     u32 interpolated;
     u32 exact;
@@ -19,12 +22,15 @@ typedef struct {
     u32 matricesInterpolated;
     u32 repeatFallback;
     u32 repeated;
+    int vfpuMatrixLerp;
     f32 alpha;
 } PspFrameInterpolationPresentation;
 
 typedef struct {
     u32 simulationVi;
     u32 generation;
+    u32 epoch;
+    s32 previousPool;
     s32 gameState;
     s32 drawMode;
     s32 level;
@@ -40,7 +46,7 @@ typedef struct {
     f32 wrapPeriod[PSP_FRAME_INTERPOLATION_MATRIX_CAPACITY];
     const void* drawSite[PSP_FRAME_INTERPOLATION_MATRIX_CAPACITY];
     const void* identity[PSP_FRAME_INTERPOLATION_MATRIX_CAPACITY];
-    PspFrameInterpolationPresentation presentation;
+    u32 invalidatedPrevious[(PSP_FRAME_INTERPOLATION_MATRIX_CAPACITY + 31) / 32];
 } PspFrameInterpolationPool;
 
 typedef struct {
@@ -49,26 +55,18 @@ typedef struct {
     s16 remaining;
 } PspFrameInterpolationMatch;
 
-static PspFrameInterpolationPool sPools[2];
+static PspFrameInterpolationPool sPools[GFX_TASK_POOL_COUNT];
+static PspFrameInterpolationPresentation sPresentation = { .pool = -1, .previousPool = -1 };
 static s16 sPreviousMatrix[PSP_FRAME_INTERPOLATION_MATRIX_CAPACITY];
 static u32 sGeneration;
+static u32 sHistoryEpoch = 1;
+static s32 sLatestPool = -1;
 static s32 sRecordingPool = -1;
-static s32 sPresentationPool = -1;
 static int sVfpuMatrixLerp;
 static s32 sWorldScope;
 static const void* sMatrixIdentity;
 static PspFrameInterpolationWrapAxis sWrapAxis;
 static f32 sWrapPeriod;
-
-static s32 psp_frame_interpolation_pool_for_task(const SPTask* task) {
-    if (task == &gGfxPools[0].task) {
-        return 0;
-    }
-    if (task == &gGfxPools[1].task) {
-        return 1;
-    }
-    return -1;
-}
 
 static s32 psp_frame_interpolation_matrix_index(const Mtx* matrix, s32 pool) {
     uintptr_t address = (uintptr_t) matrix;
@@ -81,34 +79,16 @@ static s32 psp_frame_interpolation_matrix_index(const Mtx* matrix, s32 pool) {
     return (s32) ((address - base) / sizeof(Mtx));
 }
 
-static void psp_frame_interpolation_clear_presentation(PspFrameInterpolationPresentation* presentation) {
-    presentation->requested = 0;
-    presentation->interpolated = 0;
-    presentation->exact = 0;
-    presentation->fallback = 0;
-    presentation->missingHistory = 0;
-    presentation->topologyMismatch = 0;
-    presentation->matricesInterpolated = 0;
-    presentation->repeatFallback = 0;
-    presentation->repeated = 0;
-    presentation->alpha = 1.0f;
-}
-
 void PspFrameInterpolation_Reset(void) {
-    sPools[0].valid = false;
-    sPools[1].valid = false;
-    sPools[0].eligible = false;
-    sPools[1].eligible = false;
-    psp_frame_interpolation_clear_presentation(&sPools[0].presentation);
-    psp_frame_interpolation_clear_presentation(&sPools[1].presentation);
-    sGeneration = 0;
+    // An in flight presentation keeps its recorded samples through a reset
+    sHistoryEpoch++;
+    sLatestPool = -1;
     sRecordingPool = -1;
-    sPresentationPool = -1;
     sWorldScope = false;
     sMatrixIdentity = NULL;
     sWrapAxis = PSP_FRAME_INTERPOLATION_WRAP_NONE;
     sWrapPeriod = 0.0f;
-    PspStarfield_Reset();
+    PspStarfield_BeginSimulationFrame(-1);
 }
 
 void PspFrameInterpolation_SetVfpuMatrixLerp(int enabled) {
@@ -116,15 +96,16 @@ void PspFrameInterpolation_SetVfpuMatrixLerp(int enabled) {
 }
 
 void PspFrameInterpolation_BeginSimulationFrame(SPTask* task, u32 simulationVi, u8 simulationVIs, s32 record) {
-    s32 pool = psp_frame_interpolation_pool_for_task(task);
+    s32 pool = Graphics_GetTaskPool(task);
     PspFrameInterpolationPool* state;
+    u32 i;
 
     sRecordingPool = -1;
     sWorldScope = false;
     sMatrixIdentity = NULL;
     sWrapAxis = PSP_FRAME_INTERPOLATION_WRAP_NONE;
     sWrapPeriod = 0.0f;
-    PspStarfield_BeginSimulationFrame(task);
+    PspStarfield_BeginSimulationFrame(pool);
     if (pool < 0) {
         return;
     }
@@ -132,13 +113,17 @@ void PspFrameInterpolation_BeginSimulationFrame(SPTask* task, u32 simulationVi, 
     state = &sPools[pool];
     state->simulationVi = simulationVi;
     state->generation = ++sGeneration;
+    state->epoch = sHistoryEpoch;
+    state->previousPool = sLatestPool == pool ? -1 : sLatestPool;
     state->worldEnd = 0;
     state->worldCount = 0;
     state->simulationVIs = simulationVIs;
     state->valid = false;
     state->eligible = false;
-    psp_frame_interpolation_clear_presentation(&state->presentation);
     if (record) {
+        for (i = 0; i < ARRAY_COUNT(state->invalidatedPrevious); i++) {
+            state->invalidatedPrevious[i] = 0;
+        }
         sRecordingPool = pool;
     }
 }
@@ -152,17 +137,22 @@ void PspFrameInterpolation_SetMatrixIdentity(const void* identity) {
 }
 
 void PspFrameInterpolation_ForgetIdentity(const void* identity) {
-    PspFrameInterpolationPool* previous;
+    PspFrameInterpolationPool* current;
+    const PspFrameInterpolationPool* previous;
     u32 i;
 
     if (sRecordingPool < 0) {
         return;
     }
-    previous = &sPools[sRecordingPool ^ 1];
-    // The scheduler protects both history pools while an interpolated task is in flight
+    current = &sPools[sRecordingPool];
+    if (current->previousPool < 0) {
+        return;
+    }
+    previous = &sPools[current->previousPool];
+    // Record invalidations in the new sample so older presentations stay intact
     for (i = 0; previous->valid && (i < previous->worldEnd); i++) {
         if (previous->identity[i] == identity) {
-            previous->world[i] = false;
+            current->invalidatedPrevious[i / 32] |= 1u << (i % 32);
         }
     }
 }
@@ -187,7 +177,7 @@ void PspFrameInterpolation_RecordMatrix(const Mtx* matrix, u32 flags, const void
         return;
     }
     index = psp_frame_interpolation_matrix_index(matrix, sRecordingPool);
-    if ((index < 0) || (index >= PSP_FRAME_INTERPOLATION_MATRIX_CAPACITY)) {
+    if (index < 0) {
         return;
     }
 
@@ -207,8 +197,9 @@ void PspFrameInterpolation_RecordMatrix(const Mtx* matrix, u32 flags, const void
 }
 
 void PspFrameInterpolation_EndSimulationFrame(SPTask* task, s32 eligible) {
-    s32 pool = psp_frame_interpolation_pool_for_task(task);
+    s32 pool = Graphics_GetTaskPool(task);
 
+    sLatestPool = pool;
     if ((pool >= 0) && (pool == sRecordingPool)) {
         sPools[pool].gameState = gGameState;
         sPools[pool].drawMode = gDrawMode;
@@ -242,7 +233,7 @@ static s32 psp_frame_interpolation_find_group(const PspFrameInterpolationPool* c
     return group;
 }
 
-static void psp_frame_interpolation_match_matrices(PspFrameInterpolationPool* current,
+static void psp_frame_interpolation_match_matrices(const PspFrameInterpolationPool* current,
                                                   const PspFrameInterpolationPool* previous) {
     PspFrameInterpolationMatch matches[PSP_FRAME_INTERPOLATION_MATRIX_CAPACITY];
     s16 buckets[PSP_FRAME_INTERPOLATION_BUCKETS];
@@ -256,7 +247,7 @@ static void psp_frame_interpolation_match_matrices(PspFrameInterpolationPool* cu
     }
     // Build ordered matrix chains for each object and draw site within a view
     for (i = previous->worldEnd - 1; i >= 0; i--) {
-        if (!previous->world[i]) {
+        if (!previous->world[i] || (current->invalidatedPrevious[i / 32] & (1u << (i % 32)))) {
             continue;
         }
         bucket = psp_frame_interpolation_bucket(previous, i);
@@ -278,7 +269,7 @@ static void psp_frame_interpolation_match_matrices(PspFrameInterpolationPool* cu
         bucket = psp_frame_interpolation_bucket(current, i);
         group = psp_frame_interpolation_find_group(current, i, previous, matches, buckets[bucket]);
         if (group < 0) {
-            current->presentation.topologyMismatch = 1;
+            sPresentation.topologyMismatch = 1;
             continue;
         }
         old = matches[group].remaining;
@@ -286,7 +277,7 @@ static void psp_frame_interpolation_match_matrices(PspFrameInterpolationPool* cu
             (current->wrapAxis[i] != previous->wrapAxis[old]) ||
             (current->wrapPeriod[i] != previous->wrapPeriod[old])) {
             matches[group].remaining = -2;
-            current->presentation.topologyMismatch = 1;
+            sPresentation.topologyMismatch = 1;
             continue;
         }
         sPreviousMatrix[i] = old;
@@ -301,30 +292,30 @@ static void psp_frame_interpolation_match_matrices(PspFrameInterpolationPool* cu
         group = psp_frame_interpolation_find_group(current, i, previous, matches, buckets[bucket]);
         if (matches[group].remaining != -1) {
             sPreviousMatrix[i] = -1;
-            current->presentation.topologyMismatch = 1;
+            sPresentation.topologyMismatch = 1;
         }
     }
 }
 
 SPTask* PspFrameInterpolation_PreparePresentation(SPTask* task, u32 presentationVi, u8 presentationVIs) {
-    PspFrameInterpolationPool* current;
-    PspFrameInterpolationPool* previous;
-    PspFrameInterpolationPresentation* presentation;
+    const PspFrameInterpolationPool* current;
+    const PspFrameInterpolationPool* previous;
+    PspFrameInterpolationPresentation* presentation = &sPresentation;
     u32 span;
     u32 targetVi;
     u32 offset;
-    s32 pool = psp_frame_interpolation_pool_for_task(task);
+    s32 pool = Graphics_GetTaskPool(task);
 
-    sPresentationPool = -1;
-    PspStarfield_PreparePresentation(task, NULL, 1.0f);
-    if (pool < 0) {
+    *presentation = (PspFrameInterpolationPresentation) { .pool = -1, .previousPool = -1, .alpha = 1.0f };
+    if ((pool < 0) || (sPools[pool].epoch != sHistoryEpoch)) {
+        PspStarfield_PreparePresentation(-1, -1, 1.0f);
         return NULL;
     }
 
     current = &sPools[pool];
-    previous = &sPools[pool ^ 1];
-    presentation = &current->presentation;
-    psp_frame_interpolation_clear_presentation(presentation);
+    presentation->task = task;
+    presentation->pool = pool;
+    PspStarfield_PreparePresentation(pool, -1, 1.0f);
     if (!current->valid || !current->eligible || (presentationVIs >= current->simulationVIs)) {
         return NULL;
     }
@@ -337,7 +328,9 @@ SPTask* PspFrameInterpolation_PreparePresentation(SPTask* task, u32 presentation
         return NULL;
     }
     presentation->repeatFallback = presentationVIs == 1;
-    if (!previous->valid || !previous->eligible || (current->generation != (previous->generation + 1)) ||
+    previous = current->previousPool < 0 ? NULL : &sPools[current->previousPool];
+    if ((previous == NULL) || (previous->epoch != current->epoch) ||
+        !previous->valid || !previous->eligible || (current->generation != (previous->generation + 1)) ||
         (current->gameState != previous->gameState) || (current->drawMode != previous->drawMode) ||
         (current->level != previous->level)) {
         presentation->fallback = 1;
@@ -354,19 +347,18 @@ SPTask* PspFrameInterpolation_PreparePresentation(SPTask* task, u32 presentation
     psp_frame_interpolation_match_matrices(current, previous);
     presentation->interpolated = 1;
     presentation->alpha = (f32) offset / (f32) span;
-    sPresentationPool = pool;
-    PspStarfield_PreparePresentation(task, &gGfxPools[pool ^ 1].task, presentation->alpha);
-    return &gGfxPools[pool ^ 1].task;
+    presentation->previousPool = current->previousPool;
+    presentation->vfpuMatrixLerp = sVfpuMatrixLerp;
+    PspStarfield_PreparePresentation(pool, presentation->previousPool, presentation->alpha);
+    return &gGfxPools[presentation->previousPool].task;
 }
 
 s32 PspFrameInterpolation_ShouldPresent(SPTask* task) {
-    s32 pool = psp_frame_interpolation_pool_for_task(task);
-    PspFrameInterpolationPresentation* presentation;
+    PspFrameInterpolationPresentation* presentation = &sPresentation;
 
-    if (pool < 0) {
+    if ((task == NULL) || (task != presentation->task)) {
         return true;
     }
-    presentation = &sPools[pool].presentation;
     if ((presentation->repeatFallback != 0) && (presentation->fallback != 0)) {
         // fallback would draw current simulation state in a presentation intended for intermediate state
         // Keep the displayed image instead so the invalid midpoint cannot jump ahead for a frame
@@ -377,8 +369,8 @@ s32 PspFrameInterpolation_ShouldPresent(SPTask* task) {
 }
 
 s32 PspFrameInterpolation_ResolveMatrix(const Mtx* currentMatrix, u32 flags, Matrix* result) {
-    PspFrameInterpolationPool* current;
-    PspFrameInterpolationPresentation* presentation;
+    const PspFrameInterpolationPool* current;
+    PspFrameInterpolationPresentation* presentation = &sPresentation;
     const Matrix* currentValue;
     const Matrix* previousValue;
     Matrix adjustedCurrent __attribute__((aligned(16)));
@@ -395,8 +387,8 @@ s32 PspFrameInterpolation_ResolveMatrix(const Mtx* currentMatrix, u32 flags, Mat
     s32 pool;
     s32 index;
 
-    pool = sPresentationPool;
-    if (pool < 0) {
+    pool = presentation->pool;
+    if (!presentation->interpolated || (pool < 0)) {
         return false;
     }
     index = psp_frame_interpolation_matrix_index(currentMatrix, pool);
@@ -405,14 +397,13 @@ s32 PspFrameInterpolation_ResolveMatrix(const Mtx* currentMatrix, u32 flags, Mat
     }
 
     current = &sPools[pool];
-    presentation = &current->presentation;
-    if (!presentation->interpolated || (index >= current->worldEnd) || !current->world[index] ||
+    if ((index >= current->worldEnd) || !current->world[index] ||
         (current->flags[index] != (u8) flags) || (sPreviousMatrix[index] < 0)) {
         return false;
     }
 
     currentValue = (const Matrix*) currentMatrix;
-    previousValue = (const Matrix*) &gGfxPools[pool ^ 1].mtx[sPreviousMatrix[index]];
+    previousValue = (const Matrix*) &gGfxPools[presentation->previousPool].mtx[sPreviousMatrix[index]];
     if (current->wrapAxis[index] != PSP_FRAME_INTERPOLATION_WRAP_NONE) {
         /* A wrapped coordinate has equivalent transforms one period in either
          * direction. Interpolate from the copy closest to the previous frame
@@ -444,7 +435,7 @@ s32 PspFrameInterpolation_ResolveMatrix(const Mtx* currentMatrix, u32 flags, Mat
         currentValue = &adjustedCurrent;
     }
     alpha = presentation->alpha;
-    if (sVfpuMatrixLerp) {
+    if (presentation->vfpuMatrixLerp) {
         n64psp_mat4f_lerp(result->m, previousValue->m, currentValue->m, alpha);
     } else {
         for (row = 0; row < 4; row++) {
@@ -459,32 +450,28 @@ s32 PspFrameInterpolation_ResolveMatrix(const Mtx* currentMatrix, u32 flags, Mat
 }
 
 void PspFrameInterpolation_FinishPresentation(SPTask* task) {
-    PspFrameInterpolationPool* state;
-    PspFrameInterpolationPresentation* presentation;
-    s32 pool = psp_frame_interpolation_pool_for_task(task);
+    const PspFrameInterpolationPresentation* presentation = &sPresentation;
+    s32 pool = presentation->pool;
 
-    sPresentationPool = -1;
-    if (pool < 0) {
+    if ((pool < 0) || (task != presentation->task)) {
         return;
     }
-    state = &sPools[pool];
-    presentation = &state->presentation;
     PspProfiler_RecordInterpolation(presentation->requested, presentation->interpolated, presentation->exact,
                                     presentation->fallback, presentation->missingHistory,
                                     presentation->topologyMismatch,
-                                    presentation->requested ? state->worldCount : 0,
+                                    presentation->requested ? sPools[pool].worldCount : 0,
                                     presentation->matricesInterpolated,
                                     presentation->repeated);
-    (void) state;
     (void) presentation;
+    sPresentation.task = NULL;
+    sPresentation.pool = -1;
 }
 
 #if PROFILE_CENSUS
 void PspCensus_Interpolation(void* task) {
-    s32 pool = psp_frame_interpolation_pool_for_task(task);
-    PspFrameInterpolationPresentation* presentation;
-    if (pool < 0) return;
-    presentation = &sPools[pool].presentation;
+    const PspFrameInterpolationPresentation* presentation = &sPresentation;
+    s32 pool = presentation->pool;
+    if ((pool < 0) || (task != presentation->task)) return;
     PspCensus_Event(2, presentation->requested, presentation->interpolated, presentation->exact,
                     presentation->fallback, presentation->missingHistory, presentation->topologyMismatch,
                     presentation->matricesInterpolated, presentation->repeated);

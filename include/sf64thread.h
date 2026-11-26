@@ -165,7 +165,24 @@ extern OSMesg sTimerTaskMsgBuff[16];
 extern OSMesgQueue gTimerWaitMesgQueue;
 extern OSMesg sTimerWaitMsgBuff[1];
 
-extern GfxPool gGfxPools[2]; // 800E23B0
+#ifndef GFX_TASK_POOL_COUNT
+#define GFX_TASK_POOL_COUNT 2
+#endif
+
+extern GfxPool gGfxPools[GFX_TASK_POOL_COUNT]; // 800E23B0
+
+#ifdef TARGET_PSP
+static inline s32 Graphics_GetTaskPool(const SPTask* task) {
+    s32 pool;
+
+    for (pool = 0; pool < GFX_TASK_POOL_COUNT; pool++) {
+        if (task == &gGfxPools[pool].task) {
+            return pool;
+        }
+    }
+    return -1;
+}
+#endif
 
 extern GfxPool* gGfxPool;
 extern SPTask* gGfxTask;

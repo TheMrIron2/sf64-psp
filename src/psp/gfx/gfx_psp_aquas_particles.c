@@ -14,9 +14,9 @@ int PspAquasParticles_Available(void) { return PspGfxBackend_IsGu(); }
 
 int PspAquasParticles_ValidMatrix(u32 address) {
     unsigned pool;
-    for (pool = 0; pool < 2; pool++) {
-        uintptr_t begin = (uintptr_t) &gGfxPools[pool].mtx[0];
-        uintptr_t end = (uintptr_t) &gGfxPools[pool].mtx[0x480];
+    for (pool = 0; pool < GFX_TASK_POOL_COUNT; pool++) {
+        uintptr_t begin = (uintptr_t) gGfxPools[pool].mtx;
+        uintptr_t end = begin + sizeof(gGfxPools[pool].mtx);
         if (address >= begin && address < end && (address - begin) % sizeof(Mtx) == 0) return 1;
     }
     return 0;

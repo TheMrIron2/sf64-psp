@@ -1085,7 +1085,7 @@
           "include/PR/gbi.h": "e4f3b010bdcfa92e7220b8194aa524ff10ba43679f82219559017d02f9d1fd8c",
           "include/assets/ast_blue_marine.h": "6c08c8f73144be2eab5615db664d7dd2b3cbfe2a74baa43bdca2b5f29499d7f5",
           "src/assets/ast_blue_marine/ast_blue_marine.c": "3438f4df62873d3c5e5403fb9ea9ca3e2e2fff996e0fc2bba6890a9dce4d89ea",
-          "src/overlays/ovl_i3/fox_aq.c": "d88adbbba9a2d0b38c50cfaa74a16bcaf59c06ffb777d99276cd658af3736634"
+          "src/overlays/ovl_i3/fox_aq.c": "a7ba4986c8a664a54927fbd0897e679815952b79a9771e39e34772bbe979552e"
         },
         "qualification": "accepted_commands"
       },
@@ -1573,7 +1573,7 @@
           "include/PR/gbi.h": "e4f3b010bdcfa92e7220b8194aa524ff10ba43679f82219559017d02f9d1fd8c",
           "include/assets/ast_blue_marine.h": "6c08c8f73144be2eab5615db664d7dd2b3cbfe2a74baa43bdca2b5f29499d7f5",
           "src/assets/ast_blue_marine/ast_blue_marine.c": "3438f4df62873d3c5e5403fb9ea9ca3e2e2fff996e0fc2bba6890a9dce4d89ea",
-          "src/overlays/ovl_i3/fox_aq.c": "d88adbbba9a2d0b38c50cfaa74a16bcaf59c06ffb777d99276cd658af3736634"
+          "src/overlays/ovl_i3/fox_aq.c": "a7ba4986c8a664a54927fbd0897e679815952b79a9771e39e34772bbe979552e"
         },
         "qualification": "accepted_commands"
       },
@@ -3726,7 +3726,7 @@
           "include/PR/gbi.h": "e4f3b010bdcfa92e7220b8194aa524ff10ba43679f82219559017d02f9d1fd8c",
           "include/assets/ast_aquas.h": "6c92f6ab1cb04b70992b9dae98972fb5f4c9a962a435500acbc240291b79c6fa",
           "src/assets/ast_aquas/ast_aquas.c": "949dca523744878bb0623607687b495ed93742b57c5f3c4e49039f2050297921",
-          "src/overlays/ovl_i3/fox_aq.c": "d88adbbba9a2d0b38c50cfaa74a16bcaf59c06ffb777d99276cd658af3736634"
+          "src/overlays/ovl_i3/fox_aq.c": "a7ba4986c8a664a54927fbd0897e679815952b79a9771e39e34772bbe979552e"
         },
         "qualification": "direct_reads_only"
       },
@@ -4037,7 +4037,7 @@
           "include/PR/gbi.h": "e4f3b010bdcfa92e7220b8194aa524ff10ba43679f82219559017d02f9d1fd8c",
           "include/assets/ast_blue_marine.h": "6c08c8f73144be2eab5615db664d7dd2b3cbfe2a74baa43bdca2b5f29499d7f5",
           "src/assets/ast_blue_marine/ast_blue_marine.c": "3438f4df62873d3c5e5403fb9ea9ca3e2e2fff996e0fc2bba6890a9dce4d89ea",
-          "src/overlays/ovl_i3/fox_aq.c": "d88adbbba9a2d0b38c50cfaa74a16bcaf59c06ffb777d99276cd658af3736634"
+          "src/overlays/ovl_i3/fox_aq.c": "a7ba4986c8a664a54927fbd0897e679815952b79a9771e39e34772bbe979552e"
         },
         "qualification": "accepted_commands"
       },
@@ -4065,7 +4065,7 @@
           "include/PR/gbi.h": "e4f3b010bdcfa92e7220b8194aa524ff10ba43679f82219559017d02f9d1fd8c",
           "include/assets/ast_blue_marine.h": "6c08c8f73144be2eab5615db664d7dd2b3cbfe2a74baa43bdca2b5f29499d7f5",
           "src/assets/ast_blue_marine/ast_blue_marine.c": "3438f4df62873d3c5e5403fb9ea9ca3e2e2fff996e0fc2bba6890a9dce4d89ea",
-          "src/overlays/ovl_i3/fox_aq.c": "d88adbbba9a2d0b38c50cfaa74a16bcaf59c06ffb777d99276cd658af3736634"
+          "src/overlays/ovl_i3/fox_aq.c": "a7ba4986c8a664a54927fbd0897e679815952b79a9771e39e34772bbe979552e"
         },
         "qualification": "accepted_commands"
       },
@@ -4079,7 +4079,7 @@
           "include/PR/gbi.h": "e4f3b010bdcfa92e7220b8194aa524ff10ba43679f82219559017d02f9d1fd8c",
           "include/assets/ast_blue_marine.h": "6c08c8f73144be2eab5615db664d7dd2b3cbfe2a74baa43bdca2b5f29499d7f5",
           "src/assets/ast_blue_marine/ast_blue_marine.c": "3438f4df62873d3c5e5403fb9ea9ca3e2e2fff996e0fc2bba6890a9dce4d89ea",
-          "src/overlays/ovl_i3/fox_aq.c": "d88adbbba9a2d0b38c50cfaa74a16bcaf59c06ffb777d99276cd658af3736634"
+          "src/overlays/ovl_i3/fox_aq.c": "a7ba4986c8a664a54927fbd0897e679815952b79a9771e39e34772bbe979552e"
         },
         "qualification": "accepted_commands"
       },
@@ -5007,7 +5007,7 @@
           "src/engine/fox_hud.c": "68addb5e75e77c803e01be91d8b28ff47b391303d5c5089791f7416fba395d7e",
           "src/overlays/ovl_i1/fox_ve1.c": "e792e97a56dcc057f46e64bcd77ee748d0803f81b8d0fa04d63f128ea26bb989",
           "src/overlays/ovl_i3/fox_a6.c": "cc6787acbfc07b8c7b163cb305862c1c8ec3dcbd1509b30545deafcb7d7ee1db",
-          "src/overlays/ovl_i3/fox_aq.c": "d88adbbba9a2d0b38c50cfaa74a16bcaf59c06ffb777d99276cd658af3736634",
+          "src/overlays/ovl_i3/fox_aq.c": "a7ba4986c8a664a54927fbd0897e679815952b79a9771e39e34772bbe979552e",
           "src/overlays/ovl_i3/fox_so.c": "28a80578f6fb0a46edd63a451c2e0339c9182970f4008bee6779c6796643ce18",
           "src/overlays/ovl_i4/fox_bo.c": "499eb0b78723cb683319a8c54fd33707aa00889e05998026aa7c3ab9f5647f0d",
           "src/overlays/ovl_i4/fox_ka.c": "d64ba75f7dd0188c436265147ce8597dc02d636e0694d372ee490c55824ebd83",

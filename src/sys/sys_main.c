@@ -77,9 +77,9 @@ OSMesgQueue gTimerWaitMesgQueue;
 void* sTimerWaitMsgBuff[1];
 
 #ifdef TARGET_PSP
-GfxPool gGfxPools[2] __attribute__((aligned(16)));
+GfxPool gGfxPools[GFX_TASK_POOL_COUNT] __attribute__((aligned(16)));
 #else
-GfxPool gGfxPools[2];
+GfxPool gGfxPools[GFX_TASK_POOL_COUNT];
 #endif
 
 GfxPool* gGfxPool;
@@ -238,7 +238,13 @@ static void Graphics_PrepareTask(void) {
 
 static s32 Graphics_SubmitTask(SPTask* task) {
 #if defined(TARGET_PSP) && PSP_GFX_BACKEND_GU
-    s32 result = osSendMesg(&gTaskMesgQueue, task, OS_MESG_BLOCK);
+    s32 result;
+#endif
+#ifdef TARGET_PSP
+    PspRenderer_LockTaskInputs();
+#endif
+#if defined(TARGET_PSP) && PSP_GFX_BACKEND_GU
+    result = osSendMesg(&gTaskMesgQueue, task, OS_MESG_BLOCK);
 
     if (result == 0) {
         // Wake the renderer without waiting for another VI
@@ -255,8 +261,8 @@ void Graphics_SetTask(void) {
     Graphics_SubmitTask(gGfxTask);
 }
 
-void Graphics_InitializeTask(u32 frameCount) {
-    gGfxPool = &gGfxPools[frameCount % 2];
+static void Graphics_InitializeTask(u32 frameCount, s32 pool) {
+    gGfxPool = &gGfxPools[pool];
 
     gGfxTask = &gGfxPool->task;
     gViewport = gGfxPool->viewports;
@@ -341,6 +347,15 @@ void Timer_ThreadEntry(void* arg0) {
 #ifdef TARGET_PSP
 #define PSP_MAX_SIMULATION_TICKS_PER_WAKE 2
 
+enum {
+    GFX_WAIT_CURRENT_POOL = 1 << 0,
+    GFX_WAIT_PREVIOUS_POOL = 1 << 1,
+    GFX_WAIT_SHARED_INPUTS = 1 << 2,
+    GFX_WAIT_PRESENTATION = 1 << 3,
+    GFX_WAIT_MENU = 1 << 4,
+    GFX_WAIT_EXIT = 1 << 5,
+};
+
 static u8 Graphics_GetPresentationVIs(void) {
     return PspFrameScheduler_GetPresentationVIs();
 }
@@ -360,11 +375,11 @@ static void Graphics_FinalizeDisplayList(void) {
     gSPEndDisplayList(gMasterDisp++);
 }
 
-static SPTask* Graphics_BuildSimulationTask(u32 simulationVi) {
+static SPTask* Graphics_BuildSimulationTask(u32 simulationVi, s32 pool, s32 taskInFlight) {
     u32 measureStarted = 0;
     int measure = PspNetStats_Active();
     gSysFrameCount++;
-    Graphics_InitializeTask(gSysFrameCount);
+    Graphics_InitializeTask(gSysFrameCount, pool);
     PspFrameInterpolation_BeginSimulationFrame(gGfxTask, simulationVi, gVIsPerFrame,
                                                Graphics_InterpolationEligible());
     MQ_WAIT_FOR_MESG(&gControllerMesgQueue, NULL);
@@ -378,7 +393,7 @@ static SPTask* Graphics_BuildSimulationTask(u32 simulationVi) {
     gSPSegment(gUnkDisp1++, 0, 0);
     gSPDisplayList(gMasterDisp++, gGfxPool->unkDL1);
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_GAME_UPDATE);
-    PspCensus_Simulation(0);
+    PspCensus_Simulation(0, taskInFlight, pool, simulationVi);
     if (measure) measureStarted = PspNetStats_NowUs();
     Game_Update();
     if (measure) PspNetStats_Time(PSP_NET_GAME, measureStarted);
@@ -386,23 +401,27 @@ static SPTask* Graphics_BuildSimulationTask(u32 simulationVi) {
                          (gGameState == GSTATE_PLAY && gCurrentLevel == LEVEL_VERSUS),
                          gGameState == GSTATE_PLAY ? (gPlayState == PLAY_PAUSE ? PSP_ADHOC_HOST_PAUSED :
                          PSP_ADHOC_HOST_PLAYING) : PSP_ADHOC_HOST_SETUP, gVersusStage, gGameFrameCount);
-    PspCensus_Simulation(1);
+    PspCensus_Simulation(1, taskInFlight, pool, simulationVi);
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_GAME_UPDATE);
     PspFrameInterpolation_EndSimulationFrame(gGfxTask, Graphics_InterpolationEligible());
     Graphics_FinalizeDisplayList();
     Graphics_PrepareTask();
-    PspNetStats_TagTask(gSysFrameCount % 2, gGfxTask);
+    PspNetStats_TagTask(pool, gGfxTask);
+    (void) taskInFlight;
     return gGfxTask;
 }
 
-static void Graphics_WaitForTask(s32* taskInFlight) {
+static void Graphics_WaitForTask(s32* taskInFlight, u32 reason) {
     if (!*taskInFlight) {
         return;
     }
+    PspCensus_GfxWait(0, reason);
     PspProfiler_PhaseBegin(PSP_PROFILE_PHASE_GFX_TASK_BACKPRESSURE);
     MQ_WAIT_FOR_MESG(&gGfxTaskMesgQueue, NULL);
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_GFX_TASK_BACKPRESSURE);
+    PspCensus_GfxWait(1, reason);
     *taskInFlight = false;
+    (void) reason;
 }
 
 static void Graphics_UpdateAudio(void) {
@@ -411,11 +430,12 @@ static void Graphics_UpdateAudio(void) {
     PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_AUDIO_UPDATE);
 }
 
-static void Graphics_RunPspScheduler(SPTask* reusableTask, FrameBuffer* reusableFrameBuffer, s32 taskInFlight) {
+static void Graphics_RunPspScheduler(SPTask* reusableTask, FrameBuffer* reusableFrameBuffer,
+                                     SPTask* initialDependency, s32 taskInFlight) {
     PspFrameScheduler scheduler;
     PspFrameSchedule schedule;
     SPTask* inFlightTask = taskInFlight ? reusableTask : NULL;
-    SPTask* inFlightDependency = NULL;
+    SPTask* inFlightDependency = initialDependency;
     SPTask* pendingTask = NULL;
     FrameBuffer* pendingFrameBuffer = NULL;
     u32 currentVi = PspPlatform_GetViCount();
@@ -429,7 +449,7 @@ static void Graphics_RunPspScheduler(SPTask* reusableTask, FrameBuffer* reusable
         MQ_WAIT_FOR_MESG(&gGfxVImesgQueue, NULL);
         PspProfiler_PhaseEnd(PSP_PROFILE_PHASE_VBLANK_WAIT);
         if (PspProfiler_ExitRequested()) {
-            Graphics_WaitForTask(&taskInFlight);
+            Graphics_WaitForTask(&taskInFlight, GFX_WAIT_EXIT);
             PspPlatform_ExitGame();
             return;
         }
@@ -445,7 +465,7 @@ static void Graphics_RunPspScheduler(SPTask* reusableTask, FrameBuffer* reusable
             u32 simulationTick;
 
             if (PspMenu_NeedsBoundary()) {
-                Graphics_WaitForTask(&taskInFlight);
+                Graphics_WaitForTask(&taskInFlight, GFX_WAIT_MENU);
                 inFlightTask = NULL;
                 inFlightDependency = NULL;
                 PspMenu_Apply();
@@ -457,14 +477,21 @@ static void Graphics_RunPspScheduler(SPTask* reusableTask, FrameBuffer* reusable
                 schedule.simulationDeadlineVi - ((simulationTicks - 1) * scheduler.simulationVIs);
 
             for (simulationTick = 0; simulationTick < simulationTicks; simulationTick++) {
-                SPTask* nextTask = &gGfxPools[(gSysFrameCount + 1) % 2].task;
+                s32 nextPool = (gGfxPool - gGfxPools + 1) % GFX_TASK_POOL_COUNT;
+                SPTask* nextTask = &gGfxPools[nextPool].task;
 
-                if (taskInFlight && ((nextTask == inFlightTask) || (nextTask == inFlightDependency))) {
-                    Graphics_WaitForTask(&taskInFlight);
-                    inFlightTask = NULL;
-                    inFlightDependency = NULL;
+                if (taskInFlight) {
+                    u32 reasons = 0;
+                    if (osRecvMesg(&gGfxTaskMesgQueue, NULL, OS_MESG_NOBLOCK) == 0) {
+                        taskInFlight = false;
+                    } else {
+                        if (nextTask == inFlightTask) reasons |= GFX_WAIT_CURRENT_POOL;
+                        if (nextTask == inFlightDependency) reasons |= GFX_WAIT_PREVIOUS_POOL;
+                        if (PspRenderer_TaskInputsLocked()) reasons |= GFX_WAIT_SHARED_INPUTS;
+                        if (reasons) Graphics_WaitForTask(&taskInFlight, reasons);
+                    }
                 }
-                pendingTask = Graphics_BuildSimulationTask(simulationDeadlineVi);
+                pendingTask = Graphics_BuildSimulationTask(simulationDeadlineVi, nextPool, taskInFlight);
                 pendingFrameBuffer = gFrameBuffer;
                 simulationDeadlineVi += scheduler.simulationVIs;
                 if ((simulationTick + 1) < simulationTicks) {
@@ -480,7 +507,7 @@ static void Graphics_RunPspScheduler(SPTask* reusableTask, FrameBuffer* reusable
         if (schedule.presentationDue) {
             SPTask* task;
 
-            Graphics_WaitForTask(&taskInFlight);
+            Graphics_WaitForTask(&taskInFlight, GFX_WAIT_PRESENTATION);
             inFlightTask = NULL;
             inFlightDependency = NULL;
             if (pendingTask != NULL) {
@@ -537,6 +564,7 @@ void Graphics_ThreadEntry(void* arg0) {
     u8 validVIsPerFrame;
 #else
     u32 initialVi;
+    SPTask* initialDependency;
 #endif
 
     PSP_TRACE("gfx game init");
@@ -544,7 +572,7 @@ void Graphics_ThreadEntry(void* arg0) {
     PSP_TRACE("gfx game init done");
     osSendMesg(&gSerialThreadMesgQueue, (OSMesg) SI_READ_CONTROLLER, OS_MESG_NOBLOCK);
     PSP_TRACE("gfx init task 0");
-    Graphics_InitializeTask(gSysFrameCount);
+    Graphics_InitializeTask(gSysFrameCount, gSysFrameCount % GFX_TASK_POOL_COUNT);
 #ifdef TARGET_PSP
     initialVi = PspPlatform_GetViCount();
     PspFrameInterpolation_BeginSimulationFrame(gGfxTask, initialVi, gVIsPerFrame,
@@ -568,8 +596,8 @@ void Graphics_ThreadEntry(void* arg0) {
     PSP_TRACE("gfx first task");
 #ifdef TARGET_PSP
     Graphics_PrepareTask();
-    PspFrameInterpolation_PreparePresentation(gGfxTask, initialVi, Graphics_GetPresentationVIs());
-    Graphics_RunPspScheduler(gGfxTask, gFrameBuffer, Graphics_SubmitTask(gGfxTask) == 0);
+    initialDependency = PspFrameInterpolation_PreparePresentation(gGfxTask, initialVi, Graphics_GetPresentationVIs());
+    Graphics_RunPspScheduler(gGfxTask, gFrameBuffer, initialDependency, Graphics_SubmitTask(gGfxTask) == 0);
 #else
     Graphics_SetTask();
     PSP_TRACE("gfx loop");
@@ -578,7 +606,7 @@ void Graphics_ThreadEntry(void* arg0) {
         if ((gSysFrameCount <= 4) || ((gSysFrameCount % 30) == 0)) {
             PSP_TRACE_FRAME("loop begin", gSysFrameCount);
         }
-        Graphics_InitializeTask(gSysFrameCount);
+        Graphics_InitializeTask(gSysFrameCount, gSysFrameCount % GFX_TASK_POOL_COUNT);
         MQ_WAIT_FOR_MESG(&gControllerMesgQueue, NULL);
         if ((gSysFrameCount <= 4) || ((gSysFrameCount % 30) == 0)) {
             PSP_TRACE_FRAME("controller ready", gSysFrameCount);

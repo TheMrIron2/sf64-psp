@@ -20,6 +20,12 @@ TARGET := starfox64
 VERSION ?= us
 REV ?= rev1
 PSP_GFX_BACKEND ?= unified
+PSP_GFX_TASK_POOLS ?= 2
+ifneq ($(PSP_GFX_TASK_POOLS),2)
+ifneq ($(PSP_GFX_TASK_POOLS),3)
+$(error PSP_GFX_TASK_POOLS must be 2 or 3)
+endif
+endif
 ifneq ($(filter unified pspgl gu,$(PSP_GFX_BACKEND)),$(PSP_GFX_BACKEND))
 $(error PSP_GFX_BACKEND must be unified, pspgl or gu)
 endif
@@ -149,7 +155,7 @@ CC := psp-gcc
 OBJDUMP := psp-objdump
 OBJCOPY := psp-objcopy
 
-BUILD_DIR ?= build/psp/$(PSP_GFX_BACKEND)
+BUILD_DIR ?= build/psp/$(PSP_GFX_BACKEND)$(if $(filter 3,$(PSP_GFX_TASK_POOLS)),-3pools)
 PSP_PROFILE_BUILD_ROOT ?= build/psp-profile/$(PSP_GFX_BACKEND)
 PSP_TITLE ?= Star Fox 64
 PSP_EBOOT_DIR ?= src/psp/EBOOT
@@ -205,6 +211,7 @@ GBI_DEFINES := -DF3DEX_GBI
 RELEASE_DEFINES := -DNDEBUG
 VERSION_DEFINES := -DVERSION_US=1
 PORT_DEFINES := -DLANGUAGE_C -D_LANGUAGE_C -DBUILD_VERSION=VERSION_H -DTARGET_PSP=1 -D_PSP=1
+PORT_DEFINES += -DGFX_TASK_POOL_COUNT=$(PSP_GFX_TASK_POOLS)
 PORT_DEFINES += -DNON_MATCHING -DAVOID_UB -DCOMPILER_GCC
 
 IINC := -Iinclude -Ibin/$(VERSION).$(REV) -I.

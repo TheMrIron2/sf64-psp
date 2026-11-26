@@ -583,7 +583,7 @@
       "functions": [
         {
           "name": "PspFrameInterpolation_RecordMatrix",
-          "size": 460,
+          "size": 464,
           "offset": 0
         }
       ],
@@ -838,7 +838,7 @@
       "functions": [
         {
           "name": "PspFrameInterpolation_ResolveMatrix",
-          "size": 832,
+          "size": 780,
           "offset": 0
         }
       ],
@@ -1249,7 +1249,7 @@
       "functions": [
         {
           "name": "PspFrameInterpolation_FinishPresentation",
-          "size": 16,
+          "size": 48,
           "offset": 0
         }
       ],
@@ -1384,7 +1384,7 @@
       "functions": [
         {
           "name": "PspFrameInterpolation_ShouldPresent",
-          "size": 120,
+          "size": 76,
           "offset": 0
         }
       ],
@@ -1483,21 +1483,6 @@
       "owner": "src/psp/gfx/gfx_psp_gu_texture.o"
     },
     {
-      "section": ".text.PspFrameInterpolation_EndSimulationFrame",
-      "address": 51328,
-      "slot": 320,
-      "functions": [
-        {
-          "name": "PspFrameInterpolation_EndSimulationFrame",
-          "size": 276,
-          "offset": 0
-        }
-      ],
-      "group": "warm",
-      "kind": "application",
-      "owner": "src/psp/frame_interpolation.o"
-    },
-    {
       "section": ".text.PspGfxColor_Init",
       "address": 51648,
       "slot": 256,
@@ -1513,21 +1498,6 @@
       "owner": "src/psp/gfx/gfx_psp_color.o"
     },
     {
-      "section": ".text.PspFrameInterpolation_BeginSimulationFrame",
-      "address": 51904,
-      "slot": 448,
-      "functions": [
-        {
-          "name": "PspFrameInterpolation_BeginSimulationFrame",
-          "size": 428,
-          "offset": 0
-        }
-      ],
-      "group": "warm",
-      "kind": "application",
-      "owner": "src/psp/frame_interpolation.o"
-    },
-    {
       "section": ".text.psp_gfx_gu_texture_release_entry",
       "address": 52352,
       "slot": 576,
@@ -1541,21 +1511,6 @@
       "group": "warm",
       "kind": "application",
       "owner": "src/psp/gfx/gfx_psp_gu_texture.o"
-    },
-    {
-      "section": ".text.PspFrameInterpolation_ForgetIdentity",
-      "address": 52928,
-      "slot": 192,
-      "functions": [
-        {
-          "name": "PspFrameInterpolation_ForgetIdentity",
-          "size": 136,
-          "offset": 0
-        }
-      ],
-      "group": "warm",
-      "kind": "application",
-      "owner": "src/psp/frame_interpolation.o"
     },
     {
       "section": ".text.PspGfxBackendGu_SetScissor",
@@ -1586,21 +1541,6 @@
       "group": "warm",
       "kind": "application",
       "owner": "src/psp/gfx/gfx_psp_dl.o"
-    },
-    {
-      "section": ".text.PspFrameInterpolation_PreparePresentation",
-      "address": 54528,
-      "slot": 832,
-      "functions": [
-        {
-          "name": "PspFrameInterpolation_PreparePresentation",
-          "size": 808,
-          "offset": 0
-        }
-      ],
-      "group": "warm",
-      "kind": "application",
-      "owner": "src/psp/frame_interpolation.o"
     },
     {
       "section": ".text.PspGfxGuDevice_BeginFrame",
@@ -1714,7 +1654,7 @@
       "functions": [
         {
           "name": "PspFrameInterpolation_Reset",
-          "size": 184,
+          "size": 76,
           "offset": 0
         }
       ],

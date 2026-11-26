@@ -3,6 +3,7 @@
 #include "src/psp/audio_mode.h"
 #include "src/psp/display.h"
 #include "src/psp/gfx/gfx_psp_backend.h"
+#include "sf64thread.h"
 #include <n64psp/display.h>
 #include <pspkernel.h>
 #include <psppower.h>
@@ -27,6 +28,7 @@ void PspCensus_Dispatch(unsigned index) {
 static CensusRow sRows[CENSUS_ROWS];
 static u32 sCount, sSerial, sStart, sTaskStart, sFrontendEnd, sSubmitEnd, sSimulationStart;
 static u32 sPrepareStart, sPrepareUs, sRenderOnly;
+static u32 sGfxWaitStart;
 static int sActive;
 static const char* sStatus = "idle";
 
@@ -57,7 +59,8 @@ void PspCensus_Start(void) {
     sStatus = "recording";
     PspCensus_Event(0, PspGfxBackend_GetActive(), PspAudioMode_GetRequested(),
                     PspDisplay_GetConfig()->mode, scePowerGetCpuClockFrequencyInt(),
-                    scePowerGetBusClockFrequencyInt(), PROFILE_CENSUS, 0, 0);
+                    scePowerGetBusClockFrequencyInt(), PROFILE_CENSUS, GFX_TASK_POOL_COUNT,
+                    sizeof(gGfxPools));
 }
 
 const char* PspCensus_Status(void) { return sStatus; }
@@ -113,10 +116,16 @@ void PspCensus_Prepare(int end, int renderOnly) {
     }
 }
 
-void PspCensus_Simulation(int end) {
+void PspCensus_Simulation(int end, int taskInFlight, s32 pool, u32 deadlineVi) {
     if (!sActive) return;
     if (!end) sSimulationStart = sceKernelGetSystemTimeLow();
-    else PspCensus_Event(4, sceKernelGetSystemTimeLow() - sSimulationStart, 0, 0, 0, 0, 0, 0, 0);
+    else PspCensus_Event(4, sceKernelGetSystemTimeLow() - sSimulationStart, taskInFlight, pool, deadlineVi, 0, 0, 0, 0);
+}
+
+void PspCensus_GfxWait(int end, u32 reasons) {
+    if (!sActive) return;
+    if (!end) sGfxWaitStart = sceKernelGetSystemTimeLow();
+    else PspCensus_Event(9, sceKernelGetSystemTimeLow() - sGfxWaitStart, reasons, 0, 0, 0, 0, 0, 0);
 }
 
 void PspCensus_Save(void) {
