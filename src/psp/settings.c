@@ -20,6 +20,10 @@ static int sRecoveredBackup;
 static PspGraphicsQuality sGraphicsQuality;
 static PspGraphicsQuality sActiveGraphicsQuality;
 static int sQualityPending;
+static PspGeLightingMode sGeLighting;
+static int sGeSideClip;
+static int sGePersistentVertices;
+static int sVfpuMatrixLerp;
 static char sExtraSettings[384];
 
 static int sDisplayMode = -1;
@@ -71,6 +75,10 @@ static int psp_settings_read(const char* path) {
     char data[512], extras[sizeof(sExtraSettings)];
     PspGfxBackendKind backend = sGraphicsBackend;
     PspGraphicsQuality quality = PSP_GRAPHICS_ACCURATE;
+    PspGeLightingMode geLighting = PSP_GE_LIGHTING_OFF;
+    int geSideClip = 0;
+    int gePersistentVertices = 0;
+    int vfpuMatrixLerp = 0;
     unsigned version = 0, seenBackend = 0, seenQuality = 0, extraBytes = 0, i, begin;
     SceUID fd = sceIoOpen(path, PSP_O_RDONLY, 0);
     int bytes;
@@ -101,6 +109,18 @@ static int psp_settings_read(const char* path) {
         } else if (i != begin) {
             unsigned length = i - begin;
             if ( !psp_settings_assignment(data + begin) || extraBytes + length + 1 >= sizeof(extras)) return 0;
+            if (psp_settings_prefix(data + begin, "ge_lighting=")) {
+                const char* value = data + begin + sizeof("ge_lighting=") - 1;
+                if (psp_settings_equal(value, "diffuse")) geLighting = PSP_GE_LIGHTING_DIFFUSE;
+                else if (psp_settings_equal(value, "powered")) geLighting = PSP_GE_LIGHTING_POWERED;
+                else geLighting = PSP_GE_LIGHTING_OFF;
+            } else if (psp_settings_prefix(data + begin, "ge_side_clip=")) {
+                geSideClip = psp_settings_equal(data + begin + sizeof("ge_side_clip=") - 1, "on");
+            } else if (psp_settings_prefix(data + begin, "ge_persistent_vertices=")) {
+                gePersistentVertices = psp_settings_equal(data + begin + sizeof("ge_persistent_vertices=") - 1, "on");
+            } else if (psp_settings_prefix(data + begin, "matrix_lerp=")) {
+                vfpuMatrixLerp = psp_settings_equal(data + begin + sizeof("matrix_lerp=") - 1, "vfpu");
+            }
             psp_settings_copy(extras + extraBytes, data + begin, length);
             extraBytes += length;
             extras[extraBytes++] = '\n';
@@ -110,6 +130,10 @@ static int psp_settings_read(const char* path) {
     extras[extraBytes] = 0;
     sGraphicsBackend = backend;
     sGraphicsQuality = quality;
+    sGeLighting = geLighting;
+    sGeSideClip = geSideClip;
+    sGePersistentVertices = gePersistentVertices;
+    sVfpuMatrixLerp = vfpuMatrixLerp;
     psp_settings_copy(sExtraSettings, extras, extraBytes + 1);
     return 1;
 }
@@ -174,6 +198,10 @@ void PspSettings_Init(const char* executablePath, PspGfxBackendKind buildDefault
     sBackendSaveFailed = 0;
     sRecoveredBackup = 0;
     sGraphicsQuality = PSP_GRAPHICS_ACCURATE;
+    sGeLighting = PSP_GE_LIGHTING_OFF;
+    sGeSideClip = 0;
+    sGePersistentVertices = 0;
+    sVfpuMatrixLerp = 0;
     sQualityPending = 0;
     sExtraSettings[0] = 0;
     if (!psp_settings_suffix(backup, ".bak") || !psp_settings_suffix(temporary, ".tmp")) {
@@ -183,11 +211,24 @@ void PspSettings_Init(const char* executablePath, PspGfxBackendKind buildDefault
         else psp_settings_read(temporary);
     }
     sActiveGraphicsQuality = sGraphicsQuality;
+    PspFrameInterpolation_SetVfpuMatrixLerp(sVfpuMatrixLerp);
 }
 
 int PspSettings_UseFastGraphics(void) {
     return sActiveGraphicsBackend == PSP_GFX_KIND_GU &&
            sActiveGraphicsQuality == PSP_GRAPHICS_FAST;
+}
+
+PspGeLightingMode PspSettings_GetGeLighting(void) {
+    return PspSettings_UseFastGraphics() ? sGeLighting : PSP_GE_LIGHTING_OFF;
+}
+
+int PspSettings_UseGeSideClip(void) {
+    return sGeSideClip && PspSettings_UseFastGraphics();
+}
+
+int PspSettings_PrepareGePersistentVertices(void) {
+    return sGePersistentVertices && PspSettings_GetGeLighting() != PSP_GE_LIGHTING_OFF;
 }
 
 PspGraphicsQuality PspSettings_GetGraphicsQuality(void) {

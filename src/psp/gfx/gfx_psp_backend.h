@@ -283,11 +283,40 @@ void PspGfxBackend_ReplayCache(void);
 #endif
 
 #if PSP_GFX_BACKEND_GU
+typedef struct {
+    float u, v;
+    u32 color;
+    s8 nx, ny, nz, pad;
+    float x, y, z;
+} PspGfxGuLitVertex;
+
+typedef char PspGfxGuLitVertexLayoutCheck[(sizeof(PspGfxGuLitVertex) == 28 &&
+    offsetof(PspGfxGuLitVertex, nx) == 12 && offsetof(PspGfxGuLitVertex, x) == 16) ? 1 : -1];
+
+typedef struct {
+    float x, y, z;
+    u32 diffuse;
+} PspGfxGuMeshLight;
+
+typedef struct {
+    u32 ambient;
+    u32 count;
+    int powered;
+    PspGfxGuMeshLight lights[4];
+} PspGfxGuMeshLighting;
+
+typedef struct {
+    float scaleS, scaleT, offsetS, offsetT;
+} PspGfxGuMeshUv;
+
 // Each allocation starts one model instance shared by the following mesh spans
-PspGfxVertex* PspGfxBackendGu_AllocateMeshVertices(u32 count, u32 draws);
-void PspGfxBackendGu_DrawMesh(const PspGfxVertex* vertices, const u16* indices, u32 count,
-                             const PspGfxDrawState* state, const float* modelview, int cullFront, int cullBack);
-void PspGfxBackendGu_SealMeshIndices(const u16* indices, u32 count);
+void* PspGfxBackendGu_AllocateMeshVertices(u32 count, u32 draws, u32 vertexSize);
+int PspGfxBackendGu_BeginStaticMesh(u32 draws);
+int PspGfxBackendGu_MeshSideClipSupported(PspGfxViewportPolicy viewport);
+void PspGfxBackendGu_DrawMesh(const void* vertices, const u16* indices, u32 count,
+                             const PspGfxDrawState* state, const float* modelview, int cullFront, int cullBack,
+                             const PspGfxGuMeshLighting* lighting, const PspGfxGuMeshUv* uv);
+void PspGfxBackendGu_SealMeshData(const void* data, u32 bytes);
 #endif
 
 #include "src/psp/gfx/gfx_psp_backend_impl.h"

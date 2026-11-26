@@ -87,7 +87,7 @@ int PspAquasParticles_Draw(const Gfx* records, u32 count, const float* projectio
     for (i = 0; i < count; i++) {
         const Gfx* data = &records[i * 2 + 1];
         const Mtx* source = (const Mtx*) (uintptr_t) data->words.w0;
-        Matrix interpolated;
+        Matrix interpolated __attribute__((aligned(16)));
         const Matrix* matrix = (const Matrix*) source;
         if (PspFrameInterpolation_ResolveMatrix(source, G_MTX_LOAD | G_MTX_MODELVIEW, &interpolated))
             matrix = &interpolated;

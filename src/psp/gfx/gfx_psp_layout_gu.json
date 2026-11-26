@@ -418,7 +418,7 @@
       "functions": [
         {
           "name": "PspGfxBackendGu_AllocateMeshVertices",
-          "size": 184,
+          "size": 176,
           "offset": 0
         }
       ],
@@ -429,11 +429,11 @@
     {
       "section": ".text.PspGfxBackendGu_DrawMesh",
       "address": 16576,
-      "slot": 448,
+      "slot": 576,
       "functions": [
         {
           "name": "PspGfxBackendGu_DrawMesh",
-          "size": 412,
+          "size": 576,
           "offset": 0
         }
       ],
@@ -443,12 +443,12 @@
     },
     {
       "section": ".text.psp_gfx_gu_prepare_colored_draw_with_model",
-      "address": 17024,
-      "slot": 2880,
+      "address": 17152,
+      "slot": 2944,
       "functions": [
         {
           "name": "psp_gfx_gu_prepare_colored_draw_with_model",
-          "size": 2848,
+          "size": 2888,
           "offset": 0
         }
       ],
@@ -458,12 +458,12 @@
     },
     {
       "section": ".text.psp_gfx_dl_retained_draw.constprop.0",
-      "address": 19904,
-      "slot": 2304,
+      "address": 20096,
+      "slot": 2112,
       "functions": [
         {
           "name": "psp_gfx_dl_retained_draw.constprop.0",
-          "size": 1280,
+          "size": 1452,
           "offset": 0
         }
       ],
@@ -508,7 +508,7 @@
       "functions": [
         {
           "name": "psp_gfx_gu_alloc_vertices",
-          "size": 184,
+          "size": 188,
           "offset": 0
         }
       ],
@@ -838,7 +838,7 @@
       "functions": [
         {
           "name": "PspFrameInterpolation_ResolveMatrix",
-          "size": 804,
+          "size": 832,
           "offset": 0
         }
       ],
@@ -853,7 +853,7 @@
       "functions": [
         {
           "name": "PspGfxBackendGu_DrawReservedTriangles",
-          "size": 396,
+          "size": 400,
           "offset": 0
         }
       ],
@@ -1063,7 +1063,7 @@
       "functions": [
         {
           "name": "PspGfxBackendGu_DrawTriangles",
-          "size": 524,
+          "size": 528,
           "offset": 0
         }
       ],
@@ -1354,7 +1354,7 @@
       "functions": [
         {
           "name": "PspGfxBackendGu_DrawSprites",
-          "size": 480,
+          "size": 484,
           "offset": 0
         }
       ],

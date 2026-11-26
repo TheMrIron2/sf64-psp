@@ -14,6 +14,7 @@
 #include "src/psp/renderer.h"
 #include "src/psp/gfx/gfx_psp_aquas_particles.h"
 #include "src/psp/renderer_starfield.h"
+#include "src/psp/settings.h"
 #include "src/psp/zoness_water_cull.h"
 
 #if PROFILE_COMPONENTS
@@ -554,6 +555,10 @@ typedef struct {
 } PspGfxDlContext;
 
 static PspGfxDlContext sPspGfxDlContext;
+#if PSP_GFX_BACKEND_GU
+static PspGfxGuMeshLighting sPspGfxDlRetainedLighting;
+static int sPspGfxDlRetainedLightingValid;
+#endif
 
 #if PSP_RENDERER_DIAGNOSTICS
 static volatile int sPspGfxDlTraceArmed;
@@ -2039,7 +2044,7 @@ static void psp_gfx_dl_handle_mtx_generic(PspGfxDlContext* ctx, const void* src,
 static void psp_gfx_dl_handle_mtx(PspGfxDlContext* ctx, const Gfx* gfx, int floating) {
     const void* src = psp_gfx_dl_resolve_ptr(ctx, gfx->words.w1);
     u32 flags = (gfx->words.w0 >> 16) & 0xFF;
-    Matrix interpolated;
+    Matrix interpolated __attribute__((aligned(16)));
     float decoded[4][4];
     const float (*loaded)[4];
     float (*target)[4];
@@ -2155,6 +2160,11 @@ static void psp_gfx_dl_load_directional_light(PspGfxDlLight* dst, const Light* s
 }
 
 static void psp_gfx_dl_stage_ambient_light(const PspGfxDlContext* ctx) {
+#if PSP_GFX_BACKEND_GU
+    if ((float) ctx->ambientR != sPspGfxDlLightingAmbient.x ||
+        (float) ctx->ambientG != sPspGfxDlLightingAmbient.y ||
+        (float) ctx->ambientB != sPspGfxDlLightingAmbient.z) sPspGfxDlRetainedLightingValid = 0;
+#endif
     sPspGfxDlLightingAmbient.x = (float) ctx->ambientR;
     sPspGfxDlLightingAmbient.y = (float) ctx->ambientG;
     sPspGfxDlLightingAmbient.z = (float) ctx->ambientB;
@@ -2201,6 +2211,9 @@ static void psp_gfx_dl_prepare_effective_lights(PspGfxDlContext* ctx) {
         return;
     }
 
+#if PSP_GFX_BACKEND_GU
+    sPspGfxDlRetainedLightingValid = 0;
+#endif
     ctx->groupedLightCount = 0;
     if ((ctx->lightCount == 7) &&
         psp_gfx_dl_lights_match(&ctx->lights[0], &ctx->lights[1]) &&
@@ -6779,6 +6792,9 @@ static void psp_gfx_dl_reset_context(PspGfxDlContext* ctx) {
     u8* bytes = (u8*) ctx;
     u32 i;
 
+#if PSP_GFX_BACKEND_GU
+    sPspGfxDlRetainedLightingValid = 0;
+#endif
     for (i = 0; i < offsetof(PspGfxDlContext, vertices); i++) {
         bytes[i] = 0;
     }

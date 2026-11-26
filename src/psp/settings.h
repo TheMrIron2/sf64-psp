@@ -9,7 +9,16 @@ typedef enum {
     PSP_GRAPHICS_FAST,
 } PspGraphicsQuality;
 
+typedef enum {
+    PSP_GE_LIGHTING_OFF,
+    PSP_GE_LIGHTING_DIFFUSE,
+    PSP_GE_LIGHTING_POWERED,
+} PspGeLightingMode;
+
 int PspSettings_UseFastGraphics(void);
+PspGeLightingMode PspSettings_GetGeLighting(void);
+int PspSettings_UseGeSideClip(void);
+int PspSettings_PrepareGePersistentVertices(void);
 PspGraphicsQuality PspSettings_GetGraphicsQuality(void);
 PspGraphicsQuality PspSettings_GetActiveGraphicsQuality(void);
 void PspSettings_SetGraphicsQuality(PspGraphicsQuality quality);

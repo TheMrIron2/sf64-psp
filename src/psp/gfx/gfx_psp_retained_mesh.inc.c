@@ -117,6 +117,70 @@ static __attribute__((noinline)) void psp_gfx_dl_retained_vertices(PspGfxDlConte
     }
 }
 
+static const PspGfxGuMeshLighting* psp_gfx_dl_retained_lighting(const PspGfxDlContext* ctx,
+                                                              const PspGfxRetainedProgram* program) {
+    PspGeLightingMode mode = PspSettings_GetGeLighting();
+    u32 count = ctx->groupedLightCount ? ctx->groupedLightCount : ctx->lightCount;
+    const n64psp_directional_lightf* lights = ctx->groupedLightCount ? sPspGfxDlGroupedLightingLights :
+                                                                     sPspGfxDlLightingLights;
+    PspGfxGuMeshLighting* lighting = &sPspGfxDlRetainedLighting;
+    u32 i;
+    u8 r, g, b;
+    float gain;
+
+    if (mode == PSP_GE_LIGHTING_OFF || !(ctx->geometryMode & G_LIGHTING) || count > 2 || program->hasZeroNormal) {
+        return NULL;
+    }
+    if (sPspGfxDlRetainedLightingValid) return lighting;
+
+    *lighting = (PspGfxGuMeshLighting) { 0 };
+    r = psp_gfx_dl_remap_lighting(ctx->ambientR);
+    g = psp_gfx_dl_remap_lighting(ctx->ambientG);
+    b = psp_gfx_dl_remap_lighting(ctx->ambientB);
+    lighting->ambient = psp_gfx_dl_pack_rgba_u8(r, g, b, 255, 0);
+    lighting->powered = mode == PSP_GE_LIGHTING_POWERED;
+    // Fit the diffuse response at a dot product of one half
+    gain = lighting->powered ? 1.41421356f : 2.0f;
+    for (i = 0; i < count; i++) {
+        const n64psp_directional_lightf* light = &lights[i];
+        u32 dr, dg, db, split;
+        if (light->direction.x == 0.0f && light->direction.y == 0.0f && light->direction.z == 0.0f) continue;
+        dr = (u32) ((psp_gfx_dl_remap_lighting(ctx->ambientR + light->color.x * 0.5f) - r) * gain + 0.5f);
+        dg = (u32) ((psp_gfx_dl_remap_lighting(ctx->ambientG + light->color.y * 0.5f) - g) * gain + 0.5f);
+        db = (u32) ((psp_gfx_dl_remap_lighting(ctx->ambientB + light->color.z * 0.5f) - b) * gain + 0.5f);
+        if (!(dr | dg | db)) continue;
+        split = (dr | dg | db) > 255;
+        lighting->lights[lighting->count++] = (PspGfxGuMeshLight) {
+            light->direction.x, light->direction.y, light->direction.z,
+            psp_gfx_dl_pack_rgba_u8(dr >> split, dg >> split, db >> split, 0, 0),
+        };
+        if (split) {
+            lighting->lights[lighting->count++] = (PspGfxGuMeshLight) {
+                light->direction.x, light->direction.y, light->direction.z,
+                psp_gfx_dl_pack_rgba_u8((dr + 1) >> 1, (dg + 1) >> 1, (db + 1) >> 1, 0, 0),
+            };
+        }
+    }
+    sPspGfxDlRetainedLightingValid = 1;
+    return lighting;
+}
+
+static void psp_gfx_dl_retained_lit_vertices(const PspGfxDlContext* ctx, PspGfxGuLitVertex* vertices,
+                                             const n64psp_mesh_vertex* source, u32 count) {
+    u32 i;
+    int opaque = ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_SHADE_DECAL_ALPHA;
+    for (i = 0; i < count; i++) {
+        const n64psp_mesh_vertex* vertex = &source[i];
+        vertices[i] = (PspGfxGuLitVertex) {
+            vertex->uv[0] * ctx->textureUvMulS + ctx->textureUvAddS,
+            vertex->uv[1] * ctx->textureUvMulT + ctx->textureUvAddT,
+            ((u32) (opaque ? 255 : vertex->color[3]) << 24) | 0xFFFFFFU,
+            (s8) vertex->color[0], (s8) vertex->color[1], (s8) vertex->color[2], 0,
+            vertex->position[0], vertex->position[1], vertex->position[2],
+        };
+    }
+}
+
 static __attribute__((noinline)) void psp_gfx_dl_retained_material(PspGfxDlContext* ctx,
     const n64psp_mesh_material* material) {
     u32 flags = material->flags;
@@ -168,8 +232,8 @@ static __attribute__((noinline)) void psp_gfx_dl_retained_material(PspGfxDlConte
     psp_gfx_dl_mark_effective_material_dirty(ctx);
 }
 
-static void psp_gfx_dl_retained_draw(PspGfxDlContext* ctx, PspGfxVertex* stream, int discard,
-                                    const PspGfxRetainedProgram* program) {
+static void psp_gfx_dl_retained_draw(PspGfxDlContext* ctx, u8* stream, int discard,
+                                    const PspGfxRetainedProgram* program, const PspGfxGuMeshLighting* lighting) {
     u32 i;
     PspGfxDlFogProjection fogProjection;
     float fogColor[4], fogStart, fogEnd;
@@ -178,8 +242,6 @@ static void psp_gfx_dl_retained_draw(PspGfxDlContext* ctx, PspGfxVertex* stream,
     psp_gfx_dl_resolve_fog_values(ctx, requestedFog, &fogProjection, fogColor, &fogStart, &fogEnd);
 
     psp_gfx_dl_pool_drain(ctx, PSP_PROFILE_FLUSH_OTHER);
-
-    psp_gfx_dl_prepare_effective_lights(ctx);
 
     for (i = 0; i < program->count; i++) {
         const n64psp_mesh_span* span = &program->spans[i];
@@ -192,18 +254,40 @@ static void psp_gfx_dl_retained_draw(PspGfxDlContext* ctx, PspGfxVertex* stream,
         indexCount = span->count;
         {
             PspGfxDrawState state = { 0 };
-            PspGfxVertex* vertices = stream + vertexFirst;
+            PspGfxGuMeshUv uvTransform;
+            const PspGfxGuMeshUv* uv = NULL;
+            const void* vertices;
+            const PspGfxGuMeshLighting* spanLighting;
             u32 j;
 
             psp_gfx_dl_resolve_effective_material_state(ctx);
             psp_gfx_dl_resolve_effective_depth_state(ctx);
             psp_gfx_dl_update_texture_uv_coefficients(ctx);
 
-            for (j = 0; j < vertexCount; j += 64) {
-                u32 count = vertexCount - j;
-                if (count > 64) count = 64;
-                psp_gfx_dl_retained_vertices(ctx, vertices + j,
-                    sRetainedCache->mesh.vertices + vertexFirst + j, count);
+            spanLighting = ctx->effectiveMaterial.classification.premultiplied ? NULL : lighting;
+            if (!stream) {
+                vertices = program->geVertices + vertexFirst;
+                if (PspGfxTextureHandle_IsValid(ctx->effectiveMaterial.texture)) {
+                    uvTransform = (PspGfxGuMeshUv) {
+                        ctx->textureUvMulS, ctx->textureUvMulT, ctx->textureUvAddS, ctx->textureUvAddT,
+                    };
+                    uv = &uvTransform;
+                }
+            } else {
+                u32 stride = lighting ? sizeof(PspGfxGuLitVertex) : sizeof(PspGfxVertex);
+                void* output = stream + vertexFirst * stride;
+                vertices = output;
+                if (spanLighting) {
+                    psp_gfx_dl_retained_lit_vertices(ctx, output, sRetainedCache->mesh.vertices + vertexFirst,
+                                                     vertexCount);
+                } else {
+                    for (j = 0; j < vertexCount; j += 64) {
+                        u32 count = vertexCount - j;
+                        if (count > 64) count = 64;
+                        psp_gfx_dl_retained_vertices(ctx, (PspGfxVertex*) output + j,
+                            sRetainedCache->mesh.vertices + vertexFirst + j, count);
+                    }
+                }
             }
 
             state.texture = ctx->effectiveMaterial.texture;
@@ -228,7 +312,7 @@ static void psp_gfx_dl_retained_draw(PspGfxDlContext* ctx, PspGfxVertex* stream,
             psp_gfx_dl_apply_rsp_viewport(ctx, &state);
             PspGfxBackendGu_DrawMesh(vertices, sRetainedCache->mesh.indices + indexFirst, indexCount, &state,
                 &ctx->alignedMatrices.modelview.m[0][0], (ctx->geometryMode & G_CULL_FRONT) != 0,
-                (ctx->geometryMode & G_CULL_BACK) != 0);
+                (ctx->geometryMode & G_CULL_BACK) != 0, spanLighting, uv);
 
         }
     }
@@ -243,10 +327,11 @@ static void psp_gfx_dl_retained_draw(PspGfxDlContext* ctx, PspGfxVertex* stream,
 }
 
 static __attribute__((noinline)) int psp_gfx_dl_retained_dispatch(PspGfxDlContext* ctx, const Gfx* child, u32 depth) {
-    PspGfxVertex* stream;
+    void* stream = NULL;
     const PspGfxRetainedProgram* program;
+    const PspGfxGuMeshLighting* lighting;
     u32 commandsCount, slot;
-    int discard, admitted;
+    int discard, admitted, persistent;
 
     slot = PspGfxRetainedSource_Find(child, &commandsCount);
 
@@ -292,6 +377,14 @@ static __attribute__((noinline)) int psp_gfx_dl_retained_dispatch(PspGfxDlContex
     admitted = n64psp_aabb_inside_clip_affine(sRetainedCache->bounds,
         &ctx->alignedMatrices.modelview, &ctx->alignedMatrices.projection, 1.0f, 0.001f, 0.0005f);
 
+    if (!admitted && PspSettings_UseGeSideClip() && !psp_gfx_dl_has_subviewport(ctx) &&
+        ctx->hudCanvasScaleX == 1.0f && PspGfxBackendGu_MeshSideClipSupported(
+            psp_gfx_dl_resolve_viewport(ctx, NULL, 0, &ctx->projection[0][0]))) {
+        // Four times the world viewport half extent fits within the GE guard band
+        admitted = n64psp_aabb_inside_clip_affine_sides(sRetainedCache->bounds,
+            &ctx->alignedMatrices.modelview, &ctx->alignedMatrices.projection, 1.0f, 0.001f, 0.0005f, 4.0f);
+    }
+
     if (!admitted) {
         sRetainedStats.rejects[MESH_REJECT_BOUNDS]++; return 0;
     }
@@ -304,10 +397,24 @@ static __attribute__((noinline)) int psp_gfx_dl_retained_dispatch(PspGfxDlContex
         sRetainedStats.rejects[MESH_REJECT_MATERIALS]++; return 0;
     }
 
-    stream = PspGfxBackendGu_AllocateMeshVertices(sRetainedCache->mesh.stream_count, sRetainedCache->mesh.span_count);
-
-    if (!stream) {
-        sRetainedStats.rejects[MESH_REJECT_ALLOCATE]++; return 0;
+    psp_gfx_dl_prepare_effective_lights(ctx);
+    lighting = psp_gfx_dl_retained_lighting(ctx, program);
+    // Premultiplication can depend on the texture format of each span
+    persistent = lighting && program->geVertices &&
+        !(psp_gfx_dl_blend_enabled(ctx) && (ctx->otherModeL & CVG_DST_SAVE) == CVG_DST_SAVE) &&
+        !(program->hasVertexAlpha && ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_SHADE_DECAL_ALPHA) &&
+        PspGfxBackendGu_BeginStaticMesh(sRetainedCache->mesh.span_count);
+    if (!persistent && lighting) {
+        stream = PspGfxBackendGu_AllocateMeshVertices(sRetainedCache->mesh.stream_count,
+            sRetainedCache->mesh.span_count, sizeof(PspGfxGuLitVertex));
+        if (!stream) lighting = NULL;
+    }
+    if (!persistent && !stream) {
+        stream = PspGfxBackendGu_AllocateMeshVertices(sRetainedCache->mesh.stream_count,
+            sRetainedCache->mesh.span_count, sizeof(PspGfxVertex));
+        if (!stream) {
+            sRetainedStats.rejects[MESH_REJECT_ALLOCATE]++; return 0;
+        }
     }
 
     ctx->stats.commandCount += sRetainedCache->mesh.command_count;
@@ -315,7 +422,7 @@ static __attribute__((noinline)) int psp_gfx_dl_retained_dispatch(PspGfxDlContex
     discard = PspGfxRetainedSource_OutputsDead(slot, depth,
         PSP_GFX_DL_MAX_COMMANDS - ctx->stats.commandCount);
     if (discard) sRetainedStats.skipped += sRetainedWrites[slot].count;
-    psp_gfx_dl_retained_draw(ctx, stream, discard, program);
+    psp_gfx_dl_retained_draw(ctx, stream, discard, program, lighting);
     sRetainedStats.fallbacks--;
     sRetainedStats.hits++;
     sRetainedStats.spans += sRetainedCache->mesh.span_count;

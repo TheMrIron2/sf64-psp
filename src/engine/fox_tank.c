@@ -31,21 +31,42 @@ void func_tank_80043280(u16* text0, u16* text1, f32 zRot) {
     f32 dy;
     f32 dx;
     s32 pad;
+#ifdef TARGET_PSP
+    f32 cosine;
+    f32 sine;
+#else
     Vec3f sp80;
     Vec3f sp74;
+#endif
 
     Matrix_Push(&gCalcMatrix);
     text0 = SEGMENTED_TO_VIRTUAL(text0);
     text1 = SEGMENTED_TO_VIRTUAL(text1);
     Matrix_RotateZ(gCalcMatrix, M_DTOR * zRot, MTXF_NEW);
+#ifdef TARGET_PSP
+    cosine = gCalcMatrix->m[0][0];
+    sine = gCalcMatrix->m[0][1];
+#else
     sp74.z = 0.0f;
+#endif
     for (i = 0, dy = 0.0f; i < 32; i++, dy += 1.0f) {
+#ifdef TARGET_PSP
+        f32 y = dy - 16.0f;
+        f32 rowX = -sine * y;
+        f32 rowY = cosine * y;
+#endif
         for (j = 0, dx = 0.0f; j < 32; j++, dx += 1.0f) {
+#ifdef TARGET_PSP
+            f32 x = dx - 16.0f;
+            px = (s32) (((cosine * x) + rowX) + 16.0f);
+            py = (s32) (((sine * x) + rowY) + 16.0f);
+#else
             sp74.x = dx - 16.0f;
             sp74.y = dy - 16.0f;
             Matrix_MultVec3f(gCalcMatrix, &sp74, &sp80);
             px = (s32) (sp80.x + 16.0f);
             py = (s32) (sp80.y + 16.0f);
+#endif
             if ((px >= 0) && (px < 32) && (py >= 0) && (py < 32)) {
                 text0[px + 32 * py] = text1[j + 32 * i];
             }

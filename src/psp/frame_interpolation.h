@@ -13,6 +13,7 @@ typedef enum {
 } PspFrameInterpolationWrapAxis;
 
 void PspFrameInterpolation_Reset(void);
+void PspFrameInterpolation_SetVfpuMatrixLerp(int enabled);
 void PspFrameInterpolation_BeginSimulationFrame(SPTask* task, u32 simulationVi, u8 simulationVIs, s32 record);
 void PspFrameInterpolation_SetWorldScope(s32 enabled);
 void PspFrameInterpolation_SetMatrixIdentity(const void* identity);

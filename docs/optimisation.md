@@ -1289,3 +1289,134 @@ recent world-snapshot copies of a few KiB crashed it. Any new worker that can
 reach `memcpy`, `n64psp_memcpy` or VFPU code must request the attribute at
 creation, otherwise keep its copies below the VFPU threshold or use a scalar
 copy. The host Ad-Hoc fixture now asserts the worker attribute.
+
+## Retained GE and matrix interpolation trials — 24 November 2026
+
+The unified EBOOT reads the following optional keys in `sf64-settings.cfg`
+beside the executable. The three GE keys apply to Fast GU graphics. Each
+lighting and clipping setting can be compared against its own control.
+
+| Key | Values | Default |
+| --- | --- | --- |
+| `ge_lighting` | `off`, `diffuse`, `powered` | `off` |
+| `ge_side_clip` | `off`, `on` | `off` |
+| `ge_persistent_vertices` | `off`, `on` with GE lighting | `off` |
+| `matrix_lerp` | `scalar`, `vfpu` | `scalar` |
+
+For GE lighting, use the existing one- and two-direction groups. Apply the
+CPU colour transfer to ambient and fit each diffuse channel at half cosine.
+A compensated colour above 255 splits across two channels pointing in the same
+direction. Powered diffuse uses an exponent of 0.5, applied per dot product.
+Premultiplied spans, source meshes with zero normals and unsupported light
+counts use CPU lighting. Live outgoing N64 slots still use the CPU vertex
+loader. [PSP GE lighting measurements](https://www.ppsspp.org/docs/psp-hardware/gpu/lighting/)
+
+Side admission permits X/Y up to four times W for the full world viewport
+when the framebuffer or scissor covers its clipping boundary. It preserves the
+positive-W test, near and far margins and inherited vertex slots. The GE
+discards triangles whose vertices exceed its screen guard band, so a viewport
+and scissor alone cannot make arbitrary side intersections safe.
+[PSP GE vertex and clipping measurements](https://www.ppsspp.org/docs/psp-hardware/gpu/ge-vertex-pipeline/)
+
+The persistent path builds immutable UV, normal, alpha and position streams
+once from the retained packets. It stays inside the existing 3 MiB retained
+cache with a further 512 KiB stream limit. Writeback happens once before GE
+access. Indices remain span-local, the model stays per instance, and GU texture
+scale and offset are restored after each indexed draw. Incompatible alpha and
+premultiplication cases keep the transient stream.
+
+VFPU interpolation keeps the existing subtract, multiply and add order.
+It uses aligned history and aligned output directly, and keeps the scalar
+fallback for unaligned callers. The wrapped-coordinate adjustment, matrix
+matching and history selection run before the kernel as before.
+
+Hardware comparisons use one instrumented unified PRX per controlled series,
+60 Hz presentation requested, 333 MHz CPU and audio off. The harness fixes the
+game RNG seed for repeat runs. Timing runs from one successful
+`sceGuSwapBuffers` return to the next, and the graphics-task timing includes
+frontend and submission. Submission includes the wait for GE completion.
+The matched-frame screenshot and the following timing interval are excluded
+from the seeded comparison. The harness and raw captures are under
+`build/experiments/final-optimisation/`.
+
+| Moving workload | Variant | Delivered FPS | Mean GFX task ms | Present p95 / p99 ms |
+| --- | --- | ---: | ---: | ---: |
+| Bolse | CPU control | 45.11 | 17.369 | 30.050 / 31.343 |
+| Bolse | CPU control repeat | 45.20 | 17.355 | 30.078 / 31.381 |
+| Bolse | GE diffuse | 45.83 | 17.069 | 29.532 / 31.303 |
+| Bolse | GE powered diffuse | 45.84 | 17.061 | 29.487 / 30.923 |
+| Bolse | Side admission | 45.25 | 17.232 | 30.447 / 33.215 |
+| Bolse | Powered diffuse and side admission | 46.35 | 16.779 | 29.578 / 32.561 |
+| Bolse | Powered diffuse, side admission, persistent vertices | 47.16 | 16.425 | 29.197 / 32.081 |
+| Corneria | CPU control | 59.91 | 8.265 | 19.612 / 20.113 |
+| Corneria | Powered diffuse and side admission | 59.92 | 8.191 | 19.585 / 20.080 |
+| Corneria | Powered diffuse, side admission, persistent vertices | 59.92 | 8.064 | 19.653 / 20.240 |
+
+Keep both lighting fits as Fast options. The matched Bolse captures retained
+midtone brightness and geometry detail with modest local shading changes.
+Side clipping admitted about three additional Bolse meshes per task and four
+additional Corneria meshes per task in the combined run. Its longest Bolse
+intervals increased, so leave it selectable. The persistent stream improved
+mean task time over the corresponding transient draw in both workloads. The
+matched frame was byte-identical in each. Keep it selectable for further visual
+coverage and PSP-1000 memory testing. Use the seeded controls for the decision.
+The first unseeded Bolse control moved through a measurably different load.
+
+### Venom 2 diagnostic
+
+The 24 November capture contains 241 first-phase Andross presentations and
+231 comparable brain-phase presentations after excluding the HostFS checkpoint
+write at simulation frame 401. Delivered FPS fell from 60.04 to 33.50 and
+Present p95 rose from 19.53 to 35.88 ms. Mean frontend time rose from 12.81
+to 21.50 ms and display-list generation from 1.07 to 7.20 ms. Mean submit and
+sync time changed from 0.07 to 0.11 ms. Simulation update time fell from 1.12
+to 0.56 ms. These wall-clock measurements point to the frontend and draw
+generation. The brain draw emits up to 300 tentacle segments, but the capture
+does not attribute the added time to an individual display list or kernel.
+
+An earlier diagnostic froze near brain entry. The revised brain capture
+continued through the measured window. The direct reunion run left a module
+launch log and no frame data, so its cost and the earlier harness freeze
+remain unresolved. Keep the retail Venom paths as they are.
+
+### Consolidation — 26 November 2026
+
+Powering the existing retained lights and enabling persistence with relaxed
+clipping disabled gave 46.42 FPS, 16.817 ms mean graphics task and 29.301 /
+31.094 ms Present p95/p99 in Bolse. The powered transient path gave 45.84 FPS
+and 17.061 ms, and the matched framebuffers were byte-identical. Keep powered
+diffuse with persistence as the preferred Fast trial. Ordinary diffuse remains
+selectable. Leave relaxed clipping off by default because its isolated tails
+worsened. Both GU lighting and clipping are gated on the active Fast GU
+settings. Persistent buffers are allocated on the first use of the Fast
+configuration, including after a quality change. Ordinary draws restore GU
+lighting and model state and persistent draws restore UV scale and offset
+immediately. The size cap bounds retained allocation on PSP-1000, with
+physical memory-pressure coverage still pending.
+
+The corrected VFPU kernel obtains alpha through the Allegrex hard-float ABI.
+Same-binary scalar/VFPU runs matched the captured framebuffer byte-for-byte
+in Bolse and Corneria. Both ran at 44.80 FPS in Bolse and 59.91 in Corneria.
+Mean graphics-task time was 17.483 / 17.493 ms and 8.287 / 8.291 ms respectively.
+Keep scalar as the default and keep the corrected VFPU implementation under
+`matrix_lerp=vfpu` for either quality setting. Discard the pre-fix comparison.
+
+Titania's existing wheel pass now hoists the Y terms of the existing Z
+rotation once per row and uses only the two texture coordinates. It preserves
+the October single-pass change, matrix stack and both track scrolls. In the
+seeded comparison the full game update and draw-generation mean fell from
+2.359 to 2.053 ms per simulation frame, and each of the three successive
+100-frame blocks improved. Delivered FPS rose from 46.22 to 46.74, and
+Present p95/p99 improved from 25.422 / 25.995 to 25.081 / 25.766 ms. The
+4,204-case host comparison matched the wheel output and matrix stack exactly.
+The two gameplay screenshots show small motion-phase differences.
+
+The PSP arithmetic check passed all 4,204 wheel texture and stack comparisons
+with the PSP trig implementation, plus aligned VFPU lerp and input aliasing.
+The final unified build booted in Accurate GU and Fast PSPGL with all GE
+settings present. Runtime inspection confirmed the requested backend and
+quality and showed zero persistent stream preparation in both modes.
+Unified, GU-only and PSPGL-only builds passed together with the n64psp tests
+and retained asset generator tests.
+Fast GU also booted with powered diffuse and persistence and prepared its
+persistent streams on the same PSP.

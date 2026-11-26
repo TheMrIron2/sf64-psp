@@ -5,6 +5,7 @@
 #include "gfx_psp_backend.h"
 #include "macros.h"
 #include "../renderer.h"
+#include "../settings.h"
 
 #include "retained_assets.inc.c"
 
@@ -94,12 +95,21 @@ static void psp_gfx_retained_program_support(PspGfxRetainedProgram* program) {
 
 static void psp_gfx_retained_program_build(u32 slot, const n64psp_mesh_packet* mesh) {
     u32 count = mesh->span_count + 1;
+    u32 i;
     u32 bytes = sizeof(PspGfxRetainedProgram) + count * sizeof(n64psp_mesh_span);
     PspGfxRetainedProgram* program = PspGfxRetainedSource_Allocate(bytes);
     if (!program) return;
     program->count = n64psp_mesh_compile_spans(mesh, program->spans, count);
     if (!program->count) return;
     psp_gfx_retained_program_support(program);
+    program->geVertices = NULL;
+    program->hasZeroNormal = 0;
+    program->hasVertexAlpha = 0;
+    for (i = 0; i < mesh->stream_count; i++) {
+        const uint8_t* normal = mesh->vertices[i].color;
+        if (!(normal[0] | normal[1] | normal[2])) program->hasZeroNormal = 1;
+        if (normal[3] != 255) program->hasVertexAlpha = 1;
+    }
     sRetainedPrograms[slot] = program;
 }
 
@@ -138,7 +148,7 @@ static int psp_gfx_dl_retained_build(const Gfx* child, u32 commandsCount, u32 sl
             if (!i || value > cache->bounds[1][axis]) cache->bounds[1][axis] = value;
         }
     }
-    PspGfxBackendGu_SealMeshIndices(cache->mesh.indices, cache->mesh.index_count);
+    PspGfxBackendGu_SealMeshData(cache->mesh.indices, cache->mesh.index_count * sizeof(u16));
     psp_gfx_retained_program_build(slot, &cache->mesh);
     sRetainedBuilt[slot] = 1;
     return 1;
@@ -147,14 +157,46 @@ static int psp_gfx_dl_retained_build(const Gfx* child, u32 commandsCount, u32 sl
 const n64psp_mesh_command* sRetainedContinuations[32];
 u32 sRetainedCallerLevels;
 
+static void psp_gfx_retained_prepare_ge_vertices(void) {
+    u32 slot, remaining = 512 * 1024;
+    for (slot = 0; slot < PSP_RETAINED_CACHE_SLOTS; slot++) {
+        const PspGfxDlRetainedCache* cache = sRetainedCaches[slot];
+        PspGfxRetainedProgram* program = sRetainedPrograms[slot];
+        PspGfxGuLitVertex* vertices;
+        u32 i, bytes;
+
+        if (!program || program->hasZeroNormal) continue;
+        bytes = cache->mesh.stream_count * sizeof(*vertices);
+        if (bytes > remaining) continue;
+        vertices = PspGfxRetainedSource_Allocate(bytes);
+        if (!vertices) continue;
+        for (i = 0; i < cache->mesh.stream_count; i++) {
+            const n64psp_mesh_vertex* vertex = &cache->mesh.vertices[i];
+            vertices[i] = (PspGfxGuLitVertex) {
+                vertex->uv[0], vertex->uv[1], ((u32) vertex->color[3] << 24) | 0xFFFFFFU,
+                (s8) vertex->color[0], (s8) vertex->color[1], (s8) vertex->color[2], 0,
+                vertex->position[0], vertex->position[1], vertex->position[2],
+            };
+        }
+        PspGfxBackendGu_SealMeshData(vertices, bytes);
+        program->geVertices = vertices;
+        remaining -= bytes;
+    }
+}
+
 void PspGfxRetainedSource_Prepare(void) {
     static int prepared;
+    static int geVerticesPrepared;
     u32 slot;
     if (!prepared) {
         for (slot = 0; slot < PSP_RETAINED_CACHE_SLOTS; slot++) {
             PspGfxRetainedSource_Get(slot);
         }
         prepared = 1;
+    }
+    if (!geVerticesPrepared && PspSettings_PrepareGePersistentVertices()) {
+        psp_gfx_retained_prepare_ge_vertices();
+        geVerticesPrepared = 1;
     }
     sRetainedCallerLevels = 0;
     sRetainedStats = (PspGfxDlRetainedStats) { 0 };

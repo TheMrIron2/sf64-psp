@@ -4,6 +4,8 @@
 #include "src/psp/profiler.h"
 #include "src/psp/renderer_starfield.h"
 
+#include <n64psp/math.h>
+
 #define PSP_FRAME_INTERPOLATION_MATRIX_CAPACITY 0x480
 #define PSP_FRAME_INTERPOLATION_BUCKETS 256
 
@@ -52,6 +54,7 @@ static s16 sPreviousMatrix[PSP_FRAME_INTERPOLATION_MATRIX_CAPACITY];
 static u32 sGeneration;
 static s32 sRecordingPool = -1;
 static s32 sPresentationPool = -1;
+static int sVfpuMatrixLerp;
 static s32 sWorldScope;
 static const void* sMatrixIdentity;
 static PspFrameInterpolationWrapAxis sWrapAxis;
@@ -106,6 +109,10 @@ void PspFrameInterpolation_Reset(void) {
     sWrapAxis = PSP_FRAME_INTERPOLATION_WRAP_NONE;
     sWrapPeriod = 0.0f;
     PspStarfield_Reset();
+}
+
+void PspFrameInterpolation_SetVfpuMatrixLerp(int enabled) {
+    sVfpuMatrixLerp = enabled;
 }
 
 void PspFrameInterpolation_BeginSimulationFrame(SPTask* task, u32 simulationVi, u8 simulationVIs, s32 record) {
@@ -374,7 +381,7 @@ s32 PspFrameInterpolation_ResolveMatrix(const Mtx* currentMatrix, u32 flags, Mat
     PspFrameInterpolationPresentation* presentation;
     const Matrix* currentValue;
     const Matrix* previousValue;
-    Matrix adjustedCurrent;
+    Matrix adjustedCurrent __attribute__((aligned(16)));
     f32 alpha;
     f32 rawDistanceSq;
     f32 negativeDistanceSq;
@@ -437,10 +444,14 @@ s32 PspFrameInterpolation_ResolveMatrix(const Mtx* currentMatrix, u32 flags, Mat
         currentValue = &adjustedCurrent;
     }
     alpha = presentation->alpha;
-    for (row = 0; row < 4; row++) {
-        for (column = 0; column < 4; column++) {
-            result->m[row][column] = previousValue->m[row][column] +
-                                     ((currentValue->m[row][column] - previousValue->m[row][column]) * alpha);
+    if (sVfpuMatrixLerp) {
+        n64psp_mat4f_lerp(result->m, previousValue->m, currentValue->m, alpha);
+    } else {
+        for (row = 0; row < 4; row++) {
+            for (column = 0; column < 4; column++) {
+                result->m[row][column] = previousValue->m[row][column] +
+                                         ((currentValue->m[row][column] - previousValue->m[row][column]) * alpha);
+            }
         }
     }
     presentation->matricesInterpolated++;

@@ -2,6 +2,7 @@
 #define PSP_GFX_RETAINED_SOURCES_H
 
 #include "gfx_psp_dl.h"
+#include "gfx_psp_backend.h"
 #include <n64psp/native_mesh.h>
 
 #include "retained_assets.h"
@@ -25,8 +26,10 @@ void PspGfxRetainedSource_Prepare(void);
 PspGfxDlRetainedCache* PspGfxRetainedSource_Get(u32 slot);
 
 typedef struct {
+    const PspGfxGuLitVertex* geVertices;
     u16 count;
     u8 support, palette;
+    u8 hasZeroNormal, hasVertexAlpha;
     n64psp_mesh_span spans[];
 } PspGfxRetainedProgram;
 extern PspGfxRetainedProgram* sRetainedPrograms[PSP_RETAINED_CACHE_SLOTS];
