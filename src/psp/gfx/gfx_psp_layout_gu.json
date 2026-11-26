@@ -1639,7 +1639,7 @@
       "functions": [
         {
           "name": "memcpy",
-          "size": 496,
+          "size": 384,
           "offset": 0
         }
       ],

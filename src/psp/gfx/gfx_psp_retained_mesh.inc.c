@@ -264,7 +264,7 @@ static void psp_gfx_dl_retained_draw(PspGfxDlContext* ctx, u8* stream, int disca
             psp_gfx_dl_resolve_effective_depth_state(ctx);
             psp_gfx_dl_update_texture_uv_coefficients(ctx);
 
-            spanLighting = ctx->effectiveMaterial.classification.premultiplied ? NULL : lighting;
+            spanLighting = stream && ctx->effectiveMaterial.classification.premultiplied ? NULL : lighting;
             if (!stream) {
                 vertices = program->geVertices + vertexFirst;
                 if (PspGfxTextureHandle_IsValid(ctx->effectiveMaterial.texture)) {
@@ -399,7 +399,7 @@ static __attribute__((noinline)) int psp_gfx_dl_retained_dispatch(PspGfxDlContex
 
     psp_gfx_dl_prepare_effective_lights(ctx);
     lighting = psp_gfx_dl_retained_lighting(ctx, program);
-    // Premultiplication can depend on the texture format of each span
+    // Reject potentially premultiplied spans before selecting the persistent vertex format
     persistent = lighting && program->geVertices &&
         !(psp_gfx_dl_blend_enabled(ctx) && (ctx->otherModeL & CVG_DST_SAVE) == CVG_DST_SAVE) &&
         !(program->hasVertexAlpha && ctx->combineMode == PSP_GFX_DL_COMBINE_MODULATE_SHADE_DECAL_ALPHA) &&

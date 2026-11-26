@@ -1420,3 +1420,162 @@ Unified, GU-only and PSPGL-only builds passed together with the n64psp tests
 and retained asset generator tests.
 Fast GU also booted with powered diffuse and persistence and prepared its
 persistent streams on the same PSP.
+
+## Native GE scenery trial — 26 November 2026
+
+The scenery trial was rejected and its selector and extra retained leaves
+were removed. Its control used `ge_lighting=powered`, persistent vertices,
+`ge_side_clip=off` and `matrix_lerp=scalar`.
+
+The trial used the existing retained cache and draw machinery for the Bolse
+building and pole and Corneria buildings 1–8. The persistent format
+safeguards remain in the shared path. Potential premultiplication rules out
+the immutable stream before dispatch, and streams with packed normals
+always select the normal attribute at submission.
+
+The fixed-seed PSPLink runs requested 60 Hz at 333 MHz with audio off and
+measured from active simulation frame 25 through 330. The Corneria window
+started at path progress 43,000 in the city approach. Each A/B used one
+binary and changed only `ge_scenery`.
+
+The first Bolse implementation required dead slots. It was 0.071 ms slower
+per graphics task in both test orders, with about 630 native calls from
+1,639 candidates. That version had zero Corneria hits. Of 1,437 candidates,
+538 failed the dead-slot proof after passing the format check. The one
+revision reused exact slot restoration to admit calls that still eliminate
+some CPU vertex loads.
+
+| Scene | Scenery | Delivered FPS | Mean GFX task (ms) | Present p95 / p99 (ms) | Native calls / candidates | CPU vertex loads skipped |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Bolse | Off | 45.348 | 17.034 | 29.983 / 32.323 | 0 / 1,653 | 0 |
+| Bolse | On | 45.248 | 17.074 | 30.139 / 31.964 | 864 / 1,649 | 18,534 |
+| Corneria city | Off | 53.399 | 15.232 | 23.275 / 24.668 | 0 / 1,443 | 0 |
+| Corneria city | On | 53.436 | 15.225 | 23.209 / 24.810 | 545 / 1,448 | 16,885 |
+
+The revised path admitted 52.4% and 37.6% of candidate calls, respectively.
+Corneria still rejected 738 calls at the persistent format check. The
+matched frame-190 images show local colour and edge differences, with 224
+changed gameplay pixels in Bolse and 290 in Corneria outside the performance
+overlay. Both frames retain the visible scenery. The work removed did not
+produce a repeatable frame-delivery improvement. This concludes the
+scenery expansion.
+
+Unified, GU-only and PSPGL-only builds passed, as did all 19 retained
+generator tests and the n64psp host tests and smoke test. The trial’s unified
+binary booted in Accurate GU, Fast PSPGL and Fast GU. Only Fast GU
+prepared the scenery streams with the experiment enabled. The linked n64psp
+pin is `b65916a7f7ce`. On hardware, its standalone smoke PRX passed the
+native mesh and math stages and reported a failure in the memory stage.
+The captures, matched images and exact commands are under
+`build/experiments/ge-scenery/`.
+
+## n64psp memory smoke follow-up
+
+The standalone PSPLink smoke failed at destination offset 1, source offset
+0 and length 128 on both `b65916a7f7ce` and its parent `7dadd1c`. The
+failure was in the existing unaligned VFPU copy path. Its quad loads
+ignore the bottom two address bits. After aligning the destination, the
+replacement uses batched aligned word loads for word-aligned sources or
+paired unaligned word loads for byte-misaligned sources. The aligned VFPU
+path and byte tails remain. The full standalone hardware smoke passed with
+expanded alignment coverage.
+[VFPU load documentation](https://pspdev.github.io/vfpu-docs/)
+
+At 333 MHz, the final copy passed all 120 correctness samples across
+128 B, 512 B, 4 KiB and 16 KiB and six alignment pairs. For 4 KiB, the
+word-misaligned case went from 502 MB/s on the old implementation to
+281 MB/s on the final implementation, compared with 130 MB/s on the
+initial single-word fix. At 16 KiB, the same case went from 106 to 98
+MB/s. Byte-misaligned outputs that failed the old correctness check have
+no valid legacy throughput baseline. The final copy delivered 213–218
+MB/s for those 4 KiB cases. At 4 KiB, aligned and equally misaligned cases
+remained within about 3% of legacy. These are repeated-buffer throughput
+measurements. The 4 KiB word-misaligned penalty remains a tradeoff for the
+independent library change.
+[Raw hardware throughput](../build/experiments/me-consolidation/captures/final-throughput.csv) · [Full hardware smoke](../build/experiments/me-consolidation/captures/memory-final.txt)
+
+## Media Engine trials — 26 November 2026
+
+The idle backoff trial added a bounded 128-iteration delay between idle
+mailbox reads and preserved audio work and completion signalling. Bolse
+with asynchronous audio completed 917 ME audio jobs in each arm with no
+new output errors, underruns or silent blocks. Delivered FPS was 44.907 /
+44.908, mean GFX was 15.727 / 15.760 ms and Present p95/p99 went from
+36.423/41.616 to 36.442/41.282 ms. Total audio completion waiting was
+7.066 / 7.072 seconds over the sample. The backoff and its selector were removed.
+[OOT-PSP's idle polling and asynchronous texture change](https://github.com/z2442/oot-PSP/commit/b6c4ce289290447c9de12c133f5414d979e1afd6)
+
+The Aquas producer trial offloaded one contiguous orb batch per GU
+presentation. The existing native batch made an early input snapshot
+possible. Historical all-format texture decoding averaged about 0.34 ms in
+Zoness and Macbeth and offered less room for this trial. The renderer copies
+resolved matrices and colour into a private input and continues interpreting.
+The ME writes a separate output in chunks of at most four particles and
+checks audio work between chunks. Both arrays own whole cache lines and use
+range writeback, invalidation and barriers at handover. Allegrex copies a
+completed result into the current GU reservation. A late result stays
+private until the worker releases it while the CPU draws with its own output.
+There is no graphics job wait or GE dependency on ME-owned memory. The
+kernel uses scalar floating point.
+[mcidclan's concurrent GE sample](https://github.com/mcidclan/me-feed-graphics-engine)
+
+The opening Aquas capture preceded the particle emitter. The measured
+window starts at path 32,300 after reconstructing the level at 28,400 and
+passing the normal emitter trigger at 29,875. The first implementation
+consumed every completed batch without waiting in both audio configurations.
+It matched the audio-off FPS and changed mean GFX by +0.003 ms with audio
+off and −0.011 ms with asynchronous audio. The one refinement copies the
+nine matrix values used by the shared kernel, which reduces the two buffers
+from 6,784 to 5,888 bytes and avoids writing the seven unused values per
+particle.
+
+| Aquas audio mode | Producer | FPS | Mean GFX (ms) | Present p95 / p99 (ms) | ME batches completed / consumed |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Off | Off | 48.977 | 17.197 | 27.476 / 28.139 | 0 / 0 |
+| Off | On | 48.977 | 17.186 | 27.459 / 28.057 | 1,099 / 1,099 |
+| Async | Off | 42.298 | 19.760 | 31.479 / 32.903 | 0 / 0 |
+| Async | On | 42.148 | 19.809 | 31.663 / 33.005 | 960 / 960 |
+
+No measured batch was late or busy. The Async pair completed 1,380 audio
+jobs each, with 6.447 / 6.450 seconds spent waiting for audio completion
+on Allegrex. Both recorded zero new underruns, output errors, silent blocks
+and overruns. The producer demonstrated overlap and failed the frame-delivery
+comparison. The producer and its selector were removed. The existing
+Allegrex Aquas batching and asynchronous audio paths remain.
+
+A separate check compared 917 ME-produced batches byte for byte against
+Allegrex, with zero mismatches. Both arms switched through Async, Sync,
+Off and back to Async with no audio output errors. Each counted two
+starvations around the deliberate Off interval. Physical suspend and
+resume were outside these runs. Captures and exact commands are under
+build/experiments/me-phase/.
+
+### Interpreting the Aquas audio wait
+
+The 6.45 seconds over 1,380 jobs is about 4.67 ms of elapsed wait-path time
+per job. The timer started only when the previous ME job was still running
+and ended after completion handling, including cache invalidation. It ran in
+the N64 audio synthesis thread through `AudioThread_CreateTask()`. The
+thread sleeps on the completion semaphore, or delays between polls when the
+semaphore is unavailable. The number therefore includes time when Allegrex
+could run other threads and can include wake-to-resume latency.
+[Capture timer](../build/experiments/me-phase/harness/audio_me.c) · [Audio thread](../src/audio/audio_thread.c)
+
+PSP audio bypasses the RSP task queue. The graphics scheduler waits on its
+own task completion, while the main event thread renders the GFX task.
+Steady-state graphics submission has no dependency on the ME audio
+completion semaphore. The graphics thread does call `Audio_Update()` for
+game-side commands, with a blocking acknowledgement reserved for specific
+audio resets. Within the audio pipeline, the previous mix must be collected
+and committed before the next task is prepared. That orders audio buffers.
+Higher-priority runnable audio work and shared memory traffic may still
+affect frame times. The captures do not separate those costs or establish
+a frame-delivery benefit from rescheduling audio. VME remains deferred.
+[Task scheduling](../src/sys/sys_main.c) · [Audio reset](../src/audio/audio_general.c)
+
+The consolidated unified, GU-only and PSPGL-only builds passed. The
+unified PRX booted on PSP in Accurate GU, Fast GU and Fast PSPGL. A
+Fast GU functional check submitted 126 audio blocks in Async with ME
+mixer ownership and 126 in Sync with Allegrex ownership. Off submitted
+zero blocks. The audio output error count stayed unchanged.
+[Consolidation captures and commands](../build/experiments/me-consolidation/)
