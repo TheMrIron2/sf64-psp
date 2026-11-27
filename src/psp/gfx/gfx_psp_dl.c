@@ -860,9 +860,11 @@ typedef struct {
     s16 fogMul;
     s16 fogOffset;
     int valid;
+    int success;
 } PspGfxDlApproxFogFit;
 
-static PspGfxDlApproxFogFit sPspGfxDlApproxFogFit;
+static PspGfxDlApproxFogFit sPspGfxDlApproxFogFits[4];
+static u32 sPspGfxDlNextApproxFogFit;
 
 static int psp_gfx_dl_black_fog_minimax_feasible(const float distances[23], const float values[23],
                                                  float error, float* slope, float* intercept) {
@@ -960,23 +962,33 @@ static int psp_gfx_dl_fit_black_fog_curve(const PspGfxDlFogProjection* projectio
 
 static int psp_gfx_dl_get_black_fog_curve(const PspGfxDlFogProjection* projection, s16 fogMul,
                                           s16 fogOffset, float* start, float* end) {
-    PspGfxDlApproxFogFit* fit = &sPspGfxDlApproxFogFit;
+    PspGfxDlApproxFogFit* fit;
+    u32 i;
 
-    if (!fit->valid || (fit->fogMul != fogMul) || (fit->fogOffset != fogOffset) ||
-        (fit->projection22 != projection->p22) || (fit->projection23 != projection->p23) ||
-        (fit->projection32 != projection->p32) || (fit->projection33 != projection->p33)) {
-        if (!psp_gfx_dl_fit_black_fog_curve(projection, fogMul, fogOffset,
-                                            &fit->start, &fit->end)) {
-            fit->valid = 0;
-            return 0;
+    for (i = 0; i < ARRAY_COUNT(sPspGfxDlApproxFogFits); i++) {
+        fit = &sPspGfxDlApproxFogFits[i];
+        if (fit->valid && (fit->fogMul == fogMul) && (fit->fogOffset == fogOffset) &&
+            (fit->projection22 == projection->p22) && (fit->projection23 == projection->p23) &&
+            (fit->projection32 == projection->p32) && (fit->projection33 == projection->p33)) {
+            goto found;
         }
-        fit->projection22 = projection->p22;
-        fit->projection23 = projection->p23;
-        fit->projection32 = projection->p32;
-        fit->projection33 = projection->p33;
-        fit->fogMul = fogMul;
-        fit->fogOffset = fogOffset;
-        fit->valid = 1;
+    }
+
+    fit = &sPspGfxDlApproxFogFits[sPspGfxDlNextApproxFogFit];
+    sPspGfxDlNextApproxFogFit = (sPspGfxDlNextApproxFogFit + 1) % ARRAY_COUNT(sPspGfxDlApproxFogFits);
+    fit->projection22 = projection->p22;
+    fit->projection23 = projection->p23;
+    fit->projection32 = projection->p32;
+    fit->projection33 = projection->p33;
+    fit->fogMul = fogMul;
+    fit->fogOffset = fogOffset;
+    fit->valid = 1;
+    // Rejected fits also repeat across draws
+    fit->success = psp_gfx_dl_fit_black_fog_curve(projection, fogMul, fogOffset, &fit->start, &fit->end);
+
+found:
+    if (!fit->success) {
+        return 0;
     }
     *start = fit->start;
     *end = fit->end;
@@ -4678,6 +4690,11 @@ static u32 psp_gfx_dl_emit_clipped_triangle(PspGfxDlContext* ctx, const PspGfxDl
     u32 emittedCount = 0;
     u32 plane;
     u32 i;
+    u32 cullMode = ctx->geometryMode & G_CULL_BOTH;
+    float ax = 0.0f;
+    float ay = 0.0f;
+    float bx = 0.0f;
+    float by = 0.0f;
     u32 combinedClipCode = a->clipCode | b->clipCode | c->clipCode;
 
     PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_CLIPPING);
@@ -4703,6 +4720,11 @@ static u32 psp_gfx_dl_emit_clipped_triangle(PspGfxDlContext* ctx, const PspGfxDl
     if (vertexCount > ctx->stats.clipMaxPolygonVertexCount) {
         ctx->stats.clipMaxPolygonVertexCount = vertexCount;
     }
+    for (i = 0; i < vertexCount; i++) {
+        generatedCount += input[i].generated != 0;
+    }
+    ctx->stats.clipGeneratedVertexCount += generatedCount;
+#if PSP_LOG_ENABLED || PSP_RENDERER_DIAGNOSTICS
     if (textured) {
         float minW = input[0].w;
         float maxW = input[0].w;
@@ -4722,9 +4744,6 @@ static u32 psp_gfx_dl_emit_clipped_triangle(PspGfxDlContext* ctx, const PspGfxDl
             float ndcY = input[i].y / input[i].w;
             float ndcZ = input[i].z / input[i].w;
 
-            if (input[i].generated) {
-                generatedCount++;
-            }
             if (input[i].w < minW) {
                 minW = input[i].w;
             }
@@ -4762,7 +4781,6 @@ static u32 psp_gfx_dl_emit_clipped_triangle(PspGfxDlContext* ctx, const PspGfxDl
                 maxV = input[i].v;
             }
         }
-        ctx->stats.clipGeneratedVertexCount += generatedCount;
         if (minW > 0.0f) {
             float wRatio = maxW / minW;
 
@@ -4787,30 +4805,30 @@ static u32 psp_gfx_dl_emit_clipped_triangle(PspGfxDlContext* ctx, const PspGfxDl
             ctx->clipSampleMinV = minV;
             ctx->clipSampleMaxV = maxV;
         }
-    } else {
-        for (i = 0; i < vertexCount; i++) {
-            if (input[i].generated) {
-                generatedCount++;
-            }
-        }
-        ctx->stats.clipGeneratedVertexCount += generatedCount;
     }
+#endif
 
     PspHwCounterProfile_InnerScopeEnd(PSP_HW_SCOPE_CLIPPING);
     if (!textured) {
         PspHwCounterProfile_InnerScopeBegin(PSP_HW_SCOPE_BATCH);
     }
+    if (cullMode != 0) {
+        ax = input[0].x / input[0].w;
+        ay = input[0].y / input[0].w;
+        bx = input[1].x / input[1].w;
+        by = input[1].y / input[1].w;
+    }
     for (i = 1; i + 1 < vertexCount; i++) {
-        float ax = input[0].x / input[0].w;
-        float ay = input[0].y / input[0].w;
-        float bx = input[i].x / input[i].w;
-        float by = input[i].y / input[i].w;
-        float cx = input[i + 1].x / input[i + 1].w;
-        float cy = input[i + 1].y / input[i + 1].w;
-        float area = ((bx - ax) * (cy - ay)) - ((by - ay) * (cx - ax));
+        if (cullMode != 0) {
+            float cx = input[i + 1].x / input[i + 1].w;
+            float cy = input[i + 1].y / input[i + 1].w;
+            float area = ((bx - ax) * (cy - ay)) - ((by - ay) * (cx - ax));
 
-        if (psp_gfx_dl_culls_area(ctx->geometryMode, area)) {
-            continue;
+            bx = cx;
+            by = cy;
+            if (psp_gfx_dl_culls_area(cullMode, area)) {
+                continue;
+            }
         }
         if (textured) {
             psp_gfx_dl_emit_textured_triangle(ctx, &input[0], &input[i], &input[i + 1]);

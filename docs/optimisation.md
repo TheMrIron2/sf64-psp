@@ -1918,8 +1918,11 @@ The packaged release PRXs booted in two-pool GU Accurate, three-pool GU
 Fast and three-pool PSPGL Accurate. PSPLink memory reads confirmed the
 active backend and quality in each boot. The archive includes the
 [boot screenshots](../build/experiments/gfx-task-pools/captures/smoke-preview.png).
-PSP-1000 heap headroom and an explicit hardware suspend and resume remain
-outside these runs.
+Visual acceptance of the three-pool path is complete. Two pools are the
+production default and the third remains available for future concurrency
+work. PSP-1000 heap headroom and physical suspend and resume are deferred.
+Further buffering changes require evidence of a significant scheduling
+bottleneck.
 
 ### ME feasibility
 
@@ -1986,3 +1989,175 @@ cache-range publication and shared GE list support once a working caller
 proves the interface. Keep presentation cadence, task ownership and scene
 barriers in SF64. Price any VME work against measured ME scalar bottlenecks
 after concurrent rendering exists.
+
+
+The ME renderer remains deferred. The scalar control ran on Allegrex.
+Mutable-input ownership and synchronous VI delivery still need to be
+resolved for a concurrent worker. OOT-PSP is investigating VME acceleration
+for its ME renderer. Revisit the cost once that work provides new evidence.
+
+## Post-Andross reunion black fog
+
+The Venom 2 diagnostic reuses the escape transition and seeds its random
+state before entry. It records the tunnel exit and reunion as separate
+cutscene states. The original PSP Go capture (native GU, Accurate, 60 Hz,
+Async) put about 114 ms per presentation in the frontend when the team
+formation appeared at state 4 tick 220. Game update and display-list
+generation took 2.7 ms combined and the GU finish/sync tail took 0.23 ms.
+Meteo's opening averaged 12.1 ms in the frontend.
+
+Texture-cache work including uploads and the GE stall-address calls took
+about 1.2 ms combined in this window. No texture invalidations were
+observed there. Skipping the Great Fox hull saved approximately 5 ms.
+The escape transition frees all 200 all-range scenery slots at tick 150
+and turns off the previous backdrop. Timing individual lists identified
+repeated millisecond-scale work inside the newly spawned formation's
+Arwing sublists, including small parts such as flaps and guns.
+
+The renderer's black-fog curve fit uses 23 samples and up to 25 minimax
+feasibility passes. The old one-entry cache retained accepted fits only.
+The Arwing draws inherited black fog from the cutscene and requested a fit
+which the solver rejected. The old-cache control spent a mean 97.17 ms
+per frame making 37.82 rejected fits at state 4 ticks 220–339. Later in
+state 5, it still spent 73.25 ms per frame in rejected fits at ticks
+340–529. Repeated fog resolution explains the bulk of the frontend time.
+
+The shared frontend now uses a four-entry round-robin cache keyed by the
+four projection terms used for fog and the N64 fog multiplier and offset.
+Entries retain either the fitted endpoints or the rejection status. Failed
+fits still go through the existing fallback, and accepted fits still use
+the existing endpoints. The PSP ELF uses 148 bytes of static storage
+for the cache and replacement index, up from 32 bytes. Both quality
+settings use the same solver and cache.
+
+### PSP Go comparison with Async audio
+
+The same diagnostic PRX selects the original cache or the four-entry
+cache at runtime. The table reports presented frames over elapsed time,
+nearest-rank p95 and p99 present intervals, and mean frontend and fog-fit
+time. Each reunion window matches cutscene ticks. The scheduler presents
+more samples per tick once stalls are removed. The simulation and
+presentation settings are identical within each pair.
+
+| Scene and tick window (Accurate, 60 Hz) | FPS old / new | p95 ms old / new | p99 ms old / new | Frontend ms old / new | Fog-fit ms old / new |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Formation, state 4 ticks 220–339 | 8.26 / 53.05 | 126.58 / 21.69 | 133.45 / 24.59 | 114.51 / 16.34 | 97.17 / 0 |
+| Reunion, state 5 ticks 340–529 | 10.62 / 54.81 | 123.22 / 22.00 | 128.03 / 23.53 | 89.15 / 15.59 | 73.25 / 0 |
+| Reunion, state 5 ticks 530–1389 | 18.59 / 58.01 | 119.65 / 20.20 | 122.37 / 21.94 | 50.46 / 13.09 | 37.50 / 0 |
+| Meteo opening | 57.28 / 57.32 | 21.56 / 21.53 | 24.01 / 23.84 | 12.35 / 12.32 | 0 / 0 |
+
+In the formation window, mean update/list generation remained 0.84/1.83 ms
+and the GU finish/sync tail remained 0.21 ms with the new cache. One
+rejected fit filled the cache during the preceding escape. The next two
+states reused it through tick 1389. The old-cache capture had 225
+intervals above 100 ms in states 4 and 5. The new-cache capture had none.
+Meteo issued no fits during its measured opening and provides a
+low-pressure control.
+
+| Formation with the new cache and Async | FPS | p95 ms | p99 ms | Mean frontend ms |
+| --- | ---: | ---: | ---: | ---: |
+| Accurate, 60 Hz | 53.05 | 21.69 | 24.59 | 16.34 |
+| Fast, 60 Hz | 59.38 | 20.84 | 25.09 | 13.22 |
+| Accurate, 30 Hz | 29.89 | 34.77 | 42.63 | 16.06 |
+| Fast, 30 Hz | 29.90 | 34.97 | 42.22 | 12.93 |
+
+At reunion tick 450 the original Accurate 60 Hz framebuffer and the
+corrected Accurate 30 Hz framebuffer match across all scene pixels.
+The 259 different pixels fall in the FPS overlay at rows 0–6. The two
+60 Hz images at that tick capture different interpolation samples and
+provide a side-by-side visual check.
+[Tick 450 frame comparison](../build/experiments/reunion/captures/reunion-tick450-old-new.png)
+
+Sector Z independently confirmed that multiple cache entries matter.
+With Accurate, GU, 60 Hz and Async, the first 420 simulation ticks of
+the level alternated an accepted and a rejected fit on every measured
+presentation. The old cache spent 2.39 ms per frame on fitting. The new
+cache warmed with three fits across 838 presentations. Mean frontend
+time fell from 8.83 to 6.51 ms at an already capped 59.97 to 59.98 FPS.
+The p95/p99 intervals were 18.34/18.88 ms before and 18.38/18.89 ms after.
+
+[Reproduction commands and fixture notes](../build/experiments/reunion/commands.txt)
+include the same-binary, quality and cadence controls. The
+[raw capture archive](../build/experiments/reunion/reunion-captures.tar.gz) includes timing CSVs,
+RGB565 framebuffers and PSPLink logs. A hardware spot check is to watch
+the formation and radio exchange through the transition into the
+credits in Accurate and Fast, with Async audio and both presentation
+rates.
+
+`make -j12 psp` rebuilt the unified package. PSPLink booted the exact
+executable payload from the EBOOT on the PSP Go with both GU and PSPGL.
+The smoke check read back each active backend and captured the prologue.
+[Unified EBOOT](../build/psp/unified/EBOOT.PBP)
+[GU and PSPGL boot captures](../build/experiments/reunion/captures/release-gu-pspgl.png)
+
+## Bolse center-facing frontend work
+
+The current two-pool build was measured on PSP Go with GU, 60 Hz
+presentation and Async audio. The seeded Bolse opening measured 35.51 FPS
+in Accurate and 37.70 FPS in Fast over simulation ticks 25–210. Mean
+frontend times were 22.14 and 20.83 ms. A longer 25–480 tick capture
+averaged 47.05 and 47.98 FPS because it includes the later edge views.
+
+The spatial follow-up records camera direction, horizontal distance to
+the tower and actual display-list visits. The center group aims within
+30 degrees of a point 400 units above the base, stays within 6000 units
+horizontally and calls the shield list. The edge group aims more than
+45 degrees away, is at least 6000 units away and has zero shield-list
+calls. The remaining frames form the transition group.
+
+In the Accurate source capture, center and edge frontend times were
+23.14 and 8.75 ms. Their p99 presentation intervals were 40.65 and
+23.81 ms. The base, arcs and shield themselves cost 1.98, 1.62 and
+1.08 ms from the center. At the edge the body and shield lists are
+absent and the same six arc calls cost 0.50 ms combined. These lists
+explain about 4.18 ms of the 14.39 ms frontend difference. The final GU
+finish/sync tail averaged 0.11 ms in the center and 0.09 ms at the edge.
+
+Using the tagged tick ranges in the separate sampled profile, generic
+triangle emission rose from 1.68 ms at the edge to 5.74 ms in the center,
+including state, texture and clipping work. Clipping rose from 17 to 89
+calls per presentation and from 0.53 to 2.53 ms inclusive. Vertex loads
+rose from 0.87 to 3.60 ms and texture preparation from 0.65 to 2.22 ms.
+Matrix handling and retained continuation scans reached 0.70 and 0.29 ms
+in the center. No fog-cache misses were measured. These overlapping
+timings show a broad increase in frontend traversal work. The same-binary
+A/B timings use the light capture build.
+
+The clipping change confines projected polygon bounds and W-ratio
+statistics to logging and renderer diagnostics. The release path still
+counts generated vertices. Face culling divides each fan vertex's X and
+Y by W once and reuses the results for adjacent triangles. It skips
+these divisions when face culling is disabled. Polygon construction,
+winding, clipping planes, texture coordinates and emitted vertices use
+the original arithmetic.
+
+### Same-binary PSP Go comparison with Async audio
+
+| GU view at 60 Hz | FPS old / new | p95 ms old / new | p99 ms old / new | Mean frontend ms old / new |
+| --- | ---: | ---: | ---: | ---: |
+| Bolse center, Accurate | 34.08 / 34.94 | 36.24 / 35.23 | 41.06 / 39.26 | 23.13 / 22.53 |
+| Bolse center, Fast | 35.61 / 36.79 | 35.66 / 34.17 | 42.05 / 37.77 | 22.13 / 21.32 |
+| Bolse edge, Accurate | 59.83 / 59.82 | 23.06 / 23.11 | 23.69 / 24.16 | 8.73 / 8.65 |
+| Bolse edge, Fast | 59.85 / 59.81 | 23.29 / 23.30 | 23.84 / 24.04 | 8.25 / 8.16 |
+| Aquas, Accurate | 39.84 / 40.90 | 32.96 / 32.32 | 34.74 / 33.52 | 21.09 / 20.53 |
+
+The center runs use ticks 105–243 and the edge runs use ticks 405–480.
+Equal weighting of the simulation ticks common to both center runs gives
+frontend savings of 0.56 ms in Accurate and 0.90 ms in Fast. Edge views
+remain capped at 60 Hz. In both quality settings the Bolse tick-250 framebuffers match
+pixel-for-pixel below the FPS overlay.
+
+Aquas kept normal interpolation for timing. A separate visual run
+captured the completed GU draw buffer at the exact tick-250 simulation
+sample in both arms. It matched pixel-for-pixel below the FPS overlay.
+PSP Go boot checks read back the active GU and PSPGL backends from the
+unified EBOOT's executable payload. The production build uses
+`make -j12 psp`.
+
+[Raw captures and fixture](../build/experiments/bolse-amplification/bolse-captures.tar.gz)
+include view tags, per-presentation timings, framebuffers and PSPLink
+logs. [Reproduction commands](../build/experiments/bolse-amplification/commands.txt)
+include the normal timing and exact-sample visual runs. On hardware,
+check the force field and electric arcs while approaching the center
+and through the turn to the edge in both quality modes.
+[Unified EBOOT](../build/psp/unified/EBOOT.PBP)
